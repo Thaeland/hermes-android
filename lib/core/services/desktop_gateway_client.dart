@@ -5,6 +5,7 @@ import 'package:crypto/crypto.dart';
 
 import 'capability_registry.dart';
 import 'connection_manager.dart';
+import 'filing_gateway_client.dart';
 import 'gateway_turn_coordinator.dart';
 import 'gateway_turn_journal.dart';
 import 'projects_gateway_client.dart';
@@ -61,6 +62,7 @@ class DesktopGatewayClient {
   DesktopConnectionCallback? _connectionListener;
   GatewayTurnCoordinatorRegistry? _turnCoordinatorRegistry;
   ProjectsGatewayClient? _projects;
+  FilingGatewayClient? _filing;
   final CapabilityRegistry _capabilities = CapabilityRegistry();
 
   static const _asyncEventTypes = {
@@ -558,6 +560,19 @@ class DesktopGatewayClient {
   /// instead of an error state, so callers can fall back to local grouping.
   ProjectsGatewayClient get projects {
     return _projects ??= ProjectsGatewayClient((method, params) async {
+      final client = await _connectControl();
+      return client.send(method, params);
+    }, capabilities: _capabilities);
+  }
+
+  /// Correction-aware Projects filing over the same control transport.
+  ///
+  /// Connection-scoped like [projects]: no chat session is created or
+  /// resumed. A gateway without the `filing.*` family surfaces
+  /// [FilingUnsupportedException] so callers degrade the surface instead
+  /// of failing.
+  FilingGatewayClient get filing {
+    return _filing ??= FilingGatewayClient((method, params) async {
       final client = await _connectControl();
       return client.send(method, params);
     }, capabilities: _capabilities);
@@ -1076,6 +1091,7 @@ class DesktopGatewayClient {
     _asyncEventAcceptsSession = null;
     _connectionListener = null;
     _projects = null;
+    _filing = null;
     _ws?.close();
     _ws = null;
     _gatewaySessionIds.clear();
