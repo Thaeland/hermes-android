@@ -45,6 +45,7 @@ import '../widgets/projects_pane.dart';
 import 'chat_screen.dart';
 import 'files_screen.dart';
 import 'cron_screen.dart';
+import 'assets_screen.dart';
 import 'filing_screen.dart';
 import 'memory_screen.dart';
 import 'settings_screen.dart';
@@ -223,6 +224,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   /// Proven answer for the gateway's `organization.*` batch/undo contract.
   /// Null until probed; only `true` enables batch selection in the lists.
   bool? _orgAvailable;
+
+  /// Proven answer for the gateway's `assets.*` server-authoritative
+  /// index. Null until probed; false keeps the More entry disabled.
+  bool? _assetsAvailable;
   ChatSpaceStore? _spaceStore;
   QuickChatStore? _quickChats;
   ApiClient? _sessionsApi;
@@ -797,12 +802,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         // evidence either way.
         if (_filingAvailable == null) unawaited(_probeFiling());
         if (_orgAvailable == null) unawaited(_probeOrganization());
+        if (_assetsAvailable == null) unawaited(_probeAssets());
         return MorePane(
           sections: buildMoreSections(
             dashboardReachable: _dashboardReachable,
             l10n: context.l10n,
             filingAvailable: _filingAvailable == true,
             organizationAvailable: _orgAvailable == true,
+            assetsAvailable: _assetsAvailable == true,
           ),
           onSelect: _openMoreEntry,
         );
@@ -1478,6 +1485,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         _openWorkspaceSessionView(WorkspaceSessionView.archivedQuick);
       case 'files':
         unawaited(_openFiles());
+      case 'assets':
+        _push(AssetsScreen(connection: connection));
       case 'pin-batch-undo':
         // The batch surface lives in the chat list itself (long-press to
         // select); route there rather than to a separate screen.
