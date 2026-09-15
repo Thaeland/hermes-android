@@ -249,6 +249,16 @@ List<Session> filterWorkspaceSessions({
   ];
 }
 
+enum WorkspaceBatchAction { pin, unpin, archive }
+
+/// Runs a batch action over the given session ids; returns the server's
+/// batch id so the caller can offer an undo.
+typedef WorkspaceBatchRunner =
+    Future<String> Function(List<String> sessionIds, WorkspaceBatchAction action);
+
+/// Reverses one batch by id.
+typedef WorkspaceBatchUndoRunner = Future<void> Function(String batchId);
+
 class WorkspaceSessionsScreen extends StatefulWidget {
   final String title;
   final WorkspaceSessionView view;
@@ -257,6 +267,11 @@ class WorkspaceSessionsScreen extends StatefulWidget {
   final ValueChanged<Session> onOpenSession;
   final WorkspaceSessionPromoter? onPromote;
   final LocalChatPinStore? pinStore;
+  /// Batch organization callbacks. When [runBatch] is null the batch
+  /// selection affordances stay hidden — the gateway has not proven the
+  /// `organization.*` contract.
+  final WorkspaceBatchRunner? runBatch;
+  final WorkspaceBatchUndoRunner? undoBatch;
   final bool embedded;
 
   /// Clock injection for deterministic filter/date tests. When null the
@@ -276,6 +291,8 @@ class WorkspaceSessionsScreen extends StatefulWidget {
     required this.onOpenSession,
     this.onPromote,
     this.pinStore,
+    this.runBatch,
+    this.undoBatch,
     this.embedded = false,
     this.now,
     this.refreshInterval,
@@ -305,6 +322,13 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
   /// Coalesces refresh ticks with manual pulls: a slow load must never
   /// overlap the next tick (an older completion would win the setState).
   bool _loadInFlight = false;
+
+  /// Batch selection mode. Enters on long-press (when the gateway proved
+  /// `organization.*`), exits on cancel or after a batch completes.
+  final Set<String> _selected = {};
+  bool _batchBusy = false;
+
+  bool get _selectMode => widget.runBatch != null && _selected.isNotEmpty;
 
   /// The active chip filter in the embedded Chats browser.
   WorkspaceChatsFilter _filter = WorkspaceChatsFilter.all;
@@ -484,6 +508,70 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
     }
   }
 
+  void _toggleSelected(String sessionId) {
+    setState(() {
+      if (!_selected.remove(sessionId)) _selected.add(sessionId);
+    });
+  }
+
+  void _exitSelection() => setState(_selected.clear);
+
+  Future<void> _runBatchAction(WorkspaceBatchAction action) async {
+    final runner = widget.runBatch;
+    if (runner == null || _selected.isEmpty || _batchBusy) return;
+    final ids = _selected.toList();
+    setState(() => _batchBusy = true);
+    try {
+      final batchId = await runner(ids, action);
+      if (!mounted) return;
+      setState(() {
+        _batchBusy = false;
+        _selected.clear();
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(switch (action) {
+            WorkspaceBatchAction.pin => 'Pinned ${ids.length} chat(s)',
+            WorkspaceBatchAction.unpin => 'Unpinned ${ids.length} chat(s)',
+            WorkspaceBatchAction.archive => 'Archived ${ids.length} chat(s)',
+          }),
+          action: SnackBarAction(
+            label: 'Undo',
+            onPressed: () => unawaited(_undoBatch(batchId)),
+          ),
+        ),
+      );
+      await _load();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _batchBusy = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Batch failed: $error')),
+      );
+    }
+  }
+
+  Future<void> _undoBatch(String batchId) async {
+    final undo = widget.undoBatch;
+    if (undo == null || _batchBusy) return;
+    setState(() => _batchBusy = true);
+    try {
+      await undo(batchId);
+      if (!mounted) return;
+      setState(() => _batchBusy = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Batch undone')),
+      );
+      await _load();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _batchBusy = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Undo failed: $error')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final data = _data;
@@ -557,9 +645,13 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
             ),
           ];
 
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: ListView(
+    return Column(
+      children: [
+        if (_selectMode) _buildBatchBar(sessions),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _load,
+            child: ListView(
         padding: const EdgeInsets.fromLTRB(
           HermesSpacing.lg,
           HermesSpacing.md,
@@ -661,6 +753,90 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
               ],
           ],
         ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// The select-mode action bar: what is selected, what can be done, and
+  /// how to get out. Disabled buttons while a batch is in flight so a
+  /// double-tap can't fire two overlapping batches.
+  Widget _buildBatchBar(List<Session> sessions) {
+    final tokens = HermesTokens.of(context);
+    final count = _selected.length;
+    final allSelected = count >= sessions.length && sessions.isNotEmpty;
+    return Material(
+      color: tokens.raised,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          HermesSpacing.lg,
+          HermesSpacing.sm,
+          HermesSpacing.lg,
+          HermesSpacing.sm,
+        ),
+        child: Row(
+          children: [
+            IconButton(
+              tooltip: allSelected ? 'Deselect all' : 'Select all',
+              onPressed: _batchBusy
+                  ? null
+                  : () => setState(() {
+                        if (allSelected) {
+                          _selected.clear();
+                        } else {
+                          _selected
+                            ..clear()
+                            ..addAll(sessions.map((s) => s.id));
+                        }
+                      }),
+              icon: Icon(
+                allSelected
+                    ? Icons.deselect
+                    : Icons.select_all,
+              ),
+            ),
+            Expanded(
+              child: Text(
+                '$count selected',
+                style: tokens.typography.label.copyWith(
+                  color: tokens.onSurface,
+                ),
+              ),
+            ),
+            if (_batchBusy)
+              const SizedBox.square(
+                dimension: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            else ...[
+              IconButton(
+                tooltip: 'Pin',
+                onPressed: () =>
+                    unawaited(_runBatchAction(WorkspaceBatchAction.pin)),
+                icon: const Icon(Icons.push_pin_outlined),
+              ),
+              IconButton(
+                tooltip: 'Unpin',
+                onPressed: () =>
+                    unawaited(_runBatchAction(WorkspaceBatchAction.unpin)),
+                icon: const Icon(Icons.push_pin),
+              ),
+              IconButton(
+                tooltip: 'Archive',
+                onPressed: () =>
+                    unawaited(_runBatchAction(WorkspaceBatchAction.archive)),
+                icon: const Icon(Icons.archive_outlined),
+              ),
+            ],
+            IconButton(
+              tooltip: 'Cancel selection',
+              onPressed: _batchBusy ? null : _exitSelection,
+              icon: const Icon(Icons.close),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -698,22 +874,41 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
         (widget.view == WorkspaceSessionView.archivedQuick ||
             _isUnassignedSurface) &&
         widget.onPromote != null;
+    final selectable = widget.runBatch != null;
+    final selected = _selected.contains(session.id);
     return HermesCard(
-      onTap: () => widget.onOpenSession(session),
+      onTap: _selectMode
+          ? () => _toggleSelected(session.id)
+          : () => widget.onOpenSession(session),
+      onLongPress: selectable
+          ? () => _toggleSelected(session.id)
+          : null,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            locallyPinned
-                ? Icons.push_pin
-                : session.pinned
-                ? Icons.push_pin_outlined
-                : Icons.chat_bubble_outline,
-            size: 20,
-            color: locallyPinned || session.pinned
-                ? tokens.accent
-                : tokens.muted,
-          ),
+          if (_selectMode)
+            Padding(
+              padding: const EdgeInsets.only(right: HermesSpacing.sm, top: 1),
+              child: Icon(
+                selected
+                    ? Icons.check_circle
+                    : Icons.radio_button_unchecked,
+                size: 22,
+                color: selected ? tokens.accent : tokens.muted,
+              ),
+            )
+          else
+            Icon(
+              locallyPinned
+                  ? Icons.push_pin
+                  : session.pinned
+                  ? Icons.push_pin_outlined
+                  : Icons.chat_bubble_outline,
+              size: 20,
+              color: locallyPinned || session.pinned
+                  ? tokens.accent
+                  : tokens.muted,
+            ),
           const SizedBox(width: HermesSpacing.md),
           Expanded(
             child: Column(
