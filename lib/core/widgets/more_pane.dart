@@ -86,11 +86,15 @@ class MoreSection {
 ///
 /// [organizationAvailable] is the proven answer for the `organization.*`
 /// batch pin/archive/undo contract (probed once via `organization.history`).
+///
+/// [assetsAvailable] is the proven answer for the `assets.*`
+/// server-authoritative index (probed once via `assets.status`).
 List<MoreSection> buildMoreSections({
   required bool dashboardReachable,
   required AppLocalizations l10n,
   bool filingAvailable = false,
   bool organizationAvailable = false,
+  bool assetsAvailable = false,
 }) {
   MoreEntryAvailability dashboardBacked() => dashboardReachable
       ? MoreEntryAvailability.available
@@ -128,9 +132,12 @@ List<MoreSection> buildMoreSections({
           title: l10n.assets,
           subtitle: l10n.artifacts_attachments_and_generated_media,
           icon: Icons.image_outlined,
-          availability: MoreEntryAvailability.unavailable,
-          unavailableReason:
-              l10n.needs_a_server_authoritative_assets_index_in_the_hermes_gateway,
+          availability: assetsAvailable
+              ? MoreEntryAvailability.available
+              : MoreEntryAvailability.unavailable,
+          unavailableReason: assetsAvailable
+              ? null
+              : l10n.needs_a_server_authoritative_assets_index_in_the_hermes_gateway,
         ),
       ],
     ),
