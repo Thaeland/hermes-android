@@ -8,6 +8,7 @@ import 'connection_manager.dart';
 import 'filing_gateway_client.dart';
 import 'gateway_turn_coordinator.dart';
 import 'gateway_turn_journal.dart';
+import 'organization_gateway_client.dart';
 import 'projects_gateway_client.dart';
 import 'ws_client.dart';
 
@@ -46,6 +47,7 @@ class DesktopGatewayClient {
   GatewayTurnCoordinatorRegistry? _turnCoordinatorRegistry;
   ProjectsGatewayClient? _projects;
   FilingGatewayClient? _filing;
+  OrganizationGatewayClient? _organization;
   final CapabilityRegistry _capabilities = CapabilityRegistry();
 
   static const _asyncEventTypes = {
@@ -292,6 +294,18 @@ class DesktopGatewayClient {
     }, capabilities: _capabilities);
   }
 
+  /// Batch pin/archive/undo over the same control transport.
+  ///
+  /// Connection-scoped like [filing]: a gateway without the
+  /// `organization.*` family surfaces [OrganizationUnsupportedException]
+  /// so callers degrade the surface instead of failing.
+  OrganizationGatewayClient get organization {
+    return _organization ??= OrganizationGatewayClient((method, params) async {
+      final client = await _connectControl();
+      return client.send(method, params);
+    }, capabilities: _capabilities);
+  }
+
   /// What this gateway advertises or has been proven to support.
   ///
   /// Populated from `gateway.ready` on every connect and refined by the
@@ -532,6 +546,7 @@ class DesktopGatewayClient {
     _connectionListener = null;
     _projects = null;
     _filing = null;
+    _organization = null;
     _ws?.close();
     _ws = null;
     _gatewaySessionIds.clear();
