@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 
+import 'assets_gateway_client.dart';
 import 'capability_registry.dart';
 import 'connection_manager.dart';
 import 'filing_gateway_client.dart';
@@ -48,6 +49,7 @@ class DesktopGatewayClient {
   ProjectsGatewayClient? _projects;
   FilingGatewayClient? _filing;
   OrganizationGatewayClient? _organization;
+  AssetsGatewayClient? _assets;
   final CapabilityRegistry _capabilities = CapabilityRegistry();
 
   static const _asyncEventTypes = {
@@ -306,6 +308,18 @@ class DesktopGatewayClient {
     }, capabilities: _capabilities);
   }
 
+  /// Server-authoritative asset index over the same control transport.
+  ///
+  /// Connection-scoped like [filing]: a gateway without the `assets.*`
+  /// family surfaces [AssetsUnsupportedException] so callers degrade the
+  /// surface instead of failing.
+  AssetsGatewayClient get assets {
+    return _assets ??= AssetsGatewayClient((method, params) async {
+      final client = await _connectControl();
+      return client.send(method, params);
+    }, capabilities: _capabilities);
+  }
+
   /// What this gateway advertises or has been proven to support.
   ///
   /// Populated from `gateway.ready` on every connect and refined by the
@@ -547,6 +561,7 @@ class DesktopGatewayClient {
     _projects = null;
     _filing = null;
     _organization = null;
+    _assets = null;
     _ws?.close();
     _ws = null;
     _gatewaySessionIds.clear();
