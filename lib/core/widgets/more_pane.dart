@@ -83,10 +83,14 @@ class MoreSection {
 /// [filingAvailable] is the gateway's proven answer for the `filing.*`
 /// correction-aware contract (probed once via `filing.status`); without it
 /// the entry stays disabled with its reason, never hidden.
+///
+/// [organizationAvailable] is the proven answer for the `organization.*`
+/// batch pin/archive/undo contract (probed once via `organization.history`).
 List<MoreSection> buildMoreSections({
   required bool dashboardReachable,
   required AppLocalizations l10n,
   bool filingAvailable = false,
+  bool organizationAvailable = false,
 }) {
   MoreEntryAvailability dashboardBacked() => dashboardReachable
       ? MoreEntryAvailability.available
@@ -138,9 +142,12 @@ List<MoreSection> buildMoreSections({
           title: l10n.pin_batch_and_undo,
           subtitle: l10n.cross_device_ordering_and_reversible_bulk_organization,
           icon: Icons.push_pin_outlined,
-          availability: MoreEntryAvailability.unavailable,
-          unavailableReason:
-              l10n.needs_durable_pin_ordering_batch_mutation_and_undo_contracts_in,
+          availability: organizationAvailable
+              ? MoreEntryAvailability.available
+              : MoreEntryAvailability.unavailable,
+          unavailableReason: organizationAvailable
+              ? null
+              : l10n.needs_durable_pin_ordering_batch_mutation_and_undo_contracts_in,
         ),
         MoreEntry(
           id: 'ai-filing',
