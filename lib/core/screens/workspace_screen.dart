@@ -1248,91 +1248,78 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     }
   }
 
+  final Map<String, Future<void>> _capabilityProbes = {};
+
+  /// Runs a capability probe at most once, no matter how many rebuilds ask.
+  /// Concurrent requests share the same in-flight future, so a burst of
+  /// rebuilds (each probe completing triggers a setState that re-enters
+  /// [_pane]) opens at most one probe-only gateway connection per family.
+  /// Best-effort: any failure — unsupported family, transport blink,
+  /// missing contract library — resolves to false, which keeps the gated
+  /// entry honestly disabled rather than optimistically open.
+  Future<void> _probeCapability(
+    String family,
+    Future<bool> Function(DesktopGatewayClient gateway) probe,
+    void Function(bool available) apply,
+  ) {
+    return _capabilityProbes.putIfAbsent(family, () async {
+      var gateway = _ownedGateway;
+      var ownsProbeOnly = false;
+      if (gateway == null) {
+        final gatewayUrl = widget.connection.desktopGatewayUrl?.trim() ?? '';
+        if (gatewayUrl.isEmpty) return;
+        try {
+          gateway = DesktopGatewayClient.fromConnection(widget.connection);
+          ownsProbeOnly = true;
+        } catch (_) {
+          return;
+        }
+      }
+      try {
+        final available = await probe(gateway);
+        if (mounted) setState(() => apply(available));
+      } catch (_) {
+        if (mounted) setState(() => apply(false));
+      } finally {
+        if (ownsProbeOnly) gateway.close();
+      }
+    });
+  }
+
   /// Probes `filing.status` once so the More pane can gate AI-assisted
-  /// filing on the server's real capability. Best-effort: any failure —
-  /// unsupported family, transport blink, missing contract library —
-  /// resolves to false, which keeps the entry honestly disabled rather
-  /// than optimistically open.
-  Future<void> _probeFiling() async {
-    var gateway = _ownedGateway;
-    var ownsProbeOnly = false;
-    if (gateway == null) {
-      final gatewayUrl = widget.connection.desktopGatewayUrl?.trim() ?? '';
-      if (gatewayUrl.isEmpty) return;
-      try {
-        gateway = DesktopGatewayClient.fromConnection(widget.connection);
-        ownsProbeOnly = true;
-      } catch (_) {
-        return;
-      }
-    }
-    try {
-      final status = await gateway.filing.status();
-      if (mounted) setState(() => _filingAvailable = status.available);
-    } catch (_) {
-      if (mounted) setState(() => _filingAvailable = false);
-    } finally {
-      if (ownsProbeOnly) gateway.close();
-    }
-  }
+  /// filing on the server's real answer.
+  Future<void> _probeFiling() => _probeCapability(
+        'filing',
+        (gateway) async => (await gateway.filing.status()).available,
+        (available) => _filingAvailable = available,
+      );
 
-  /// Probes `organization.*` once so batch selection can be enabled on
-  /// the gateway's real answer. Same best-effort shape as [_probeFiling]:
-  /// any failure resolves to false, hiding batch affordances rather than
-  /// offering actions that would fail.
-  Future<void> _probeOrganization() async {
-    var gateway = _ownedGateway;
-    var ownsProbeOnly = false;
-    if (gateway == null) {
-      final gatewayUrl = widget.connection.desktopGatewayUrl?.trim() ?? '';
-      if (gatewayUrl.isEmpty) return;
-      try {
-        gateway = DesktopGatewayClient.fromConnection(widget.connection);
-        ownsProbeOnly = true;
-      } catch (_) {
-        return;
-      }
-    }
-    try {
-      await gateway.organization.history();
-      if (mounted) setState(() => _orgAvailable = true);
-    } catch (_) {
-      if (mounted) setState(() => _orgAvailable = false);
-    } finally {
-      if (ownsProbeOnly) gateway.close();
-    }
-  }
+  /// Probes `organization.history` once so batch selection can be enabled
+  /// on the gateway's real answer.
+  Future<void> _probeOrganization() => _probeCapability(
+        'organization',
+        (gateway) async {
+          await gateway.organization.history();
+          return true;
+        },
+        (available) => _orgAvailable = available,
+      );
 
-  /// Probes `assets.*` once so the More pane can gate the Assets gallery on
-  /// the gateway's real answer. Same best-effort shape as [_probeFiling].
-  Future<void> _probeAssets() async {
-    var gateway = _ownedGateway;
-    var ownsProbeOnly = false;
-    if (gateway == null) {
-      final gatewayUrl = widget.connection.desktopGatewayUrl?.trim() ?? '';
-      if (gatewayUrl.isEmpty) return;
-      try {
-        gateway = DesktopGatewayClient.fromConnection(widget.connection);
-        ownsProbeOnly = true;
-      } catch (_) {
-        return;
-      }
-    }
-    try {
-      final status = await gateway.assets.status();
-      if (mounted) setState(() => _assetsAvailable = status.available);
-    } catch (_) {
-      if (mounted) setState(() => _assetsAvailable = false);
-    } finally {
-      if (ownsProbeOnly) gateway.close();
-    }
-  }
+  /// Probes `assets.status` once so the More pane can gate the Assets
+  /// gallery on the gateway's real answer.
+  Future<void> _probeAssets() => _probeCapability(
+        'assets',
+        (gateway) async => (await gateway.assets.status()).available,
+        (available) => _assetsAvailable = available,
+      );
 
-  /// Runs one batch action and returns the server's batch id for undo.
+  /// Runs one batch action and returns the server's outcome for undo.
   ///
   /// Uses the owned gateway when present; otherwise opens a probe-only one
-  /// for the call. Throws on failure so the caller can surface it.
-  Future<String> _runOrgBatch(
+  /// for the call. A partial batch is NOT an error: the applied half stays
+  /// reversible through the returned batch id, and the snackbar reports the
+  /// failed count. Only a genuine transport/RPC failure throws.
+  Future<WorkspaceBatchOutcome> _runOrgBatch(
     List<String> sessionIds,
     WorkspaceBatchAction action,
   ) async {
@@ -1354,13 +1341,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           archived: true,
         ),
       };
-      if (result.partial) {
-        throw StateError(
-          '${result.applied.length} of ${sessionIds.length} — '
-          '${result.failed.length} failed',
-        );
-      }
-      return result.batchId;
+      return WorkspaceBatchOutcome(
+        batchId: result.batchId,
+        requested: sessionIds.length,
+        applied: result.applied.length,
+        failed: result.failed.length,
+      );
     } finally {
       if (!identical(gateway, _ownedGateway)) gateway.close();
     }

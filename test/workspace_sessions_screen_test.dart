@@ -334,6 +334,162 @@ void main() {
     });
   });
 
+  group('batch selection (organization.*)', () {
+    final now = DateTime.fromMillisecondsSinceEpoch(1750000000 * 1000);
+
+    Future<void> pumpBatch(
+      WidgetTester tester, {
+      required WorkspaceBatchRunner? runBatch,
+      WorkspaceBatchUndoRunner? undoBatch,
+    }) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: hermesTheme(Brightness.dark),
+          // Embedded screens render inside the workspace shell's Scaffold;
+          // the batch SnackBars need one to present to.
+          home: Scaffold(
+            body: WorkspaceSessionsScreen(
+              title: 'Chats',
+              view: WorkspaceSessionView.all,
+              embedded: true,
+              now: now,
+              load: () async => WorkspaceSessionsData(
+                sessions: [
+                  _session('s1', 'First', lastActive: 1750000000),
+                  _session('s2', 'Second', lastActive: 1750000000),
+                ],
+              ),
+              onOpenSession: (_) {},
+              runBatch: runBatch,
+              undoBatch: undoBatch,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> selectBoth(WidgetTester tester) async {
+      await tester.longPress(find.text('First'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Second'));
+      await tester.pumpAndSettle();
+    }
+
+    // SnackBars animate for their full display duration, so pumpAndSettle
+    // would spin; advance with a frame to mount, then a fixed pump.
+    Future<void> settleSnackBar(WidgetTester tester) async {
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+    }
+
+    testWidgets('long-press enters selection mode and offers the action bar', (
+      tester,
+    ) async {
+      await pumpBatch(
+        tester,
+        runBatch: (ids, action) async => const WorkspaceBatchOutcome(
+          batchId: 'b1',
+          requested: 2,
+          applied: 2,
+          failed: 0,
+        ),
+      );
+
+      await tester.longPress(find.text('First'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('1 selected'), findsOneWidget);
+      expect(find.byTooltip('Select all'), findsOneWidget);
+      expect(find.byTooltip('Pin'), findsOneWidget);
+      expect(find.byTooltip('Unpin'), findsOneWidget);
+      expect(find.byTooltip('Archive'), findsOneWidget);
+      expect(find.byTooltip('Cancel selection'), findsOneWidget);
+    });
+
+    testWidgets('a full batch reports the count and offers Undo', (
+      tester,
+    ) async {
+      final undone = <String>[];
+      await pumpBatch(
+        tester,
+        runBatch: (ids, action) async => WorkspaceBatchOutcome(
+          batchId: 'b-full',
+          requested: ids.length,
+          applied: ids.length,
+          failed: 0,
+        ),
+        undoBatch: (batchId) async => undone.add(batchId),
+      );
+
+      await selectBoth(tester);
+      await tester.tap(find.byTooltip('Pin'));
+      await settleSnackBar(tester);
+
+      expect(find.text('Pinned 2 chat(s)'), findsOneWidget);
+      await tester.tap(find.text('Undo'));
+      await settleSnackBar(tester);
+      expect(undone, ['b-full']);
+    });
+
+    testWidgets('a partial batch keeps its Undo handle for the applied half', (
+      tester,
+    ) async {
+      final undone = <String>[];
+      await pumpBatch(
+        tester,
+        runBatch: (ids, action) async => const WorkspaceBatchOutcome(
+          batchId: 'b-partial',
+          requested: 2,
+          applied: 1,
+          failed: 1,
+        ),
+        undoBatch: (batchId) async => undone.add(batchId),
+      );
+
+      await selectBoth(tester);
+      await tester.tap(find.byTooltip('Archive'));
+      await settleSnackBar(tester);
+
+      expect(find.text('Archived 1 of 2 chat(s) — 1 failed'), findsOneWidget);
+      // The applied half must stay reversible — the batch id is not lost.
+      await tester.tap(find.text('Undo'));
+      await settleSnackBar(tester);
+      expect(undone, ['b-partial']);
+    });
+
+    testWidgets('nothing applied means no Undo', (tester) async {
+      await pumpBatch(
+        tester,
+        runBatch: (ids, action) async => const WorkspaceBatchOutcome(
+          batchId: 'b-empty',
+          requested: 2,
+          applied: 0,
+          failed: 2,
+        ),
+      );
+
+      await selectBoth(tester);
+      await tester.tap(find.byTooltip('Pin'));
+      await settleSnackBar(tester);
+
+      expect(find.text('Pinned 0 of 2 chat(s) — 2 failed'), findsOneWidget);
+      expect(find.text('Undo'), findsNothing);
+    });
+
+    testWidgets('without runBatch the selection affordances stay hidden', (
+      tester,
+    ) async {
+      await pumpBatch(tester, runBatch: null);
+
+      await tester.longPress(find.text('First'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('1 selected'), findsNothing);
+      expect(find.byTooltip('Pin'), findsNothing);
+    });
+  });
+
   testWidgets('search opens a result and Archived Quick offers Promote', (
     tester,
   ) async {

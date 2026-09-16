@@ -133,10 +133,34 @@ typedef WorkspaceSessionPromoter = Future<void> Function(Session session);
 /// A reversible batch action the gateway's `organization.*` surface supports.
 enum WorkspaceBatchAction { pin, unpin, archive }
 
-/// Runs a batch action over the given session ids; returns the server's
-/// batch id so the caller can offer an undo.
-typedef WorkspaceBatchRunner =
-    Future<String> Function(List<String> sessionIds, WorkspaceBatchAction action);
+/// Outcome of one batch run, surfaced to the list so a partial batch keeps
+/// its undo handle: the applied half is reversible even when some ids failed.
+class WorkspaceBatchOutcome {
+  final String batchId;
+  final int requested;
+  final int applied;
+  final int failed;
+
+  const WorkspaceBatchOutcome({
+    required this.batchId,
+    required this.requested,
+    required this.applied,
+    required this.failed,
+  });
+
+  bool get partial => failed > 0;
+
+  /// Undo only makes sense when the server actually applied something and
+  /// handed back a batch id.
+  bool get undoable => batchId.isNotEmpty && applied > 0;
+}
+
+/// Runs a batch action over the given session ids; returns the outcome so
+/// the caller can offer an undo for whatever the server applied.
+typedef WorkspaceBatchRunner = Future<WorkspaceBatchOutcome> Function(
+  List<String> sessionIds,
+  WorkspaceBatchAction action,
+);
 
 /// Reverses one batch by id.
 typedef WorkspaceBatchUndoRunner = Future<void> Function(String batchId);
@@ -304,23 +328,31 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
     final ids = _selected.toList();
     setState(() => _batchBusy = true);
     try {
-      final batchId = await runner(ids, action);
+      final outcome = await runner(ids, action);
       if (!mounted) return;
       setState(() {
         _batchBusy = false;
         _selected.clear();
       });
+      final verb = switch (action) {
+        WorkspaceBatchAction.pin => 'Pinned',
+        WorkspaceBatchAction.unpin => 'Unpinned',
+        WorkspaceBatchAction.archive => 'Archived',
+      };
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(switch (action) {
-            WorkspaceBatchAction.pin => 'Pinned ${ids.length} chat(s)',
-            WorkspaceBatchAction.unpin => 'Unpinned ${ids.length} chat(s)',
-            WorkspaceBatchAction.archive => 'Archived ${ids.length} chat(s)',
-          }),
-          action: SnackBarAction(
-            label: 'Undo',
-            onPressed: () => unawaited(_undoBatch(batchId)),
+          content: Text(
+            outcome.partial
+                ? '$verb ${outcome.applied} of ${outcome.requested} chat(s)'
+                    ' — ${outcome.failed} failed'
+                : '$verb ${outcome.applied} chat(s)',
           ),
+          action: outcome.undoable
+              ? SnackBarAction(
+                  label: 'Undo',
+                  onPressed: () => unawaited(_undoBatch(outcome.batchId)),
+                )
+              : null,
         ),
       );
       await _load();
