@@ -1039,16 +1039,28 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         // project's working directory as the session cwd instead — the
         // gateway derives project membership from cwd (`project_for_path`),
         // so the chat still lands inside the project.
+        //
+        // A Project with no folder cannot be bound this way (Android allows
+        // name-only Projects), so the message must not claim a folder that
+        // was never sent. The chat still opens; the user is told plainly it
+        // is unassigned and what to do about it.
         if (!mounted) return;
         final messenger = ScaffoldMessenger.of(context);
         messenger.hideCurrentSnackBar();
+        final hasFolder =
+            (draft.projectWorkingDirectory?.trim().isNotEmpty ?? false);
         messenger.showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text(
-              'This gateway can\u2019t file chats into projects directly \u2014 '
-              'opened in the project\u2019s folder instead.',
+              hasFolder
+                  ? 'This gateway can\u2019t file chats into projects directly — '
+                      'opened in the project\u2019s folder instead.'
+                  : 'This gateway can\u2019t file chats into projects, and this '
+                      'Project has no folder to open it in — the chat opened '
+                      'unassigned. Add a folder to the Project to group its '
+                      'chats.',
             ),
-            duration: Duration(seconds: 4),
+            duration: Duration(seconds: hasFolder ? 4 : 6),
           ),
         );
       } catch (_) {
