@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hermes_android/core/services/chat_space_store.dart';
+import 'package:hermes_android/core/services/project_folder_provisioner.dart';
 import 'package:hermes_android/core/services/projects_gateway_client.dart';
 import 'package:hermes_android/core/services/projects_repository.dart';
 import 'package:hermes_android/core/services/ws_client.dart';
@@ -28,6 +29,9 @@ class _FakeGateway {
   /// When set, the next call throws this instead of answering.
   Object? failNext;
 
+  /// When set, every call to this method throws (models a missing sibling).
+  String? failMethod;
+
   _FakeGateway({List<Map<String, dynamic>>? projects, this.activeId})
     : projects = projects ?? [];
 
@@ -41,6 +45,9 @@ class _FakeGateway {
       failNext = null;
       throw failure;
     }
+    if (failMethod == method) {
+      throw JsonRpcError(method, 'unknown method');
+    }
     switch (method) {
       case 'projects.list':
         return _ok({'projects': projects, 'active_id': activeId});
@@ -52,6 +59,25 @@ class _FakeGateway {
         projects = [...projects, created];
         if (params['use'] == true) activeId = created['id'] as String;
         return _ok({'project': created});
+      case 'projects.add_folder':
+        final target = projects.firstWhere((p) => p['id'] == params['id']);
+        final updated = {
+          ...target,
+          'folders': [
+            ...((target['folders'] as List?) ?? const []),
+            {
+              'path': params['path'],
+              'label': params['label'],
+              'is_primary': params['is_primary'] == true,
+              'added_at': 1750000001,
+            },
+          ],
+        };
+        projects = [
+          for (final p in projects)
+            if (p['id'] == params['id']) updated else p,
+        ];
+        return _ok({'project': updated});
       case 'projects.update':
         projects = [
           for (final project in projects)
@@ -111,6 +137,28 @@ JsonRpcError get _offline => JsonRpcError(
   'Desktop gateway connection closed',
   reason: 'connection_closed',
 );
+
+/// A provisioner that always hands back [path] without touching a network.
+class _StubProvisioner implements ProjectFolderProvisioner {
+  final String path;
+  _StubProvisioner(this.path);
+
+  @override
+  Future<String?> provision(String slug) async => path;
+}
+
+/// A provisioner that records the slugs it was asked about and provisions
+/// nothing (models "the host refused / nothing was free").
+class _RecordingProvisioner implements ProjectFolderProvisioner {
+  final List<String> slugs;
+  _RecordingProvisioner(this.slugs);
+
+  @override
+  Future<String?> provision(String slug) async {
+    slugs.add(slug);
+    return null;
+  }
+}
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
@@ -274,6 +322,87 @@ void main() {
 
       await expectLater(repo.create('Doomed'), throwsA(isA<JsonRpcError>()));
       expect(repo.current.projects.map((p) => p.name), ['Kept']);
+    });
+
+    test(
+      'a name-only create auto-provisions a folder and binds it primary',
+      () async {
+        final gateway = _FakeGateway();
+        final prefs = await SharedPreferences.getInstance();
+        final repo = ProjectsRepository(
+          client: ProjectsGatewayClient(gateway.call),
+          preferences: prefs,
+          connectionId: 'gateway-a',
+          folderProvisioner: _StubProvisioner('/srv/Projects/scripthive'),
+        );
+        await repo.refresh();
+
+        final created = await repo.create('ScriptHive');
+
+        expect(gateway.calls, contains('projects.add_folder'));
+        expect(created.folders, hasLength(1));
+        expect(created.workingDirectory, '/srv/Projects/scripthive');
+        expect(repo.current.projects.single.workingDirectory,
+            '/srv/Projects/scripthive');
+      },
+    );
+
+    test('a project that already has folders is never re-provisioned', () async {
+      final gateway = _FakeGateway();
+      final provisioned = <String>[];
+      final prefs = await SharedPreferences.getInstance();
+      final repo = ProjectsRepository(
+        client: ProjectsGatewayClient((method, params) async {
+          if (method == 'projects.create') {
+            return {
+              'jsonrpc': '2.0',
+              'id': 1,
+              'result': {
+                'project': {
+                  ..._projectJson(id: 'srv-1', name: 'ScriptHive'),
+                  'folders': [
+                    {
+                      'path': '/srv/existing',
+                      'label': 'existing',
+                      'is_primary': true,
+                      'added_at': 1,
+                    },
+                  ],
+                },
+              },
+            };
+          }
+          return gateway.call(method, params);
+        }),
+        preferences: prefs,
+        connectionId: 'gateway-a',
+        folderProvisioner: _RecordingProvisioner(provisioned),
+      );
+      await repo.refresh();
+
+      final created = await repo.create('ScriptHive');
+
+      expect(provisioned, isEmpty);
+      expect(gateway.calls, isNot(contains('projects.add_folder')));
+      expect(created.workingDirectory, '/srv/existing');
+    });
+
+    test('a failed folder bind keeps the created project, folderless', () async {
+      final gateway = _FakeGateway();
+      final prefs = await SharedPreferences.getInstance();
+      gateway.failMethod = 'projects.add_folder';
+      final repo = ProjectsRepository(
+        client: ProjectsGatewayClient(gateway.call),
+        preferences: prefs,
+        connectionId: 'gateway-a',
+        folderProvisioner: _StubProvisioner('/srv/Projects/scripthive'),
+      );
+      await repo.refresh();
+
+      final created = await repo.create('ScriptHive');
+
+      expect(created.folders, isEmpty);
+      expect(repo.current.projects.single.name, 'ScriptHive');
     });
 
     test(
