@@ -222,6 +222,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   ChatSpaceStore? _spaceStore;
   QuickChatStore? _quickChats;
   ApiClient? _sessionsApi;
+  DashboardClient? _archivedSessionsClient;
   bool _ownsRepository = false;
   bool _initialized = false;
   late final Future<void> _initialization;
@@ -1178,11 +1179,37 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       // Quick-chat metadata is additive; session access must survive its loss.
     }
 
+    // Server-archived chats come from the dashboard, not the gateway: the
+    // api_server behind the chat transport ignores `archived` and never
+    // returns archived rows (live-verified). Best-effort like the reads
+    // above — a connection without dashboard credentials keeps the
+    // Archived chip on quick-chat expiries only.
+    List<Session> archivedSessions = const [];
+    if (_dashboardReachable) {
+      try {
+        final dashboard = _archivedSessionsClient ??= DashboardClient(
+          host: widget.connection.host,
+          port: widget.connection.dashboardPort,
+          useHttps: widget.connection.useHttps,
+          pathPrefix: widget.connection.dashboardPrefix ?? '',
+          proxied: widget.connection.dashboardProxied,
+          username: widget.connection.dashboardUsername,
+          password: widget.connection.dashboardPassword,
+        );
+        archivedSessions = await dashboard
+            .getArchivedSessions()
+            .timeout(const Duration(seconds: 8));
+      } catch (_) {
+        // Same additive contract: no dashboard, no server-archived rows.
+      }
+    }
+
     _chatProjectLabels = Map.unmodifiable(projectLabels);
     return WorkspaceSessionsData(
       sessions: sessions,
       claimedSessionIds: Set.unmodifiable(claimed),
       archivedQuickChatIds: Set.unmodifiable(archived),
+      archivedSessions: List.unmodifiable(archivedSessions),
       projectLabels: _chatProjectLabels,
     );
   }

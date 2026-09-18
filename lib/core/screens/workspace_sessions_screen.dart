@@ -72,11 +72,13 @@ List<Session> filterChats({
   final filtered = [
     for (final session in sessions)
       if (switch (filter) {
-            WorkspaceChatsFilter.all => true,
-            WorkspaceChatsFilter.recent => session.lastActive >= recentCutoff,
-            WorkspaceChatsFilter.unassigned => !claimedSessionIds.contains(
-              session.id,
-            ),
+            WorkspaceChatsFilter.all => !session.archived,
+            WorkspaceChatsFilter.recent =>
+              !session.archived && session.lastActive >= recentCutoff,
+            WorkspaceChatsFilter.unassigned =>
+              !session.archived && !claimedSessionIds.contains(
+                session.id,
+              ),
             WorkspaceChatsFilter.archived =>
               session.archived || archivedQuickChatIds.contains(session.id),
           } &&
@@ -113,6 +115,13 @@ class WorkspaceSessionsData {
   final Set<String> claimedSessionIds;
   final Set<String> archivedQuickChatIds;
 
+  /// Server-archived sessions, fetched from the dashboard's
+  /// `archived=only` router. The gateway chat transport never returns
+  /// archived rows, so without this the Archived chip only ever showed
+  /// quick-chat expiries. Empty when the dashboard is unreachable — the
+  /// chip then degrades to quick-chat-only rather than lying.
+  final List<Session> archivedSessions;
+
   /// Best-effort session id → project label mapping.
   ///
   /// Built from the server `projects.tree` preview rows; a conversation whose
@@ -123,6 +132,7 @@ class WorkspaceSessionsData {
     this.sessions = const [],
     this.claimedSessionIds = const {},
     this.archivedQuickChatIds = const {},
+    this.archivedSessions = const [],
     this.projectLabels = const {},
   });
 }
@@ -411,9 +421,14 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
   }
 
   Widget _buildLoaded(WorkspaceSessionsData data) {
+    // The embedded browser filters over the union of the gateway's active
+    // list and the dashboard's archived list: the Archived chip needs the
+    // archived rows, and every other chip explicitly excludes
+    // `session.archived`, so the union cannot leak them into All/Recent/
+    // Unassigned.
     final sessions = widget.embedded
         ? filterChats(
-            sessions: data.sessions,
+            sessions: [...data.sessions, ...data.archivedSessions],
             filter: _filter,
             claimedSessionIds: data.claimedSessionIds,
             archivedQuickChatIds: data.archivedQuickChatIds,
