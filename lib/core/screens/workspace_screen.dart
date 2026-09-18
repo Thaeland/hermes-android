@@ -1111,13 +1111,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             .overview(refresh: true)
             .timeout(const Duration(seconds: 8));
         claimed = overview.scopedSessionIds.toSet();
-        // Best-effort session → project label, from the server's own preview
-        // rows. A conversation the overview does not name stays honest as
+        // Best-effort session → project label from the server's full placement
+        // map (every claimed chat names its owner, not just the top-N
+        // previews). A conversation the map does not name stays honest as
         // "Unassigned" in the Chats row.
         projectLabels = {
-          for (final project in overview.projects)
-            for (final preview in project.previewSessions)
-              preview.id: project.label,
+          for (final entry in overview.sessionProjects.entries)
+            if (overview.ownerLabelOf(entry.key) != null)
+              entry.key: overview.ownerLabelOf(entry.key)!,
         };
       } catch (_) {
         // A gateway without projects.tree still gets All chats and Search.

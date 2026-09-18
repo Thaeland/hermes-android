@@ -113,6 +113,12 @@ Future<ProjectsRepository> _repository(
               for (final entry in treeWithPreview.entries)
                 entry.value.sessionId,
             ],
+            // The real gateway emits the full placement map alongside the
+            // previews; the Chats row labels read owner names from it.
+            'session_projects': {
+              for (final entry in treeWithPreview.entries)
+                entry.value.sessionId: entry.key,
+            },
           },
         };
       }
