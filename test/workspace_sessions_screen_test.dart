@@ -48,13 +48,36 @@ void main() {
       }
     });
 
-    test('All keeps every session', () {
+    test('All keeps every non-archived session', () {
       final result = filterChats(
         sessions: [_session('s1', 'A'), _session('s2', 'B')],
         filter: WorkspaceChatsFilter.all,
         now: DateTime.fromMillisecondsSinceEpoch(1750000000 * 1000),
       );
       expect(result.map((s) => s.id), ['s1', 's2']);
+    });
+
+    test('All, Recent and Unassigned hide server-archived sessions', () {
+      // The Chats browser feeds the filter the union of the gateway's
+      // active list and the dashboard's archived list; the non-archived
+      // chips must therefore exclude archived rows explicitly or the
+      // union would leak them.
+      final live = _session('s1', 'Live');
+      final archived = _session('s2', 'Archived', archived: true);
+      final now = DateTime.fromMillisecondsSinceEpoch(1750000000 * 1000);
+
+      for (final filter in [
+        WorkspaceChatsFilter.all,
+        WorkspaceChatsFilter.recent,
+        WorkspaceChatsFilter.unassigned,
+      ]) {
+        final result = filterChats(
+          sessions: [live, archived],
+          filter: filter,
+          now: now,
+        );
+        expect(result.map((s) => s.id), ['s1'], reason: filter.label);
+      }
     });
 
     test('Recent keeps only sessions active within seven days', () {
@@ -252,6 +275,42 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Quick archived'), findsOneWidget);
+      expect(find.text('Fresh'), findsNothing);
+    });
+
+    testWidgets('Archived shows server-archived sessions from the dashboard', (
+      tester,
+    ) async {
+      // The gateway's active list never contains archived rows, so the
+      // dashboard-sourced archivedSessions list is the only way an
+      // explicitly archived chat reaches the chip. It must show under
+      // Archived and stay hidden under All.
+      final serverArchived = _session('s9', 'Archived on server', archived: true);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: hermesTheme(Brightness.dark),
+          home: WorkspaceSessionsScreen(
+            title: 'Chats',
+            view: WorkspaceSessionView.all,
+            embedded: true,
+            now: now,
+            load: () async => WorkspaceSessionsData(
+              sessions: [recent],
+              archivedSessions: [serverArchived],
+            ),
+            onOpenSession: (_) {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Archived on server'), findsNothing);
+      expect(find.text('Fresh'), findsOneWidget);
+
+      await tester.tap(find.widgetWithText(ChoiceChip, 'Archived'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Archived on server'), findsOneWidget);
       expect(find.text('Fresh'), findsNothing);
     });
 
