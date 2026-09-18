@@ -264,6 +264,45 @@ void main() {
       expect(overview.claimsSession('s1'), isFalse);
     });
 
+    test('session_projects names the owner of every claimed chat', () {
+      // The row label bug this pins: labels built from previewSessions only
+      // covered the top-N window, so a correctly-filed chat rendered as
+      // "Unassigned". The map must resolve every claimed id to its owner.
+      final overview = ProjectsTreeOverview.fromJson({
+        'projects': [
+          _overviewNode(id: 'p1', label: 'Email Assistant'),
+          _overviewNode(id: '__no_project__', isNoProject: true),
+        ],
+        'scoped_session_ids': const ['s1', 's2', 's3'],
+        'session_projects': const {
+          's1': 'p1',
+          's2': '__no_project__',
+          's3': 'gone_project',
+        },
+      });
+
+      expect(overview.sessionProjects['s1'], 'p1');
+      expect(overview.ownerLabelOf('s1'), 'Email Assistant');
+      // Home is not a filing: an unfiled chat stays unlabeled ("Unassigned").
+      expect(overview.ownerLabelOf('s2'), isNull);
+      // A map entry naming a project the payload dropped resolves to nothing.
+      expect(overview.ownerLabelOf('s3'), isNull);
+      expect(overview.ownerLabelOf('s9'), isNull);
+    });
+
+    test('a missing session_projects map degrades to no labels, not failure', () {
+      // An older backend ships scoped_session_ids without the map; parsing
+      // must yield an empty map so labels fall back, never throw.
+      final overview = ProjectsTreeOverview.fromJson({
+        'projects': [_overviewNode()],
+        'scoped_session_ids': const ['s1'],
+      });
+
+      expect(overview.sessionProjects, isEmpty);
+      expect(overview.claimsSession('s1'), isTrue);
+      expect(overview.ownerLabelOf('s1'), isNull);
+    });
+
     test('preserves server order across every tier', () {
       // The server emits Home first, then explicit projects, then auto ones.
       // Re-sorting on device would make Android rank projects differently
