@@ -176,6 +176,32 @@ class ProjectsGatewayClient {
     return ProjectsSnapshot.fromJson(result);
   }
 
+  /// Adds a folder to an existing project and returns the updated record.
+  ///
+  /// The gateway normalizes the path and, with [isPrimary], repoints the
+  /// project's `primary_path`. An older gateway lacking this sibling raises
+  /// [ProjectsUnsupportedException] without disowning the `projects.*`
+  /// family (only `projects.list` decides that).
+  Future<HermesProject> addFolder({
+    required String id,
+    required String path,
+    String? label,
+    bool isPrimary = false,
+  }) async {
+    final trimmedPath = path.trim();
+    if (trimmedPath.isEmpty) {
+      throw ArgumentError.value(path, 'path', 'A folder path is required');
+    }
+    final params = <String, dynamic>{
+      'id': _requireId(id),
+      'path': trimmedPath,
+    };
+    if (label != null && label.trim().isNotEmpty) params['label'] = label.trim();
+    if (isPrimary) params['is_primary'] = true;
+    final result = await _request('projects.add_folder', params);
+    return _requireProject('projects.add_folder', result);
+  }
+
   Future<ProjectsSnapshot> delete(String id) async {
     final result = await _request('projects.delete', {'id': _requireId(id)});
     return ProjectsSnapshot.fromJson(result);

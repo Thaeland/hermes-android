@@ -23,6 +23,7 @@ import '../services/connection_manager.dart';
 import '../services/desktop_gateway_client.dart';
 import '../services/gateway_turn_application_controller.dart';
 import '../services/gateway_turn_journal.dart';
+import '../services/project_folder_provisioner.dart';
 import '../services/projects_gateway_client.dart';
 import '../services/projects_repository.dart';
 import '../services/quick_chat_store.dart';
@@ -648,6 +649,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           client: gateway.projects,
           preferences: preferences,
           connectionId: widget.connection.id,
+          folderProvisioner: DashboardFolderProvisioner(gateway.dashboard),
         );
         _spaceStore = spaceStore;
         _ownsRepository = true;

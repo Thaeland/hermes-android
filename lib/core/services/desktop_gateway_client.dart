@@ -264,6 +264,13 @@ class DesktopGatewayClient {
     await _connect(sessionId, workingDirectory: workingDirectory);
   }
 
+  /// The dashboard client backing this gateway's auth/ticket flow.
+  ///
+  /// Exposed so collaborators (e.g. the Projects folder provisioner) can
+  /// reuse this connection's cached auth and single-flight login instead of
+  /// standing up a second unauthenticated HTTP client.
+  DashboardClient get dashboard => _dashboard;
+
   /// Server-owned Hermes Projects for this gateway.
   ///
   /// Projects are connection-scoped, not session-scoped, so this opens the
