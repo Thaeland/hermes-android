@@ -2186,6 +2186,151 @@ void main() {
       },
     );
 
+    test(
+      'stock Hermes ready frame marks the fallback as a clean absence',
+      () async {
+        // Exactly what tui_gateway/ws.py emits: skin + change_events +
+        // replay_epoch, no protocol, no capabilities.
+        final stockReady = <String, dynamic>{
+          'jsonrpc': '2.0',
+          'method': 'event',
+          'params': <String, dynamic>{
+            'type': 'gateway.ready',
+            'payload': <String, dynamic>{
+              'skin': <String, dynamic>{'name': 'default'},
+              'change_events': true,
+              'heartbeat': true,
+              'replay_epoch': 'epoch-a',
+            },
+          },
+        };
+        final fixture = await _GatewayFixture.start(
+          readyFrame: stockReady,
+          handler: (request, _) => throw StateError(
+            'Unsupported ready must not call ${request['method']}',
+          ),
+        );
+        final store = _MemoryJournalStore();
+        final coordinator = _coordinator(
+          fixture: fixture,
+          journal: GatewayTurnJournal(store: store),
+        );
+
+        try {
+          await expectLater(
+            coordinator.recoverPending(),
+            throwsA(
+              isA<GatewayTurnCoordinatorException>()
+                  .having(
+                    (error) => error.failure,
+                    'failure',
+                    GatewayTurnCoordinatorFailure.unsupportedCapability,
+                  )
+                  .having(
+                    (error) => error.stockGateway,
+                    'stockGateway',
+                    isTrue,
+                  ),
+            ),
+          );
+          expect(fixture.requests, isEmpty);
+          expect(store.value, isNull);
+        } finally {
+          await coordinator.close();
+          await fixture.close();
+        }
+      },
+    );
+
+    test(
+      'v2 protocol without turn_recovery is also a clean absence',
+      () async {
+        final ready = _readyFrame();
+        final payload =
+            (ready['params'] as Map<String, dynamic>)['payload']
+                as Map<String, dynamic>;
+        (payload['capabilities'] as Map<String, dynamic>).remove(
+          'turn_recovery',
+        );
+        final fixture = await _GatewayFixture.start(
+          readyFrame: ready,
+          handler: (request, _) => throw StateError(
+            'Unsupported ready must not call ${request['method']}',
+          ),
+        );
+        final coordinator = _coordinator(
+          fixture: fixture,
+          journal: GatewayTurnJournal(store: _MemoryJournalStore()),
+        );
+
+        try {
+          await expectLater(
+            coordinator.recoverPending(),
+            throwsA(
+              isA<GatewayTurnCoordinatorException>()
+                  .having(
+                    (error) => error.failure,
+                    'failure',
+                    GatewayTurnCoordinatorFailure.unsupportedCapability,
+                  )
+                  .having(
+                    (error) => error.stockGateway,
+                    'stockGateway',
+                    isTrue,
+                  ),
+            ),
+          );
+        } finally {
+          await coordinator.close();
+          await fixture.close();
+        }
+      },
+    );
+
+    test(
+      'a wrong protocol name is a mismatch, never a clean absence',
+      () async {
+        final ready = _readyFrame();
+        final payload =
+            (ready['params'] as Map<String, dynamic>)['payload']
+                as Map<String, dynamic>;
+        (payload['protocol'] as Map<String, dynamic>)['name'] =
+            'not-hermes';
+        final fixture = await _GatewayFixture.start(
+          readyFrame: ready,
+          handler: (request, _) => throw StateError(
+            'Unsupported ready must not call ${request['method']}',
+          ),
+        );
+        final coordinator = _coordinator(
+          fixture: fixture,
+          journal: GatewayTurnJournal(store: _MemoryJournalStore()),
+        );
+
+        try {
+          await expectLater(
+            coordinator.recoverPending(),
+            throwsA(
+              isA<GatewayTurnCoordinatorException>()
+                  .having(
+                    (error) => error.failure,
+                    'failure',
+                    GatewayTurnCoordinatorFailure.unsupportedCapability,
+                  )
+                  .having(
+                    (error) => error.stockGateway,
+                    'stockGateway',
+                    isFalse,
+                  ),
+            ),
+          );
+        } finally {
+          await coordinator.close();
+          await fixture.close();
+        }
+      },
+    );
+
     test('clean terminal journal still permits explicit fallback', () async {
       final store = _MemoryJournalStore();
       final journal = GatewayTurnJournal(store: store);
