@@ -22,6 +22,7 @@ import '../models/project_sessions_tree.dart';
 import '../models/projects_tree_overview.dart';
 import '../models/session.dart';
 import 'chat_space_store.dart';
+import 'project_folder_provisioner.dart';
 import 'projects_gateway_client.dart';
 
 /// Whether this gateway offers the native `projects.*` family.
@@ -195,6 +196,16 @@ class ProjectsRepository {
   final SharedPreferences preferences;
   final String connectionId;
 
+  /// Optional folder auto-provisioner for name-only creates.
+  ///
+  /// When set, a Project created without any folder gets a freshly made
+  /// directory bound as its primary — the phone cannot pick folders the
+  /// way Desktop does, and a folderless Project cannot hold chats on
+  /// gateways without direct assignment. The provisioner never adopts a
+  /// pre-existing folder, so this can only ever bind a directory it just
+  /// created itself.
+  final ProjectFolderProvisioner? folderProvisioner;
+
   final _controller = StreamController<ProjectsView>.broadcast();
   ProjectsView _current = ProjectsView.empty;
 
@@ -214,6 +225,7 @@ class ProjectsRepository {
     required this.client,
     required this.preferences,
     required this.connectionId,
+    this.folderProvisioner,
   });
 
   /// Emits after every state change, including optimistic ones.
@@ -301,7 +313,24 @@ class ProjectsRepository {
     );
 
     try {
-      final created = await client.create(name: trimmed, use: select);
+      var created = await client.create(name: trimmed, use: select);
+      if (created.folders.isEmpty && folderProvisioner != null) {
+        // Name-only create: give the Project a folder it owns outright.
+        // A provisioning or bind failure must not undo the create — the
+        // Project exists and stays folderless (honest, and the user can
+        // add a folder later); only the auto-home is lost.
+        final folder = await folderProvisioner!.provision(created.slug);
+        if (folder != null) {
+          try {
+            created = await client.addFolder(
+              id: created.id,
+              path: folder,
+              label: created.name,
+              isPrimary: true,
+            );
+          } catch (_) {}
+        }
+      }
       final view = previous.copyWith(
         projects: [...previous.projects, created],
         activeId: select ? created.id : null,

@@ -113,6 +113,12 @@ Future<ProjectsRepository> _repository(
               for (final entry in treeWithPreview.entries)
                 entry.value.sessionId,
             ],
+            // The real gateway emits the full placement map alongside the
+            // previews; the Chats row labels read owner names from it.
+            'session_projects': {
+              for (final entry in treeWithPreview.entries)
+                entry.value.sessionId: entry.key,
+            },
           },
         };
       }
@@ -1440,6 +1446,73 @@ void main() {
         ]);
         expect(opened.single.session.id, 'new-project-chat');
         expect(opened.single.projectId, 'p1');
+      },
+    );
+
+    testWidgets(
+      'a stock gateway without projects.assign_session opens in the project cwd',
+      (tester) async {
+        final opened = <NewChatDraft>[];
+        await _pump(
+          tester,
+          connection: _connection(desktopGatewayUrl: 'https://host:8642'),
+          repository: await _repository(
+            [
+              _projectJson(
+                id: 'p1',
+                name: 'Hermes Android',
+                primaryPath: '/srv/projects/hermes-android',
+              ),
+            ],
+            assignmentUnsupported: true,
+          ),
+          sessions: const [],
+          onNewChat: opened.add,
+          newChatSessionIdFactory: () => 'stock-project-chat',
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(kWorkspaceNewChatButtonKey));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text(NewChatMode.projectChat.label));
+        await tester.pumpAndSettle();
+
+        expect(opened, hasLength(1));
+        expect(opened.single.session.id, 'stock-project-chat');
+        expect(opened.single.projectWorkingDirectory, '/srv/projects/hermes-android');
+        expect(find.textContaining('opened in the project’s folder'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'a folderless Project on a stock gateway says unassigned, not folder',
+      (tester) async {
+        // Android allows name-only Projects; without a folder the cwd
+        // fallback cannot bind the session, so the snackbar must not
+        // claim the chat opened in a folder that was never sent.
+        final opened = <NewChatDraft>[];
+        await _pump(
+          tester,
+          connection: _connection(desktopGatewayUrl: 'https://host:8642'),
+          repository: await _repository(
+            [_projectJson(id: 'p1', name: 'Nameless')],
+            assignmentUnsupported: true,
+          ),
+          sessions: const [],
+          onNewChat: opened.add,
+          newChatSessionIdFactory: () => 'folderless-chat',
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(kWorkspaceNewChatButtonKey));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text(NewChatMode.projectChat.label));
+        await tester.pumpAndSettle();
+
+        expect(opened, hasLength(1));
+        expect(opened.single.projectWorkingDirectory, isNull);
+        expect(find.textContaining('opened in the project’s folder'), findsNothing);
+        expect(find.textContaining('the chat opened unassigned'), findsOneWidget);
       },
     );
 

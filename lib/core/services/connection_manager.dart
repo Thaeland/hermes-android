@@ -1299,6 +1299,28 @@ class DashboardClient {
     throw Exception('Expected list response');
   }
 
+  /// Lists server-archived sessions from the dashboard's session router.
+  ///
+  /// The gateway api_server that serves the chat transport ignores the
+  /// `archived` query param entirely (live-verified: its list never
+  /// contains archived rows), so the Chats browser's Archived chip reads
+  /// them from the dashboard instead — the same `archived=only` router the
+  /// dashboard's own Archived view uses, and the only stock Hermes surface
+  /// that enumerates archived sessions. Requires dashboard credentials on
+  /// the connection; callers degrade honestly when this throws.
+  Future<List<Session>> getArchivedSessions({int limit = 100}) async {
+    final data = await apiGet('sessions', queryParameters: {
+      'archived': 'only',
+      'order': 'recent',
+      'limit': '$limit',
+    });
+    final list = data['sessions'] as List? ?? [];
+    return list
+        .whereType<Map<String, dynamic>>()
+        .map((s) => Session.fromJson(s))
+        .toList();
+  }
+
   Future<Map<String, dynamic>> apiPost(
     String endpoint, {
     Map<String, dynamic>? body,

@@ -138,6 +138,60 @@ void main() {
       }
     });
 
+    test('Assets opens when the gateway proves the assets index', () {
+      final entries = {
+        for (final section in buildMoreSections(
+          dashboardReachable: true,
+          assetsAvailable: true,
+        ))
+          for (final entry in section.entries) entry.id: entry,
+      };
+
+      final assets = entries['assets']!;
+      expect(assets.availability, MoreEntryAvailability.available);
+      expect(assets.unavailableReason, isNull);
+    });
+
+    test('AI filing opens when the gateway proves the filing contract', () {
+      final entries = {
+        for (final section in buildMoreSections(
+          dashboardReachable: true,
+          filingAvailable: true,
+        ))
+          for (final entry in section.entries) entry.id: entry,
+      };
+
+      final filing = entries['ai-filing']!;
+      expect(filing.availability, MoreEntryAvailability.available);
+      expect(filing.isSelectable, isTrue);
+      expect(filing.unavailableReason, isNull);
+      // The other contract gaps stay gated.
+      expect(
+        entries['pin-batch-undo']!.availability,
+        MoreEntryAvailability.unavailable,
+      );
+    });
+
+    test('batch organization opens when the gateway proves it', () {
+      final entries = {
+        for (final section in buildMoreSections(
+          dashboardReachable: true,
+          organizationAvailable: true,
+        ))
+          for (final entry in section.entries) entry.id: entry,
+      };
+
+      final batch = entries['pin-batch-undo']!;
+      expect(batch.availability, MoreEntryAvailability.available);
+      expect(batch.isSelectable, isTrue);
+      expect(batch.unavailableReason, isNull);
+      // Filing stays gated independently of organization.
+      expect(
+        entries['ai-filing']!.availability,
+        MoreEntryAvailability.unavailable,
+      );
+    });
+
     test(
       'native Smart Views are available and only contract gaps are disabled',
       () {
