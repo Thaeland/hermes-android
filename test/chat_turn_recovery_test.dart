@@ -198,6 +198,45 @@ void main() {
   );
 
   testWidgets(
+    'stock gateway fallback shows the calm capability notice, not the failure banner',
+    (tester) async {
+      final session = _FakeTurnSession(
+        const <Object>[],
+        recoverError: const GatewayTurnCoordinatorException(
+          GatewayTurnCoordinatorFailure.unsupportedCapability,
+          stockGateway: true,
+        ),
+      );
+      var legacySubmitCount = 0;
+      await _pumpChat(
+        tester,
+        turnSession: session,
+        testRemotePromptSubmit:
+            ({required sessionId, required text, required onEvent}) async {
+              legacySubmitCount += 1;
+            },
+      );
+
+      expect(
+        find.text(
+          "This server doesn't offer background recovery — chats run live",
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.text('Background recovery unavailable — legacy transport'),
+        findsNothing,
+      );
+      await tester.enterText(find.byType(TextField), 'Stock send');
+      await tester.tap(find.byTooltip('Send'));
+      await tester.pumpAndSettle();
+
+      expect(legacySubmitCount, 1);
+      expect(session.submitCount, 0);
+    },
+  );
+
+  testWidgets(
     'legacy fallback resyncs a backgrounded turn once the stream disconnects',
     (tester) async {
       final session = _FakeTurnSession(
