@@ -27,6 +27,65 @@ class FilingScreen extends StatefulWidget {
   State<FilingScreen> createState() => _FilingScreenState();
 }
 
+/// Suggestions that share one (cwd, project) pair. `filing.apply` is a
+/// path→project rule, so a whole group collapses to a single apply: one
+/// tap files every session in the folder class, not one card's worth.
+class FilingGroup {
+  final String cwd;
+  final String projectId;
+  final String projectName;
+  final String reason;
+  final double confidence;
+  final List<FilingSuggestion> sessions;
+
+  const FilingGroup({
+    required this.cwd,
+    required this.projectId,
+    required this.projectName,
+    required this.reason,
+    required this.confidence,
+    required this.sessions,
+  });
+
+  bool get isUserRule => reason == 'contract_rule';
+}
+
+/// Groups suggestions by (cwd, project), highest-confidence reason first
+/// inside each group, groups ordered by size (biggest win first).
+List<FilingGroup> groupFilingSuggestions(List<FilingSuggestion> suggestions) {
+  final byKey = <String, FilingGroup>{};
+  for (final s in suggestions) {
+    final key = '${s.cwd}\u0000${s.projectId}';
+    final existing = byKey[key];
+    if (existing == null) {
+      byKey[key] = FilingGroup(
+        cwd: s.cwd,
+        projectId: s.projectId,
+        projectName: s.projectName,
+        reason: s.reason,
+        confidence: s.confidence,
+        sessions: [s],
+      );
+    } else {
+      // A user rule outranks a cwd match as the group's displayed reason.
+      final betterReason = s.isUserRule && !existing.isUserRule;
+      byKey[key] = FilingGroup(
+        cwd: existing.cwd,
+        projectId: existing.projectId,
+        projectName: existing.projectName,
+        reason: betterReason ? s.reason : existing.reason,
+        confidence: s.confidence > existing.confidence
+            ? s.confidence
+            : existing.confidence,
+        sessions: [...existing.sessions, s],
+      );
+    }
+  }
+  final groups = byKey.values.toList()
+    ..sort((a, b) => b.sessions.length.compareTo(a.sessions.length));
+  return groups;
+}
+
 class _FilingScreenState extends State<FilingScreen> {
   DesktopGatewayClient? _gateway;
   FilingStatus? _status;
@@ -35,7 +94,7 @@ class _FilingScreenState extends State<FilingScreen> {
   bool _loading = true;
   String? _error;
   bool _unsupported = false;
-  final Set<String> _busySessions = {};
+  final Set<String> _busyCwds = {};
 
   @override
   void initState() {
@@ -103,39 +162,50 @@ class _FilingScreenState extends State<FilingScreen> {
     }
   }
 
-  Future<void> _accept(FilingSuggestion s) async {
+  /// Bulk accept: one tap files the whole folder class. `filing.apply`
+  /// records a path→project rule, so applying it once covers every session
+  /// sharing this cwd — current and future — instead of one call per chat.
+  Future<void> _acceptGroup(FilingGroup group) async {
     final client = _gateway?.filing;
-    if (client == null || _busySessions.contains(s.sessionId)) return;
-    setState(() => _busySessions.add(s.sessionId));
+    if (client == null || _busyCwds.contains(group.cwd)) return;
+    setState(() => _busyCwds.add(group.cwd));
     try {
-      final note = await client.apply(path: s.cwd, project: s.projectName);
+      final note =
+          await client.apply(path: group.cwd, project: group.projectName);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(note)));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${group.sessions.length} chats — $note')),
+      );
       await _load();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('Could not apply: $e')));
     } finally {
-      if (mounted) setState(() => _busySessions.remove(s.sessionId));
+      if (mounted) setState(() => _busyCwds.remove(group.cwd));
     }
   }
 
-  Future<void> _reject(FilingSuggestion s) async {
+  /// Bulk reject: one exclusion covers the whole folder class — the
+  /// contract is path-keyed, and the retroactive unfile runs server-side.
+  Future<void> _rejectGroup(FilingGroup group) async {
     final client = _gateway?.filing;
-    if (client == null || _busySessions.contains(s.sessionId)) return;
-    setState(() => _busySessions.add(s.sessionId));
+    if (client == null || _busyCwds.contains(group.cwd)) return;
+    setState(() => _busyCwds.add(group.cwd));
     try {
-      final note = await client.reject(path: s.cwd, project: s.projectName);
+      final note =
+          await client.reject(path: group.cwd, project: group.projectName);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(note)));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${group.sessions.length} chats — $note')),
+      );
       await _load();
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('Could not record: $e')));
     } finally {
-      if (mounted) setState(() => _busySessions.remove(s.sessionId));
+      if (mounted) setState(() => _busyCwds.remove(group.cwd));
     }
   }
 
@@ -196,7 +266,8 @@ class _FilingScreenState extends State<FilingScreen> {
                   'working directory or a standing rule.',
             )
           else
-            for (final s in _suggestions) _suggestionCard(tokens, s),
+            for (final group in groupFilingSuggestions(_suggestions))
+              _groupCard(tokens, group),
           const SectionHeader(title: 'Contract'),
           _policySection(tokens),
         ],
@@ -238,17 +309,24 @@ class _FilingScreenState extends State<FilingScreen> {
     );
   }
 
-  Widget _suggestionCard(HermesTokens tokens, FilingSuggestion s) {
-    final busy = _busySessions.contains(s.sessionId);
+  Widget _groupCard(HermesTokens tokens, FilingGroup group) {
+    final busy = _busyCwds.contains(group.cwd);
+    final single = group.sessions.length == 1;
+    final title = single
+        ? (group.sessions.first.title.isEmpty
+            ? group.sessions.first.sessionId
+            : group.sessions.first.title)
+        : '${group.sessions.length} chats in this folder';
     return Padding(
       padding: const EdgeInsets.fromLTRB(
           HermesSpacing.lg, HermesSpacing.sm, HermesSpacing.lg, 0),
       child: HermesCard(
+        key: Key('filing-group-${group.cwd}'),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              s.title.isEmpty ? s.sessionId : s.title,
+              title,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: tokens.typography.section
@@ -256,7 +334,7 @@ class _FilingScreenState extends State<FilingScreen> {
             ),
             const SizedBox(height: HermesSpacing.xs),
             Text(
-              s.cwd,
+              group.cwd,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style:
@@ -264,10 +342,10 @@ class _FilingScreenState extends State<FilingScreen> {
             ),
             const SizedBox(height: HermesSpacing.sm),
             Text(
-              s.isUserRule
-                  ? 'Your standing rule \u2192 ${s.projectName}'
-                  : 'Working directory matches ${s.projectName} '
-                      '(${(s.confidence * 100).round()}%)',
+              group.isUserRule
+                  ? 'Your standing rule \u2192 ${group.projectName}'
+                  : 'Working directory matches ${group.projectName} '
+                      '(${(group.confidence * 100).round()}%)',
               style: tokens.typography.body.copyWith(color: tokens.accent),
             ),
             const SizedBox(height: HermesSpacing.md),
@@ -282,13 +360,13 @@ class _FilingScreenState extends State<FilingScreen> {
                   )
                 else ...[
                   TextButton(
-                    onPressed: () => _reject(s),
+                    onPressed: () => _rejectGroup(group),
                     child: const Text('Never here'),
                   ),
                   const SizedBox(width: HermesSpacing.sm),
                   FilledButton.tonal(
-                    onPressed: () => _accept(s),
-                    child: const Text('File it'),
+                    onPressed: () => _acceptGroup(group),
+                    child: Text(single ? 'File it' : 'File all ${group.sessions.length}'),
                   ),
                 ],
               ],
