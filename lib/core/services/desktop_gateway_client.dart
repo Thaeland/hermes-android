@@ -55,6 +55,11 @@ class DesktopGatewayClient {
   static const _asyncEventTypes = {
     'background.complete',
     'review.summary',
+    // Auto-title pushes land in the turn prologue (delivered via the
+    // submit stream) but can also arrive after the terminal event or on a
+    // reconnect; the bridge relays them so the open chat re-labels.
+    // Applying the same title twice is a no-op in ChatScreen.
+    'session.title',
     'notification.show',
     'notification.clear',
     'subagent.spawn_requested',
@@ -433,8 +438,12 @@ class DesktopGatewayClient {
       final gatewaySessionId = event.data['session_id']?.toString();
       String? mobileSessionId;
       if (gatewaySessionId != null && gatewaySessionId.isNotEmpty) {
+        // Auto-title pushes carry the STORED key (prompt_turn's
+        // session_key), while other events carry the runtime sid — match
+        // either binding for the same mobile session.
         for (final entry in _gatewaySessionIds.entries) {
-          if (entry.value == gatewaySessionId) {
+          if (entry.value == gatewaySessionId ||
+              _storedSessionIds[entry.key] == gatewaySessionId) {
             mobileSessionId = entry.key;
             break;
           }
