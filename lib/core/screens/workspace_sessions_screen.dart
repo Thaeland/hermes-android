@@ -37,6 +37,17 @@ enum ChatDateBucket {
 /// How long "Recent" means in the Chats browser.
 const Duration kRecentChatsWindow = Duration(days: 7);
 
+/// Machine-generated session sources. The server's `projects.tree`
+/// deliberately never claims these (`_PROJECT_TREE_EXCLUDED_SOURCES` in
+/// tui_gateway/methods_projects.py), and `filing.suggest` skips them too —
+/// automated runs carry no human filing intent. The Unassigned view must
+/// mirror that exclusion or every cron run shows up as "unfiled" noise the
+/// filing engine can never answer for.
+const Set<String> kMachineSessionSources = {'cron', 'kanban', 'oneshot'};
+
+bool isMachineSession(Session session) =>
+    kMachineSessionSources.contains(session.source);
+
 /// Assigns a conversation to its date bucket, by calendar day.
 ChatDateBucket chatDateBucket(DateTime now, double lastActiveSeconds) {
   final activity = DateTime.fromMillisecondsSinceEpoch(
@@ -76,7 +87,9 @@ List<Session> filterChats({
             WorkspaceChatsFilter.recent =>
               !session.archived && session.lastActive >= recentCutoff,
             WorkspaceChatsFilter.unassigned =>
-              !session.archived && !claimedSessionIds.contains(
+              !session.archived &&
+              !isMachineSession(session) &&
+              !claimedSessionIds.contains(
                 session.id,
               ),
             WorkspaceChatsFilter.archived =>
@@ -190,9 +203,11 @@ List<Session> filterWorkspaceSessions({
   return [
     for (final session in sessions)
       if (switch (view) {
-            WorkspaceSessionView.unassigned => !claimedSessionIds.contains(
-              session.id,
-            ),
+            WorkspaceSessionView.unassigned =>
+              !isMachineSession(session) &&
+              !claimedSessionIds.contains(
+                session.id,
+              ),
             WorkspaceSessionView.archivedQuick => archivedQuickChatIds.contains(
               session.id,
             ),

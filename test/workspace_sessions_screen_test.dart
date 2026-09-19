@@ -11,11 +11,12 @@ Session _session(
   bool archived = false,
   bool isActive = false,
   bool pinned = false,
+  String source = 'gateway',
 }) => Session(
   id: id,
   title: title,
   model: 'claude-opus-5',
-  source: 'gateway',
+  source: source,
   messageCount: 1,
   isActive: isActive,
   preview: 'preview $title',
@@ -33,6 +34,19 @@ void main() {
       claimedSessionIds: const {'s1'},
     );
     expect(result.map((session) => session.id), ['s2']);
+  });
+
+  test('Unassigned hides machine-generated sessions', () {
+    // Same contract as filterChats: the tree never claims cron rows, so
+    // the legacy view must not present them as unfilable either.
+    final result = filterWorkspaceSessions(
+      sessions: [
+        _session('s1', 'Human chat'),
+        _session('s2', 'Cron run', source: 'cron'),
+      ],
+      view: WorkspaceSessionView.unassigned,
+    );
+    expect(result.map((session) => session.id), ['s1']);
   });
 
   group('WorkspaceChatsFilter', () {
@@ -102,6 +116,45 @@ void main() {
         now: DateTime.fromMillisecondsSinceEpoch(1750000000 * 1000),
       );
       expect(result.map((s) => s.id), ['s2']);
+    });
+
+    test('Unassigned hides machine-generated sessions', () {
+      // projects.tree never claims cron/kanban/oneshot rows, so without
+      // this exclusion every automated run piles up as unfilable
+      // "unassigned" noise the filing engine can never answer for.
+      final human = _session('s1', 'Human chat');
+      final cron = _session('s2', 'Cron run', source: 'cron');
+      final kanban = _session('s3', 'Kanban run', source: 'kanban');
+      final oneshot = _session('s4', 'Oneshot run', source: 'oneshot');
+
+      final result = filterChats(
+        sessions: [human, cron, kanban, oneshot],
+        filter: WorkspaceChatsFilter.unassigned,
+        now: DateTime.fromMillisecondsSinceEpoch(1750000000 * 1000),
+      );
+      expect(result.map((s) => s.id), ['s1']);
+    });
+
+    test('All and Recent still show machine sessions', () {
+      // The exclusion is Unassigned-only: cron runs are real history and
+      // belong in All/Recent.
+      final human = _session('s1', 'Human chat');
+      final cron = _session('s2', 'Cron run', source: 'cron');
+      final now = DateTime.fromMillisecondsSinceEpoch(1750000000 * 1000);
+
+      final all = filterChats(
+        sessions: [human, cron],
+        filter: WorkspaceChatsFilter.all,
+        now: now,
+      );
+      expect(all.map((s) => s.id).toSet(), {'s1', 's2'});
+
+      final recent = filterChats(
+        sessions: [human, cron],
+        filter: WorkspaceChatsFilter.recent,
+        now: now,
+      );
+      expect(recent.map((s) => s.id).toSet(), {'s1', 's2'});
     });
 
     test('Archived merges server-archived and quick-chat archived ids', () {
