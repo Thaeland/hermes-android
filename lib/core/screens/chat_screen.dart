@@ -84,6 +84,13 @@ enum _ResponseTransport { none, rest, desktop }
 const _legacyTransportNotice =
     'Background recovery unavailable — legacy transport';
 
+/// Notice for a gateway that cleanly does not offer the durable turn-recovery
+/// contract (stock Hermes). The chat is fully usable on the live JSON-RPC
+/// transport; only background recovery is absent, so this reads as a
+/// capability note, not a failure.
+const _stockGatewayNotice =
+    'This server doesn\'t offer background recovery — chats run live';
+
 @visibleForTesting
 typedef TestRemotePromptSubmit =
     Future<void> Function({
@@ -236,6 +243,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   String? _activeClientTurnId;
   bool _recoveringTurn = false;
   bool _legacyTransportFallback = false;
+  bool _stockGatewayFallback = false;
   bool _legacyHistoryResyncPending = false;
   bool _legacyHistoryResyncing = false;
   int _responseGeneration = 0;
@@ -815,6 +823,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (fallback == TurnRecoveryFallback.legacyTransport) {
         setState(() {
           _legacyTransportFallback = true;
+          _stockGatewayFallback = turnRecoveryFailureIsStockGateway(error);
           _sending = false;
           _streaming = false;
           _gatewayTurnStatus = null;
@@ -2747,7 +2756,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     vertical: 10,
                   ),
                   child: Text(
-                    _legacyTransportNotice,
+                    _stockGatewayFallback
+                        ? _stockGatewayNotice
+                        : _legacyTransportNotice,
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: Theme.of(context).colorScheme.onTertiaryContainer,
