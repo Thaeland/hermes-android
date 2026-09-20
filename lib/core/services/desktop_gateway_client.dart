@@ -34,7 +34,6 @@ class DesktopGatewayClient {
   final String _connectionId;
   final String _baseUrl;
   final DashboardClient _dashboard;
-  final String _documentProfile;
 
   /// Hermes profile the gateway socket should run chats under, or null to
   /// let the server use its own. See [SavedConnection.gatewayProfile].
@@ -77,7 +76,6 @@ class DesktopGatewayClient {
     required this._connectionId,
     required this._baseUrl,
     required this._dashboard,
-    required this._documentProfile,
     this._gatewayProfile,
   });
 
@@ -166,7 +164,6 @@ class DesktopGatewayClient {
         username: connection.dashboardUsername,
         password: connection.dashboardPassword,
       ),
-      documentProfile: documentIntakeProfileForConnection(connection),
       gatewayProfile: connection.gatewayProfile,
     );
   }
@@ -441,8 +438,6 @@ class DesktopGatewayClient {
       sessionId: gateway.sessionId,
       name: name,
       dataUrl: dataUrl,
-      sourceChannel: 'hermes_mobile',
-      sourceProfile: _documentProfile,
     );
   }
 

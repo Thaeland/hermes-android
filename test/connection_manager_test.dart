@@ -2126,7 +2126,7 @@ void main() {
       }
     });
 
-    test('preserves mobile source_profile on generic file.attach', () async {
+    test('file.attach sends only stock FileAttachParams wire keys', () async {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       final requestSeen = Completer<Map<String, dynamic>>();
       final socketSubscription = server
@@ -2156,19 +2156,18 @@ void main() {
           sessionId: 'gateway-session-123',
           name: 'fixture.txt',
           dataUrl: 'data:application/octet-stream;base64,ZmFrZQ==',
-          sourceChannel: 'hermes_mobile',
-          sourceProfile: 'pro',
         );
         final request = await requestSeen.future;
 
+        // Stock Hermes FileAttachParams is extra="forbid"; sending
+        // source_channel/source_profile (fixture-only keys) makes every
+        // attach fail with "Extra inputs are not permitted".
         expect(request['method'], 'file.attach');
         expect(request['params'], {
           'session_id': 'gateway-session-123',
           'name': 'fixture.txt',
           'path': '',
           'data_url': 'data:application/octet-stream;base64,ZmFrZQ==',
-          'source_channel': 'hermes_mobile',
-          'source_profile': 'pro',
         });
       } finally {
         client.close();
