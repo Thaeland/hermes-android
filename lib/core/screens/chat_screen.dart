@@ -2530,21 +2530,42 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
 
     try {
-      final interrupted = switch (transport) {
-        _ResponseTransport.rest => await _gateway.cancelActiveMessage(),
-        _ResponseTransport.desktop =>
-          _turnApplicationSession != null && activeClientTurnId != null
-              ? (await _turnApplicationSession!.interrupt(
-                      localSessionId: widget.session.id,
-                      clientTurnId: activeClientTurnId,
-                    )).status?.isTerminal ==
-                    true
-              : await _desktopGateway?.interruptPrompt(
+      GatewayTurnRecoveryState? interruptedTurnState;
+      bool interrupted;
+      switch (transport) {
+        case _ResponseTransport.rest:
+          interrupted = await _gateway.cancelActiveMessage();
+        case _ResponseTransport.desktop:
+          if (_turnApplicationSession != null && activeClientTurnId != null) {
+            // Keep the authoritative terminal state from the interrupt so
+            // the partial assistant message gets the real final content
+            // + terminal markers instead of whatever streamed before the
+            // stop. Previously only .status was read for the snackbar and
+            // the state was discarded: navigating away before the next
+            // resume left truncated text displayed as if complete.
+            final state = await _turnApplicationSession!.interrupt(
+              localSessionId: widget.session.id,
+              clientTurnId: activeClientTurnId,
+            );
+            interruptedTurnState = state;
+            interrupted = state.status?.isTerminal == true;
+          } else {
+            interrupted =
+                await _desktopGateway?.interruptPrompt(
                       sessionId: widget.session.id,
                     ) ??
-                    false,
-        _ResponseTransport.none => false,
-      };
+                false;
+          }
+        case _ResponseTransport.none:
+          interrupted = false;
+      }
+      if (!mounted) return;
+      if (interruptedTurnState != null) {
+        // Route through the shared apply path (idempotent): the terminal
+        // state updates the message content/markers and clears the
+        // pending-response flag exactly as a live terminal event would.
+        _applyGatewayTurnState(interruptedTurnState);
+      }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
