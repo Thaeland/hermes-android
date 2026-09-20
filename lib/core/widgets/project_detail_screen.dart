@@ -199,6 +199,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
+          persist: false,
           content: const Text('Couldn’t move conversation'),
           action: SnackBarAction(
             label: 'Retry',
@@ -304,6 +305,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
   void _showManagementError(String action, Future<void> Function() retry) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
+        persist: false,
         content: Text('Couldn’t $action project'),
         action: SnackBarAction(label: 'Retry', onPressed: retry),
       ),
@@ -358,6 +360,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
       setState(() => _deleting = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
+          persist: false,
           content: const Text('Couldn’t delete project'),
           action: SnackBarAction(
             label: 'Retry',

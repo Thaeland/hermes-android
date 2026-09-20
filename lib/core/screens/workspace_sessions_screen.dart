@@ -287,6 +287,7 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
       if (error is QuickChatPromotionCancelled) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
+          persist: false,
           content: const Text('Couldn’t promote conversation'),
           action: SnackBarAction(
             label: 'Retry',

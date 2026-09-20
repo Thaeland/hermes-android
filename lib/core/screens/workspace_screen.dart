@@ -1029,6 +1029,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         messenger.hideCurrentSnackBar();
         messenger.showSnackBar(
           SnackBar(
+            persist: false,
             content: const Text('Couldn’t create Project chat'),
             action: SnackBarAction(
               label: 'Retry',
