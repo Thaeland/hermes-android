@@ -38,10 +38,17 @@ class AssetsScreen extends StatefulWidget {
   final String? projectId;
   final String? projectName;
 
+  /// When true the gallery renders without its own Scaffold/AppBar so it can
+  /// live inside another screen's body — the project detail Assets tab. The
+  /// pull-to-refresh in the body still covers what the AppBar's Refresh
+  /// button did for the standalone route.
+  final bool embedded;
+
   const AssetsScreen({
     required this.connection,
     this.projectId,
     this.projectName,
+    this.embedded = false,
     super.key,
   });
 
@@ -140,6 +147,11 @@ class _AssetsScreenState extends State<AssetsScreen> {
   @override
   Widget build(BuildContext context) {
     final tokens = HermesTokens.of(context);
+    if (widget.embedded) {
+      // Hosted inside another screen (project detail's Assets tab): the host
+      // owns the Scaffold and title, so only the gallery body renders here.
+      return _buildBody(tokens);
+    }
     return Scaffold(
       backgroundColor: tokens.surface,
       appBar: AppBar(
