@@ -1103,6 +1103,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
 
     Set<String> claimed = const {};
     Map<String, String> projectLabels = const {};
+    var projectsKnown = true;
     final repository = _repository;
     if (repository != null) {
       try {
@@ -1125,6 +1126,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         };
       } catch (_) {
         // A gateway without projects.tree still gets All chats and Search.
+        // But the claim map is UNKNOWN, not empty: the Unassigned chip
+        // must not present every chat as unfiled on a timeout.
+        projectsKnown = false;
       }
     }
 
@@ -1168,6 +1172,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       archivedQuickChatIds: Set.unmodifiable(archived),
       archivedSessions: List.unmodifiable(archivedSessions),
       projectLabels: _chatProjectLabels,
+      projectsKnown: projectsKnown,
     );
   }
 
