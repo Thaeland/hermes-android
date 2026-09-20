@@ -1146,6 +1146,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
 
     Set<String> claimed = const {};
     Map<String, String> projectLabels = const {};
+    var projectsKnown = true;
     final repository = _repository;
     if (repository != null) {
       try {
@@ -1168,6 +1169,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         };
       } catch (_) {
         // A gateway without projects.tree still gets All chats and Search.
+        // But the claim map is UNKNOWN, not empty: the Unassigned chip
+        // must not present every chat as unfiled on a timeout.
+        projectsKnown = false;
       }
     }
 
@@ -1211,6 +1215,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       archivedQuickChatIds: Set.unmodifiable(archived),
       archivedSessions: List.unmodifiable(archivedSessions),
       projectLabels: _chatProjectLabels,
+      projectsKnown: projectsKnown,
     );
   }
 
@@ -1321,7 +1326,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         final available = await probe(gateway);
         if (mounted) setState(() => apply(available));
       } catch (_) {
-        if (mounted) setState(() => apply(false));
+        // A transport blip during the first probe must not pin the entry
+        // disabled for the life of the app: drop the cached probe so the
+        // next pane open retries, and leave the verdict unprobed rather
+        // than applying a false we have no evidence for. Definitive
+        // answers (the probe RETURNING true/false) still cache normally.
+        _capabilityProbes.remove(family);
       } finally {
         if (ownsProbeOnly) gateway.close();
       }
