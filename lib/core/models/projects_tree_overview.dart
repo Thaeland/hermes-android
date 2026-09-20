@@ -69,9 +69,18 @@ class ProjectOverviewNode {
 
   /// The few most recent chats, as ranked by the server.
   ///
-  /// The only place the overview carries real chats, so a card that shows
-  /// recent activity depends entirely on this list.
+  /// The only place the overview carries real Session rows, so a card that
+  /// shows recent activity depends entirely on this list.
   final List<Session> previewSessions;
+
+  /// Every chat id this project claims — not just the preview window.
+  ///
+  /// The server emits this on every node even when `hydrate=False`
+  /// (`sessionIds` in `tui_gateway/project_tree.py::_project_node`), so
+  /// placement never depends on whether a chat made the preview cut. This
+  /// is the ONLY wire source of per-chat ownership: there is no
+  /// top-level placement map on `projects.tree`.
+  final List<String> sessionIds;
 
   const ProjectOverviewNode({
     required this.id,
@@ -87,6 +96,7 @@ class ProjectOverviewNode {
     this.totalCostUsd = 0,
     this.repos = const [],
     this.previewSessions = const [],
+    this.sessionIds = const [],
   });
 
   factory ProjectOverviewNode.fromJson(Map<String, dynamic> json) {
@@ -117,6 +127,7 @@ class ProjectOverviewNode {
                 .toList(growable: false)
           : const <ProjectRepo>[],
       previewSessions: _sessions(json['previewSessions']),
+      sessionIds: _scopedIds(json['sessionIds']),
     );
   }
 
@@ -137,10 +148,14 @@ class ProjectsTreeOverview {
   final List<String> scopedSessionIds;
 
   /// Full placement map: chat id -> owning project id (`__no_project__` for
-  /// the Home bucket). Unlike [ProjectOverviewNode.previewSessions] — a
-  /// top-N window — this names the owner of EVERY claimed chat, so a row
-  /// label never depends on whether the chat made the preview cut.
-  final Map<String, String> sessionProjects;
+  /// the Home bucket), derived from every node's [ProjectOverviewNode
+  /// .sessionIds]. Unlike [ProjectOverviewNode.previewSessions] — a top-N
+  /// window — this names the owner of EVERY claimed chat, so a row label
+  /// never depends on whether the chat made the preview cut.
+  late final Map<String, String> sessionProjects = Map.unmodifiable({
+    for (final project in projects)
+      for (final id in project.sessionIds) id: project.id,
+  });
 
   final Set<String> _scoped;
 
@@ -148,7 +163,6 @@ class ProjectsTreeOverview {
     this.projects = const [],
     this.activeId,
     this.scopedSessionIds = const [],
-    this.sessionProjects = const {},
   }) : _scoped = Set.unmodifiable(scopedSessionIds);
 
   static final empty = ProjectsTreeOverview();
@@ -179,7 +193,6 @@ class ProjectsTreeOverview {
       projects: List.unmodifiable(projects),
       activeId: activeId,
       scopedSessionIds: _scopedIds(json['scoped_session_ids']),
-      sessionProjects: _sessionProjects(json['session_projects']),
     );
   }
 
@@ -229,18 +242,6 @@ List<String> _scopedIds(Object? raw) {
     if (id != null && seen.add(id)) ids.add(id);
   }
   return List.unmodifiable(ids);
-}
-
-/// Decodes the session id -> project id map, dropping blank keys or values.
-Map<String, String> _sessionProjects(Object? raw) {
-  if (raw is! Map) return const {};
-  final out = <String, String>{};
-  for (final entry in raw.entries) {
-    final id = _trimmedString(entry.key);
-    final owner = _trimmedString(entry.value);
-    if (id != null && owner != null) out[id] = owner;
-  }
-  return Map.unmodifiable(out);
 }
 
 /// Decodes a list of session rows, skipping any row that carries no id.
