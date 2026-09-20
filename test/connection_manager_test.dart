@@ -20,6 +20,8 @@ String? _header(http.BaseRequest request, String name) {
   return null;
 }
 
+const _raceKey = 'race-test-key';
+
 class _BlockingStreamingClient extends http.BaseClient {
   bool cancelled = false;
   late final StreamController<List<int>> controller =
@@ -33,6 +35,28 @@ class _BlockingStreamingClient extends http.BaseClient {
   @override
   void close() {
     if (!controller.isClosed) controller.close();
+  }
+}
+
+/// Returns a FRESH stream controller per request so a test can keep the
+/// first response's stream alive while a second send starts.
+class _MultiStreamingClient extends http.BaseClient {
+  final List<StreamController<List<int>>> controllers = [];
+
+  StreamController<List<int>> get latest => controllers.last;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    final controller = StreamController<List<int>>();
+    controllers.add(controller);
+    return http.StreamedResponse(controller.stream, 200);
+  }
+
+  @override
+  void close() {
+    for (final c in controllers) {
+      if (!c.isClosed) c.close();
+    }
   }
 }
 
@@ -693,6 +717,74 @@ void main() {
         expect(transport.cancelled, isTrue);
         expect(done, isFalse);
         expect(error, isNull);
+        api.close();
+      },
+    );
+
+    test(
+      'cancel-then-resend never reports the cancelled turn as done and '
+      'never leaks its tokens into the new stream',
+      () async {
+        final transport = _MultiStreamingClient();
+        final api = ApiClient(
+          baseUrl: 'http://hermes.local:8642',
+          apiKey: _raceKey,
+          httpClient: transport,
+        );
+        final gateway = GatewayChatClient(api);
+        final firstToken = Completer<void>();
+        var firstDone = false;
+        var secondDone = false;
+        final firstTokens = <String>[];
+        final secondTokens = <String>[];
+
+        final firstSending = gateway.sendMessageStreaming(
+          message: 'first',
+          sessionId: 'mob-race-1',
+          onToken: (t) {
+            firstTokens.add(t);
+            if (!firstToken.isCompleted) firstToken.complete();
+          },
+          onDone: () => firstDone = true,
+          onError: (_) {},
+        );
+        transport.controllers.first.add(
+          utf8.encode('data: {"choices":[{"delta":{"content":"one"}}]}\n\n'),
+        );
+        await firstToken.future;
+
+        // Cancel the first, then IMMEDIATELY start a second send — the
+        // old shared-flag design reset _activeStreamCancelled=false in
+        // the second call before the first call's post-await check ran,
+        // so the cancelled first turn reported onDone.
+        expect(await gateway.cancelActiveMessage(), isTrue);
+        final secondSending = gateway.sendMessageStreaming(
+          message: 'second',
+          sessionId: 'mob-race-2',
+          onToken: secondTokens.add,
+          onDone: () => secondDone = true,
+          onError: (_) {},
+        );
+        // Let the first call unwind fully with the second already active.
+        await firstSending;
+        expect(firstDone, isFalse,
+            reason: 'a cancelled turn must never report completion');
+
+        // The orphaned first stream pushing late tokens must not reach
+        // any callback: the first stream's controller is still open but
+        // its subscription was cancelled; the second stream gets its own.
+        transport.latest.add(
+          utf8.encode('data: {"choices":[{"delta":{"content":"two"}}]}\n\n'),
+        );
+        await pumpEventQueue();
+        expect(secondTokens, ['two']);
+        expect(firstTokens, ['one'],
+            reason: 'first stream delivered nothing after cancellation');
+
+        // Second stream completes normally.
+        await transport.latest.close();
+        await secondSending;
+        expect(secondDone, isTrue);
         api.close();
       },
     );
