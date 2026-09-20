@@ -470,9 +470,12 @@ class ProjectsRepository {
     String normalize(String value) =>
         value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
 
+    // Active projects only: matching a Space to an ARCHIVED project would
+    // report 'already linked' while landing the chats in a bucket the
+    // user cannot see in the active list. An archived name is treated as
+    // free — the migration creates/uses the active project instead.
     final byName = <String, HermesProject>{
-      for (final project in [..._current.projects, ..._current.archived])
-        normalize(project.name): project,
+      for (final project in _current.projects) normalize(project.name): project,
     };
 
     final counts = <String, int>{};

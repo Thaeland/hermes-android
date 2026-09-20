@@ -245,6 +245,11 @@ class DesktopGatewayClient {
     );
     existing?.close();
     _gatewaySessionIds.clear();
+    // A fresh socket means a possibly-replaced server: forget old
+    // -32601 verdicts so an upgraded gateway's methods are re-discovered
+    // instead of staying short-circuited until app restart. gateway.ready
+    // on the new socket re-populates protocol/advertisement.
+    _capabilities.reset();
     final ticket = await _dashboard.mintWebSocketTicket();
     if (_closed) throw StateError('DesktopGatewayClient is closed.');
     final client = WsClient(_baseUrl, ticket: ticket, profile: _gatewayProfile);

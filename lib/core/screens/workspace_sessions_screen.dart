@@ -433,7 +433,14 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
               child: ChoiceChip(
                 label: Text(filter.label),
                 selected: _filter == filter,
-                onSelected: (_) => setState(() => _filter = filter),
+                onSelected: (_) => setState(() {
+                  // Selection must not survive a filter change: the bar's
+                  // 'all selected' compares against the FILTERED list,
+                  // and a batch acting on ids the user can no longer see
+                  // is how you archive the wrong 20 chats.
+                  if (_filter != filter) _selected.clear();
+                  _filter = filter;
+                }),
               ),
             ),
         ],
