@@ -71,6 +71,14 @@ class ProjectDetailScreen extends StatefulWidget {
   /// become Unassigned because the Gateway deletes only their assignments.
   final ProjectDeleter? onDeleteProject;
 
+  /// Builds the per-project Assets gallery for the Assets tab. The host
+  /// supplies this only when the gateway's `assets.*` probe succeeded, so
+  /// the tab renders the real index when it exists and the honest
+  /// "unavailable" notice when the host cannot provide one. Kept as a
+  /// builder so this screen stays gateway-free and test-driveable, like
+  /// [loadSessions].
+  final Widget Function(String projectId, String projectName)? assetsGalleryBuilder;
+
   const ProjectDetailScreen({
     required this.projectId,
     required this.projectName,
@@ -82,6 +90,7 @@ class ProjectDetailScreen extends StatefulWidget {
     this.onRenameProject,
     this.onArchiveProject,
     this.onDeleteProject,
+    this.assetsGalleryBuilder,
     super.key,
   });
 
@@ -757,7 +766,15 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
   }
 
   /// Honest capability gate: no server Assets index, no fake gallery.
+  /// When the host proved `assets.*` and supplied a gallery builder, the
+  /// real per-project index renders here instead of the stub.
   Widget _buildAssets(ProjectSessionsView view) {
+    final builder = widget.assetsGalleryBuilder;
+    if (builder != null) {
+      // The gallery owns its own refresh; wrapping it in a second
+      // RefreshIndicator would nest two competing pull gestures.
+      return builder(widget.projectId, _projectName);
+    }
     return RefreshIndicator(
       onRefresh: () => _load(refresh: true),
       child: ListView(

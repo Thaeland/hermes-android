@@ -90,6 +90,7 @@ Future<void> _pump(
   Future<void> Function(String name)? onRenameProject,
   Future<void> Function()? onArchiveProject,
   Future<void> Function()? onDeleteProject,
+  Widget Function(String projectId, String projectName)? assetsGalleryBuilder,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
@@ -104,6 +105,7 @@ Future<void> _pump(
         onRenameProject: onRenameProject,
         onArchiveProject: onArchiveProject,
         onDeleteProject: onDeleteProject,
+        assetsGalleryBuilder: assetsGalleryBuilder,
       ),
     ),
   );
@@ -314,6 +316,35 @@ void main() {
       find.textContaining('server-authoritative Assets index'),
       findsOneWidget,
     );
+  });
+
+  testWidgets('Assets tab renders the host gallery when one is provided',
+      (tester) async {
+    String? builtProjectId;
+    String? builtProjectName;
+    await _pump(
+      tester,
+      load: ({required refresh}) async => ProjectSessionsView(
+        projectId: 'p1',
+        tree: _tree(sessions: [_session()]),
+        sessions: [_session()],
+        support: ProjectsSupport.native,
+      ),
+      assetsGalleryBuilder: (projectId, projectName) {
+        builtProjectId = projectId;
+        builtProjectName = projectName;
+        return const Text('GALLERY');
+      },
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Assets'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('GALLERY'), findsOneWidget);
+    expect(find.textContaining('server-authoritative Assets index'), findsNothing);
+    expect(builtProjectId, 'p1');
+    expect(builtProjectName, 'Hermes Android');
   });
 
   testWidgets('Activity tab shows the project chat activity', (tester) async {
