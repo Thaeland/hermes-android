@@ -6,6 +6,7 @@
 // a JSON-RPC response with the same id.
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:web_socket_channel/io.dart';
 
 Object? _deepFreezeJson(Object? value) {
@@ -200,11 +201,39 @@ class WsClient {
     String? token,
     String? ticket,
     String? profile,
+    Duration heartbeatInterval = defaultHeartbeatInterval,
+    Duration heartbeatDeadline = defaultHeartbeatDeadline,
   }) {
-    return WsClient._(baseUrl, token, ticket, profile);
+    return WsClient._(
+      baseUrl,
+      token,
+      ticket,
+      profile,
+      heartbeatInterval,
+      heartbeatDeadline,
+    );
   }
 
-  WsClient._(this.baseUrl, this._token, this._ticket, this._profile);
+  WsClient._(
+    this.baseUrl,
+    this._token,
+    this._ticket,
+    this._profile,
+    this.heartbeatInterval,
+    this.heartbeatDeadline,
+  );
+
+  /// Keepalive cadence mirroring the desktop client
+  /// (`apps/shared/src/json-rpc-channel.ts` DEFAULT_HEARTBEAT_*): a
+  /// `gateway.ping` every 15s, dead-socket verdict after 45s of silence.
+  static const defaultHeartbeatInterval = Duration(seconds: 15);
+  static const defaultHeartbeatDeadline = Duration(seconds: 45);
+
+  final Duration heartbeatInterval;
+  final Duration heartbeatDeadline;
+  Timer? _heartbeatTimer;
+  int _heartbeatSeq = 0;
+  int _lastLivenessMs = 0;
 
   /// Connect to the WebSocket gateway.
   Future<void> connect() async {
@@ -241,6 +270,7 @@ class WsClient {
         );
       }
       _connected = true;
+      _startHeartbeat(generation);
       try {
         onConnectionChanged?.call(true);
       } catch (_) {
@@ -262,6 +292,7 @@ class WsClient {
     // Invalidate this socket before any completion or observer can enqueue
     // more work. Buffered callbacks from it now fail the generation guard.
     _connectionGeneration = generation + 1;
+    _stopHeartbeat();
     final wasConnected = _connected || _channel != null;
     _connected = false;
     _channel = null;
@@ -332,6 +363,54 @@ class WsClient {
     _connectionClosedListeners.remove(token);
   }
 
+  /// Keepalive loop mirroring the desktop `JsonRpcChannel.startHeartbeat`.
+  /// Every [heartbeatInterval] sends a `gateway.ping` (answered cheaply on
+  /// the gateway's WS reader thread, even while every agent is mid-turn);
+  /// if nothing has been received for [heartbeatDeadline] the socket is
+  /// declared half-open and torn down, which starts the owner's reconnect
+  /// instead of leaving later RPCs parked on a dead pipe.
+  void _startHeartbeat(int generation) {
+    _stopHeartbeat();
+    if (heartbeatInterval.inMilliseconds <= 0 ||
+        heartbeatDeadline.inMilliseconds <= 0) {
+      return;
+    }
+    _lastLivenessMs = DateTime.now().millisecondsSinceEpoch;
+    _heartbeatTimer = Timer.periodic(heartbeatInterval, (_) {
+      if (generation != _connectionGeneration || !_connected) return;
+      final silenceMs =
+          DateTime.now().millisecondsSinceEpoch - _lastLivenessMs;
+      if (silenceMs >= heartbeatDeadline.inMilliseconds) {
+        // Half-open socket (phone slept, NAT dropped the mapping, proxy
+        // died): close it so the close path rejects pending calls and the
+        // owner can reconnect on a fresh ticket. 4000 = private close
+        // code (the channel rejects 1001).
+        _channel?.sink.close(4000, 'heartbeat timeout');
+        _handleClosedConnection(generation);
+        return;
+      }
+      _heartbeatSeq++;
+      try {
+        _channel?.sink.add(
+          jsonEncode({
+            'jsonrpc': '2.0',
+            'id': 'heartbeat-$_heartbeatSeq',
+            'method': 'gateway.ping',
+            'params': <String, dynamic>{},
+          }),
+        );
+      } catch (_) {
+        _channel?.sink.close(4000, 'heartbeat send failed');
+        _handleClosedConnection(generation);
+      }
+    });
+  }
+
+  void _stopHeartbeat() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
+  }
+
   /// Produces the gateway `/api/ws` URL. Secured Desktop gateways use a
   /// single-use ticket; insecure legacy gateways still use a session token.
   static String buildWebSocketUrl(
@@ -373,6 +452,10 @@ class WsClient {
   /// Handle inbound messages.
   void _handleMessage(dynamic msg, int generation) {
     if (generation != _connectionGeneration) return;
+    // Any inbound frame proves the socket is alive ('any-inbound' liveness,
+    // matching the desktop channel): streaming events keep the heartbeat
+    // deadline reset even if the pong for one ping raced past it.
+    _lastLivenessMs = DateTime.now().millisecondsSinceEpoch;
     try {
       Map<String, dynamic> data;
       if (msg is String) {
