@@ -917,13 +917,18 @@ class WsClient {
 
   /// Uploads one file or image to a remote Desktop gateway and returns the
   /// canonical `@file:` reference that must be included in the following turn.
+  ///
+  /// The wire params are exactly the stock gateway's `FileAttachParams`
+  /// (`extra="forbid"`: session_id/profile/path/data_url/name). An earlier
+  /// revision also sent `source_channel`/`source_profile`; those exist only
+  /// in the repo's fixture gateway and stock Hermes rejects them with
+  /// "invalid params for file.attach: source_channel: Extra inputs are not
+  /// permitted", so they must never go on the wire.
   Future<RemoteFileAttachment> attachFile({
     required String sessionId,
     required String name,
     required String dataUrl,
     String path = '',
-    String? sourceChannel,
-    String? sourceProfile,
   }) async {
     final params = <String, dynamic>{
       'session_id': sessionId,
@@ -931,12 +936,6 @@ class WsClient {
       'path': path,
       'data_url': dataUrl,
     };
-    if (sourceChannel?.isNotEmpty == true) {
-      params['source_channel'] = sourceChannel;
-    }
-    if (sourceProfile?.isNotEmpty == true) {
-      params['source_profile'] = sourceProfile;
-    }
     final response = await send('file.attach', params);
     final error = response['error'];
     if (error != null) {
