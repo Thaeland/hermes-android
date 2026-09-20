@@ -99,6 +99,10 @@ Future<ProjectsRepository> _repository(
                   'label': entry.value.label,
                   'isNoProject': false,
                   'sessionCount': 1,
+                  // The real gateway emits every claimed id on the node
+                  // itself (project_tree.py::_project_node); the Chats row
+                  // labels derive owner names from it.
+                  'sessionIds': [entry.value.sessionId],
                   'previewSessions': [
                     {
                       'id': entry.value.sessionId,
@@ -113,12 +117,6 @@ Future<ProjectsRepository> _repository(
               for (final entry in treeWithPreview.entries)
                 entry.value.sessionId,
             ],
-            // The real gateway emits the full placement map alongside the
-            // previews; the Chats row labels read owner names from it.
-            'session_projects': {
-              for (final entry in treeWithPreview.entries)
-                entry.value.sessionId: entry.key,
-            },
           },
         };
       }
