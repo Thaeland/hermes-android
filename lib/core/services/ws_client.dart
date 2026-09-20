@@ -849,7 +849,12 @@ class WsClient {
         fallbackMessage: 'Unknown error',
       );
     }
-    return result['result']?['session_id'] as String? ?? sessionId;
+    return result['result']?['session_id'] as String? ??
+        (throw StateError(
+          'session.resume succeeded without a session_id — refusing to bind '
+          'the caller-supplied id, which may not be the runtime session the '
+          'gateway resumed.',
+        ));
   }
 
   Future<void> setSessionTitle(String sessionId, String title) async {
