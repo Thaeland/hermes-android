@@ -841,9 +841,15 @@ typedef ToolProgressCallback = void Function(Map<String, dynamic> progress);
 class GatewayChatClient {
   final ApiClient _api;
   final String _baseUrl;
-  StreamSubscription<String>? _activeStreamSubscription;
-  Completer<void>? _activeStreamCompletion;
-  bool _activeStreamCancelled = false;
+
+  /// Per-call stream state: each sendMessageStreaming call owns a
+  /// _LiveStream, and the client keeps only the current one, which
+  /// cancelActiveMessage targets. (Previously three shared fields let a
+  /// second send overwrite the first's slot and let cancel-then-resend
+  /// reset the cancelled flag before the cancelled stream's onDone
+  /// check ran — so a cancelled turn reported success and the orphaned
+  /// subscription kept pushing tokens into stale callbacks.)
+  _LiveStream? _liveStream;
 
   GatewayChatClient(this._api) : _baseUrl = _api.baseUrl;
 
@@ -968,9 +974,21 @@ class GatewayChatClient {
     };
 
     final headers = {..._api._headers, 'X-Hermes-Session-Id': sessionId};
-    final completion = Completer<void>();
-    _activeStreamCompletion = completion;
-    _activeStreamCancelled = false;
+    final stream = _LiveStream();
+    final previous = _liveStream;
+    // A second concurrent send supersedes the first: cancel the old one
+    // with its OWN state so its callbacks are muted rather than silently
+    // drained into the new call's flags.
+    if (previous != null) {
+      previous.cancelled = true;
+      final sub = previous.subscription;
+      if (sub != null) {
+        unawaited(sub.cancel());
+      }
+      if (!previous.completion.isCompleted) previous.completion.complete();
+    }
+    _liveStream = stream;
+    final completion = stream.completion;
 
     try {
       final request = http.Request(
@@ -982,8 +1000,7 @@ class GatewayChatClient {
 
       final response = await _api._http.send(request);
 
-      if (_activeStreamCancelled ||
-          !identical(_activeStreamCompletion, completion)) {
+      if (stream.cancelled || !identical(_liveStream, stream)) {
         final subscription = response.stream.listen((_) {});
         await subscription.cancel();
         return;
@@ -1006,11 +1023,14 @@ class GatewayChatClient {
       }
 
       String buffer = '';
-      _activeStreamSubscription = response.stream
+      stream.subscription = response.stream
           .transform(utf8.decoder)
           .listen(
             (chunk) {
-              if (_activeStreamCancelled) return;
+              // A superseded or cancelled stream must never deliver tokens
+              // into these callbacks: the UI has moved on (or already
+              // reported the cancellation).
+              if (stream.cancelled || !identical(_liveStream, stream)) return;
               buffer += chunk;
               // SSE frames end on a blank line: LF-only or CRLF-only per
               // the spec. A CRLF-emitting proxy would otherwise never
@@ -1040,14 +1060,14 @@ class GatewayChatClient {
           );
       await completion.future;
 
-      if (!_activeStreamCancelled) onDone();
+      // Per-call flag: a newer send cannot reset this call's cancelled
+      // state, so a cancelled turn never reports onDone.
+      if (!stream.cancelled) onDone();
     } catch (e) {
-      if (!_activeStreamCancelled) onError(e.toString());
+      if (!stream.cancelled) onError(e.toString());
     } finally {
-      if (identical(_activeStreamCompletion, completion)) {
-        _activeStreamSubscription = null;
-        _activeStreamCompletion = null;
-        _activeStreamCancelled = false;
+      if (identical(_liveStream, stream)) {
+        _liveStream = null;
       }
     }
   }
@@ -1055,21 +1075,40 @@ class GatewayChatClient {
   /// Cancels the current SSE response. The Hermes API server treats the
   /// resulting client disconnect as an agent interrupt.
   Future<bool> cancelActiveMessage() async {
-    final completion = _activeStreamCompletion;
-    if (completion == null) return false;
+    final stream = _liveStream;
+    if (stream == null) return false;
 
-    _activeStreamCancelled = true;
-    final subscription = _activeStreamSubscription;
+    stream.cancelled = true;
+    final subscription = stream.subscription;
     if (subscription != null) {
       await subscription.cancel();
     }
-    if (!completion.isCompleted) completion.complete();
+    if (!stream.completion.isCompleted) stream.completion.complete();
     return true;
   }
 
   void abort() {
-    _api.close();
+    final stream = _liveStream;
+    if (stream != null) {
+      stream.cancelled = true;
+      final sub = stream.subscription;
+      if (sub != null) {
+        unawaited(sub.cancel());
+      }
+      if (!stream.completion.isCompleted) stream.completion.complete();
+      _liveStream = null;
+    }
+    // NOTE: deliberately does NOT close the shared ApiClient's HTTP
+    // client — the same ApiClient instance feeds the session list and
+    // health checks, and closing it killed every later HTTP call on it.
   }
+}
+
+/// Per-call SSE stream state owned by one sendMessageStreaming call.
+class _LiveStream {
+  final Completer<void> completion = Completer<void>();
+  StreamSubscription<String>? subscription;
+  bool cancelled = false;
 }
 
 /// Client for the Hermes Dashboard REST API.
