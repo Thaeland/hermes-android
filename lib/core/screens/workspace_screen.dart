@@ -1156,6 +1156,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           name: context.l10n.project,
         );
 
+    // The Assets tab needs the same proven `assets.*` verdict the More pane
+    // uses. The gallery itself probes on load and degrades honestly, so an
+    // unprobed gateway still gets a truthful screen rather than the old
+    // hardcoded stub; only a proven-absent index skips the builder.
+    if (_assetsAvailable == null) unawaited(_probeAssets());
+
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (_) => ProjectDetailScreen(
@@ -1163,6 +1169,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           projectName: project.name,
           loadSessions: ({required bool refresh}) =>
               repository.projectSessions(projectId, refresh: refresh),
+          assetsGalleryBuilder: _assetsAvailable == false
+              ? null
+              : (pid, name) => AssetsScreen(
+                    connection: widget.connection,
+                    projectId: pid,
+                    projectName: name,
+                    embedded: true,
+                  ),
           onOpenSession: (session) => _openSession(
             session,
             projectName: project.name,
