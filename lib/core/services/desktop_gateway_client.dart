@@ -37,6 +37,8 @@ class DesktopGatewayClient {
   final String? _gatewayProfile;
   WsClient? _ws;
   Future<WsClient>? _socketInFlight;
+  Timer? _reconnectTimer;
+  int _reconnectAttempts = 0;
   final Map<String, Future<_DesktopGatewayBinding>> _bindingInFlight = {};
   bool _closed = false;
   final Map<String, String> _gatewaySessionIds = {};
@@ -256,10 +258,20 @@ class DesktopGatewayClient {
         // Fires inside connect() before _ws is assigned, so no identical()
         // guard is possible here. The single-flight in _ensureSocket keeps
         // loser sockets from being built concurrently.
+        _reconnectAttempts = 0;
+        _reconnectTimer?.cancel();
+        _reconnectTimer = null;
         _connectionListener?.call(DesktopConnectionState.connected);
       } else if (identical(_ws, client)) {
         _gatewaySessionIds.clear();
         _connectionListener?.call(DesktopConnectionState.disconnected);
+        // A socket that was once live and then dropped (phone sleep,
+        // heartbeat timeout, gateway restart) must come back on its own:
+        // the user is often not looking at the chat window when it dies,
+        // and every later RPC would otherwise fail until app restart.
+        // Stored session ids survive the drop, so the reopened socket
+        // re-binds each session via session.resume on next use.
+        _scheduleReconnect();
       }
     };
     try {
@@ -276,6 +288,30 @@ class DesktopGatewayClient {
       _connectionListener?.call(DesktopConnectionState.disconnected);
       rethrow;
     }
+  }
+
+  /// Exponential-backoff reconnect loop, started when a previously-live
+  /// socket drops. Runs independently of the UI: the socket is back before
+  /// the user opens the chat again. Stops on success, on client close, or
+  /// when the cap is hit (a later explicit action still retries via
+  /// _ensureSocket).
+  void _scheduleReconnect() {
+    if (_closed || _reconnectTimer != null) return;
+    if (_reconnectAttempts >= 8) return;
+    _reconnectAttempts++;
+    final delay = Duration(
+      seconds: (1 << (_reconnectAttempts - 1)).clamp(2, 30),
+    );
+    _reconnectTimer = Timer(delay, () async {
+      _reconnectTimer = null;
+      if (_closed) return;
+      _connectionListener?.call(DesktopConnectionState.reconnecting);
+      try {
+        await _ensureSocket();
+      } catch (_) {
+        if (!_closed) _scheduleReconnect();
+      }
+    });
   }
 
   Future<_DesktopGatewayBinding> _resumeOrCreate(
@@ -547,6 +583,8 @@ class DesktopGatewayClient {
 
   void close() {
     _closed = true;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     _asyncEventListener = null;
     _connectionListener = null;
     _projects = null;
