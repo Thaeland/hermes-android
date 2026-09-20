@@ -144,7 +144,12 @@ class FilingGatewayClient {
     if (known != null) return known;
     try {
       final filingStatus = await status();
-      _supported = filingStatus.available;
+      // Only a positive verdict is cached permanently. A soft
+      // available:false means "not installed right now" — caching it
+      // would keep isSupported() false forever even after the contract
+      // library is installed, diverging from ProjectsGatewayClient which
+      // caches only definitive paths.
+      if (filingStatus.available) _supported = true;
       return filingStatus.available;
     } on FilingUnsupportedException {
       return false;

@@ -119,7 +119,9 @@ class AssetsGatewayClient {
     if (known != null) return known;
     try {
       final assetsStatus = await status();
-      _supported = assetsStatus.available;
+      // Only a positive verdict is cached permanently; a soft
+      // available:false is re-probed next time (see filing client).
+      if (assetsStatus.available) _supported = true;
       return assetsStatus.available;
     } on AssetsUnsupportedException {
       return false;
