@@ -39,19 +39,33 @@ class Session {
   });
 
   factory Session.fromJson(Map<String, dynamic> json) {
+    // Type-tolerant readers: one row with a string-typed number must not
+    // take down the whole session list with a TypeError mid-map.
+    double asDouble(Object? value, [double fallback = 0]) {
+      if (value is num) return value.toDouble();
+      if (value is String) return double.tryParse(value) ?? fallback;
+      return fallback;
+    }
+
+    int asInt(Object? value, [int fallback = 0]) {
+      if (value is num) return value.toInt();
+      if (value is String) return int.tryParse(value) ?? fallback;
+      return fallback;
+    }
+
     final endedAt = json['ended_at'];
-    final startedAt = (json['started_at'] ?? 0).toDouble();
-    final lastActive = (json['last_active'] ?? startedAt).toDouble();
+    final startedAt = asDouble(json['started_at']);
+    final lastActive = asDouble(json['last_active'], startedAt);
     return Session(
       id: json['id'] ?? '',
       title: json['title'] ?? 'Untitled',
       model: json['model'] ?? 'Default',
       source: json['source'] ?? '',
-      messageCount: json['message_count'] ?? 0,
+      messageCount: asInt(json['message_count']),
       isActive: endedAt == null,
       preview: json['preview'] ?? '',
       startedAt: startedAt,
-      endedAt: endedAt?.toDouble(),
+      endedAt: endedAt == null ? null : asDouble(endedAt),
       lastActive: lastActive,
       pinned: json['pinned'] == true,
       archived: json['archived'] == true,

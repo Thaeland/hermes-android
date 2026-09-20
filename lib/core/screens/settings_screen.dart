@@ -65,6 +65,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _client.getModelOptions(),
       ]);
 
+      if (!mounted) return;
       setState(() {
         _modelInfo = results[0];
         _modelOptions = results[1];
@@ -72,6 +73,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _parseModelOptions();
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = e.toString();
         _loading = false;
@@ -128,11 +130,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     try {
       await _client.setModel('main', _selectedProvider, _selectedModel);
+      if (!mounted) return;
       setState(() {
         _successMsg =
             'Profile default set to $_selectedModel. Chats with their own model keep that override.';
       });
     } catch (e) {
+      if (!mounted) return;
       setState(() {
         _error = e.toString();
       });
@@ -491,8 +495,10 @@ class _AboutCardState extends State<_AboutCard> {
   Future<void> _loadVersion() async {
     try {
       final info = await PackageInfo.fromPlatform();
+      if (!mounted) return;
       setState(() => _version = '${info.version}+${info.buildNumber}');
     } catch (_) {
+      if (!mounted) return;
       setState(() => _version = 'unknown');
     }
   }
@@ -680,6 +686,7 @@ class _VoicePickerState extends State<_VoicePicker> {
 
   Future<void> _set(Map<String, String>? voice) async {
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
     if (voice == null) {
       await prefs.remove('voice_name');
       await prefs.remove('voice_locale');

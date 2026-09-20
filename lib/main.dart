@@ -18,17 +18,122 @@ import 'core/widgets/config_backup_card.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final prefs = await SharedPreferences.getInstance();
-  final connManager = await ConnectionManager.create(prefs);
+  ConnectionManager? connManager;
+  Object? startupError;
+  try {
+    connManager = await ConnectionManager.create(prefs);
+  } catch (error) {
+    // A corrupt saved-connections entry or a Keystore fault must not kill
+    // the app before any UI exists — reinstall-only failure. Surface a
+    // recovery screen instead so the user can reset the damaged store.
+    startupError = error;
+  }
   final shareIntents = AndroidShareIntentService();
   final launchIntents = AndroidLaunchIntentService();
   await Future.wait([shareIntents.initialize(), launchIntents.initialize()]);
   runApp(
-    HermesApp(
-      connManager: connManager,
-      shareIntents: shareIntents,
-      launchIntents: launchIntents,
-    ),
+    connManager == null
+        ? _StartupRecoveryApp(
+            prefs: prefs,
+            error: startupError,
+            shareIntents: shareIntents,
+            launchIntents: launchIntents,
+          )
+        : HermesApp(
+            connManager: connManager,
+            shareIntents: shareIntents,
+            launchIntents: launchIntents,
+          ),
   );
+}
+
+/// Minimal recovery surface shown when the connection store could not be
+/// loaded at launch. Offers to wipe the damaged saved-connections metadata
+/// (and only that key) and retry, rather than dying silently.
+class _StartupRecoveryApp extends StatelessWidget {
+  static final GlobalKey _rootKey = GlobalKey();
+
+  const _StartupRecoveryApp({
+    required this.prefs,
+    required this.error,
+    required this.shareIntents,
+    required this.launchIntents,
+  });
+
+  final SharedPreferences prefs;
+  final Object? error;
+  final AndroidShareIntentService shareIntents;
+  final AndroidLaunchIntentService launchIntents;
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      key: _rootKey,
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.storage_rounded, size: 48),
+                const SizedBox(height: 16),
+                const Text(
+                  'Hermes could not load your saved connections',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'The local connection store looks damaged '
+                  '(${error.runtimeType}). You can reset the saved '
+                  'connections and start fresh. Chats on your gateway '
+                  'are not affected.',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 13),
+                ),
+                const SizedBox(height: 24),
+                FilledButton.icon(
+                  onPressed: () async {
+                    await prefs.remove('saved_connections');
+                    try {
+                      final retry = await ConnectionManager.create(prefs);
+                      runApp(
+                        HermesApp(
+                          connManager: retry,
+                          shareIntents: shareIntents,
+                          launchIntents: launchIntents,
+                        ),
+                      );
+                    } catch (retryError) {
+                      // Re-read the key after the await: the recovery
+                      // screen may already have been replaced by the
+                      // retried app.
+                      final context = _rootKey.currentContext;
+                      if (context != null) {
+                        // ignore: use_build_context_synchronously
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              'Reset failed: $retryError. The secure '
+                              'storage may need reinstall.',
+                            ),
+                          ),
+                        );
+                      }
+                    }
+                  },
+                  icon: const Icon(Icons.restart_alt),
+                  label: const Text('Reset saved connections'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class HermesApp extends StatefulWidget {
@@ -544,7 +649,7 @@ class HomeScreenState extends State<HomeScreen> {
           ],
         ),
       ),
-    );
+    ).whenComplete(ctrl.dispose);
   }
 
   void _showDashboardAuthDialog(SavedConnection conn) {
