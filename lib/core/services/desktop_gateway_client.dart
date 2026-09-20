@@ -40,6 +40,9 @@ class DesktopGatewayClient {
   /// let the server use its own. See [SavedConnection.gatewayProfile].
   final String? _gatewayProfile;
   WsClient? _ws;
+  Future<WsClient>? _socketInFlight;
+  final Map<String, Future<_DesktopGatewayBinding>> _bindingInFlight = {};
+  bool _closed = false;
   final Map<String, String> _gatewaySessionIds = {};
   final Map<String, String> _storedSessionIds = {};
   final Map<String, String> _workingDirectories = {};
@@ -184,7 +187,7 @@ class DesktopGatewayClient {
       if (mappedSessionId != null) {
         return _DesktopGatewaySession(existing, mappedSessionId);
       }
-      final binding = await _resumeOrCreate(
+      final binding = await _resumeOrCreateSingle(
         existing,
         mobileSessionId,
         workingDirectory: effectiveWorkingDirectory,
@@ -193,6 +196,59 @@ class DesktopGatewayClient {
       return _DesktopGatewaySession(existing, binding.runtimeSessionId);
     }
 
+    final client = await _ensureSocket();
+    final binding = await _resumeOrCreateSingle(
+      client,
+      mobileSessionId,
+      workingDirectory: effectiveWorkingDirectory,
+    );
+    _rememberBinding(mobileSessionId, binding);
+    return _DesktopGatewaySession(client, binding.runtimeSessionId);
+  }
+
+  /// Single-flight wrapper for `_resumeOrCreate`: two concurrent callers for
+  /// the same mobile session must not each issue a `session.create` and leave
+  /// one gateway session orphaned.
+  Future<_DesktopGatewayBinding> _resumeOrCreateSingle(
+    WsClient client,
+    String mobileSessionId, {
+    String? workingDirectory,
+  }) {
+    final inFlight = _bindingInFlight[mobileSessionId];
+    if (inFlight != null) return inFlight;
+    final future = _resumeOrCreate(client, mobileSessionId,
+        workingDirectory: workingDirectory);
+    _bindingInFlight[mobileSessionId] = future;
+    future.whenComplete(() {
+      if (identical(_bindingInFlight[mobileSessionId], future)) {
+        _bindingInFlight.remove(mobileSessionId);
+      }
+    }).ignore();
+    return future;
+  }
+
+  /// Single-flight socket establishment shared by `_connect` and
+  /// `_connectControl`. Without this, concurrent callers both pass the
+  /// `isConnected` check, both mint tickets, and both build sockets: the
+  /// last assignment wins and the loser's socket leaks with the async-event
+  /// bridge attached.
+  Future<WsClient> _ensureSocket() {
+    final existing = _ws;
+    if (existing != null && existing.isConnected) {
+      return Future.value(existing);
+    }
+    final inFlight = _socketInFlight;
+    if (inFlight != null) return inFlight;
+    final future = _openSocket(existing);
+    _socketInFlight = future;
+    future.whenComplete(() {
+      if (identical(_socketInFlight, future)) _socketInFlight = null;
+    }).ignore();
+    return future;
+  }
+
+  Future<WsClient> _openSocket(WsClient? existing) async {
+    if (_closed) throw StateError('DesktopGatewayClient is closed.');
     _connectionListener?.call(
       existing == null
           ? DesktopConnectionState.connecting
@@ -201,10 +257,14 @@ class DesktopGatewayClient {
     existing?.close();
     _gatewaySessionIds.clear();
     final ticket = await _dashboard.mintWebSocketTicket();
+    if (_closed) throw StateError('DesktopGatewayClient is closed.');
     final client = WsClient(_baseUrl, ticket: ticket, profile: _gatewayProfile);
     _installAsyncEventBridge(client);
     client.onConnectionChanged = (connected) {
       if (connected) {
+        // Fires inside connect() before _ws is assigned, so no identical()
+        // guard is possible here. The single-flight in _ensureSocket keeps
+        // loser sockets from being built concurrently.
         _connectionListener?.call(DesktopConnectionState.connected);
       } else if (identical(_ws, client)) {
         _gatewaySessionIds.clear();
@@ -213,14 +273,12 @@ class DesktopGatewayClient {
     };
     try {
       await client.connect();
+      if (_closed) {
+        client.close();
+        throw StateError('DesktopGatewayClient is closed.');
+      }
       _ws = client;
-      final binding = await _resumeOrCreate(
-        client,
-        mobileSessionId,
-        workingDirectory: effectiveWorkingDirectory,
-      );
-      _rememberBinding(mobileSessionId, binding);
-      return _DesktopGatewaySession(client, binding.runtimeSessionId);
+      return client;
     } catch (_) {
       client.close();
       if (identical(_ws, client)) _ws = null;
@@ -340,39 +398,7 @@ class DesktopGatewayClient {
   CapabilityRegistry get capabilities => _capabilities;
 
   /// Opens (or reuses) the gateway socket without binding it to a session.
-  Future<WsClient> _connectControl() async {
-    final existing = _ws;
-    if (existing != null && existing.isConnected) return existing;
-
-    _connectionListener?.call(
-      existing == null
-          ? DesktopConnectionState.connecting
-          : DesktopConnectionState.reconnecting,
-    );
-    existing?.close();
-    _gatewaySessionIds.clear();
-    final ticket = await _dashboard.mintWebSocketTicket();
-    final client = WsClient(_baseUrl, ticket: ticket, profile: _gatewayProfile);
-    _installAsyncEventBridge(client);
-    client.onConnectionChanged = (connected) {
-      if (connected) {
-        _connectionListener?.call(DesktopConnectionState.connected);
-      } else if (identical(_ws, client)) {
-        _gatewaySessionIds.clear();
-        _connectionListener?.call(DesktopConnectionState.disconnected);
-      }
-    };
-    try {
-      await client.connect();
-      _ws = client;
-      return client;
-    } catch (_) {
-      client.close();
-      if (identical(_ws, client)) _ws = null;
-      _connectionListener?.call(DesktopConnectionState.disconnected);
-      rethrow;
-    }
-  }
+  Future<WsClient> _connectControl() => _ensureSocket();
 
   /// Creates the source-only recovery-v2 registry without changing any legacy
   /// session, submit, interrupt, or event route in this client.
@@ -572,6 +598,7 @@ class DesktopGatewayClient {
   }
 
   void close() {
+    _closed = true;
     _asyncEventListener = null;
     _connectionListener = null;
     _projects = null;
