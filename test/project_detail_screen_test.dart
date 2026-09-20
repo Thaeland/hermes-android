@@ -399,6 +399,7 @@ void main() {
       onMoveSession: (session, projectId) async {
         expect(session.id, 's-42');
         moves.add(projectId);
+        return null;
       },
     );
     await tester.pumpAndSettle();
@@ -417,6 +418,47 @@ void main() {
     expect(moves, ['p2']);
     expect(refreshes, [false, true]);
     expect(find.text('Moved to ScriptHive'), findsOneWidget);
+  });
+
+  testWidgets('an impossible move reports the gateway reason, no Retry', (
+    tester,
+  ) async {
+    final refreshes = <bool>[];
+    await _pump(
+      tester,
+      load: ({required refresh}) async {
+        refreshes.add(refresh);
+        return ProjectSessionsView(
+          projectId: 'p1',
+          tree: _tree(sessions: [_session(id: 's-42')]),
+          sessions: [_session(id: 's-42')],
+          support: ProjectsSupport.native,
+        );
+      },
+      projects: const [
+        HermesProject(id: 'p1', slug: 'android', name: 'Hermes Android'),
+        HermesProject(id: 'p2', slug: 'scripthive', name: 'ScriptHive'),
+      ],
+      onMoveSession: (session, projectId) async =>
+          'This gateway files chats by working folder and cannot move a '
+          'chat back to Unassigned.',
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('move-session-s-42')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Unassigned'));
+    // One frame mounts the snackbar; never pumpAndSettle on one.
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(
+      find.textContaining('Couldn’t move to Unassigned: This gateway files'),
+      findsOneWidget,
+    );
+    expect(find.text('Retry'), findsNothing);
+    // An impossible move is not a refresh-worthy state change.
+    expect(refreshes, [false]);
   });
 
   testWidgets('project actions rename and archive through explicit flows', (

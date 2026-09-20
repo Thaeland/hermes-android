@@ -865,7 +865,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           onNewChat: () => unawaited(_startProjectChat(project)),
           projects: repository.current.projects,
           onMoveSession: (session, targetProjectId) =>
-              repository.assignSession(session.id, targetProjectId),
+              repository.moveSessionToProject(
+                session.id,
+                targetProjectId,
+                storedSessionKey:
+                    _ownedGateway?.storedSessionKeyFor(session.id),
+              ),
           onRenameProject: (name) => repository.rename(projectId, name),
           onArchiveProject: () => repository.archive(projectId),
           onDeleteProject: () => repository.delete(projectId),
@@ -1267,7 +1272,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           );
     if (project == null) throw const QuickChatPromotionCancelled();
 
-    await repository.assignSession(session.id, project.id);
+    final reason = await repository.moveSessionToProject(session.id, project.id);
+    if (reason != null) {
+      throw StateError(reason);
+    }
     await (await _quickChatStore()).promote(session.id);
     if (mounted) {
       setState(() {

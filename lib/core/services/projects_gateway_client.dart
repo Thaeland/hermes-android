@@ -244,6 +244,35 @@ class ProjectsGatewayClient {
         : null;
   }
 
+  /// Re-homes a stored session's workspace to [cwd] via `session.workspace.move`.
+  ///
+  /// This is how Hermes Desktop moves a chat between Projects: the gateway
+  /// derives project membership from the session's cwd (`project_for_path`),
+  /// so rewriting the cwd IS the move. Works on every gateway that serves
+  /// sessions, including stock ones without `projects.assign_session`.
+  /// [sessionKey] must be the gateway's stored session key, not a local id.
+  Future<void> moveSessionWorkspace({
+    required String sessionKey,
+    required String cwd,
+  }) async {
+    final key = sessionKey.trim();
+    if (key.isEmpty) {
+      throw ArgumentError.value(
+        sessionKey,
+        'sessionKey',
+        'A stored session key is required',
+      );
+    }
+    final folder = cwd.trim();
+    if (folder.isEmpty) {
+      throw ArgumentError.value(cwd, 'cwd', 'A working directory is required');
+    }
+    await _request('session.workspace.move', {
+      'session_key': key,
+      'cwd': folder,
+    });
+  }
+
   /// Selects [id] as the gateway's active project, or clears it when null.
   Future<String?> setActive(String? id) async {
     final params = <String, dynamic>{};

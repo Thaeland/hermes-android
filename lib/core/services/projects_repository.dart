@@ -441,6 +441,63 @@ class ProjectsRepository {
     await client.assignSession(sessionId: sessionId, projectId: projectId);
   }
 
+  /// Moves one chat into [projectId] (or back to Unassigned when null).
+  ///
+  /// Mirrors how Hermes Desktop performs the same gesture: try the explicit
+  /// `projects.assign_session` first, and when the gateway predates it,
+  /// re-home the session's workspace to the target project's folder via
+  /// `session.workspace.move` — the gateway derives project membership from
+  /// cwd, so the chat lands inside the project either way.
+  ///
+  /// [storedSessionKey] is the gateway's stored key for the chat (falls back
+  /// to [sessionId] when the binding is unknown). Returns a reason string
+  /// when the move is impossible (Unassigned on a stock gateway, or a
+  /// target Project with no folder to re-home into); throws only on a real
+  /// gateway failure so the caller can offer a retry.
+  Future<String?> moveSessionToProject(
+    String sessionId,
+    String? projectId, {
+    String? storedSessionKey,
+  }) async {
+    _requireSupported();
+    try {
+      await client.assignSession(sessionId: sessionId, projectId: projectId);
+      return null;
+    } on ProjectsUnsupportedException {
+      // Stock gateway: fall through to the cwd re-home below.
+    }
+    if (projectId == null) {
+      // Without explicit assignment there is no way to un-file a chat:
+      // its project is wherever its cwd points. Say so instead of failing
+      // with a generic error.
+      return 'This gateway files chats by working folder and cannot move a '
+          'chat back to Unassigned.';
+    }
+    final target = _findProject(projectId);
+    final folder = target?.workingDirectory?.trim() ?? '';
+    if (target == null || folder.isEmpty) {
+      return 'That Project has no folder to move the chat into. Add a '
+          'folder to it first.';
+    }
+    await client.moveSessionWorkspace(
+      sessionKey: (storedSessionKey?.trim().isNotEmpty ?? false)
+          ? storedSessionKey!.trim()
+          : sessionId,
+      cwd: folder,
+    );
+    return null;
+  }
+
+  HermesProject? _findProject(String id) {
+    for (final project in _current.projects) {
+      if (project.id == id) return project;
+    }
+    for (final project in _current.archived) {
+      if (project.id == id) return project;
+    }
+    return null;
+  }
+
   Future<void> setActive(String? id) async {
     _requireSupported();
     final previous = _current;

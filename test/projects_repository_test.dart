@@ -11,13 +11,16 @@ Map<String, dynamic> _projectJson({
   required String name,
   String? slug,
   bool archived = false,
+  String? primaryPath,
+  List<Map<String, dynamic>>? folders,
 }) => {
   'id': id,
   'slug': slug ?? name.toLowerCase().replaceAll(' ', '-'),
   'name': name,
   'archived': archived,
   'created_at': 1750000000,
-  'folders': const [],
+  'primary_path': ?primaryPath,
+  'folders': folders ?? const [],
 };
 
 /// A scriptable stand-in for the gateway `projects.*` family.
@@ -31,6 +34,13 @@ class _FakeGateway {
 
   /// When set, every call to this method throws (models a missing sibling).
   String? failMethod;
+
+  /// When true, `projects.assign_session` answers unknown-method (a stock
+  /// gateway) while `session.workspace.move` succeeds and is recorded.
+  bool unsupportedAssign = false;
+
+  /// Params of every `session.workspace.move` the repo issued.
+  final List<Map<String, dynamic>> workspaceMoves = [];
 
   _FakeGateway({List<Map<String, dynamic>>? projects, this.activeId})
     : projects = projects ?? [];
@@ -108,6 +118,30 @@ class _FakeGateway {
       case 'projects.set_active':
         activeId = params['id'] as String?;
         return _ok({'active_id': activeId});
+      case 'projects.assign_session':
+        if (unsupportedAssign) {
+          // Returned as an error envelope (not a throw): the client only
+          // converts envelope errors into ProjectsUnsupportedException.
+          return {
+            'jsonrpc': '2.0',
+            'id': 1,
+            'error': const {
+              'code': -32601,
+              'message': 'unknown method: projects.assign_session',
+            },
+          };
+        }
+        return _ok({
+          'session_id': params['session_id'],
+          'project_id': params['project_id'],
+        });
+      case 'session.workspace.move':
+        workspaceMoves.add(Map<String, dynamic>.from(params));
+        return _ok({
+          'cwd': params['cwd'],
+          'branch': null,
+          'git_repo_root': null,
+        });
       default:
         return _ok(const {});
     }
@@ -514,6 +548,112 @@ void main() {
       await repo.setActive(null);
       expect(repo.current.activeId, isNull);
     });
+
+    test(
+      'move uses the explicit assignment when the gateway supports it',
+      () async {
+        final gateway = _FakeGateway(
+          projects: [_projectJson(id: 'p1', name: 'Hermes Android')],
+        );
+        final repo = _repository(gateway, await SharedPreferences.getInstance());
+        await repo.refresh();
+
+        final reason = await repo.moveSessionToProject('s-1', 'p1');
+
+        expect(reason, isNull);
+        expect(gateway.calls, contains('projects.assign_session'));
+        expect(gateway.calls, isNot(contains('session.workspace.move')));
+      },
+    );
+
+    test(
+      'move falls back to the cwd re-home on a stock gateway',
+      () async {
+        final gateway = _FakeGateway(
+          projects: [
+            _projectJson(id: 'p1', name: 'Hermes Android'),
+            _projectJson(
+              id: 'p2',
+              name: 'ScriptHive',
+              folders: [
+                {
+                  'path': '/home/dev/scripthive',
+                  'label': 'main',
+                  'is_primary': true,
+                  'added_at': 1750000001,
+                },
+              ],
+            ),
+          ],
+        )..unsupportedAssign = true;
+        final repo = _repository(gateway, await SharedPreferences.getInstance());
+        await repo.refresh();
+
+        final reason = await repo.moveSessionToProject(
+          's-1',
+          'p2',
+          storedSessionKey: 'stored-9',
+        );
+
+        expect(reason, isNull);
+        expect(gateway.workspaceMoves, [
+          {'session_key': 'stored-9', 'cwd': '/home/dev/scripthive'},
+        ]);
+      },
+    );
+
+    test(
+      'moving back to Unassigned on a stock gateway reports why',
+      () async {
+        final gateway = _FakeGateway()..unsupportedAssign = true;
+        final repo = _repository(gateway, await SharedPreferences.getInstance());
+        await repo.refresh();
+
+        final reason = await repo.moveSessionToProject('s-1', null);
+
+        expect(reason, contains('cannot move a chat back to Unassigned'));
+        expect(gateway.workspaceMoves, isEmpty);
+      },
+    );
+
+    test(
+      'a folderless target on a stock gateway asks for a folder',
+      () async {
+        final gateway = _FakeGateway(
+          projects: [_projectJson(id: 'p1', name: 'Name Only')],
+        )..unsupportedAssign = true;
+        final repo = _repository(gateway, await SharedPreferences.getInstance());
+        await repo.refresh();
+
+        final reason = await repo.moveSessionToProject('s-1', 'p1');
+
+        expect(reason, contains('no folder'));
+        expect(gateway.workspaceMoves, isEmpty);
+      },
+    );
+
+    test(
+      'the move falls back to the mobile id when no stored key is bound',
+      () async {
+        final gateway = _FakeGateway(
+          projects: [
+            _projectJson(
+              id: 'p2',
+              name: 'ScriptHive',
+              primaryPath: '/home/dev/scripthive',
+            ),
+          ],
+        )..unsupportedAssign = true;
+        final repo = _repository(gateway, await SharedPreferences.getInstance());
+        await repo.refresh();
+
+        await repo.moveSessionToProject('mob-7', 'p2');
+
+        expect(gateway.workspaceMoves, [
+          {'session_key': 'mob-7', 'cwd': '/home/dev/scripthive'},
+        ]);
+      },
+    );
 
     test(
       'mutations are refused in compatibility mode without a call',

@@ -35,7 +35,7 @@ import 'hermes_components.dart';
 typedef ProjectSessionsLoader =
     Future<ProjectSessionsView> Function({required bool refresh});
 typedef ProjectSessionMover =
-    Future<void> Function(Session session, String? projectId);
+    Future<String?> Function(Session session, String? projectId);
 typedef ProjectRenamer = Future<void> Function(String name);
 typedef ProjectArchiver = Future<void> Function();
 typedef ProjectDeleter = Future<void> Function();
@@ -188,8 +188,17 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
 
   Future<void> _moveSession(Session session, _MoveTarget target) async {
     try {
-      await widget.onMoveSession!(session, target.projectId);
+      final reason = await widget.onMoveSession!(session, target.projectId);
       if (!mounted) return;
+      if (reason != null) {
+        // The gateway could not perform this move (e.g. a stock gateway
+        // files chats by folder and cannot un-file one). Report the real
+        // reason instead of a generic failure with a doomed Retry.
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Couldn’t move to ${target.label}: $reason')),
+        );
+        return;
+      }
       await _load(refresh: true);
       if (!mounted) return;
       ScaffoldMessenger.of(

@@ -358,6 +358,12 @@ class DesktopGatewayClient {
     }, capabilities: _capabilities);
   }
 
+  /// The gateway's stored session key bound to a mobile session id, when a
+  /// binding exists. Stored keys address rows in the session DB (move,
+  /// resume); mobile ids do not survive into gateway-side lookups.
+  String? storedSessionKeyFor(String mobileSessionId) =>
+      _storedSessionIds[mobileSessionId];
+
   /// Correction-aware Projects filing over the same control transport.
   ///
   /// Connection-scoped like [projects]: no chat session is created or
