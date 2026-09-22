@@ -550,10 +550,16 @@ void main() {
     });
 
     test(
-      'move uses the explicit assignment when the gateway supports it',
+      'move uses only the stock cwd re-home, never assign_session',
       () async {
         final gateway = _FakeGateway(
-          projects: [_projectJson(id: 'p1', name: 'Hermes Android')],
+          projects: [
+            _projectJson(
+              id: 'p1',
+              name: 'Hermes Android',
+              primaryPath: '/home/dev/hermes-android',
+            ),
+          ],
         );
         final repo = _repository(gateway, await SharedPreferences.getInstance());
         await repo.refresh();
@@ -561,8 +567,12 @@ void main() {
         final reason = await repo.moveSessionToProject('s-1', 'p1');
 
         expect(reason, isNull);
-        expect(gateway.calls, contains('projects.assign_session'));
-        expect(gateway.calls, isNot(contains('session.workspace.move')));
+        // Stock-only contract: projects.assign_session (never shipped
+        // upstream) must not be attempted even when a fake would accept it.
+        expect(gateway.calls, isNot(contains('projects.assign_session')));
+        expect(gateway.workspaceMoves, [
+          {'session_key': 's-1', 'cwd': '/home/dev/hermes-android'},
+        ]);
       },
     );
 

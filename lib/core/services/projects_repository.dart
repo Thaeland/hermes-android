@@ -441,35 +441,29 @@ class ProjectsRepository {
     await client.assignSession(sessionId: sessionId, projectId: projectId);
   }
 
-  /// Moves one chat into [projectId] (or back to Unassigned when null).
+  /// Moves one chat into [projectId] by re-homing its workspace.
   ///
-  /// Mirrors how Hermes Desktop performs the same gesture: try the explicit
-  /// `projects.assign_session` first, and when the gateway predates it,
-  /// re-home the session's workspace to the target project's folder via
-  /// `session.workspace.move` — the gateway derives project membership from
-  /// cwd, so the chat lands inside the project either way.
+  /// Stock-gateway-only path: the chat's cwd is re-pointed at the target
+  /// project's folder via `session.workspace.move` — the one RPC stock
+  /// Hermes ships for this, and how the desktop files chats (membership
+  /// is derived from cwd). `projects.assign_session` is deliberately
+  /// NOT attempted: it never shipped upstream, so trying it first only
+  /// adds a doomed round-trip and a capability assumption.
   ///
-  /// [storedSessionKey] is the gateway's stored key for the chat (falls back
-  /// to [sessionId] when the binding is unknown). Returns a reason string
-  /// when the move is impossible (Unassigned on a stock gateway, or a
-  /// target Project with no folder to re-home into); throws only on a real
-  /// gateway failure so the caller can offer a retry.
+  /// [storedSessionKey] is the gateway's stored key for the chat (falls
+  /// back to [sessionId] when the binding is unknown). Returns a reason
+  /// string when the move is impossible (un-file on a cwd-derived model,
+  /// or a target Project with no folder to re-home into); throws only on
+  /// a real gateway failure so the caller can offer a retry.
   Future<String?> moveSessionToProject(
     String sessionId,
     String? projectId, {
     String? storedSessionKey,
   }) async {
     _requireSupported();
-    try {
-      await client.assignSession(sessionId: sessionId, projectId: projectId);
-      return null;
-    } on ProjectsUnsupportedException {
-      // Stock gateway: fall through to the cwd re-home below.
-    }
     if (projectId == null) {
-      // Without explicit assignment there is no way to un-file a chat:
-      // its project is wherever its cwd points. Say so instead of failing
-      // with a generic error.
+      // There is no stock RPC to un-file a chat: its project is wherever
+      // its cwd points. Say so instead of failing with a generic error.
       return 'This gateway files chats by working folder and cannot move a '
           'chat back to Unassigned.';
     }
