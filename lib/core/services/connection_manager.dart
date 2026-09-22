@@ -611,6 +611,14 @@ class ApiHealthCheckResult {
   }
 }
 
+/// One page of the gateway's session list with its paging signal.
+class SessionListPage {
+  final List<Session> sessions;
+  final bool hasMore;
+
+  const SessionListPage({required this.sessions, required this.hasMore});
+}
+
 /// HTTP client for the Hermes Gateway API Server (port 8642).
 ///
 /// Uses Bearer token auth. Same pattern as hermes-desktop.
@@ -655,19 +663,38 @@ class ApiClient {
 
   // ── Session listing ──────────────────────────────────────────────────
 
-  Future<List<Session>> getSessions({Duration timeout = requestTimeout}) async {
-    final res = await _http
-        .get(Uri.parse('$baseUrl/api/sessions'), headers: _headers)
-        .timeout(timeout);
+  /// One page of the gateway session list plus the server's paging signal.
+  ///
+  /// The gateway api_server caps `limit` at 200 and reports `has_more` from
+  /// its recency window, so a client that never pages only ever sees the
+  /// most recent page — which silently truncated the Unassigned bucket
+  /// (sessions outside the first page never reached the device).
+  Future<SessionListPage> getSessionsPage({
+    int limit = 50,
+    int offset = 0,
+    Duration timeout = requestTimeout,
+  }) async {
+    final uri = Uri.parse('$baseUrl/api/sessions').replace(
+      queryParameters: {'limit': '$limit', 'offset': '$offset'},
+    );
+    final res = await _http.get(uri, headers: _headers).timeout(timeout);
     if (res.statusCode != 200) {
       throw Exception('HTTP ${res.statusCode}: ${res.body}');
     }
     final data = jsonDecode(res.body) as Map<String, dynamic>;
     final list = data['data'] as List? ?? [];
-    return list
-        .whereType<Map<String, dynamic>>()
-        .map((s) => Session.fromJson(s))
-        .toList();
+    return SessionListPage(
+      sessions: list
+          .whereType<Map<String, dynamic>>()
+          .map((s) => Session.fromJson(s))
+          .toList(),
+      hasMore: data['has_more'] == true,
+    );
+  }
+
+  Future<List<Session>> getSessions({Duration timeout = requestTimeout}) async {
+    final page = await getSessionsPage(timeout: timeout);
+    return page.sessions;
   }
 
   // ── Messages ─────────────────────────────────────────────────────────
