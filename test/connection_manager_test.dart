@@ -874,6 +874,84 @@ void main() {
       });
     });
 
+    test('getCronJobRuns parses the dashboard runs envelope', () async {
+      final client = DashboardClient(
+        host: 'hermes.local',
+        port: 9119,
+        username: 'misha',
+        password: 'secret',
+        httpClient: MockClient((request) async {
+          if (request.url.path == '/auth/password-login') {
+            return http.Response(
+              '{"ok":true}',
+              200,
+              headers: {
+                'set-cookie':
+                    'hermes_session_at=TOK123; Path=/; HttpOnly; SameSite=Lax',
+              },
+            );
+          }
+          if (request.url.path == '/api/cron/jobs/nightly%20report/runs') {
+            expect(request.url.queryParameters['limit'], '20');
+            return http.Response(
+              jsonEncode({
+                'runs': [
+                  {
+                    'id': 'cron_nightly_1750000000',
+                    'title': 'Nightly report run',
+                    'model': 'claude-opus-5',
+                    'source': 'cron',
+                    'message_count': 4,
+                    'started_at': 1750000000,
+                    'last_active': 1750000123,
+                    'preview': 'Report generated',
+                    'ended_at': 1750000123,
+                  },
+                ],
+                'limit': 20,
+              }),
+              200,
+            );
+          }
+          return http.Response('not found', 404);
+        }),
+      );
+
+      final runs = await client.getCronJobRuns('nightly report');
+
+      expect(runs, hasLength(1));
+      expect(runs.single.id, 'cron_nightly_1750000000');
+      expect(runs.single.source, 'cron');
+      expect(runs.single.isActive, isFalse);
+      expect(runs.single.lastActive, 1750000123);
+      client.close();
+    });
+
+    test('getCronJobRuns returns empty for a job with no runs', () async {
+      final client = DashboardClient(
+        host: 'hermes.local',
+        port: 9119,
+        username: 'misha',
+        password: 'secret',
+        httpClient: MockClient((request) async {
+          if (request.url.path == '/auth/password-login') {
+            return http.Response(
+              '{"ok":true}',
+              200,
+              headers: {
+                'set-cookie':
+                    'hermes_session_at=TOK123; Path=/; HttpOnly; SameSite=Lax',
+              },
+            );
+          }
+          return http.Response('{"runs": [], "limit": 20}', 200);
+        }),
+      );
+
+      expect(await client.getCronJobRuns('fresh-job'), isEmpty);
+      client.close();
+    });
+
     test(
       'logs in and authenticates /api calls with the session cookie',
       () async {

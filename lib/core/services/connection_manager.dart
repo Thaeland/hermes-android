@@ -1398,6 +1398,25 @@ class DashboardClient {
         .toList();
   }
 
+  /// Run sessions produced by one cron job, newest first.
+  ///
+  /// Mirrors the desktop's `getCronJobRuns` (apps/desktop/src/api/cron.ts):
+  /// runs are ordinary sessions with id `cron_{job_id}_{timestamp}` and
+  /// `source='cron'`, enumerated by the dashboard's bounded id-range scan.
+  /// This is the desktop-parity home for cron output: the chat list excludes
+  /// machine-source rows, so per-job runs are browsed here instead.
+  Future<List<Session>> getCronJobRuns(String jobId, {int limit = 20}) async {
+    final data = await apiGet(
+      'cron/jobs/${Uri.encodeComponent(jobId)}/runs',
+      queryParameters: {'limit': '$limit'},
+    );
+    final list = data['runs'] as List? ?? [];
+    return list
+        .whereType<Map<String, dynamic>>()
+        .map((s) => Session.fromJson(s))
+        .toList();
+  }
+
   Future<Map<String, dynamic>> apiPost(
     String endpoint, {
     Map<String, dynamic>? body,

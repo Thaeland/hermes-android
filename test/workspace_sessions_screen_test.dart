@@ -104,6 +104,49 @@ void main() {
       expect(result.map((s) => s.id), ['s2']);
     });
 
+    test('Unassigned hides machine-generated sessions', () {
+      // projects.tree never claims cron/kanban/oneshot rows, so without
+      // this exclusion every automated run piles up as unfilable
+      // "unassigned" noise the filing engine can never answer for.
+      final human = _session('s1', 'Human chat');
+      final cron = _session('s2', 'Cron run', source: 'cron');
+      final kanban = _session('s3', 'Kanban run', source: 'kanban');
+      final oneshot = _session('s4', 'Oneshot run', source: 'oneshot');
+
+      final result = filterChats(
+        sessions: [human, cron, kanban, oneshot],
+        filter: WorkspaceChatsFilter.unassigned,
+        now: DateTime.fromMillisecondsSinceEpoch(1750000000 * 1000),
+      );
+      expect(result.map((s) => s.id), ['s1']);
+    });
+
+    test('All and Recent hide machine sessions (desktop parity)', () {
+      // Cron/kanban/oneshot runs are excluded from every chat chip, not
+      // just Unassigned — the desktop sidebar drops these sources from
+      // recents entirely so the scheduler's always-newest sessions can't
+      // crowd human chats out. Cron runs are browsed per-job from the
+      // Cron screen instead.
+      final human = _session('s1', 'Human chat');
+      final cron = _session('s2', 'Cron run', source: 'cron');
+      final kanban = _session('s3', 'Kanban run', source: 'kanban');
+      final now = DateTime.fromMillisecondsSinceEpoch(1750000000 * 1000);
+
+      final all = filterChats(
+        sessions: [human, cron, kanban],
+        filter: WorkspaceChatsFilter.all,
+        now: now,
+      );
+      expect(all.map((s) => s.id).toSet(), {'s1'});
+
+      final recent = filterChats(
+        sessions: [human, cron, kanban],
+        filter: WorkspaceChatsFilter.recent,
+        now: now,
+      );
+      expect(recent.map((s) => s.id).toSet(), {'s1'});
+    });
+
     test('Archived merges server-archived and quick-chat archived ids', () {
       final server = _session('s1', 'Server archived', archived: true);
       final quick = _session('s2', 'Quick archived');
