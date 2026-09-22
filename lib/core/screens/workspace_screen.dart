@@ -288,14 +288,29 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   late final WorkspaceTurnSignalsLoader _loadTurnSignals =
       widget.turnSignalsLoader ?? _loadTurnSignalsFromJournal;
 
-  Future<List<Session>> _loadSessionsFromGateway() {
+  Future<List<Session>> _loadSessionsFromGateway() async {
     final connection = widget.connection;
     final api = _sessionsApi ??= ApiClient(
       baseUrl: connection.baseUrl,
       apiKey: connection.apiKey,
       pathPrefix: connection.gatewayPrefix ?? '',
     );
-    return api.getSessions();
+    // Page through the whole visible list. The gateway serves newest-first
+    // in a capped window; a single first-page request truncated the
+    // Unassigned bucket (older unfiled chats never reached the device).
+    // Bounded at 20 pages x 100 so a chatty store can't fan out forever.
+    const pageSize = 100;
+    const maxPages = 20;
+    final all = <Session>[];
+    var offset = 0;
+    for (var page = 0; page < maxPages; page++) {
+      final result = await api.getSessionsPage(limit: pageSize, offset: offset);
+      all.addAll(result.sessions);
+      if (!result.hasMore) break;
+      offset += result.sessions.length;
+      if (result.sessions.isEmpty) break; // guard: server returned no progress
+    }
+    return all;
   }
 
   /// Derives Home's signals from the durable turn recovery journal.
