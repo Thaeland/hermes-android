@@ -469,4 +469,35 @@ void main() {
     expect(promoted, ['s1']);
     expect(find.text('Old research'), findsNothing);
   });
+
+  testWidgets('Unassigned rows offer Move to project and drop on move', (
+    tester,
+  ) async {
+    final moved = <String>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: hermesTheme(Brightness.dark),
+        home: WorkspaceSessionsScreen(
+          title: 'Unassigned chats',
+          view: WorkspaceSessionView.unassigned,
+          load: () async => WorkspaceSessionsData(
+            sessions: [_session('s1', 'Loose chat'), _session('s2', 'Also loose')],
+          ),
+          onOpenSession: (_) {},
+          onPromote: (session) async => moved.add(session.id),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Loose chat'), findsOneWidget);
+    await tester.tap(find.byTooltip('Move to project').first);
+    await tester.pumpAndSettle();
+
+    expect(moved, ['s1']);
+    // The moved chat leaves the Unassigned list immediately (claimed);
+    // the other stays.
+    expect(find.text('Loose chat'), findsNothing);
+    expect(find.text('Also loose'), findsOneWidget);
+  });
 }

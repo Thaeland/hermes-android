@@ -249,6 +249,12 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
   /// Injectable clock for deterministic tests.
   DateTime get _now => widget.now ?? DateTime.now();
 
+  /// Whether the current surface is an Unassigned one (standalone view or
+  /// the embedded chip browser with the Unassigned chip active).
+  bool get _isUnassignedSurface =>
+      widget.view == WorkspaceSessionView.unassigned ||
+      (widget.embedded && _filter == WorkspaceChatsFilter.unassigned);
+
   @override
   void initState() {
     super.initState();
@@ -282,7 +288,13 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
         setState(() {
           _data = WorkspaceSessionsData(
             sessions: data.sessions,
-            claimedSessionIds: data.claimedSessionIds,
+            // The move claims the chat: add it to the claim set so the
+            // Unassigned view drops the row immediately instead of
+            // waiting for the next reload.
+            claimedSessionIds: {
+              ...data.claimedSessionIds,
+              session.id,
+            },
             archivedQuickChatIds: {
               for (final id in data.archivedQuickChatIds)
                 if (id != session.id) id,
@@ -296,7 +308,7 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
       }
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Promoted to a Project')));
+      ).showSnackBar(const SnackBar(content: Text('Moved to a Project')));
     } catch (error) {
       if (!mounted) return;
       setState(() => _promoting.remove(session.id));
@@ -468,8 +480,13 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
   Widget _buildSessionRow(Session session, WorkspaceSessionsData data) {
     final tokens = HermesTokens.of(context);
     final projectLabel = data.projectLabels[session.id];
+    // The move-to-project affordance serves the Archived-Quick view
+    // (promote a lapsed quick chat) and any Unassigned surface — the
+    // standalone view or the embedded chip browser with the Unassigned
+    // chip active. Both call the same repository move.
     final showPromote =
-        widget.view == WorkspaceSessionView.archivedQuick &&
+        (widget.view == WorkspaceSessionView.archivedQuick ||
+            _isUnassignedSurface) &&
         widget.onPromote != null;
     return HermesCard(
       onTap: () => widget.onOpenSession(session),
@@ -540,7 +557,9 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : IconButton(
-                    tooltip: 'Promote to project',
+                    tooltip: _isUnassignedSurface
+                        ? 'Move to project'
+                        : 'Promote to project',
                     onPressed: () => unawaited(_promote(session)),
                     icon: const Icon(Icons.drive_file_move_outline),
                   ),
