@@ -929,6 +929,79 @@ void main() {
     expect(find.text('Find me'), findsOneWidget);
   });
 
+  testWidgets('Unassigned shows Home-bucket chats despite scoped_session_ids', (
+    tester,
+  ) async {
+    // Regression: the server's scoped_session_ids covers EVERY tier
+    // including the synthetic Home bucket (project_tree.py::_scope on
+    // tier 0), so treating it as the claim set made the Unassigned
+    // filter permanently empty. Only chats owned by a REAL project are
+    // claimed; Home-bucket chats must show.
+    final repository = ProjectsRepository(
+      client: ProjectsGatewayClient((method, params) async {
+        if (method == 'projects.tree') {
+          return {
+            'jsonrpc': '2.0',
+            'id': 1,
+            'result': {
+              'projects': [
+                {
+                  'id': '__no_project__',
+                  'label': 'Home',
+                  'isNoProject': true,
+                  'sessionCount': 1,
+                  'sessionIds': ['s_home'],
+                  'previewSessions': const [],
+                },
+                {
+                  'id': 'p1',
+                  'label': 'Filed Project',
+                  'isNoProject': false,
+                  'sessionCount': 1,
+                  'sessionIds': ['s_filed'],
+                  'previewSessions': const [],
+                },
+              ],
+              'active_id': null,
+              // Both tiers scoped — the trap this fix steps around.
+              'scoped_session_ids': ['s_home', 's_filed'],
+            },
+          };
+        }
+        if (method == 'projects.list') {
+          return {
+            'jsonrpc': '2.0',
+            'id': 1,
+            'result': const {'projects': [], 'active_id': null},
+          };
+        }
+        return {'jsonrpc': '2.0', 'id': 1, 'result': const {}};
+      }),
+      preferences: await SharedPreferences.getInstance(),
+      connectionId: 'conn-1',
+    );
+    await _pump(
+      tester,
+      connection: _connection(desktopGatewayUrl: 'https://host:8642'),
+      repository: repository,
+      sessions: [
+        _session(id: 's_home', title: 'Unfiled chat'),
+        _session(id: 's_filed', title: 'Filed chat'),
+      ],
+      openedSessions: <String>[],
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text(HermesDestination.more.label).last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Unassigned chats'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(WorkspaceSessionsScreen), findsOneWidget);
+    expect(find.text('Unfiled chat'), findsOneWidget);
+    expect(find.text('Filed chat'), findsNothing);
+  });
+
   testWidgets('More opens the native Files screen', (tester) async {
     await _pump(
       tester,
