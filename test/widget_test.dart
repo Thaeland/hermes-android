@@ -180,6 +180,46 @@ void main() {
     expect(find.text('Hermes'), findsOneWidget);
   });
 
+  testWidgets('message bubble stays within a tablet chat column', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1704, 1136);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
+
+    for (final isUser in [false, true]) {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Center(
+              child: ConstrainedBox(
+                key: const Key('chat-column'),
+                constraints: const BoxConstraints(maxWidth: 800),
+                child: MessageBubble(
+                  content: List.filled(
+                    30,
+                    'Long tablet message content must wrap inside the chat column.',
+                  ).join(' '),
+                  isUser: isUser,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final columnRect = tester.getRect(find.byKey(const Key('chat-column')));
+      final bubbleRect = tester.getRect(
+        find.byKey(const Key('message-bubble')),
+      );
+      expect(bubbleRect.width, lessThanOrEqualTo(columnRect.width));
+      expect(bubbleRect.left, greaterThanOrEqualTo(columnRect.left));
+      expect(bubbleRect.right, lessThanOrEqualTo(columnRect.right));
+      expect(tester.takeException(), isNull);
+    }
+  });
+
   testWidgets('fenced code has language, copy, and wrap controls', (
     tester,
   ) async {
