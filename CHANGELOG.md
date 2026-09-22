@@ -4,6 +4,18 @@ All notable changes to this project are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Release notes for
 versions prior to 1.0.7 are in the **What's new** sections of the [README](README.md).
 
+## [2.1.4] - 2026-09-23
+
+### Fixed
+
+- Long user and Hermes messages now wrap inside the capped tablet chat column
+  instead of sizing from the full screen and being clipped (PR #105, #104).
+
+### Thanks
+
+- @kon1z for the precise tablet reproduction, measurements, and root-cause
+  analysis in #104.
+
 ## [2.1.3] - 2026-09-17
 
 ### Fixed
