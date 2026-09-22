@@ -710,6 +710,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           onOpenSession: (session) => unawaited(
             _openSession(session, projectName: _chatProjectLabels[session.id]),
           ),
+          // The Unassigned chip inside this browser gets the same
+          // move-to-project affordance as the standalone Unassigned view.
+          onPromote: _moveUnassignedChat,
         );
       case HermesDestination.projects:
         final repository = _repository;
@@ -1278,11 +1281,54 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         runBatch: _orgAvailable == true ? _runOrgBatch : null,
         undoBatch: _orgAvailable == true ? _undoOrgBatch : null,
         onOpenSession: (session) => unawaited(_openSession(session)),
-        onPromote: view == WorkspaceSessionView.archivedQuick
-            ? _promoteQuickChat
-            : null,
+        onPromote: switch (view) {
+          WorkspaceSessionView.archivedQuick => _promoteQuickChat,
+          WorkspaceSessionView.unassigned => _moveUnassignedChat,
+          WorkspaceSessionView.all || WorkspaceSessionView.search => null,
+        },
       ),
     );
+  }
+
+  /// Files one unassigned chat into an existing Project.
+  ///
+  /// Same repository move as the quick-chat promotion (explicit assign,
+  /// cwd re-home fallback on stock gateways); the only difference is no
+  /// quick-chat store bookkeeping — the chat was never a quick chat.
+  Future<void> _moveUnassignedChat(Session session) async {
+    final repository = _repository;
+    if (repository == null) {
+      throw StateError('Projects are unavailable for this connection');
+    }
+    var view = repository.current;
+    if (view.support == ProjectsSupport.unknown) {
+      view = await repository.refresh();
+    }
+    final projects = view.projects
+        .where((project) => !project.archived)
+        .toList(growable: false);
+    if (projects.isEmpty) {
+      throw StateError('Create a Project before moving this chat');
+    }
+
+    if (!mounted) throw const QuickChatPromotionCancelled();
+    final project = projects.length == 1
+        ? projects.single
+        : await showModalBottomSheet<HermesProject>(
+            context: context,
+            isScrollControlled: true,
+            builder: (_) => ProjectPickerSheet(projects: projects),
+          );
+    if (project == null) throw const QuickChatPromotionCancelled();
+
+    final reason = await repository.moveSessionToProject(
+      session.id,
+      project.id,
+      storedSessionKey: _ownedGateway?.storedSessionKeyFor(session.id),
+    );
+    if (reason != null) {
+      throw StateError(reason);
+    }
   }
 
   Future<void> _promoteQuickChat(Session session) async {
