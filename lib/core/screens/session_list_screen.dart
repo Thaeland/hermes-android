@@ -84,6 +84,15 @@ class _SessionListScreenState extends State<SessionListScreen> {
   ChatSpaceScope _spaceScope = const ChatSpaceScope.all();
   bool _loading = true;
   String? _error;
+
+  /// Session-list paging state. The gateway serves the list newest-first in
+  /// pages; [_sessions] accumulates loaded pages so the Unassigned bucket
+  /// can reach sessions beyond the first page.
+  static const _sessionPageSize = 50;
+  int _sessionsOffset = 0;
+  bool _hasMoreSessions = false;
+  bool _loadingMoreSessions = false;
+
   bool _healthOk = false;
   final Set<String> _deletingSessionIds = {};
   final Set<String> _branchingSessionIds = {};
@@ -637,26 +646,34 @@ class _SessionListScreenState extends State<SessionListScreen> {
       _error = null;
     });
     try {
-      final sessions = await _client.getSessions();
+      final page = await _client.getSessionsPage(limit: _sessionPageSize);
       if (!mounted) return;
       final prefs = await SharedPreferences.getInstance();
       final key = 'excluded_session_sources_${widget.connection.id}';
       final excluded = prefs.getStringList(key) ?? [];
-      final filtered = sessions
+      final filtered = page.sessions
           .where((s) => !excluded.contains(s.source))
           .toList();
       final store =
           _spaceStore ??
           ChatSpaceStore(prefs, connectionId: widget.connection.id);
-      await store.pruneAssignments(
-        sessions.map((session) => session.id).toSet(),
-      );
+      // Pruning removes assignments for sessions that no longer exist. It
+      // must only run against a COMPLETE list: with paging, pruning on page
+      // one alone would wipe the space assignments of every session still
+      // on an unfetched page.
+      if (!page.hasMore) {
+        await store.pruneAssignments(
+          page.sessions.map((session) => session.id).toSet(),
+        );
+      }
       final spaceState = await store.load();
       if (!mounted) return;
       setState(() {
         _spaceStore = store;
         _spaceState = spaceState;
         _sessions = filtered;
+        _sessionsOffset = page.sessions.length;
+        _hasMoreSessions = page.hasMore;
         _loading = false;
       });
     } catch (e) {
@@ -666,6 +683,62 @@ class _SessionListScreenState extends State<SessionListScreen> {
         _loading = false;
       });
     }
+  }
+
+  /// Append the next page of sessions when the list is scrolled near bottom.
+  Future<void> _loadMoreSessions() async {
+    if (_loadingMoreSessions || !_hasMoreSessions) return;
+    setState(() => _loadingMoreSessions = true);
+    try {
+      final page = await _client.getSessionsPage(
+        limit: _sessionPageSize,
+        offset: _sessionsOffset,
+      );
+      if (!mounted) return;
+      final prefs = await SharedPreferences.getInstance();
+      final excluded =
+          prefs.getStringList('excluded_session_sources_${widget.connection.id}') ??
+          [];
+      final existing = _sessions.map((s) => s.id).toSet();
+      final incoming = page.sessions
+          .where((s) => !excluded.contains(s.source) && !existing.contains(s.id))
+          .toList();
+      if (!page.hasMore) {
+        // Full list now loaded — safe to reconcile space assignments.
+        final allIds = <String>{..._sessions.map((s) => s.id), ...page.sessions.map((s) => s.id)};
+        await _spaceStore?.pruneAssignments(allIds);
+        if (mounted) {
+          final reconciled = await _spaceStore?.load();
+          if (mounted && reconciled != null) {
+            setState(() => _spaceState = reconciled);
+          }
+        }
+      }
+      if (!mounted) return;
+      setState(() {
+        _sessions = [..._sessions, ...incoming];
+        _sessionsOffset += page.sessions.length;
+        _hasMoreSessions = page.hasMore;
+        _loadingMoreSessions = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      // Keep the loaded pages; surface the failure and allow a retry on the
+      // next scroll instead of losing the list.
+      setState(() => _loadingMoreSessions = false);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Could not load more chats: $e')));
+    }
+  }
+
+  bool _onListScroll(ScrollNotification notification) {
+    if (!_hasMoreSessions || _loadingMoreSessions) return false;
+    if (notification.metrics.pixels >=
+        notification.metrics.maxScrollExtent - 300) {
+      _loadMoreSessions();
+    }
+    return false;
   }
 
   Future<void> _confirmDeleteSession(Session session) async {
@@ -1043,11 +1116,27 @@ class _SessionListScreenState extends State<SessionListScreen> {
       onRefresh: rawQuery.isNotEmpty && serverMode
           ? () => _runServerSearch(rawQuery)
           : _fetchSessions,
-      child: ListView.builder(
-        padding: const EdgeInsets.all(16),
-        itemCount: visibleSessions.length + 1,
-        itemBuilder: (context, index) {
-          if (index == 0) {
+      child: NotificationListener<ScrollNotification>(
+        onNotification: _onListScroll,
+        child: ListView.builder(
+          padding: const EdgeInsets.all(16),
+          itemCount:
+              visibleSessions.length + 1 + (_hasMoreSessions || _loadingMoreSessions ? 1 : 0),
+          itemBuilder: (context, index) {
+            if (index == visibleSessions.length + 1) {
+              return Padding(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                child: Center(
+                  child: _loadingMoreSessions
+                      ? const SizedBox.square(
+                          dimension: 22,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Text('Load more…'),
+                ),
+              );
+            }
+            if (index == 0) {
             return Padding(
               padding: const EdgeInsets.only(bottom: 12),
               child: Column(
@@ -1356,7 +1445,8 @@ class _SessionListScreenState extends State<SessionListScreen> {
                     },
             ),
           );
-        },
+          },
+        ),
       ),
     );
   }
