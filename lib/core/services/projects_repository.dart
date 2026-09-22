@@ -441,13 +441,20 @@ class ProjectsRepository {
     await client.assignSession(sessionId: sessionId, projectId: projectId);
   }
 
-  /// Moves one conversation into [projectId] by re-homing its cwd, the
-  /// stock-gateway move primitive (mirrors Desktop's moveSessionToProject).
+  /// Moves one chat into [projectId] by re-homing its workspace.
   ///
-  /// Returns a human-readable reason string when the move is impossible
-  /// (un-file on a cwd-derived model, or a target Project with no folder
-  /// to re-home into); throws only on a real gateway failure so the caller
-  /// can offer a retry.
+  /// Stock-gateway-only path: the chat's cwd is re-pointed at the target
+  /// project's folder via `session.workspace.move` — the one RPC stock
+  /// Hermes ships for this, and how the desktop files chats (membership
+  /// is derived from cwd). `projects.assign_session` is deliberately
+  /// NOT attempted: it never shipped upstream, so trying it first only
+  /// adds a doomed round-trip and a capability assumption.
+  ///
+  /// [storedSessionKey] is the gateway's stored key for the chat (falls
+  /// back to [sessionId] when the binding is unknown). Returns a reason
+  /// string when the move is impossible (un-file on a cwd-derived model,
+  /// or a target Project with no folder to re-home into); throws only on
+  /// a real gateway failure so the caller can offer a retry.
   Future<String?> moveSessionToProject(
     String sessionId,
     String? projectId, {

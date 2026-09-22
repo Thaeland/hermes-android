@@ -516,6 +516,122 @@ void main() {
     });
 
     test(
+      'move uses only the stock cwd re-home, never assign_session',
+      () async {
+        final gateway = _FakeGateway(
+          projects: [
+            _projectJson(
+              id: 'p1',
+              name: 'Hermes Android',
+              primaryPath: '/home/dev/hermes-android',
+            ),
+          ],
+        );
+        final repo = _repository(gateway, await SharedPreferences.getInstance());
+        await repo.refresh();
+
+        final reason = await repo.moveSessionToProject('s-1', 'p1');
+
+        expect(reason, isNull);
+        // Stock-only contract: projects.assign_session (never shipped
+        // upstream) must not be attempted even when a fake would accept it.
+        expect(gateway.calls, isNot(contains('projects.assign_session')));
+        expect(gateway.workspaceMoves, [
+          {'session_key': 's-1', 'cwd': '/home/dev/hermes-android'},
+        ]);
+      },
+    );
+
+    test(
+      'move falls back to the cwd re-home on a stock gateway',
+      () async {
+        final gateway = _FakeGateway(
+          projects: [
+            _projectJson(id: 'p1', name: 'Hermes Android'),
+            _projectJson(
+              id: 'p2',
+              name: 'ScriptHive',
+              folders: [
+                {
+                  'path': '/home/dev/scripthive',
+                  'label': 'main',
+                  'is_primary': true,
+                  'added_at': 1750000001,
+                },
+              ],
+            ),
+          ],
+        )..unsupportedAssign = true;
+        final repo = _repository(gateway, await SharedPreferences.getInstance());
+        await repo.refresh();
+
+        final reason = await repo.moveSessionToProject(
+          's-1',
+          'p2',
+          storedSessionKey: 'stored-9',
+        );
+
+        expect(reason, isNull);
+        expect(gateway.workspaceMoves, [
+          {'session_key': 'stored-9', 'cwd': '/home/dev/scripthive'},
+        ]);
+      },
+    );
+
+    test(
+      'moving back to Unassigned on a stock gateway reports why',
+      () async {
+        final gateway = _FakeGateway()..unsupportedAssign = true;
+        final repo = _repository(gateway, await SharedPreferences.getInstance());
+        await repo.refresh();
+
+        final reason = await repo.moveSessionToProject('s-1', null);
+
+        expect(reason, contains('cannot move a chat back to Unassigned'));
+        expect(gateway.workspaceMoves, isEmpty);
+      },
+    );
+
+    test(
+      'a folderless target on a stock gateway asks for a folder',
+      () async {
+        final gateway = _FakeGateway(
+          projects: [_projectJson(id: 'p1', name: 'Name Only')],
+        )..unsupportedAssign = true;
+        final repo = _repository(gateway, await SharedPreferences.getInstance());
+        await repo.refresh();
+
+        final reason = await repo.moveSessionToProject('s-1', 'p1');
+
+        expect(reason, contains('no folder'));
+        expect(gateway.workspaceMoves, isEmpty);
+      },
+    );
+
+    test(
+      'the move falls back to the mobile id when no stored key is bound',
+      () async {
+        final gateway = _FakeGateway(
+          projects: [
+            _projectJson(
+              id: 'p2',
+              name: 'ScriptHive',
+              primaryPath: '/home/dev/scripthive',
+            ),
+          ],
+        )..unsupportedAssign = true;
+        final repo = _repository(gateway, await SharedPreferences.getInstance());
+        await repo.refresh();
+
+        await repo.moveSessionToProject('mob-7', 'p2');
+
+        expect(gateway.workspaceMoves, [
+          {'session_key': 'mob-7', 'cwd': '/home/dev/scripthive'},
+        ]);
+      },
+    );
+
+    test(
       'mutations are refused in compatibility mode without a call',
       () async {
         final gateway = _FakeGateway()
