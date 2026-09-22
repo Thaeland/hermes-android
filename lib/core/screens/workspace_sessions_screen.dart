@@ -42,7 +42,9 @@ const Duration kRecentChatsWindow = Duration(days: 7);
 /// tui_gateway/methods_projects.py), and `filing.suggest` skips them too —
 /// automated runs carry no human filing intent. The Unassigned view must
 /// mirror that exclusion or every cron run shows up as "unfiled" noise the
-/// filing engine can never answer for.
+/// filing engine can never answer for. The Chats browser excludes them from
+/// every chip (desktop parity): cron runs are browsed per-job from the
+/// Cron screen's run list, not as chat-list entries.
 const Set<String> kMachineSessionSources = {'cron', 'kanban', 'oneshot'};
 
 bool isMachineSession(Session session) =>
@@ -84,9 +86,18 @@ List<Session> filterChats({
   final filtered = [
     for (final session in sessions)
       if (switch (filter) {
-            WorkspaceChatsFilter.all => !session.archived,
+            // Machine-generated runs (cron/kanban/oneshot) never enter the
+            // chat browser at all — the desktop's sidebar applies the same
+            // exclusion (SIDEBAR_EXCLUDED_SOURCES in
+            // use-session-list-actions.ts). Cron runs live in the Cron
+            // screen's per-job run list instead, so the scheduler's
+            // always-newest sessions can't crowd human chats out.
+            WorkspaceChatsFilter.all =>
+              !session.archived && !isMachineSession(session),
             WorkspaceChatsFilter.recent =>
-              !session.archived && session.lastActive >= recentCutoff,
+              !session.archived &&
+              !isMachineSession(session) &&
+              session.lastActive >= recentCutoff,
             WorkspaceChatsFilter.unassigned =>
               // When the claim map is unknown (projects.tree timed out),
               // every chat would pass as 'unassigned' — a lie that turns
