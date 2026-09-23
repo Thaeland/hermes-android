@@ -441,6 +441,50 @@ class ProjectsRepository {
     await client.assignSession(sessionId: sessionId, projectId: projectId);
   }
 
+  /// Moves one conversation into [projectId] by re-homing its cwd, the
+  /// stock-gateway move primitive (mirrors Desktop's moveSessionToProject).
+  ///
+  /// Returns a human-readable reason string when the move is impossible
+  /// (un-file on a cwd-derived model, or a target Project with no folder
+  /// to re-home into); throws only on a real gateway failure so the caller
+  /// can offer a retry.
+  Future<String?> moveSessionToProject(
+    String sessionId,
+    String? projectId, {
+    String? storedSessionKey,
+  }) async {
+    _requireSupported();
+    if (projectId == null) {
+      // There is no stock RPC to un-file a chat: its project is wherever
+      // its cwd points. Say so instead of failing with a generic error.
+      return 'This gateway files chats by working folder and cannot move a '
+          'chat back to Unassigned.';
+    }
+    final target = _findProject(projectId);
+    final folder = target?.workingDirectory?.trim() ?? '';
+    if (target == null || folder.isEmpty) {
+      return 'That Project has no folder to move the chat into. Add a '
+          'folder to it first.';
+    }
+    await client.moveSessionWorkspace(
+      sessionKey: (storedSessionKey?.trim().isNotEmpty ?? false)
+          ? storedSessionKey!.trim()
+          : sessionId,
+      cwd: folder,
+    );
+    return null;
+  }
+
+  HermesProject? _findProject(String id) {
+    for (final project in _current.projects) {
+      if (project.id == id) return project;
+    }
+    for (final project in _current.archived) {
+      if (project.id == id) return project;
+    }
+    return null;
+  }
+
   Future<void> setActive(String? id) async {
     _requireSupported();
     final previous = _current;

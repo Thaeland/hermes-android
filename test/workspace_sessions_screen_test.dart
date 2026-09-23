@@ -11,11 +11,12 @@ Session _session(
   bool archived = false,
   bool isActive = false,
   bool pinned = false,
+  String source = 'gateway',
 }) => Session(
   id: id,
   title: title,
   model: 'claude-opus-5',
-  source: 'gateway',
+  source: source,
   messageCount: 1,
   isActive: isActive,
   preview: 'preview $title',

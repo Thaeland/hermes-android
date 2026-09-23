@@ -353,6 +353,12 @@ class DesktopGatewayClient {
     _storedSessionIds[mobileSessionId] = binding.storedSessionId;
   }
 
+  /// The gateway's stored session key bound to a mobile session id, when a
+  /// binding exists. Stored keys address rows in the session DB (move,
+  /// resume); mobile ids do not survive into gateway-side lookups.
+  String? storedSessionKeyFor(String mobileSessionId) =>
+      _storedSessionIds[mobileSessionId];
+
   /// True when [error] says the runtime session id the gateway was handed no
   /// longer exists — the detached/orphan-reap or eviction signature. The
   /// gateway's own rejection text tells the client to resume the STORED id
