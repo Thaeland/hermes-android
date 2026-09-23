@@ -399,6 +399,7 @@ void main() {
       onMoveSession: (session, projectId) async {
         expect(session.id, 's-42');
         moves.add(projectId);
+        return null;
       },
     );
     await tester.pumpAndSettle();

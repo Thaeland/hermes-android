@@ -141,9 +141,8 @@ class NewChatDraft {
   final String? projectName;
 
   /// The owning Project's working directory on the gateway host. Used as the
-  /// session `cwd` fallback binding when the gateway lacks
-  /// `projects.assign_session` (stock Hermes groups sessions under a project
-  /// by cwd via `project_for_path`).
+  /// session `cwd` binding: stock Hermes groups sessions under a project
+  /// by cwd via `project_for_path`, so the cwd IS the membership.
   final String? projectWorkingDirectory;
 
   /// When a Quick chat becomes eligible for auto-archive. Null when durable.

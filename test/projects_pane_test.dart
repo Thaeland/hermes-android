@@ -16,13 +16,22 @@ Map<String, dynamic> _projectJson({
   required String id,
   required String name,
   bool archived = false,
+  List<Map<String, dynamic>>? folders,
 }) => {
   'id': id,
   'slug': name.toLowerCase().replaceAll(' ', '-'),
   'name': name,
   'archived': archived,
   'created_at': 1750000000,
-  'folders': const [],
+  'folders': folders ??
+      [
+        {
+          'path': '/home/test/${name.toLowerCase().replaceAll(' ', '-')}',
+          'label': name,
+          'is_primary': true,
+          'added_at': 1750000001,
+        },
+      ],
 };
 
 class _FakeGateway {
@@ -101,12 +110,9 @@ class _FakeGateway {
               project,
         ];
         return _ok({'projects': projects, 'active_id': activeId});
-      case 'projects.assign_session':
+      case 'session.workspace.move':
         assignments.add(Map<String, dynamic>.from(params));
-        return _ok({
-          'session_id': params['session_id'],
-          'project_id': params['project_id'],
-        });
+        return _ok(const {'ok': true});
       case 'projects.set_active':
         activeId = params['id'] as String?;
         return _ok({'active_id': activeId});
@@ -542,7 +548,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(gateway.assignments, [
-      {'session_id': 'chat-1', 'project_id': 'p1'},
+      {'session_key': 'chat-1', 'cwd': '/home/test/hermes-android'},
     ]);
     expect(find.text('Migration complete'), findsOneWidget);
   });

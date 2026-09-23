@@ -11,13 +11,16 @@ Map<String, dynamic> _projectJson({
   required String name,
   String? slug,
   bool archived = false,
+  String? primaryPath,
+  List<Map<String, dynamic>>? folders,
 }) => {
   'id': id,
   'slug': slug ?? name.toLowerCase().replaceAll(' ', '-'),
   'name': name,
   'archived': archived,
   'created_at': 1750000000,
-  'folders': const [],
+  'primary_path': ?primaryPath,
+  'folders': folders ?? const [],
 };
 
 /// A scriptable stand-in for the gateway `projects.*` family.
@@ -31,6 +34,9 @@ class _FakeGateway {
 
   /// When set, every call to this method throws (models a missing sibling).
   String? failMethod;
+
+  /// Params of every `session.workspace.move` the repo issued.
+  final List<Map<String, dynamic>> workspaceMoves = [];
 
   _FakeGateway({List<Map<String, dynamic>>? projects, this.activeId})
     : projects = projects ?? [];
@@ -108,6 +114,13 @@ class _FakeGateway {
       case 'projects.set_active':
         activeId = params['id'] as String?;
         return _ok({'active_id': activeId});
+      case 'session.workspace.move':
+        workspaceMoves.add(Map<String, dynamic>.from(params));
+        return _ok({
+          'cwd': params['cwd'],
+          'branch': null,
+          'git_repo_root': null,
+        });
       default:
         return _ok(const {});
     }
@@ -543,7 +556,7 @@ void main() {
     );
 
     test(
-      'move falls back to the cwd re-home on a stock gateway',
+      'move re-homes the workspace to the target project folder',
       () async {
         final gateway = _FakeGateway(
           projects: [
@@ -561,7 +574,7 @@ void main() {
               ],
             ),
           ],
-        )..unsupportedAssign = true;
+        );
         final repo = _repository(gateway, await SharedPreferences.getInstance());
         await repo.refresh();
 
@@ -579,9 +592,9 @@ void main() {
     );
 
     test(
-      'moving back to Unassigned on a stock gateway reports why',
+      'moving back to Unassigned reports why (cwd-derived filing)',
       () async {
-        final gateway = _FakeGateway()..unsupportedAssign = true;
+        final gateway = _FakeGateway();
         final repo = _repository(gateway, await SharedPreferences.getInstance());
         await repo.refresh();
 
@@ -593,11 +606,11 @@ void main() {
     );
 
     test(
-      'a folderless target on a stock gateway asks for a folder',
+      'a folderless target asks for a folder',
       () async {
         final gateway = _FakeGateway(
           projects: [_projectJson(id: 'p1', name: 'Name Only')],
-        )..unsupportedAssign = true;
+        );
         final repo = _repository(gateway, await SharedPreferences.getInstance());
         await repo.refresh();
 
@@ -609,7 +622,7 @@ void main() {
     );
 
     test(
-      'the move falls back to the mobile id when no stored key is bound',
+      'the move uses the mobile id when no stored key is bound',
       () async {
         final gateway = _FakeGateway(
           projects: [
@@ -619,7 +632,7 @@ void main() {
               primaryPath: '/home/dev/scripthive',
             ),
           ],
-        )..unsupportedAssign = true;
+        );
         final repo = _repository(gateway, await SharedPreferences.getInstance());
         await repo.refresh();
 
