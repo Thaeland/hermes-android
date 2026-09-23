@@ -11,11 +11,12 @@ Session _session(
   bool archived = false,
   bool isActive = false,
   bool pinned = false,
+  String source = 'gateway',
 }) => Session(
   id: id,
   title: title,
   model: 'claude-opus-5',
-  source: 'gateway',
+  source: source,
   messageCount: 1,
   isActive: isActive,
   preview: 'preview $title',
@@ -35,6 +36,19 @@ void main() {
     expect(result.map((session) => session.id), ['s2']);
   });
 
+  test('Unassigned hides machine-generated sessions', () {
+    // Same contract as filterChats: the tree never claims cron rows, so
+    // the legacy view must not present them as unfilable either.
+    final result = filterWorkspaceSessions(
+      sessions: [
+        _session('s1', 'Human chat'),
+        _session('s2', 'Cron run', source: 'cron'),
+      ],
+      view: WorkspaceSessionView.unassigned,
+    );
+    expect(result.map((session) => session.id), ['s1']);
+  });
+
   group('WorkspaceChatsFilter', () {
     test('declares the four validated chip filters in order', () {
       expect(WorkspaceChatsFilter.values, [
@@ -48,13 +62,36 @@ void main() {
       }
     });
 
-    test('All keeps every session', () {
+    test('All keeps every non-archived session', () {
       final result = filterChats(
         sessions: [_session('s1', 'A'), _session('s2', 'B')],
         filter: WorkspaceChatsFilter.all,
         now: DateTime.fromMillisecondsSinceEpoch(1750000000 * 1000),
       );
       expect(result.map((s) => s.id), ['s1', 's2']);
+    });
+
+    test('All, Recent and Unassigned hide server-archived sessions', () {
+      // The Chats browser feeds the filter the union of the gateway's
+      // active list and the dashboard's archived list; the non-archived
+      // chips must therefore exclude archived rows explicitly or the
+      // union would leak them.
+      final live = _session('s1', 'Live');
+      final archived = _session('s2', 'Archived', archived: true);
+      final now = DateTime.fromMillisecondsSinceEpoch(1750000000 * 1000);
+
+      for (final filter in [
+        WorkspaceChatsFilter.all,
+        WorkspaceChatsFilter.recent,
+        WorkspaceChatsFilter.unassigned,
+      ]) {
+        final result = filterChats(
+          sessions: [live, archived],
+          filter: filter,
+          now: now,
+        );
+        expect(result.map((s) => s.id), ['s1'], reason: filter.label);
+      }
     });
 
     test('Recent keeps only sessions active within seven days', () {
@@ -79,6 +116,45 @@ void main() {
         now: DateTime.fromMillisecondsSinceEpoch(1750000000 * 1000),
       );
       expect(result.map((s) => s.id), ['s2']);
+    });
+
+    test('Unassigned hides machine-generated sessions', () {
+      // projects.tree never claims cron/kanban/oneshot rows, so without
+      // this exclusion every automated run piles up as unfilable
+      // "unassigned" noise the filing engine can never answer for.
+      final human = _session('s1', 'Human chat');
+      final cron = _session('s2', 'Cron run', source: 'cron');
+      final kanban = _session('s3', 'Kanban run', source: 'kanban');
+      final oneshot = _session('s4', 'Oneshot run', source: 'oneshot');
+
+      final result = filterChats(
+        sessions: [human, cron, kanban, oneshot],
+        filter: WorkspaceChatsFilter.unassigned,
+        now: DateTime.fromMillisecondsSinceEpoch(1750000000 * 1000),
+      );
+      expect(result.map((s) => s.id), ['s1']);
+    });
+
+    test('All and Recent still show machine sessions', () {
+      // The exclusion is Unassigned-only: cron runs are real history and
+      // belong in All/Recent.
+      final human = _session('s1', 'Human chat');
+      final cron = _session('s2', 'Cron run', source: 'cron');
+      final now = DateTime.fromMillisecondsSinceEpoch(1750000000 * 1000);
+
+      final all = filterChats(
+        sessions: [human, cron],
+        filter: WorkspaceChatsFilter.all,
+        now: now,
+      );
+      expect(all.map((s) => s.id).toSet(), {'s1', 's2'});
+
+      final recent = filterChats(
+        sessions: [human, cron],
+        filter: WorkspaceChatsFilter.recent,
+        now: now,
+      );
+      expect(recent.map((s) => s.id).toSet(), {'s1', 's2'});
     });
 
     test('Archived merges server-archived and quick-chat archived ids', () {
@@ -255,6 +331,42 @@ void main() {
       expect(find.text('Fresh'), findsNothing);
     });
 
+    testWidgets('Archived shows server-archived sessions from the dashboard', (
+      tester,
+    ) async {
+      // The gateway's active list never contains archived rows, so the
+      // dashboard-sourced archivedSessions list is the only way an
+      // explicitly archived chat reaches the chip. It must show under
+      // Archived and stay hidden under All.
+      final serverArchived = _session('s9', 'Archived on server', archived: true);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: hermesTheme(Brightness.dark),
+          home: WorkspaceSessionsScreen(
+            title: 'Chats',
+            view: WorkspaceSessionView.all,
+            embedded: true,
+            now: now,
+            load: () async => WorkspaceSessionsData(
+              sessions: [recent],
+              archivedSessions: [serverArchived],
+            ),
+            onOpenSession: (_) {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Archived on server'), findsNothing);
+      expect(find.text('Fresh'), findsOneWidget);
+
+      await tester.tap(find.widgetWithText(ChoiceChip, 'Archived'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Archived on server'), findsOneWidget);
+      expect(find.text('Fresh'), findsNothing);
+    });
+
     testWidgets('groups rows under date headers', (tester) async {
       await pumpChats(tester);
 
@@ -331,6 +443,162 @@ void main() {
       );
 
       expect(find.byIcon(Icons.push_pin_outlined), findsOneWidget);
+    });
+  });
+
+  group('batch selection (organization.*)', () {
+    final now = DateTime.fromMillisecondsSinceEpoch(1750000000 * 1000);
+
+    Future<void> pumpBatch(
+      WidgetTester tester, {
+      required WorkspaceBatchRunner? runBatch,
+      WorkspaceBatchUndoRunner? undoBatch,
+    }) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: hermesTheme(Brightness.dark),
+          // Embedded screens render inside the workspace shell's Scaffold;
+          // the batch SnackBars need one to present to.
+          home: Scaffold(
+            body: WorkspaceSessionsScreen(
+              title: 'Chats',
+              view: WorkspaceSessionView.all,
+              embedded: true,
+              now: now,
+              load: () async => WorkspaceSessionsData(
+                sessions: [
+                  _session('s1', 'First', lastActive: 1750000000),
+                  _session('s2', 'Second', lastActive: 1750000000),
+                ],
+              ),
+              onOpenSession: (_) {},
+              runBatch: runBatch,
+              undoBatch: undoBatch,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> selectBoth(WidgetTester tester) async {
+      await tester.longPress(find.text('First'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Second'));
+      await tester.pumpAndSettle();
+    }
+
+    // SnackBars animate for their full display duration, so pumpAndSettle
+    // would spin; advance with a frame to mount, then a fixed pump.
+    Future<void> settleSnackBar(WidgetTester tester) async {
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+    }
+
+    testWidgets('long-press enters selection mode and offers the action bar', (
+      tester,
+    ) async {
+      await pumpBatch(
+        tester,
+        runBatch: (ids, action) async => const WorkspaceBatchOutcome(
+          batchId: 'b1',
+          requested: 2,
+          applied: 2,
+          failed: 0,
+        ),
+      );
+
+      await tester.longPress(find.text('First'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('1 selected'), findsOneWidget);
+      expect(find.byTooltip('Select all'), findsOneWidget);
+      expect(find.byTooltip('Pin'), findsOneWidget);
+      expect(find.byTooltip('Unpin'), findsOneWidget);
+      expect(find.byTooltip('Archive'), findsOneWidget);
+      expect(find.byTooltip('Cancel selection'), findsOneWidget);
+    });
+
+    testWidgets('a full batch reports the count and offers Undo', (
+      tester,
+    ) async {
+      final undone = <String>[];
+      await pumpBatch(
+        tester,
+        runBatch: (ids, action) async => WorkspaceBatchOutcome(
+          batchId: 'b-full',
+          requested: ids.length,
+          applied: ids.length,
+          failed: 0,
+        ),
+        undoBatch: (batchId) async => undone.add(batchId),
+      );
+
+      await selectBoth(tester);
+      await tester.tap(find.byTooltip('Pin'));
+      await settleSnackBar(tester);
+
+      expect(find.text('Pinned 2 chat(s)'), findsOneWidget);
+      await tester.tap(find.text('Undo'));
+      await settleSnackBar(tester);
+      expect(undone, ['b-full']);
+    });
+
+    testWidgets('a partial batch keeps its Undo handle for the applied half', (
+      tester,
+    ) async {
+      final undone = <String>[];
+      await pumpBatch(
+        tester,
+        runBatch: (ids, action) async => const WorkspaceBatchOutcome(
+          batchId: 'b-partial',
+          requested: 2,
+          applied: 1,
+          failed: 1,
+        ),
+        undoBatch: (batchId) async => undone.add(batchId),
+      );
+
+      await selectBoth(tester);
+      await tester.tap(find.byTooltip('Archive'));
+      await settleSnackBar(tester);
+
+      expect(find.text('Archived 1 of 2 chat(s) — 1 failed'), findsOneWidget);
+      // The applied half must stay reversible — the batch id is not lost.
+      await tester.tap(find.text('Undo'));
+      await settleSnackBar(tester);
+      expect(undone, ['b-partial']);
+    });
+
+    testWidgets('nothing applied means no Undo', (tester) async {
+      await pumpBatch(
+        tester,
+        runBatch: (ids, action) async => const WorkspaceBatchOutcome(
+          batchId: 'b-empty',
+          requested: 2,
+          applied: 0,
+          failed: 2,
+        ),
+      );
+
+      await selectBoth(tester);
+      await tester.tap(find.byTooltip('Pin'));
+      await settleSnackBar(tester);
+
+      expect(find.text('Pinned 0 of 2 chat(s) — 2 failed'), findsOneWidget);
+      expect(find.text('Undo'), findsNothing);
+    });
+
+    testWidgets('without runBatch the selection affordances stay hidden', (
+      tester,
+    ) async {
+      await pumpBatch(tester, runBatch: null);
+
+      await tester.longPress(find.text('First'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('1 selected'), findsNothing);
+      expect(find.byTooltip('Pin'), findsNothing);
     });
   });
 

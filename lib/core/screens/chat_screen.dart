@@ -84,6 +84,13 @@ enum _ResponseTransport { none, rest, desktop }
 const _legacyTransportNotice =
     'Background recovery unavailable — legacy transport';
 
+/// Notice for a gateway that cleanly does not offer the durable turn-recovery
+/// contract (stock Hermes). The chat is fully usable on the live JSON-RPC
+/// transport; only background recovery is absent, so this reads as a
+/// capability note, not a failure.
+const _stockGatewayNotice =
+    'This server doesn\'t offer background recovery — chats run live';
+
 @visibleForTesting
 typedef TestRemotePromptSubmit =
     Future<void> Function({
@@ -206,6 +213,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   late final Future<void> _sessionModelRestore;
   DesktopGatewayClient? _desktopGateway;
   GatewayTurnApplicationSession? _turnApplicationSession;
+  /// Live title pushed by the gateway's auto-titler (`session.title` event).
+  /// Overrides the title the screen was opened with until the session list
+  /// is next pulled from the server, so a fresh chat stops showing
+  /// "Untitled chat" the moment the gateway names it.
+  String? _liveTitle;
+
+  /// The title to show/share for this chat: the pushed auto-title when one
+  /// has arrived, otherwise the title the screen was opened with.
+  String get _effectiveTitle => _liveTitle ?? widget.session.title;
   DesktopConnectionState _desktopConnectionState =
       DesktopConnectionState.disconnected;
   bool _appInBackground = false;
@@ -227,6 +243,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   String? _activeClientTurnId;
   bool _recoveringTurn = false;
   bool _legacyTransportFallback = false;
+  bool _stockGatewayFallback = false;
   bool _legacyHistoryResyncPending = false;
   bool _legacyHistoryResyncing = false;
   int _responseGeneration = 0;
@@ -446,7 +463,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _exportConversation() async {
-    final buffer = StringBuffer('# ${widget.session.title}\n\n');
+    final buffer = StringBuffer('# $_effectiveTitle\n\n');
     for (final message in _messages) {
       final role = message['role']?.toString();
       if (role != 'user' && role != 'assistant') continue;
@@ -462,7 +479,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     await SharePlus.instance.share(
       ShareParams(
-        subject: widget.session.title,
+        subject: _effectiveTitle,
         text: buffer.toString().trim(),
       ),
     );
@@ -572,7 +589,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         : 'Turn completed';
     unawaited(
       _turnNotifications.showTurnCompleted(
-        turnSummary: '${widget.session.title}: $summary',
+        turnSummary: '$_effectiveTitle: $summary',
         turnId: turnId,
       ),
     );
@@ -806,6 +823,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (fallback == TurnRecoveryFallback.legacyTransport) {
         setState(() {
           _legacyTransportFallback = true;
+          _stockGatewayFallback = turnRecoveryFailureIsStockGateway(error);
           _sending = false;
           _streaming = false;
           _gatewayTurnStatus = null;
@@ -2140,6 +2158,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
       return;
     }
+    if (event.type == 'session.title') {
+      _applyPushedTitle(event.data);
+      return;
+    }
     if (event.type.startsWith('tool.')) {
       _upsertToolProgress(event.data, eventType: event.type);
       return;
@@ -2147,6 +2169,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (event.type.startsWith('subagent.')) {
       _upsertSubagent(event.type, event.data);
     }
+  }
+
+  /// Apply a gateway-pushed auto-title (`session.title` event).
+  ///
+  /// The gateway's auto-titler renames the session inside the turn prologue
+  /// and pushes `{session_id, title}` (session_id is the stored key). The
+  /// async bridge has already routed the event to this screen's mobile
+  /// session, so the title is applied unconditionally once it is a
+  /// non-empty string; a malformed or empty push keeps the current title.
+  void _applyPushedTitle(Map<String, dynamic> data) {
+    final title = data['title']?.toString().trim();
+    if (title == null || title.isEmpty) return;
+    if (_effectiveTitle == title) return;
+    setState(() => _liveTitle = title);
   }
 
   Map<String, dynamic>? _lastAssistantMessage() {
@@ -2188,6 +2224,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         }
       });
       _scheduleStreamingFollow();
+      return;
+    }
+    if (event.type == 'session.title') {
+      _applyPushedTitle(event.data);
       return;
     }
     if (event.type.startsWith('subagent.')) {
@@ -2640,9 +2680,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       appBar: AppBar(
         centerTitle: false,
         title: Text(
-          widget.session.title.trim().isEmpty
-              ? 'Untitled chat'
-              : widget.session.title,
+          _effectiveTitle.trim().isEmpty ? 'Untitled chat' : _effectiveTitle,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: Theme.of(context).textTheme.titleMedium,
@@ -2718,7 +2756,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     vertical: 10,
                   ),
                   child: Text(
-                    _legacyTransportNotice,
+                    _stockGatewayFallback
+                        ? _stockGatewayNotice
+                        : _legacyTransportNotice,
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: Theme.of(context).colorScheme.onTertiaryContainer,

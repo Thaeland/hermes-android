@@ -37,6 +37,17 @@ enum ChatDateBucket {
 /// How long "Recent" means in the Chats browser.
 const Duration kRecentChatsWindow = Duration(days: 7);
 
+/// Machine-generated session sources. The server's `projects.tree`
+/// deliberately never claims these (`_PROJECT_TREE_EXCLUDED_SOURCES` in
+/// tui_gateway/methods_projects.py), and `filing.suggest` skips them too —
+/// automated runs carry no human filing intent. The Unassigned view must
+/// mirror that exclusion or every cron run shows up as "unfiled" noise the
+/// filing engine can never answer for.
+const Set<String> kMachineSessionSources = {'cron', 'kanban', 'oneshot'};
+
+bool isMachineSession(Session session) =>
+    kMachineSessionSources.contains(session.source);
+
 /// Assigns a conversation to its date bucket, by calendar day.
 ChatDateBucket chatDateBucket(DateTime now, double lastActiveSeconds) {
   final activity = DateTime.fromMillisecondsSinceEpoch(
@@ -72,11 +83,15 @@ List<Session> filterChats({
   final filtered = [
     for (final session in sessions)
       if (switch (filter) {
-            WorkspaceChatsFilter.all => true,
-            WorkspaceChatsFilter.recent => session.lastActive >= recentCutoff,
-            WorkspaceChatsFilter.unassigned => !claimedSessionIds.contains(
-              session.id,
-            ),
+            WorkspaceChatsFilter.all => !session.archived,
+            WorkspaceChatsFilter.recent =>
+              !session.archived && session.lastActive >= recentCutoff,
+            WorkspaceChatsFilter.unassigned =>
+              !session.archived &&
+              !isMachineSession(session) &&
+              !claimedSessionIds.contains(
+                session.id,
+              ),
             WorkspaceChatsFilter.archived =>
               session.archived || archivedQuickChatIds.contains(session.id),
           } &&
@@ -113,6 +128,13 @@ class WorkspaceSessionsData {
   final Set<String> claimedSessionIds;
   final Set<String> archivedQuickChatIds;
 
+  /// Server-archived sessions, fetched from the dashboard's
+  /// `archived=only` router. The gateway chat transport never returns
+  /// archived rows, so without this the Archived chip only ever showed
+  /// quick-chat expiries. Empty when the dashboard is unreachable — the
+  /// chip then degrades to quick-chat-only rather than lying.
+  final List<Session> archivedSessions;
+
   /// Best-effort session id → project label mapping.
   ///
   /// Built from the server `projects.tree` preview rows; a conversation whose
@@ -123,12 +145,48 @@ class WorkspaceSessionsData {
     this.sessions = const [],
     this.claimedSessionIds = const {},
     this.archivedQuickChatIds = const {},
+    this.archivedSessions = const [],
     this.projectLabels = const {},
   });
 }
 
 typedef WorkspaceSessionsLoader = Future<WorkspaceSessionsData> Function();
 typedef WorkspaceSessionPromoter = Future<void> Function(Session session);
+
+/// A reversible batch action the gateway's `organization.*` surface supports.
+enum WorkspaceBatchAction { pin, unpin, archive }
+
+/// Outcome of one batch run, surfaced to the list so a partial batch keeps
+/// its undo handle: the applied half is reversible even when some ids failed.
+class WorkspaceBatchOutcome {
+  final String batchId;
+  final int requested;
+  final int applied;
+  final int failed;
+
+  const WorkspaceBatchOutcome({
+    required this.batchId,
+    required this.requested,
+    required this.applied,
+    required this.failed,
+  });
+
+  bool get partial => failed > 0;
+
+  /// Undo only makes sense when the server actually applied something and
+  /// handed back a batch id.
+  bool get undoable => batchId.isNotEmpty && applied > 0;
+}
+
+/// Runs a batch action over the given session ids; returns the outcome so
+/// the caller can offer an undo for whatever the server applied.
+typedef WorkspaceBatchRunner = Future<WorkspaceBatchOutcome> Function(
+  List<String> sessionIds,
+  WorkspaceBatchAction action,
+);
+
+/// Reverses one batch by id.
+typedef WorkspaceBatchUndoRunner = Future<void> Function(String batchId);
 
 class QuickChatPromotionCancelled implements Exception {
   const QuickChatPromotionCancelled();
@@ -145,9 +203,11 @@ List<Session> filterWorkspaceSessions({
   return [
     for (final session in sessions)
       if (switch (view) {
-            WorkspaceSessionView.unassigned => !claimedSessionIds.contains(
-              session.id,
-            ),
+            WorkspaceSessionView.unassigned =>
+              !isMachineSession(session) &&
+              !claimedSessionIds.contains(
+                session.id,
+              ),
             WorkspaceSessionView.archivedQuick => archivedQuickChatIds.contains(
               session.id,
             ),
@@ -168,6 +228,12 @@ class WorkspaceSessionsScreen extends StatefulWidget {
   final WorkspaceSessionsLoader load;
   final ValueChanged<Session> onOpenSession;
   final WorkspaceSessionPromoter? onPromote;
+
+  /// Batch organization callbacks. When [runBatch] is null the batch
+  /// selection affordances stay hidden — the gateway has not proven the
+  /// `organization.*` contract.
+  final WorkspaceBatchRunner? runBatch;
+  final WorkspaceBatchUndoRunner? undoBatch;
   final bool embedded;
 
   /// Clock injection for deterministic filter/date tests. When null the
@@ -180,6 +246,8 @@ class WorkspaceSessionsScreen extends StatefulWidget {
     required this.load,
     required this.onOpenSession,
     this.onPromote,
+    this.runBatch,
+    this.undoBatch,
     this.embedded = false,
     this.now,
     super.key,
@@ -195,6 +263,13 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
   Object? _error;
   String _query = '';
   final Set<String> _promoting = {};
+
+  /// Batch selection mode. Enters on long-press (when the gateway proved
+  /// `organization.*`), exits on cancel or after a batch completes.
+  final Set<String> _selected = {};
+  bool _batchBusy = false;
+
+  bool get _selectMode => widget.runBatch != null && _selected.isNotEmpty;
 
   /// The active chip filter in the embedded Chats browser.
   WorkspaceChatsFilter _filter = WorkspaceChatsFilter.all;
@@ -264,6 +339,78 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
     }
   }
 
+  void _toggleSelected(String sessionId) {
+    setState(() {
+      if (!_selected.remove(sessionId)) _selected.add(sessionId);
+    });
+  }
+
+  void _exitSelection() => setState(_selected.clear);
+
+  Future<void> _runBatchAction(WorkspaceBatchAction action) async {
+    final runner = widget.runBatch;
+    if (runner == null || _selected.isEmpty || _batchBusy) return;
+    final ids = _selected.toList();
+    setState(() => _batchBusy = true);
+    try {
+      final outcome = await runner(ids, action);
+      if (!mounted) return;
+      setState(() {
+        _batchBusy = false;
+        _selected.clear();
+      });
+      final verb = switch (action) {
+        WorkspaceBatchAction.pin => 'Pinned',
+        WorkspaceBatchAction.unpin => 'Unpinned',
+        WorkspaceBatchAction.archive => 'Archived',
+      };
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            outcome.partial
+                ? '$verb ${outcome.applied} of ${outcome.requested} chat(s)'
+                    ' — ${outcome.failed} failed'
+                : '$verb ${outcome.applied} chat(s)',
+          ),
+          action: outcome.undoable
+              ? SnackBarAction(
+                  label: 'Undo',
+                  onPressed: () => unawaited(_undoBatch(outcome.batchId)),
+                )
+              : null,
+        ),
+      );
+      await _load();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _batchBusy = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Batch failed: $error')),
+      );
+    }
+  }
+
+  Future<void> _undoBatch(String batchId) async {
+    final undo = widget.undoBatch;
+    if (undo == null || _batchBusy) return;
+    setState(() => _batchBusy = true);
+    try {
+      await undo(batchId);
+      if (!mounted) return;
+      setState(() => _batchBusy = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Batch undone')),
+      );
+      await _load();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() => _batchBusy = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Undo failed: $error')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final data = _data;
@@ -289,9 +436,14 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
   }
 
   Widget _buildLoaded(WorkspaceSessionsData data) {
+    // The embedded browser filters over the union of the gateway's active
+    // list and the dashboard's archived list: the Archived chip needs the
+    // archived rows, and every other chip explicitly excludes
+    // `session.archived`, so the union cannot leak them into All/Recent/
+    // Unassigned.
     final sessions = widget.embedded
         ? filterChats(
-            sessions: data.sessions,
+            sessions: [...data.sessions, ...data.archivedSessions],
             filter: _filter,
             claimedSessionIds: data.claimedSessionIds,
             archivedQuickChatIds: data.archivedQuickChatIds,
@@ -315,9 +467,13 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
             ),
           ];
 
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: ListView(
+    return Column(
+      children: [
+        if (_selectMode) _buildBatchBar(sessions),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _load,
+            child: ListView(
         padding: const EdgeInsets.fromLTRB(
           HermesSpacing.lg,
           HermesSpacing.md,
@@ -370,7 +526,91 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
                   child: _buildSessionRow(session, data),
                 ),
             ],
-        ],
+          ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// The select-mode action bar: what is selected, what can be done, and
+  /// how to get out. Disabled buttons while a batch is in flight so a
+  /// double-tap can't fire two overlapping batches.
+  Widget _buildBatchBar(List<Session> sessions) {
+    final tokens = HermesTokens.of(context);
+    final count = _selected.length;
+    final allSelected = count >= sessions.length && sessions.isNotEmpty;
+    return Material(
+      color: tokens.raised,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(
+          HermesSpacing.lg,
+          HermesSpacing.sm,
+          HermesSpacing.lg,
+          HermesSpacing.sm,
+        ),
+        child: Row(
+          children: [
+            IconButton(
+              tooltip: allSelected ? 'Deselect all' : 'Select all',
+              onPressed: _batchBusy
+                  ? null
+                  : () => setState(() {
+                        if (allSelected) {
+                          _selected.clear();
+                        } else {
+                          _selected
+                            ..clear()
+                            ..addAll(sessions.map((s) => s.id));
+                        }
+                      }),
+              icon: Icon(
+                allSelected
+                    ? Icons.deselect
+                    : Icons.select_all,
+              ),
+            ),
+            Expanded(
+              child: Text(
+                '$count selected',
+                style: tokens.typography.label.copyWith(
+                  color: tokens.onSurface,
+                ),
+              ),
+            ),
+            if (_batchBusy)
+              const SizedBox.square(
+                dimension: 20,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            else ...[
+              IconButton(
+                tooltip: 'Pin',
+                onPressed: () =>
+                    unawaited(_runBatchAction(WorkspaceBatchAction.pin)),
+                icon: const Icon(Icons.push_pin_outlined),
+              ),
+              IconButton(
+                tooltip: 'Unpin',
+                onPressed: () =>
+                    unawaited(_runBatchAction(WorkspaceBatchAction.unpin)),
+                icon: const Icon(Icons.push_pin),
+              ),
+              IconButton(
+                tooltip: 'Archive',
+                onPressed: () =>
+                    unawaited(_runBatchAction(WorkspaceBatchAction.archive)),
+                icon: const Icon(Icons.archive_outlined),
+              ),
+            ],
+            IconButton(
+              tooltip: 'Cancel selection',
+              onPressed: _batchBusy ? null : _exitSelection,
+              icon: const Icon(Icons.close),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -400,18 +640,37 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
     final showPromote =
         widget.view == WorkspaceSessionView.archivedQuick &&
         widget.onPromote != null;
+    final selectable = widget.runBatch != null;
+    final selected = _selected.contains(session.id);
     return HermesCard(
-      onTap: () => widget.onOpenSession(session),
+      onTap: _selectMode
+          ? () => _toggleSelected(session.id)
+          : () => widget.onOpenSession(session),
+      onLongPress: selectable
+          ? () => _toggleSelected(session.id)
+          : null,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(
-            session.pinned
-                ? Icons.push_pin_outlined
-                : Icons.chat_bubble_outline,
-            size: 20,
-            color: session.pinned ? tokens.accent : tokens.muted,
-          ),
+          if (_selectMode)
+            Padding(
+              padding: const EdgeInsets.only(right: HermesSpacing.sm, top: 1),
+              child: Icon(
+                selected
+                    ? Icons.check_circle
+                    : Icons.radio_button_unchecked,
+                size: 22,
+                color: selected ? tokens.accent : tokens.muted,
+              ),
+            )
+          else
+            Icon(
+              session.pinned
+                  ? Icons.push_pin_outlined
+                  : Icons.chat_bubble_outline,
+              size: 20,
+              color: session.pinned ? tokens.accent : tokens.muted,
+            ),
           const SizedBox(width: HermesSpacing.md),
           Expanded(
             child: Column(

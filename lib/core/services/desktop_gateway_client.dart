@@ -3,10 +3,13 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 
+import 'assets_gateway_client.dart';
 import 'capability_registry.dart';
 import 'connection_manager.dart';
+import 'filing_gateway_client.dart';
 import 'gateway_turn_coordinator.dart';
 import 'gateway_turn_journal.dart';
+import 'organization_gateway_client.dart';
 import 'projects_gateway_client.dart';
 import 'ws_client.dart';
 
@@ -44,11 +47,19 @@ class DesktopGatewayClient {
   DesktopConnectionCallback? _connectionListener;
   GatewayTurnCoordinatorRegistry? _turnCoordinatorRegistry;
   ProjectsGatewayClient? _projects;
+  FilingGatewayClient? _filing;
+  OrganizationGatewayClient? _organization;
+  AssetsGatewayClient? _assets;
   final CapabilityRegistry _capabilities = CapabilityRegistry();
 
   static const _asyncEventTypes = {
     'background.complete',
     'review.summary',
+    // Auto-title pushes land in the turn prologue (delivered via the
+    // submit stream) but can also arrive after the terminal event or on a
+    // reconnect; the bridge relays them so the open chat re-labels.
+    // Applying the same title twice is a no-op in ChatScreen.
+    'session.title',
     'notification.show',
     'notification.clear',
     'subagent.spawn_requested',
@@ -264,6 +275,13 @@ class DesktopGatewayClient {
     await _connect(sessionId, workingDirectory: workingDirectory);
   }
 
+  /// The dashboard client backing this gateway's auth/ticket flow.
+  ///
+  /// Exposed so collaborators (e.g. the Projects folder provisioner) can
+  /// reuse this connection's cached auth and single-flight login instead of
+  /// standing up a second unauthenticated HTTP client.
+  DashboardClient get dashboard => _dashboard;
+
   /// Server-owned Hermes Projects for this gateway.
   ///
   /// Projects are connection-scoped, not session-scoped, so this opens the
@@ -272,6 +290,43 @@ class DesktopGatewayClient {
   /// instead of an error state, so callers can fall back to local grouping.
   ProjectsGatewayClient get projects {
     return _projects ??= ProjectsGatewayClient((method, params) async {
+      final client = await _connectControl();
+      return client.send(method, params);
+    }, capabilities: _capabilities);
+  }
+
+  /// Correction-aware Projects filing over the same control transport.
+  ///
+  /// Connection-scoped like [projects]: no chat session is created or
+  /// resumed. A gateway without the `filing.*` family surfaces
+  /// [FilingUnsupportedException] so callers degrade the surface instead
+  /// of failing.
+  FilingGatewayClient get filing {
+    return _filing ??= FilingGatewayClient((method, params) async {
+      final client = await _connectControl();
+      return client.send(method, params);
+    }, capabilities: _capabilities);
+  }
+
+  /// Batch pin/archive/undo over the same control transport.
+  ///
+  /// Connection-scoped like [filing]: a gateway without the
+  /// `organization.*` family surfaces [OrganizationUnsupportedException]
+  /// so callers degrade the surface instead of failing.
+  OrganizationGatewayClient get organization {
+    return _organization ??= OrganizationGatewayClient((method, params) async {
+      final client = await _connectControl();
+      return client.send(method, params);
+    }, capabilities: _capabilities);
+  }
+
+  /// Server-authoritative asset index over the same control transport.
+  ///
+  /// Connection-scoped like [filing]: a gateway without the `assets.*`
+  /// family surfaces [AssetsUnsupportedException] so callers degrade the
+  /// surface instead of failing.
+  AssetsGatewayClient get assets {
+    return _assets ??= AssetsGatewayClient((method, params) async {
       final client = await _connectControl();
       return client.send(method, params);
     }, capabilities: _capabilities);
@@ -383,8 +438,12 @@ class DesktopGatewayClient {
       final gatewaySessionId = event.data['session_id']?.toString();
       String? mobileSessionId;
       if (gatewaySessionId != null && gatewaySessionId.isNotEmpty) {
+        // Auto-title pushes carry the STORED key (prompt_turn's
+        // session_key), while other events carry the runtime sid — match
+        // either binding for the same mobile session.
         for (final entry in _gatewaySessionIds.entries) {
-          if (entry.value == gatewaySessionId) {
+          if (entry.value == gatewaySessionId ||
+              _storedSessionIds[entry.key] == gatewaySessionId) {
             mobileSessionId = entry.key;
             break;
           }
@@ -516,6 +575,9 @@ class DesktopGatewayClient {
     _asyncEventListener = null;
     _connectionListener = null;
     _projects = null;
+    _filing = null;
+    _organization = null;
+    _assets = null;
     _ws?.close();
     _ws = null;
     _gatewaySessionIds.clear();

@@ -23,6 +23,7 @@ import '../services/connection_manager.dart';
 import '../services/desktop_gateway_client.dart';
 import '../services/gateway_turn_application_controller.dart';
 import '../services/gateway_turn_journal.dart';
+import '../services/project_folder_provisioner.dart';
 import '../services/projects_gateway_client.dart';
 import '../services/projects_repository.dart';
 import '../services/quick_chat_store.dart';
@@ -43,6 +44,8 @@ import '../widgets/projects_pane.dart';
 import 'chat_screen.dart';
 import 'files_screen.dart';
 import 'cron_screen.dart';
+import 'assets_screen.dart';
+import 'filing_screen.dart';
 import 'memory_screen.dart';
 import 'settings_screen.dart';
 import 'skills_screen.dart';
@@ -204,9 +207,22 @@ class WorkspaceScreen extends StatefulWidget {
 class _WorkspaceScreenState extends State<WorkspaceScreen> {
   ProjectsRepository? _repository;
   DesktopGatewayClient? _ownedGateway;
+
+  /// Proven answer for the gateway's `filing.*` correction-aware contract.
+  /// Null until probed; false keeps the More entry disabled with its reason.
+  bool? _filingAvailable;
+
+  /// Proven answer for the gateway's `organization.*` batch/undo contract.
+  /// Null until probed; only `true` enables batch selection in the lists.
+  bool? _orgAvailable;
+
+  /// Proven answer for the gateway's `assets.*` server-authoritative
+  /// index. Null until probed; false keeps the More entry disabled.
+  bool? _assetsAvailable;
   ChatSpaceStore? _spaceStore;
   QuickChatStore? _quickChats;
   ApiClient? _sessionsApi;
+  DashboardClient? _archivedSessionsClient;
   bool _ownsRepository = false;
   bool _initialized = false;
   late final Future<void> _initialization;
@@ -648,6 +664,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           client: gateway.projects,
           preferences: preferences,
           connectionId: widget.connection.id,
+          folderProvisioner: DashboardFolderProvisioner(gateway.dashboard),
         );
         _spaceStore = spaceStore;
         _ownsRepository = true;
@@ -663,11 +680,17 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   Widget _pane(BuildContext context, HermesDestination destination) {
     switch (destination) {
       case HermesDestination.chats:
+        // Batch selection needs the proven organization.* contract; the
+        // probe fires once here so long-press works without a settings hop.
+        if (_orgAvailable == null) unawaited(_probeOrganization());
+        final batchable = _orgAvailable == true;
         return WorkspaceSessionsScreen(
           title: 'Chats',
           view: WorkspaceSessionView.all,
           embedded: true,
           load: _loadWorkspaceSessionsData,
+          runBatch: batchable ? _runOrgBatch : null,
+          undoBatch: batchable ? _undoOrgBatch : null,
           onOpenSession: (session) => unawaited(
             _openSession(session, projectName: _chatProjectLabels[session.id]),
           ),
@@ -710,8 +733,19 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           onOpenItem: _openActivityItem,
         );
       case HermesDestination.more:
+        // Probe filing lazily, on first open of the pane: the entry must
+        // reflect the server's real answer, and an unprobed gateway is not
+        // evidence either way.
+        if (_filingAvailable == null) unawaited(_probeFiling());
+        if (_orgAvailable == null) unawaited(_probeOrganization());
+        if (_assetsAvailable == null) unawaited(_probeAssets());
         return MorePane(
-          sections: buildMoreSections(dashboardReachable: _dashboardReachable),
+          sections: buildMoreSections(
+            dashboardReachable: _dashboardReachable,
+            filingAvailable: _filingAvailable == true,
+            organizationAvailable: _orgAvailable == true,
+            assetsAvailable: _assetsAvailable == true,
+          ),
           onSelect: _openMoreEntry,
         );
     }
@@ -1008,16 +1042,28 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         // project's working directory as the session cwd instead — the
         // gateway derives project membership from cwd (`project_for_path`),
         // so the chat still lands inside the project.
+        //
+        // A Project with no folder cannot be bound this way (Android allows
+        // name-only Projects), so the message must not claim a folder that
+        // was never sent. The chat still opens; the user is told plainly it
+        // is unassigned and what to do about it.
         if (!mounted) return;
         final messenger = ScaffoldMessenger.of(context);
         messenger.hideCurrentSnackBar();
+        final hasFolder =
+            (draft.projectWorkingDirectory?.trim().isNotEmpty ?? false);
         messenger.showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text(
-              'This gateway can\u2019t file chats into projects directly \u2014 '
-              'opened in the project\u2019s folder instead.',
+              hasFolder
+                  ? 'This gateway can\u2019t file chats into projects directly — '
+                      'opened in the project\u2019s folder instead.'
+                  : 'This gateway can\u2019t file chats into projects, and this '
+                      'Project has no folder to open it in — the chat opened '
+                      'unassigned. Add a folder to the Project to group its '
+                      'chats.',
             ),
-            duration: Duration(seconds: 4),
+            duration: Duration(seconds: hasFolder ? 4 : 6),
           ),
         );
       } catch (_) {
@@ -1111,13 +1157,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             .overview(refresh: true)
             .timeout(const Duration(seconds: 8));
         claimed = overview.scopedSessionIds.toSet();
-        // Best-effort session → project label, from the server's own preview
-        // rows. A conversation the overview does not name stays honest as
+        // Best-effort session → project label from the server's full placement
+        // map (every claimed chat names its owner, not just the top-N
+        // previews). A conversation the map does not name stays honest as
         // "Unassigned" in the Chats row.
         projectLabels = {
-          for (final project in overview.projects)
-            for (final preview in project.previewSessions)
-              preview.id: project.label,
+          for (final entry in overview.sessionProjects.entries)
+            if (overview.ownerLabelOf(entry.key) != null)
+              entry.key: overview.ownerLabelOf(entry.key)!,
         };
       } catch (_) {
         // A gateway without projects.tree still gets All chats and Search.
@@ -1132,11 +1179,37 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       // Quick-chat metadata is additive; session access must survive its loss.
     }
 
+    // Server-archived chats come from the dashboard, not the gateway: the
+    // api_server behind the chat transport ignores `archived` and never
+    // returns archived rows (live-verified). Best-effort like the reads
+    // above — a connection without dashboard credentials keeps the
+    // Archived chip on quick-chat expiries only.
+    List<Session> archivedSessions = const [];
+    if (_dashboardReachable) {
+      try {
+        final dashboard = _archivedSessionsClient ??= DashboardClient(
+          host: widget.connection.host,
+          port: widget.connection.dashboardPort,
+          useHttps: widget.connection.useHttps,
+          pathPrefix: widget.connection.dashboardPrefix ?? '',
+          proxied: widget.connection.dashboardProxied,
+          username: widget.connection.dashboardUsername,
+          password: widget.connection.dashboardPassword,
+        );
+        archivedSessions = await dashboard
+            .getArchivedSessions()
+            .timeout(const Duration(seconds: 8));
+      } catch (_) {
+        // Same additive contract: no dashboard, no server-archived rows.
+      }
+    }
+
     _chatProjectLabels = Map.unmodifiable(projectLabels);
     return WorkspaceSessionsData(
       sessions: sessions,
       claimedSessionIds: Set.unmodifiable(claimed),
       archivedQuickChatIds: Set.unmodifiable(archived),
+      archivedSessions: List.unmodifiable(archivedSessions),
       projectLabels: _chatProjectLabels,
     );
   }
@@ -1153,6 +1226,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         title: title,
         view: view,
         load: _loadWorkspaceSessionsData,
+        runBatch: _orgAvailable == true ? _runOrgBatch : null,
+        undoBatch: _orgAvailable == true ? _undoOrgBatch : null,
         onOpenSession: (session) => unawaited(_openSession(session)),
         onPromote: view == WorkspaceSessionView.archivedQuick
             ? _promoteQuickChat
@@ -1215,6 +1290,121 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     }
   }
 
+  final Map<String, Future<void>> _capabilityProbes = {};
+
+  /// Runs a capability probe at most once, no matter how many rebuilds ask.
+  /// Concurrent requests share the same in-flight future, so a burst of
+  /// rebuilds (each probe completing triggers a setState that re-enters
+  /// [_pane]) opens at most one probe-only gateway connection per family.
+  /// Best-effort: any failure — unsupported family, transport blink,
+  /// missing contract library — resolves to false, which keeps the gated
+  /// entry honestly disabled rather than optimistically open.
+  Future<void> _probeCapability(
+    String family,
+    Future<bool> Function(DesktopGatewayClient gateway) probe,
+    void Function(bool available) apply,
+  ) {
+    return _capabilityProbes.putIfAbsent(family, () async {
+      var gateway = _ownedGateway;
+      var ownsProbeOnly = false;
+      if (gateway == null) {
+        final gatewayUrl = widget.connection.desktopGatewayUrl?.trim() ?? '';
+        if (gatewayUrl.isEmpty) return;
+        try {
+          gateway = DesktopGatewayClient.fromConnection(widget.connection);
+          ownsProbeOnly = true;
+        } catch (_) {
+          return;
+        }
+      }
+      try {
+        final available = await probe(gateway);
+        if (mounted) setState(() => apply(available));
+      } catch (_) {
+        if (mounted) setState(() => apply(false));
+      } finally {
+        if (ownsProbeOnly) gateway.close();
+      }
+    });
+  }
+
+  /// Probes `filing.status` once so the More pane can gate AI-assisted
+  /// filing on the server's real answer.
+  Future<void> _probeFiling() => _probeCapability(
+        'filing',
+        (gateway) async => (await gateway.filing.status()).available,
+        (available) => _filingAvailable = available,
+      );
+
+  /// Probes `organization.history` once so batch selection can be enabled
+  /// on the gateway's real answer.
+  Future<void> _probeOrganization() => _probeCapability(
+        'organization',
+        (gateway) async {
+          await gateway.organization.history();
+          return true;
+        },
+        (available) => _orgAvailable = available,
+      );
+
+  /// Probes `assets.status` once so the More pane can gate the Assets
+  /// gallery on the gateway's real answer.
+  Future<void> _probeAssets() => _probeCapability(
+        'assets',
+        (gateway) async => (await gateway.assets.status()).available,
+        (available) => _assetsAvailable = available,
+      );
+
+  /// Runs one batch action and returns the server's outcome for undo.
+  ///
+  /// Uses the owned gateway when present; otherwise opens a probe-only one
+  /// for the call. A partial batch is NOT an error: the applied half stays
+  /// reversible through the returned batch id, and the snackbar reports the
+  /// failed count. Only a genuine transport/RPC failure throws.
+  Future<WorkspaceBatchOutcome> _runOrgBatch(
+    List<String> sessionIds,
+    WorkspaceBatchAction action,
+  ) async {
+    final gateway = _ownedGateway ?? DesktopGatewayClient.fromConnection(
+      widget.connection,
+    );
+    try {
+      final result = switch (action) {
+        WorkspaceBatchAction.pin => await gateway.organization.pin(
+          sessionIds,
+          pinned: true,
+        ),
+        WorkspaceBatchAction.unpin => await gateway.organization.pin(
+          sessionIds,
+          pinned: false,
+        ),
+        WorkspaceBatchAction.archive => await gateway.organization.archive(
+          sessionIds,
+          archived: true,
+        ),
+      };
+      return WorkspaceBatchOutcome(
+        batchId: result.batchId,
+        requested: sessionIds.length,
+        applied: result.applied.length,
+        failed: result.failed.length,
+      );
+    } finally {
+      if (!identical(gateway, _ownedGateway)) gateway.close();
+    }
+  }
+
+  Future<void> _undoOrgBatch(String batchId) async {
+    final gateway = _ownedGateway ?? DesktopGatewayClient.fromConnection(
+      widget.connection,
+    );
+    try {
+      await gateway.organization.undo(batchId: batchId);
+    } finally {
+      if (!identical(gateway, _ownedGateway)) gateway.close();
+    }
+  }
+
   void _openMoreEntry(MoreEntry entry) {
     final connection = widget.connection;
     switch (entry.id) {
@@ -1224,6 +1414,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         _openWorkspaceSessionView(WorkspaceSessionView.archivedQuick);
       case 'files':
         unawaited(_openFiles());
+      case 'assets':
+        _push(AssetsScreen(connection: connection));
+      case 'pin-batch-undo':
+        // The batch surface lives in the chat list itself (long-press to
+        // select); route there rather than to a separate screen.
+        _openWorkspaceSessionView(WorkspaceSessionView.all);
+      case 'ai-filing':
+        _push(FilingScreen(connection: connection));
       case 'cron':
         _push(CronScreen(connection: connection));
       case 'skills':

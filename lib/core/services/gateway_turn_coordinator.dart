@@ -38,7 +38,18 @@ enum GatewayTurnCoordinatorFailure {
 class GatewayTurnCoordinatorException implements Exception {
   final GatewayTurnCoordinatorFailure failure;
 
-  const GatewayTurnCoordinatorException(this.failure);
+  /// True when the failure came from a gateway whose `gateway.ready` greeting
+  /// cleanly lacks the durable turn-recovery contract (a stock Hermes server),
+  /// as opposed to a v2-capable gateway rejecting one feature (attachments)
+  /// or an unsafe/malformed advertisement. Only the clean-absence case may
+  /// be surfaced to the user as "this server doesn't offer recovery" rather
+  /// than a failure.
+  final bool stockGateway;
+
+  const GatewayTurnCoordinatorException(
+    this.failure, {
+    this.stockGateway = false,
+  });
 
   @override
   String toString() => 'Gateway turn coordinator stopped: ${failure.name}.';
@@ -815,6 +826,7 @@ class GatewayTurnCoordinator {
         }
         throw GatewayTurnCoordinatorException(
           await _unsupportedReadyFailure(previous),
+          stockGateway: _readyLacksRecoveryContractCleanly(ready.failure, readyFrame),
         );
       }
       final openResponse = await client.send('session.open', <String, dynamic>{
@@ -1758,6 +1770,36 @@ bool _readyFailureAllowsLegacy(
     case GatewayTurnCapabilityFailure.unsupportedCapability:
       return false;
   }
+}
+
+/// Whether the gateway cleanly does not offer the durable recovery contract,
+/// as opposed to offering a broken or mismatched one.
+///
+/// Stock Hermes greets with `{skin, change_events, replay_epoch}` — no
+/// `protocol` key at all — and a v2 server that simply doesn't implement
+/// turn recovery advertises a protocol with a capabilities map that lacks
+/// the `turn_recovery` family. Both are honest "not offered" states the UI
+/// can label calmly. A present-but-wrong protocol name/major or a malformed
+/// recovery payload is a mismatch or a violation, not an absence, and must
+/// keep the failure presentation.
+bool _readyLacksRecoveryContractCleanly(
+  GatewayTurnCapabilityFailure failure,
+  Map<String, dynamic> frame,
+) {
+  if (failure != GatewayTurnCapabilityFailure.missingProtocol &&
+      failure != GatewayTurnCapabilityFailure.missingCapability) {
+    return false;
+  }
+  final params = frame['params'];
+  if (params is! Map<String, dynamic> || params['type'] != 'gateway.ready') {
+    return false;
+  }
+  final payload = params['payload'];
+  if (payload is! Map<String, dynamic>) return false;
+  if (!payload.containsKey('protocol')) return true;
+  final capabilities = payload['capabilities'];
+  return capabilities is Map<String, dynamic> &&
+      !capabilities.containsKey('turn_recovery');
 }
 
 int _causalTimestamp(int? durablePrior, int current) =>

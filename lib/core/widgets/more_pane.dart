@@ -89,7 +89,22 @@ const _gatewayAiFilingRequired =
 /// [dashboardReachable] gates the surfaces served by the Hermes Dashboard.
 /// Local device settings stay reachable regardless, so the user can always
 /// repair a broken connection from inside the app.
-List<MoreSection> buildMoreSections({required bool dashboardReachable}) {
+///
+/// [filingAvailable] is the gateway's proven answer for the `filing.*`
+/// correction-aware contract (probed once via `filing.status`); without it
+/// the entry stays disabled with its reason, never hidden.
+///
+/// [organizationAvailable] is the proven answer for the `organization.*`
+/// batch pin/archive/undo contract (probed once via `organization.history`).
+///
+/// [assetsAvailable] is the proven answer for the `assets.*`
+/// server-authoritative index (probed once via `assets.status`).
+List<MoreSection> buildMoreSections({
+  required bool dashboardReachable,
+  bool filingAvailable = false,
+  bool organizationAvailable = false,
+  bool assetsAvailable = false,
+}) {
   MoreEntryAvailability dashboardBacked() => dashboardReachable
       ? MoreEntryAvailability.available
       : MoreEntryAvailability.unavailable;
@@ -119,17 +134,20 @@ List<MoreSection> buildMoreSections({required bool dashboardReachable}) {
           availability: dashboardBacked(),
           unavailableReason: dashboardReason(),
         ),
-        const MoreEntry(
+        MoreEntry(
           id: 'assets',
           title: 'Assets',
           subtitle: 'Artifacts, attachments, and generated media',
           icon: Icons.image_outlined,
-          availability: MoreEntryAvailability.unavailable,
-          unavailableReason: _gatewayAssetsRequired,
+          availability: assetsAvailable
+              ? MoreEntryAvailability.available
+              : MoreEntryAvailability.unavailable,
+          unavailableReason:
+              assetsAvailable ? null : _gatewayAssetsRequired,
         ),
       ],
     ),
-    const MoreSection(
+    MoreSection(
       title: 'Organization',
       entries: [
         MoreEntry(
@@ -137,16 +155,22 @@ List<MoreSection> buildMoreSections({required bool dashboardReachable}) {
           title: 'Pin, batch and undo',
           subtitle: 'Cross-device ordering and reversible bulk organization',
           icon: Icons.push_pin_outlined,
-          availability: MoreEntryAvailability.unavailable,
-          unavailableReason: _gatewayOrganizationRequired,
+          availability: organizationAvailable
+              ? MoreEntryAvailability.available
+              : MoreEntryAvailability.unavailable,
+          unavailableReason:
+              organizationAvailable ? null : _gatewayOrganizationRequired,
         ),
         MoreEntry(
           id: 'ai-filing',
           title: 'AI-assisted filing',
           subtitle: 'Suggest Projects and learn from your corrections',
           icon: Icons.auto_fix_high_outlined,
-          availability: MoreEntryAvailability.unavailable,
-          unavailableReason: _gatewayAiFilingRequired,
+          availability: filingAvailable
+              ? MoreEntryAvailability.available
+              : MoreEntryAvailability.unavailable,
+          unavailableReason:
+              filingAvailable ? null : _gatewayAiFilingRequired,
         ),
       ],
     ),

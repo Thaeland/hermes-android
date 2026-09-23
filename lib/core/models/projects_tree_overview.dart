@@ -136,12 +136,19 @@ class ProjectsTreeOverview {
   /// Ids of chats some project already claims, in server order.
   final List<String> scopedSessionIds;
 
+  /// Full placement map: chat id -> owning project id (`__no_project__` for
+  /// the Home bucket). Unlike [ProjectOverviewNode.previewSessions] — a
+  /// top-N window — this names the owner of EVERY claimed chat, so a row
+  /// label never depends on whether the chat made the preview cut.
+  final Map<String, String> sessionProjects;
+
   final Set<String> _scoped;
 
   ProjectsTreeOverview({
     this.projects = const [],
     this.activeId,
     this.scopedSessionIds = const [],
+    this.sessionProjects = const {},
   }) : _scoped = Set.unmodifiable(scopedSessionIds);
 
   static final empty = ProjectsTreeOverview();
@@ -172,8 +179,23 @@ class ProjectsTreeOverview {
       projects: List.unmodifiable(projects),
       activeId: activeId,
       scopedSessionIds: _scopedIds(json['scoped_session_ids']),
+      sessionProjects: _sessionProjects(json['session_projects']),
     );
   }
+
+  /// The label of the project that owns [sessionId], or null when no project
+  /// claims it (or the owning node is the Home bucket, which is not a filing).
+  String? ownerLabelOf(String sessionId) {
+    final ownerId = sessionProjects[sessionId];
+    if (ownerId == null || ownerId == noProjectId) return null;
+    for (final project in projects) {
+      if (project.id == ownerId) return project.label;
+    }
+    return null;
+  }
+
+  /// The Home bucket id the backend's tree uses for unfiled chats.
+  static const String noProjectId = '__no_project__';
 
   /// Projects the user created, so the ones that accept server-side edits.
   List<ProjectOverviewNode> get userProjects =>
@@ -207,6 +229,18 @@ List<String> _scopedIds(Object? raw) {
     if (id != null && seen.add(id)) ids.add(id);
   }
   return List.unmodifiable(ids);
+}
+
+/// Decodes the session id -> project id map, dropping blank keys or values.
+Map<String, String> _sessionProjects(Object? raw) {
+  if (raw is! Map) return const {};
+  final out = <String, String>{};
+  for (final entry in raw.entries) {
+    final id = _trimmedString(entry.key);
+    final owner = _trimmedString(entry.value);
+    if (id != null && owner != null) out[id] = owner;
+  }
+  return Map.unmodifiable(out);
 }
 
 /// Decodes a list of session rows, skipping any row that carries no id.
