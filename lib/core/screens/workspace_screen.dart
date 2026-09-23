@@ -25,7 +25,6 @@ import '../services/desktop_gateway_client.dart';
 import '../services/gateway_turn_application_controller.dart';
 import '../services/gateway_turn_journal.dart';
 import '../services/project_folder_provisioner.dart';
-import '../services/projects_gateway_client.dart';
 import '../services/projects_repository.dart';
 import '../services/quick_chat_store.dart';
 import '../services/remote_files_client.dart';
@@ -269,13 +268,6 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   /// Best-effort Project labels learned from the latest projects.tree read,
   /// used to carry context into chats opened from the global Chats browser.
   Map<String, String> _chatProjectLabels = const {};
-
-  /// Draft session ids of Project chats this workspace started, mapped to the
-  /// Project they were committed to. When `session.open` first binds such a
-  /// draft to a durable stored id, the binding is re-written under the stored
-  /// id so the server-owned Project actually shows the chat.
-  final Map<String, String> _projectChatBindings = {};
-  bool _projectReconcileInstalled = false;
 
   /// Read lazily so a connection that never opens Home never touches secure
   /// storage, and so tests that inject a loader never construct one at all.
@@ -1054,79 +1046,38 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
 
   /// Commits a drafted Project chat before exposing it to navigation.
   ///
-  /// `projects.assign_session` is idempotent, so Retry can safely reuse the
-  /// same session id. A failed write never opens an Unassigned chat under the
-  /// guise of the Project the user chose.
+  /// Stock-gateway-only path: the chat is opened with the Project's folder as
+  /// its session `cwd` (threaded via `draft.projectWorkingDirectory` into
+  /// `session.create`), and the gateway derives project membership from cwd
+  /// (`project_for_path`) — the same way Hermes Desktop files chats. There
+  /// is no pre-open assignment RPC to commit: `projects.assign_session`
+  /// never shipped upstream, so there is nothing to fail or retry here.
+  ///
+  /// A Project with no folder cannot be bound this way (Android allows
+  /// name-only Projects), so the message must not claim a folder that was
+  /// never sent. The chat still opens; the user is told plainly it is
+  /// unassigned and what to do about it.
   Future<void> _finishNewChat(
     NewChatDraft draft, {
     String? initialComposerText,
     List<AttachmentDraft> initialAttachmentDrafts = const [],
   }) async {
-    final projectId = draft.projectId;
-    if (projectId != null) {
-      // Remember the intent so the stored-id reconciliation below can re-write
-      // the assignment once this draft gains its durable server id.
-      _projectChatBindings[draft.session.id] = projectId;
-      _installProjectAssignmentReconcile();
-      try {
-        final repository = _repository;
-        if (repository == null) {
-          throw StateError('Projects are unavailable for this connection');
-        }
-        await repository.assignSession(draft.session.id, projectId);
-      } on ProjectsUnsupportedException {
-        // Stock Hermes hosts the `projects.*` family but predates
-        // `projects.assign_session`. Do not block the chat: open it with the
-        // project's working directory as the session cwd instead — the
-        // gateway derives project membership from cwd (`project_for_path`),
-        // so the chat still lands inside the project.
-        //
-        // A Project with no folder cannot be bound this way (Android allows
-        // name-only Projects), so the message must not claim a folder that
-        // was never sent. The chat still opens; the user is told plainly it
-        // is unassigned and what to do about it.
-        if (!mounted) return;
+    if (draft.projectId != null) {
+      final hasFolder =
+          (draft.projectWorkingDirectory?.trim().isNotEmpty ?? false);
+      if (!hasFolder && mounted) {
         final messenger = ScaffoldMessenger.of(context);
         messenger.hideCurrentSnackBar();
-        final hasFolder =
-            (draft.projectWorkingDirectory?.trim().isNotEmpty ?? false);
         messenger.showSnackBar(
-          SnackBar(
+          const SnackBar(
             content: Text(
-              hasFolder
-                  ? 'This gateway can\u2019t file chats into projects directly — '
-                      'opened in the project\u2019s folder instead.'
-                  : 'This gateway can\u2019t file chats into projects, and this '
-                      'Project has no folder to open it in — the chat opened '
-                      'unassigned. Add a folder to the Project to group its '
-                      'chats.',
+              'This Project has no folder to open the chat in — it opened '
+              'unassigned. Add a folder to the Project to group its chats.',
             ),
-            duration: Duration(seconds: hasFolder ? 4 : 6),
+            duration: Duration(seconds: 6),
           ),
         );
-      } catch (_) {
-        if (!mounted) return;
-        final messenger = ScaffoldMessenger.of(context);
-        messenger.hideCurrentSnackBar();
-        messenger.showSnackBar(
-          SnackBar(
-            persist: false,
-            content: const Text('Couldn’t create Project chat'),
-            action: SnackBarAction(
-              label: 'Retry',
-              onPressed: () => unawaited(
-                _finishNewChat(
-                  draft,
-                  initialComposerText: initialComposerText,
-                  initialAttachmentDrafts: initialAttachmentDrafts,
-                ),
-              ),
-            ),
-          ),
-        );
-        return;
       }
-      if (!mounted) return;
     }
 
     final report = widget.onNewChat;
@@ -1141,42 +1092,6 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       initialComposerText: initialComposerText,
       initialAttachmentDrafts: initialAttachmentDrafts,
     );
-  }
-
-  /// Re-writes a Project chat's assignment under its durable stored id.
-  ///
-  /// The commit-before-open write uses the draft id (`mob-...`) because the
-  /// stored id only exists once `session.open` runs. The Gateway binds the two
-  /// ids; this workspace subscribes once and, on the first binding, writes the
-  /// authoritative row the server-owned Project tree can resolve.
-  void _installProjectAssignmentReconcile() {
-    if (_projectReconcileInstalled) return;
-    final controller = widget.turnApplicationController;
-    if (controller == null) return;
-    _projectReconcileInstalled = true;
-    controller
-        .sessionFor(widget.connection)
-        .onSessionBound = (localSessionId, storedSessionId) {
-      final projectId = _projectChatBindings.remove(localSessionId);
-      if (projectId == null) return;
-      unawaited(_reconcileProjectAssignment(storedSessionId, projectId));
-    };
-  }
-
-  Future<void> _reconcileProjectAssignment(
-    String storedSessionId,
-    String projectId,
-  ) async {
-    final repository = _repository;
-    if (repository == null) return;
-    try {
-      await repository.assignSession(storedSessionId, projectId);
-    } catch (_) {
-      // Best-effort: the commit-before-open write already recorded the user's
-      // choice under the draft id, so the intent is never lost — this only
-      // makes the chat visible inside the Project one refresh sooner.
-      debugPrint('Could not reconcile Project assignment for $storedSessionId');
-    }
   }
 
   Future<WorkspaceSessionsData> _loadWorkspaceSessionsData() async {

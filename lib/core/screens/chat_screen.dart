@@ -130,8 +130,8 @@ class ChatScreen extends StatefulWidget {
 
   /// The owning Project's working directory on the gateway host. Forwarded as
   /// `cwd` when this chat's session is created, so a Project chat runs inside
-  /// the project folder even on gateways without `projects.assign_session`
-  /// (stock Hermes derives project membership from the session cwd).
+  /// the project folder — stock Hermes derives project membership from the
+  /// session cwd (`project_for_path`), so the cwd is the filing.
   final String? projectWorkingDirectory;
 
   /// Optional text supplied by Android's share sheet. It only prefills the

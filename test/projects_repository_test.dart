@@ -35,10 +35,6 @@ class _FakeGateway {
   /// When set, every call to this method throws (models a missing sibling).
   String? failMethod;
 
-  /// When true, `projects.assign_session` answers unknown-method (a stock
-  /// gateway) while `session.workspace.move` succeeds and is recorded.
-  bool unsupportedAssign = false;
-
   /// Params of every `session.workspace.move` the repo issued.
   final List<Map<String, dynamic>> workspaceMoves = [];
 
@@ -118,23 +114,6 @@ class _FakeGateway {
       case 'projects.set_active':
         activeId = params['id'] as String?;
         return _ok({'active_id': activeId});
-      case 'projects.assign_session':
-        if (unsupportedAssign) {
-          // Returned as an error envelope (not a throw): the client only
-          // converts envelope errors into ProjectsUnsupportedException.
-          return {
-            'jsonrpc': '2.0',
-            'id': 1,
-            'error': const {
-              'code': -32601,
-              'message': 'unknown method: projects.assign_session',
-            },
-          };
-        }
-        return _ok({
-          'session_id': params['session_id'],
-          'project_id': params['project_id'],
-        });
       case 'session.workspace.move':
         workspaceMoves.add(Map<String, dynamic>.from(params));
         return _ok({
@@ -577,7 +556,7 @@ void main() {
     );
 
     test(
-      'move falls back to the cwd re-home on a stock gateway',
+      'move re-homes the workspace to the target project folder',
       () async {
         final gateway = _FakeGateway(
           projects: [
@@ -595,7 +574,7 @@ void main() {
               ],
             ),
           ],
-        )..unsupportedAssign = true;
+        );
         final repo = _repository(gateway, await SharedPreferences.getInstance());
         await repo.refresh();
 
@@ -613,9 +592,9 @@ void main() {
     );
 
     test(
-      'moving back to Unassigned on a stock gateway reports why',
+      'moving back to Unassigned reports why (cwd-derived filing)',
       () async {
-        final gateway = _FakeGateway()..unsupportedAssign = true;
+        final gateway = _FakeGateway();
         final repo = _repository(gateway, await SharedPreferences.getInstance());
         await repo.refresh();
 
@@ -627,11 +606,11 @@ void main() {
     );
 
     test(
-      'a folderless target on a stock gateway asks for a folder',
+      'a folderless target asks for a folder',
       () async {
         final gateway = _FakeGateway(
           projects: [_projectJson(id: 'p1', name: 'Name Only')],
-        )..unsupportedAssign = true;
+        );
         final repo = _repository(gateway, await SharedPreferences.getInstance());
         await repo.refresh();
 
@@ -643,7 +622,7 @@ void main() {
     );
 
     test(
-      'the move falls back to the mobile id when no stored key is bound',
+      'the move uses the mobile id when no stored key is bound',
       () async {
         final gateway = _FakeGateway(
           projects: [
@@ -653,7 +632,7 @@ void main() {
               primaryPath: '/home/dev/scripthive',
             ),
           ],
-        )..unsupportedAssign = true;
+        );
         final repo = _repository(gateway, await SharedPreferences.getInstance());
         await repo.refresh();
 
