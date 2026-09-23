@@ -331,7 +331,31 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         );
         _desktopGateway!.setAsyncEventListener(_handleDesktopAsyncEvent);
         _desktopGateway!.setConnectionListener((state) {
-          if (mounted) setState(() => _desktopConnectionState = state);
+          if (!mounted) return;
+          // A deliberate connection switch or a dropped socket detaches the
+          // WS mid-turn. The gateway no longer cancels the running turn at
+          // the orphan-reap grace (activity-staleness gate); it completes
+          // detached and the client re-resumes the stored session on the
+          // fresh socket. Say so — the bare silence read as "your reply was
+          // lost" (issue #94196's `Operation interrupted.` UX).
+          final wasLive = _desktopConnectionState ==
+              DesktopConnectionState.connected;
+          final turnInFlight = _sending || _streaming;
+          if (wasLive &&
+              turnInFlight &&
+              (state == DesktopConnectionState.reconnecting ||
+                  state == DesktopConnectionState.disconnected)) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Connection switched — the running reply continues on the '
+                  'server and will reattach automatically.',
+                ),
+                persist: false,
+              ),
+            );
+          }
+          setState(() => _desktopConnectionState = state);
         });
         unawaited(_ensureDesktopSession());
       } on ArgumentError {

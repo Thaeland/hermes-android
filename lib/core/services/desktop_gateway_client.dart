@@ -364,6 +364,63 @@ class DesktopGatewayClient {
     _storedSessionIds[mobileSessionId] = binding.storedSessionId;
   }
 
+  /// True when [error] says the runtime session id the gateway was handed no
+  /// longer exists — the detached/orphan-reap or eviction signature. The
+  /// gateway's own rejection text tells the client to resume the STORED id
+  /// (`_sess_nowait`, 4001), so this is a recoverable stale-binding, not a
+  /// hard failure.
+  static bool _isStaleRuntimeSession(JsonRpcError error) {
+    if (error.code == 4001) return true;
+    final message = error.message.toLowerCase();
+    return message.contains('session not found') ||
+        message.contains('not in memory');
+  }
+
+  /// Runs a session-scoped gateway call with one automatic recovery from a
+  /// stale runtime binding.
+  ///
+  /// The gateway orphan-reaps detached runtimes and LRU-evicts idle ones, so
+  /// a cached runtime sid can name a session the server no longer holds even
+  /// while the stored row lives on. Every session-scoped RPC then fails with
+  /// 4001 "session not found" and the UI shows a dropped chat. Recovery is
+  /// exactly what the gateway's rejection asks for: drop the stale runtime
+  /// mapping, `session.resume` the stored key on the live socket, and retry
+  /// the call once with the fresh runtime sid. A second stale failure is a
+  /// real one (stored row gone too) and propagates.
+  Future<T> _callSessionScoped<T>(
+    String mobileSessionId,
+    Future<T> Function(_DesktopGatewaySession session) call,
+  ) async {
+    final session = await _connect(mobileSessionId);
+    try {
+      return await call(session);
+    } on JsonRpcError catch (error) {
+      if (!_isStaleRuntimeSession(error)) rethrow;
+      final client = _ws;
+      if (client == null || !client.isConnected || !_rememberedRuntimeIsStale(
+            mobileSessionId,
+            session.sessionId,
+          )) {
+        rethrow;
+      }
+      _gatewaySessionIds.remove(mobileSessionId);
+      final binding = await _resumeOrCreateSingle(
+        client,
+        mobileSessionId,
+        workingDirectory: _workingDirectories[mobileSessionId],
+      );
+      _rememberBinding(mobileSessionId, binding);
+      return call(_DesktopGatewaySession(client, binding.runtimeSessionId));
+    }
+  }
+
+  /// Guard against retrying a call whose sid was not the one we cached: if
+  /// some other path already re-bound the session while the call was in
+  /// flight, the error came from a different generation and a blind retry
+  /// could double-execute against the new binding.
+  bool _rememberedRuntimeIsStale(String mobileSessionId, String usedRuntimeId) =>
+      _gatewaySessionIds[mobileSessionId] == usedRuntimeId;
+
   Future<void> ensureSession(
     String sessionId, {
     String? workingDirectory,
@@ -469,11 +526,13 @@ class DesktopGatewayClient {
     required String name,
     required String dataUrl,
   }) async {
-    final gateway = await _connect(sessionId);
-    return gateway.client.attachFile(
-      sessionId: gateway.sessionId,
-      name: name,
-      dataUrl: dataUrl,
+    return _callSessionScoped(
+      sessionId,
+      (gateway) => gateway.client.attachFile(
+        sessionId: gateway.sessionId,
+        name: name,
+        dataUrl: dataUrl,
+      ),
     );
   }
 
@@ -482,11 +541,13 @@ class DesktopGatewayClient {
     required String text,
     required StreamCallback onEvent,
   }) async {
-    final gateway = await _connect(sessionId);
-    await gateway.client.submitPrompt(
-      text,
-      sessionId: gateway.sessionId,
-      onEvent: onEvent,
+    await _callSessionScoped(
+      sessionId,
+      (gateway) => gateway.client.submitPrompt(
+        text,
+        sessionId: gateway.sessionId,
+        onEvent: onEvent,
+      ),
     );
   }
 
@@ -599,27 +660,33 @@ class DesktopGatewayClient {
     required String provider,
     required String model,
   }) async {
-    final gateway = await _connect(sessionId);
-    await gateway.client.setSessionModel(
-      sessionId: gateway.sessionId,
-      provider: provider,
-      model: model,
+    await _callSessionScoped(
+      sessionId,
+      (gateway) => gateway.client.setSessionModel(
+        sessionId: gateway.sessionId,
+        provider: provider,
+        model: model,
+      ),
     );
   }
 
-  Future<String> getSessionReasoning(String sessionId) async {
-    final gateway = await _connect(sessionId);
-    return gateway.client.getSessionReasoning(gateway.sessionId);
+  Future<String> getSessionReasoning(String sessionId) {
+    return _callSessionScoped(
+      sessionId,
+      (gateway) => gateway.client.getSessionReasoning(gateway.sessionId),
+    );
   }
 
   Future<void> setSessionReasoning({
     required String sessionId,
     required String effort,
   }) async {
-    final gateway = await _connect(sessionId);
-    await gateway.client.setSessionReasoning(
-      sessionId: gateway.sessionId,
-      effort: effort,
+    await _callSessionScoped(
+      sessionId,
+      (gateway) => gateway.client.setSessionReasoning(
+        sessionId: gateway.sessionId,
+        effort: effort,
+      ),
     );
   }
 
@@ -627,16 +694,20 @@ class DesktopGatewayClient {
     required String sessionId,
     required String title,
   }) async {
-    final gateway = await _connect(sessionId);
-    await gateway.client.setSessionTitle(gateway.sessionId, title);
+    await _callSessionScoped(
+      sessionId,
+      (gateway) => gateway.client.setSessionTitle(gateway.sessionId, title),
+    );
   }
 
   Future<Map<String, dynamic>> branchSession({
     required String sessionId,
     required String name,
   }) async {
-    final gateway = await _connect(sessionId);
-    return gateway.client.branchSession(gateway.sessionId, name: name);
+    return _callSessionScoped(
+      sessionId,
+      (gateway) => gateway.client.branchSession(gateway.sessionId, name: name),
+    );
   }
 
   void close() {
