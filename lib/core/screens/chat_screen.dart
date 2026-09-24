@@ -106,6 +106,15 @@ typedef TestRemoteAttachmentUpload =
       required String dataUrl,
     });
 
+/// Mutable holder that lets a test reach the ChatScreen's Desktop
+/// connection-state handler when no real gateway is configured. The screen
+/// fills [handler] in `initState`; the test then calls it with the state
+/// transitions a reconnecting `DesktopGatewayClient` would emit.
+@visibleForTesting
+class TestDesktopConnectionHook {
+  void Function(DesktopConnectionState state)? handler;
+}
+
 class _PendingSensitivePrompt {
   final GatewaySensitivePromptRequest request;
   final int responseGeneration;
@@ -172,6 +181,18 @@ class ChatScreen extends StatefulWidget {
   @visibleForTesting
   final TurnNotificationService? testTurnNotifications;
 
+  /// Passed by tests when no real Desktop gateway is configured: the
+  /// screen attaches its connection-state handler to this hook in
+  /// `initState`, so a test can drive drop-during-turn → reconnect →
+  /// resync transitions without a live socket.
+  @visibleForTesting
+  final TestDesktopConnectionHook? testDesktopConnectionHook;
+
+  /// Invoked on every `_ensureDesktopSession()` call so a test can assert
+  /// the reattach resync actually re-bound the session.
+  @visibleForTesting
+  final VoidCallback? testDesktopSessionEnsured;
+
   const ChatScreen({
     required this.connection,
     required this.session,
@@ -189,6 +210,8 @@ class ChatScreen extends StatefulWidget {
     this.testInitialAttachmentDrafts = const [],
     this.testVoiceComposerAdapter,
     this.testTurnNotifications,
+    this.testDesktopConnectionHook,
+    this.testDesktopSessionEnsured,
     super.key,
   });
 
@@ -237,6 +260,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _stockGatewayFallback = false;
   bool _legacyHistoryResyncPending = false;
   bool _legacyHistoryResyncing = false;
+
+  /// Set when the socket drops while a turn is in flight: the gateway keeps
+  /// the reply running detached, so on the next `connected` the screen must
+  /// re-bind the session and refetch history — otherwise a reply that
+  /// completed server-side during the outage never lands in the transcript.
+  bool _pendingReattachResync = false;
+
+  /// Bumped every time [_fetchMessages] replaces [_messages]. The submit
+  /// catch path compares it against the value captured at send time to tell
+  /// whether a reattach resync already made the server history
+  /// authoritative before it restores the composer.
+  int _historyGeneration = 0;
+  bool _reattachResyncing = false;
   int _responseGeneration = 0;
   bool _approvalDialogOpen = false;
   final List<_PendingSensitivePrompt> _sensitivePromptQueue = [];
@@ -321,33 +357,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           widget.connection,
         );
         _desktopGateway!.setAsyncEventListener(_handleDesktopAsyncEvent);
-        _desktopGateway!.setConnectionListener((state) {
-          if (!mounted) return;
-          // A deliberate connection switch or a dropped socket detaches the
-          // WS mid-turn. The gateway no longer cancels the running turn at
-          // the orphan-reap grace (activity-staleness gate); it completes
-          // detached and the client re-resumes the stored session on the
-          // fresh socket. Say so — the bare silence read as "your reply was
-          // lost" (issue #94196's `Operation interrupted.` UX).
-          final wasLive = _desktopConnectionState ==
-              DesktopConnectionState.connected;
-          final turnInFlight = _sending || _streaming;
-          if (wasLive &&
-              turnInFlight &&
-              (state == DesktopConnectionState.reconnecting ||
-                  state == DesktopConnectionState.disconnected)) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text(
-                  'Connection switched — the running reply continues on the '
-                  'server and will reattach automatically.',
-                ),
-                persist: false,
-              ),
-            );
-          }
-          setState(() => _desktopConnectionState = state);
-        });
+        _desktopGateway!.setConnectionListener(_onDesktopConnectionChanged);
         unawaited(_ensureDesktopSession());
       } on ArgumentError {
         // The regular mobile chat remains usable; selection surfaces the
@@ -355,6 +365,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _desktopGateway = null;
       }
     }
+    // Test seam: with no real gateway, hand the same handler to the test
+    // hook so it can simulate reconnect transitions.
+    widget.testDesktopConnectionHook?.handler = _onDesktopConnectionChanged;
     _turnApplicationSession =
         widget.testTurnApplicationSession ??
         (_desktopGateway != null
@@ -450,8 +463,44 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     await _recoverPendingTurn(allowLegacyFallback: true);
   }
 
+  /// Desktop gateway connection-state transitions.
+  ///
+  /// A deliberate connection switch or a dropped socket detaches the WS
+  /// mid-turn. The gateway no longer cancels the running turn at the
+  /// orphan-reap grace (activity-staleness gate); it completes detached
+  /// and the client re-resumes the stored session on the fresh socket.
+  /// Say so — the bare silence read as "your reply was lost" (issue
+  /// #94196's `Operation interrupted.` UX) — and remember the drop so the
+  /// eventual `connected` transition actually re-binds and refetches.
+  void _onDesktopConnectionChanged(DesktopConnectionState state) {
+    if (!mounted) return;
+    final wasLive = _desktopConnectionState == DesktopConnectionState.connected;
+    final turnInFlight = _sending || _streaming;
+    if (wasLive &&
+        turnInFlight &&
+        (state == DesktopConnectionState.reconnecting ||
+            state == DesktopConnectionState.disconnected)) {
+      _pendingReattachResync = true;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Connection switched — the running reply continues on the '
+            'server and will reattach automatically.',
+          ),
+          persist: false,
+        ),
+      );
+    }
+    if (state == DesktopConnectionState.connected && _pendingReattachResync) {
+      _pendingReattachResync = false;
+      unawaited(_resyncAfterReattach());
+    }
+    setState(() => _desktopConnectionState = state);
+  }
+
   Future<void> _ensureDesktopSession() async {
     final gateway = _desktopGateway;
+    widget.testDesktopSessionEnsured?.call();
     if (gateway == null) return;
     try {
       await gateway.ensureSession(
@@ -748,6 +797,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _extractToolMessages(messages);
       setState(() {
         _messages = messages;
+        // Server history is now authoritative; a submit catch that starts
+        // after this point must not clobber it with composer-restore.
+        _historyGeneration++;
         _loading = false;
       });
       _scheduleInitialEndAlignment();
@@ -757,6 +809,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (errStr.contains('404') || errStr.contains('not found')) {
         setState(() {
           _messages = [];
+          _historyGeneration++;
           _loading = false;
         });
         _scheduleInitialEndAlignment();
@@ -766,6 +819,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _error = errStr;
         _loading = false;
       });
+    }
+  }
+
+  /// Reattach resync: the socket came back after a mid-turn drop. Re-bind
+  /// the session on the fresh socket (single-flights with the client's own
+  /// reconnect rebind) and refetch history so a reply that completed
+  /// server-side while the socket was down lands in the transcript.
+  Future<void> _resyncAfterReattach() async {
+    if (_reattachResyncing) return;
+    _reattachResyncing = true;
+    try {
+      await _ensureDesktopSession();
+      if (!mounted) return;
+      await _fetchMessages();
+    } finally {
+      _reattachResyncing = false;
     }
   }
 
@@ -1773,6 +1842,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     _awaitingVoiceReply = speakResponse && _voiceReplyEnabled;
     final responseGeneration = ++_responseGeneration;
+    // History generation at send time: if a reattach resync replaces
+    // _messages while this submit is in flight, the catch path below must
+    // not clobber the fresh server history with composer-restore.
+    final historyAtSend = _historyGeneration;
     _activeResponseTransport = _ResponseTransport.desktop;
     var turnAdded = false;
 
@@ -1890,7 +1963,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     } catch (error) {
       if (!mounted || responseGeneration != _responseGeneration) return;
       _scrollCoordinator.cancelStreaming();
-      if (turnAdded) {
+      // A reattach resync replaced _messages while this submit was in
+      // flight: the server history is now authoritative (it already
+      // carries the user prompt and, if the detached turn finished, the
+      // reply). Restoring the composer and stripping the local turn would
+      // clobber it, so skip the restore and just surface the error state.
+      final resyncLanded = _historyGeneration != historyAtSend;
+      if (turnAdded && !resyncLanded) {
         setState(() {
           if (_messages.isNotEmpty &&
               _messages.last['role'] == 'assistant' &&

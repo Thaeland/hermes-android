@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/session_search_hit.dart';
 import '../services/ai_search_query_rewriter.dart';
@@ -56,9 +57,15 @@ class SessionListScreen extends StatefulWidget {
   final SavedConnection connection;
   final GatewayTurnApplicationController turnApplicationController;
 
+  /// Test-only HTTP client injected into the session-list [ApiClient] so
+  /// paging behaviour (pinned back-fills, offset advance) can be driven
+  /// against a fake server without a real gateway.
+  final http.Client? testHttpClient;
+
   const SessionListScreen({
     required this.connection,
     required this.turnApplicationController,
+    this.testHttpClient,
     super.key,
   });
 
@@ -93,6 +100,13 @@ class _SessionListScreenState extends State<SessionListScreen> {
   bool _hasMoreSessions = false;
   bool _loadingMoreSessions = false;
 
+  /// Raw session ids from every loaded page, before any source filtering.
+  /// Space-assignment pruning must run against this set, never against the
+  /// filtered list — an excluded-source session from an earlier page is
+  /// still alive, and pruning against the filtered set would wipe its
+  /// assignment as if the session had been deleted.
+  final Set<String> _rawLoadedIds = {};
+
   bool _healthOk = false;
   final Set<String> _deletingSessionIds = {};
   final Set<String> _branchingSessionIds = {};
@@ -122,6 +136,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
       baseUrl: widget.connection.baseUrl,
       apiKey: widget.connection.apiKey,
       pathPrefix: widget.connection.gatewayPrefix ?? '',
+      httpClient: widget.testHttpClient,
     );
     if (widget.connection.desktopGatewayUrl?.trim().isNotEmpty == true) {
       try {
@@ -645,6 +660,10 @@ class _SessionListScreenState extends State<SessionListScreen> {
       _loading = true;
       _error = null;
     });
+    // Full refresh: the raw-id accumulator restarts here. Carrying stale
+    // ids across refreshes would keep a deleted session in the "live"
+    // prune set forever, so its space assignment could never be pruned.
+    _rawLoadedIds.clear();
     try {
       final page = await _client.getSessionsPage(limit: _sessionPageSize);
       if (!mounted) return;
@@ -660,11 +679,12 @@ class _SessionListScreenState extends State<SessionListScreen> {
       // Pruning removes assignments for sessions that no longer exist. It
       // must only run against a COMPLETE list: with paging, pruning on page
       // one alone would wipe the space assignments of every session still
-      // on an unfetched page.
+      // on an unfetched page. The set is the RAW ids of every loaded page —
+      // excluded-source sessions are alive too, and pruning against the
+      // filtered list would wipe their assignments as if deleted.
+      _rawLoadedIds.addAll(page.sessions.map((session) => session.id));
       if (!page.hasMore) {
-        await store.pruneAssignments(
-          page.sessions.map((session) => session.id).toSet(),
-        );
+        await store.pruneAssignments(Set.of(_rawLoadedIds));
       }
       final spaceState = await store.load();
       if (!mounted) return;
@@ -672,7 +692,12 @@ class _SessionListScreenState extends State<SessionListScreen> {
         _spaceStore = store;
         _spaceState = spaceState;
         _sessions = filtered;
-        _sessionsOffset = page.sessions.length;
+        // Advance by the REQUESTED window, not the returned row count: the
+        // stock gateway back-fills pinned sessions past `limit`, so a page
+        // can carry more rows than the window and advancing by
+        // sessions.length would skip the gap between the window and the
+        // back-fill on the next request.
+        _sessionsOffset = _sessionPageSize;
         _hasMoreSessions = page.hasMore;
         _loading = false;
       });
@@ -703,10 +728,12 @@ class _SessionListScreenState extends State<SessionListScreen> {
       final incoming = page.sessions
           .where((s) => !excluded.contains(s.source) && !existing.contains(s.id))
           .toList();
+      _rawLoadedIds.addAll(page.sessions.map((session) => session.id));
       if (!page.hasMore) {
-        // Full list now loaded — safe to reconcile space assignments.
-        final allIds = <String>{..._sessions.map((s) => s.id), ...page.sessions.map((s) => s.id)};
-        await _spaceStore?.pruneAssignments(allIds);
+        // Full list now loaded — safe to reconcile space assignments,
+        // against the RAW ids of every page (see _fetchSessions: the
+        // filtered set would prune live excluded-source sessions).
+        await _spaceStore?.pruneAssignments(Set.of(_rawLoadedIds));
         if (mounted) {
           final reconciled = await _spaceStore?.load();
           if (mounted && reconciled != null) {
@@ -717,7 +744,11 @@ class _SessionListScreenState extends State<SessionListScreen> {
       if (!mounted) return;
       setState(() {
         _sessions = [..._sessions, ...incoming];
-        _sessionsOffset += page.sessions.length;
+        // Advance by the requested window, never the returned row count:
+        // pinned back-fills arrive past `limit` and would otherwise shift
+        // the offset past unfetched window rows (dedup below keeps the
+        // repeated pins from showing twice).
+        _sessionsOffset += _sessionPageSize;
         _hasMoreSessions = page.hasMore;
         _loadingMoreSessions = false;
       });

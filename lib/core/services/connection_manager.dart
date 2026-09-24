@@ -1138,6 +1138,20 @@ class _LiveStream {
   bool cancelled = false;
 }
 
+/// A non-200 answer from a dashboard API call, carrying the status code so
+/// callers can distinguish authoritative outcomes (404 = the resource is
+/// definitively absent) from unknowable ones (403/5xx/timeout = existence
+/// cannot be determined). Callers that must never act on a guess — like
+/// the project folder provisioner — branch on this instead of string-
+/// matching a bare Exception.
+class DashboardHttpException implements Exception {
+  final int statusCode;
+  const DashboardHttpException(this.statusCode);
+
+  @override
+  String toString() => 'HTTP $statusCode';
+}
+
 /// Client for the Hermes Dashboard REST API.
 ///
 /// Three auth modes, picked by proxy configuration and supplied credentials:
@@ -1353,7 +1367,7 @@ class DashboardClient {
       _resetAuth();
       return apiGet(endpoint, queryParameters: queryParameters, retried: true);
     }
-    if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
+    if (res.statusCode != 200) throw DashboardHttpException(res.statusCode);
     return _decodeMapResponse(res);
   }
 
@@ -1412,17 +1426,43 @@ class DashboardClient {
   /// dashboard's own Archived view uses, and the only stock Hermes surface
   /// that enumerates archived sessions. Requires dashboard credentials on
   /// the connection; callers degrade honestly when this throws.
-  Future<List<Session>> getArchivedSessions({int limit = 100}) async {
-    final data = await apiGet('sessions', queryParameters: {
-      'archived': 'only',
-      'order': 'recent',
-      'limit': '$limit',
-    });
-    final list = data['sessions'] as List? ?? [];
-    return list
-        .whereType<Map<String, dynamic>>()
-        .map((s) => Session.fromJson(s))
-        .toList();
+  ///
+  /// Pages to completion: the router caps each page at 100 rows and
+  /// reports the full match count in `total`, so a single request would
+  /// silently truncate anyone with more than one page of archived chats.
+  /// [gatewayProfile] scopes the read to the connection's Hermes profile
+  /// (the router opens that profile's session DB); omitting it would list
+  /// the dashboard process's own default profile instead — the wrong
+  /// store on a multiplexed gateway.
+  Future<List<Session>> getArchivedSessions({
+    int pageSize = 100,
+    int maxPages = 20,
+    String? gatewayProfile,
+  }) async {
+    final all = <Session>[];
+    var offset = 0;
+    for (var page = 0; page < maxPages; page++) {
+      final data = await apiGet('sessions', queryParameters: {
+        'archived': 'only',
+        'order': 'recent',
+        'limit': '$pageSize',
+        'offset': '$offset',
+        if (gatewayProfile != null && gatewayProfile.isNotEmpty)
+          'profile': gatewayProfile,
+      });
+      final list = data['sessions'] as List? ?? [];
+      final rows = list
+          .whereType<Map<String, dynamic>>()
+          .map((s) => Session.fromJson(s))
+          .toList();
+      all.addAll(rows);
+      final total = data['total'] is num ? (data['total'] as num).toInt() : rows.length;
+      offset += pageSize;
+      // Stop when the pages are exhausted or the server stopped making
+      // progress (guards a router that ignores offset and repeats page 1).
+      if (rows.isEmpty || all.length >= total || offset >= total) break;
+    }
+    return all;
   }
 
   /// Run sessions produced by one cron job, newest first.

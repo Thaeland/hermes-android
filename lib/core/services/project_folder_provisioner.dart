@@ -10,10 +10,18 @@ import 'connection_manager.dart';
 /// projects root (`<locked_root>` when the dashboard is locked, else
 /// `<home>/Projects`), so a name-only Project still gets a real home.
 ///
-/// **Never adopts an existing folder.** Every candidate is probed first and
-/// skipped when it already exists — the previous failure mode was a new
-/// project silently binding to a pre-existing directory of the same name.
-/// Only a path this call just created is ever returned.
+/// **Never adopts an existing folder.** Every candidate is probed first
+/// and only an authoritative 404 counts as free — a 403 (unreadable),
+/// 400 (exists but is not a directory) or a transport failure is NOT
+/// evidence of absence, and treating it as such was the previous failure
+/// mode where a new project silently bound to a pre-existing directory.
+/// Because the stock `POST /api/files/mkdir` is `exist_ok=True` (it
+/// succeeds even when the directory already exists), the probe alone
+/// cannot close the create race, so every successful mkdir is
+/// post-verified: the path must answer as a directory with zero entries.
+/// A folder that turns out non-empty belongs to someone else and is never
+/// returned. Only a path this call just created, proven empty, is ever
+/// returned.
 abstract class ProjectFolderProvisioner {
   /// Returns the absolute path of a newly created folder for [slug], or
   /// `null` when nothing could be provisioned (no projects root reachable,
@@ -22,11 +30,39 @@ abstract class ProjectFolderProvisioner {
   Future<String?> provision(String slug);
 }
 
+/// Outcome of probing one candidate path against the dashboard files
+/// router. Only [missing] authorizes creation.
+enum _Probe {
+  /// 404 — authoritative: nothing lives at this path.
+  missing,
+
+  /// 200 — a directory already lives here.
+  present,
+
+  /// 403 — unreadable/forbidden. Existence is unknowable; never treat as
+  /// free, and a denied write will not change with a suffix, so the caller
+  /// stops the whole loop.
+  forbidden,
+
+  /// 400 — the path exists but is not a directory (or is otherwise
+  /// rejected by the router). Occupied.
+  occupied,
+
+  /// Any other status or a transport failure: existence is unknowable.
+  /// The candidate is skipped, never created on top of.
+  unknown,
+}
+
 class DashboardFolderProvisioner implements ProjectFolderProvisioner {
   final DashboardClient dashboard;
 
   /// Number of `-N` suffix attempts before giving up on provisioning.
   static const _maxCandidates = 50;
+
+  /// Consecutive [ _Probe.unknown ] results before aborting: a server
+  /// that cannot answer existence probes cannot safely provision at all,
+  /// and suffix-cycling 50 doomed probes buys nothing.
+  static const _maxConsecutiveUnknown = 3;
 
   const DashboardFolderProvisioner(this.dashboard);
 
@@ -40,12 +76,31 @@ class DashboardFolderProvisioner implements ProjectFolderProvisioner {
     if (base.isEmpty) return null;
     final root = await _projectsRoot();
     if (root == null) return null;
+    var consecutiveUnknown = 0;
     for (var suffix = 0; suffix < _maxCandidates; suffix++) {
       final candidate = suffix == 0 ? '$root/$base' : '$root/$base-$suffix';
-      if (await _exists(candidate)) continue;
+      final probe = await _probe(candidate);
+      switch (probe) {
+        case _Probe.forbidden:
+          // A denied read means the whole region is off-limits to us —
+          // suffixing cannot help. Stop rather than burn 50 doomed probes.
+          return null;
+        case _Probe.present:
+        case _Probe.occupied:
+          consecutiveUnknown = 0;
+          continue;
+        case _Probe.unknown:
+          // Existence unknowable: skip this name, but don't suffix-spam a
+          // server that is failing every probe.
+          consecutiveUnknown++;
+          if (consecutiveUnknown >= _maxConsecutiveUnknown) return null;
+          continue;
+        case _Probe.missing:
+          // Authoritatively free — attempt the create below.
+          break;
+      }
       try {
         await dashboard.apiPost('files/mkdir', body: {'path': candidate});
-        return candidate;
       } catch (error) {
         // A denied write (403: outside the locked root, or a name the
         // server guards like `pairing`) will not change with a suffix —
@@ -53,8 +108,19 @@ class DashboardFolderProvisioner implements ProjectFolderProvisioner {
         if (error.toString().contains('403')) return null;
         // 409 (a file sits at that path) or a race with a concurrent
         // create: try the next suffix rather than give up.
+        consecutiveUnknown = 0;
         continue;
       }
+      // The stock mkdir is exist_ok=True: a 200 here does NOT prove we
+      // created the directory — a concurrent writer (or a path that
+      // appeared between probe and create) passes the same check. The
+      // fail-if-exists contract is enforced post-hoc: only a directory
+      // that answers as freshly created (zero entries) may be adopted.
+      if (await _isFreshlyCreatedEmpty(candidate)) {
+        return candidate;
+      }
+      consecutiveUnknown = 0;
+      continue;
     }
     return null;
   }
@@ -81,14 +147,37 @@ class DashboardFolderProvisioner implements ProjectFolderProvisioner {
     return null;
   }
 
-  /// True when [path] already exists on the host (directory or otherwise).
+  /// Classifies one existence probe of [path] against GET /api/files.
   ///
-  /// Any non-200 (404 missing, 403 unreadable) is read as "not usable as
-  /// this name": an existing-but-forbidden path must not be adopted either.
-  Future<bool> _exists(String path) async {
+  /// The stock router answers 404 for a missing path, 400 when the path
+  /// exists but is not a directory, 403 when it is unreadable/forbidden.
+  /// Only the 404 is authoritative absence; everything else keeps the
+  /// candidate off the create path.
+  Future<_Probe> _probe(String path) async {
     try {
       await dashboard.apiGet('files', queryParameters: {'path': path});
-      return true;
+      return _Probe.present;
+    } on DashboardHttpException catch (e) {
+      return switch (e.statusCode) {
+        404 => _Probe.missing,
+        403 => _Probe.forbidden,
+        400 => _Probe.occupied,
+        _ => _Probe.unknown,
+      };
+    } catch (_) {
+      return _Probe.unknown;
+    }
+  }
+
+  /// Post-create proof: [path] must answer as a directory with zero
+  /// entries. A non-empty directory means someone else's folder won the
+  /// race and must never be adopted; an unreadable result after a
+  /// "successful" mkdir is equally untrustworthy.
+  Future<bool> _isFreshlyCreatedEmpty(String path) async {
+    try {
+      final res = await dashboard.apiGet('files', queryParameters: {'path': path});
+      final entries = res['entries'];
+      return entries is List && entries.isEmpty;
     } catch (_) {
       return false;
     }

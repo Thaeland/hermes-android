@@ -86,6 +86,14 @@ void main() {
     // The client must reopen WITHOUT any explicit call from the UI.
     await _waitFor(() => gateway.connectionCount >= 2, timeout: const Duration(seconds: 8));
 
+    // Rebind-on-reconnect: the fresh socket must resume the stored key
+    // proactively — no explicit call — so a reply that completed detached
+    // during the outage is addressable immediately.
+    await _waitFor(
+      () => gateway.resumedStoredIds.contains('stored-ka-1'),
+      timeout: const Duration(seconds: 5),
+    );
+
     // And the stored session binding must survive: the next use resumes
     // the same stored key rather than minting a fresh session.
     await client.ensureSession('mob-ka');

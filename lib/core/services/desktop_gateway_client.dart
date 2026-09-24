@@ -261,6 +261,17 @@ class DesktopGatewayClient {
         _reconnectAttempts = 0;
         _reconnectTimer?.cancel();
         _reconnectTimer = null;
+        // The drop cleared every runtime binding and the server forgot the
+        // old socket's sessions. Re-bind each stored session on this
+        // fresh socket immediately — a turn that completed detached during
+        // the outage must be addressable (and its history refetchable)
+        // without waiting for the next user action. Initial connects have
+        // no stored ids, so this is a no-op there. Individual resume
+        // failures are swallowed: a later explicit call retries the same
+        // single-flight path.
+        if (!_closed && _storedSessionIds.isNotEmpty) {
+          unawaited(_rebindStoredSessions(client));
+        }
         _connectionListener?.call(DesktopConnectionState.connected);
       } else if (identical(_ws, client)) {
         _gatewaySessionIds.clear();
@@ -312,6 +323,41 @@ class DesktopGatewayClient {
         if (!_closed) _scheduleReconnect();
       }
     });
+  }
+
+  /// Re-establish the runtime binding for every stored session on a fresh
+  /// socket. Runs fire-and-forget from the connected callback so a reply
+  /// that finished server-side during an outage is immediately addressable
+  /// on the new socket; the UI's resync (ensureSession + history refetch)
+  /// then single-flights with these resumes instead of racing them.
+  Future<void> _rebindStoredSessions(WsClient client) async {
+    // The connected callback fires inside WsClient.connect() before the
+    // await returns; hop off that frame so the socket's message pump is
+    // fully live before we issue session.resume over it.
+    await Future<void>.delayed(Duration.zero);
+    // Snapshot: the map may mutate while resumes are in flight.
+    final mobileIds = List<String>.from(_storedSessionIds.keys);
+    for (final mobileId in mobileIds) {
+      if (_closed || !client.isConnected) return;
+      // _ws is null only while this client's own connect() is still
+      // returning — that is this socket's own pending assignment, not a
+      // replacement. A non-null different client means we were superseded.
+      final current = _ws;
+      if (current != null && !identical(current, client)) return;
+      try {
+        final binding = await _resumeOrCreateSingle(
+          client,
+          mobileId,
+          workingDirectory: _workingDirectories[mobileId],
+        );
+        final after = _ws;
+        if (_closed || (after != null && !identical(after, client))) return;
+        _rememberBinding(mobileId, binding);
+      } catch (_) {
+        // Swallow: a later explicit action retries the same single-flight
+        // resume path; a resume error must never escape the socket callback.
+      }
+    }
   }
 
   Future<_DesktopGatewayBinding> _resumeOrCreate(

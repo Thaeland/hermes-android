@@ -686,16 +686,19 @@ class _VoicePickerState extends State<_VoicePicker> {
 
   Future<void> _set(Map<String, String>? voice) async {
     final prefs = await SharedPreferences.getInstance();
-    if (!mounted) return;
     if (voice == null) {
       await prefs.remove('voice_name');
       await prefs.remove('voice_locale');
+      // Check immediately before setState: the awaits above can outlive the
+      // widget, and a mounted check before them does not cover the gap.
+      if (!mounted) return;
       setState(() => _selectedVoiceName = null);
     } else {
       final name = voice['name'] ?? '';
       final locale = voice['locale'] ?? '';
       await prefs.setString('voice_name', name);
       await prefs.setString('voice_locale', locale);
+      if (!mounted) return;
       setState(() => _selectedVoiceName = name);
     }
   }

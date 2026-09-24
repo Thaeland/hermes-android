@@ -11,6 +11,7 @@ library;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
@@ -141,6 +142,12 @@ class WorkspaceScreen extends StatefulWidget {
   /// the digest can be asserted without a live gateway.
   final HomeSessionsLoader? sessionsLoader;
 
+  /// Test-only HTTP client injected into Home's session-list [ApiClient] so
+  /// the real paging loop (pinned back-fills, offset advance, dedupe) can
+  /// be driven against a fake server without a live gateway. Ignored when
+  /// [sessionsLoader] is set.
+  final http.Client? testSessionsHttpClient;
+
   /// Overrides the screen a Home row opens.
   final WorkspaceSessionScreenBuilder? sessionScreenBuilder;
 
@@ -184,6 +191,7 @@ class WorkspaceScreen extends StatefulWidget {
     this.onOpenSession,
     this.turnApplicationController,
     this.sessionsLoader,
+    this.testSessionsHttpClient,
     this.sessionScreenBuilder,
     this.filesScreenBuilder,
     this.turnSignalsLoader,
@@ -273,6 +281,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       baseUrl: connection.baseUrl,
       apiKey: connection.apiKey,
       pathPrefix: connection.gatewayPrefix ?? '',
+      httpClient: widget.testSessionsHttpClient,
     );
     // Page through the whole visible list. The gateway serves newest-first
     // in a capped window; a single first-page request truncated the
@@ -281,12 +290,20 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     const pageSize = 100;
     const maxPages = 20;
     final all = <Session>[];
+    final seenIds = <String>{};
     var offset = 0;
     for (var page = 0; page < maxPages; page++) {
       final result = await api.getSessionsPage(limit: pageSize, offset: offset);
-      all.addAll(result.sessions);
+      // The stock gateway back-fills pinned sessions past `limit` and
+      // repeats them on later pages, so the returned row count is NOT
+      // the window size: advance by the requested pageSize or window
+      // rows between the window and the back-fill are skipped, and dedupe
+      // by id so a repeated pin never shows twice.
+      for (final session in result.sessions) {
+        if (seenIds.add(session.id)) all.add(session);
+      }
       if (!result.hasMore) break;
-      offset += result.sessions.length;
+      offset += pageSize;
       if (result.sessions.isEmpty) break; // guard: server returned no progress
     }
     return all;
@@ -612,6 +629,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       unawaited(_repository?.close());
       _ownedGateway?.close();
     }
+    // Screen-owned transport clients close with the screen — both hold live
+    // http.Client pools that leak otherwise.
+    _sessionsApi?.close();
+    _archivedSessionsClient?.close();
     super.dispose();
   }
 
@@ -1118,7 +1139,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           password: widget.connection.dashboardPassword,
         );
         archivedSessions = await dashboard
-            .getArchivedSessions()
+            .getArchivedSessions(
+              gatewayProfile: widget.connection.gatewayProfile,
+            )
             .timeout(const Duration(seconds: 8));
       } catch (_) {
         // Same additive contract: no dashboard, no server-archived rows.

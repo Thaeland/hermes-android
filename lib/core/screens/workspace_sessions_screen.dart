@@ -110,7 +110,12 @@ List<Session> filterChats({
                 session.id,
               ),
             WorkspaceChatsFilter.archived =>
-              session.archived || archivedQuickChatIds.contains(session.id),
+              // Machine runs stay excluded even once archived — an archived
+              // cron run is still cron noise, and its home is the Cron
+              // screen's run drill-down. Quick-chat archives are human
+              // rows and stay.
+              !isMachineSession(session) &&
+              (session.archived || archivedQuickChatIds.contains(session.id)),
           } &&
           (normalized.isEmpty ||
               session.title.toLowerCase().contains(normalized) ||
@@ -187,18 +192,30 @@ List<Session> filterWorkspaceSessions({
   Set<String> claimedSessionIds = const {},
   Set<String> archivedQuickChatIds = const {},
   String query = '',
+  bool projectsKnown = true,
 }) {
   final normalized = query.trim().toLowerCase();
   return [
     for (final session in sessions)
       if (switch (view) {
-            WorkspaceSessionView.unassigned => !claimedSessionIds.contains(
-              session.id,
-            ),
+            // Same contract as filterChats' unassigned chip: an unknown
+            // claim map (projects.tree timed out) must not render every
+            // chat as unfiled, and machine-source runs (cron/kanban/
+            // oneshot) carry no human filing intent — they live in the
+            // Cron screen's run drill-down, never in the Unassigned
+            // bucket.
+            WorkspaceSessionView.unassigned =>
+              projectsKnown &&
+              !isMachineSession(session) &&
+              !claimedSessionIds.contains(session.id),
             WorkspaceSessionView.archivedQuick => archivedQuickChatIds.contains(
               session.id,
             ),
-            WorkspaceSessionView.all || WorkspaceSessionView.search => true,
+            // Machine sessions stay out of every human-facing list, the
+            // archived view included — an archived cron run is still
+            // cron noise. Quick-chat archives are human rows and stay.
+            WorkspaceSessionView.all ||
+            WorkspaceSessionView.search => !isMachineSession(session),
           } &&
           (normalized.isEmpty ||
               session.title.toLowerCase().contains(normalized) ||
@@ -380,6 +397,7 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
             claimedSessionIds: data.claimedSessionIds,
             archivedQuickChatIds: data.archivedQuickChatIds,
             query: _query,
+            projectsKnown: data.projectsKnown,
           );
 
     final groups = widget.embedded
