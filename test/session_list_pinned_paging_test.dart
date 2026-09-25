@@ -296,6 +296,66 @@ void main() {
         expect(find.text('Window chat 55'), findsOneWidget);
       },
     );
+
+    testWidgets(
+      'a pin inside a later page (has_more=false too early) does not '
+      'stop pagination',
+      (tester) async {
+        // Window row 55 is pinned. Page 50 therefore reports
+        // has_more=false even though rows 100-119 still exist.
+        final fake = _PinnedBackfillClient(
+          totalWindow: 120,
+          pinnedIds: const ['pin-a'],
+          pinnedWindowIndexes: const {55},
+        );
+        final controller = GatewayTurnApplicationController(
+          sessionFactory: (_) => InertTurnApplicationSession(),
+        );
+        addTearDown(controller.close);
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: SessionListScreen(
+              connection: _connection('paging-inwin-later'),
+              turnApplicationController: controller,
+              testHttpClient: fake,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final list = find.descendant(
+          of: find.byType(RefreshIndicator),
+          matching: find.byType(ListView),
+        );
+        final scrollable = find.descendant(
+          of: list,
+          matching: find.byType(Scrollable),
+        );
+
+        // Reach the bottom repeatedly so pages 50 and 100 can load.
+        for (var i = 0; i < 5; i++) {
+          await tester.drag(list, const Offset(0, -3000));
+          await tester.pumpAndSettle();
+        }
+
+        expect(
+          fake.requestedOffsets,
+          contains('100'),
+          reason:
+              'has_more=false from a pin inside a later window must not '
+              'stop pagination',
+        );
+        await tester.scrollUntilVisible(
+          find.text('Window chat 119'),
+          500,
+          scrollable: scrollable,
+          maxScrolls: 80,
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Window chat 119'), findsOneWidget);
+      },
+    );
   });
 
   group('WorkspaceScreen Home loader paging vs pinned back-fill', () {

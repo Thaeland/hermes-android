@@ -744,8 +744,14 @@ class _SessionListScreenState extends State<SessionListScreen> {
       final incoming = page.sessions
           .where((s) => !excluded.contains(s.source) && !existing.contains(s.id))
           .toList();
-      _rawLoadedIds.addAll(page.sessions.map((session) => session.id));
-      if (!page.hasMore) {
+      final pageIds = page.sessions.map((session) => session.id).toSet();
+      final newIds = pageIds.difference(_rawLoadedIds);
+      _rawLoadedIds.addAll(pageIds);
+      // Apply the same end-of-list rule as the initial page. `has_more` can
+      // be false on any window containing a pinned row, not only page zero.
+      // Only a page with no unseen ids proves that pagination is exhausted.
+      final exhausted = newIds.isEmpty;
+      if (exhausted) {
         // Full list now loaded — safe to reconcile space assignments,
         // against the RAW ids of every page (see _fetchSessions: the
         // filtered set would prune live excluded-source sessions).
@@ -765,7 +771,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
         // the offset past unfetched window rows (dedup below keeps the
         // repeated pins from showing twice).
         _sessionsOffset += _sessionPageSize;
-        _hasMoreSessions = page.hasMore;
+        _hasMoreSessions = !exhausted;
         _loadingMoreSessions = false;
       });
     } catch (e) {
