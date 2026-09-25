@@ -18,19 +18,22 @@ import 'connection_manager.dart';
 /// evidence of absence, and treating it as such was the previous failure
 /// mode where a new project silently bound to a pre-existing directory.
 ///
-/// **Ownership is proven by a marker, not by emptiness.** The stock
-/// `POST /api/files/mkdir` is `exist_ok=True`: a 200 says nothing about
-/// who created the directory, and a post-create emptiness check cannot
-/// distinguish "I just made this" from "a concurrent creator made this
-/// empty folder a moment ago" — both callers of a racing pair would
-/// happily adopt the same directory. Instead, after mkdir the provisioner
-/// writes an unguessable marker file (`hermes-provision-<random>.owner`)
-/// inside the candidate and reads it back: the marker content must match
-/// the token this call wrote. Only the writer that can read its own
-/// unguessable token back has provably claimed the folder; a directory
-/// created by anyone else can never contain it. A candidate whose marker
-/// cannot be written or verified is abandoned (never adopted, never
-/// deleted — it may not be ours).
+/// **Ownership is proven by an unguessable name plus a marker.** The
+/// stock `POST /api/files/mkdir` is `exist_ok=True` (`files.py`:
+/// `target.mkdir(parents=True, exist_ok=True)`): a 200 says nothing about
+/// who created the directory. A human-readable candidate name cannot
+/// close the probe→mkdir window at all — a concurrent actor who knows the
+/// name (any other client provisioning the same slug) can create the same
+/// EMPTY directory after our 404 probe, and our marker would then be the
+/// only entry in a folder we did not create. The candidate name therefore
+/// carries 64 bits of per-attempt randomness: no other actor can pre-create
+/// the exact path we are about to mkdir, so probe-404 + mkdir + marker is
+/// airtight. The marker (an unguessable `hermes-provision-<token>.owner`
+/// written inside, read back with the directory listing showing it as the
+/// only entry) stays as defense-in-depth: it proves write access and
+/// rejects any folder that already carries someone else's contents. A
+/// candidate whose marker cannot be written or verified is abandoned
+/// (never adopted, never deleted — it may not be ours).
 abstract class ProjectFolderProvisioner {
   /// Returns the absolute path of a newly created folder for [slug], or
   /// `null` when nothing could be provisioned (no projects root reachable,
@@ -85,9 +88,19 @@ class DashboardFolderProvisioner implements ProjectFolderProvisioner {
     if (base.isEmpty) return null;
     final root = await _projectsRoot();
     if (root == null) return null;
+    // One unguessable token per provision() call, folded into EVERY
+    // candidate name. The probe→mkdir window cannot be closed by any
+    // check (stock mkdir is exist_ok=True), so the name itself must be
+    // impossible for a concurrent actor to pre-create: seeing the request
+    // URL does not help, the token is 64 random bits. The -N suffix still
+    // rotates on probe-present so a retried provision of the same slug
+    // never reuses a name.
+    final nonce = _ownerToken().substring(0, 16);
     var consecutiveUnknown = 0;
     for (var suffix = 0; suffix < _maxCandidates; suffix++) {
-      final candidate = suffix == 0 ? '$root/$base' : '$root/$base-$suffix';
+      final candidate = suffix == 0
+          ? '$root/$base-$nonce'
+          : '$root/$base-$nonce-$suffix';
       final probe = await _probe(candidate);
       switch (probe) {
         case _Probe.forbidden:

@@ -62,10 +62,16 @@ class SessionListScreen extends StatefulWidget {
   /// against a fake server without a real gateway.
   final http.Client? testHttpClient;
 
+  /// Test-only page-size override so a fake can make a base window
+  /// consist entirely of pinned rows (the pin-only-window case) without
+  /// shipping 50+ fixtures. Production keeps the 50-row window.
+  final int? testSessionPageSize;
+
   const SessionListScreen({
     required this.connection,
     required this.turnApplicationController,
     this.testHttpClient,
+    this.testSessionPageSize,
     super.key,
   });
 
@@ -95,7 +101,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
   /// Session-list paging state. The gateway serves the list newest-first in
   /// pages; [_sessions] accumulates loaded pages so the Unassigned bucket
   /// can reach sessions beyond the first page.
-  static const _sessionPageSize = 50;
+  int get _sessionPageSize => widget.testSessionPageSize ?? 50;
   int _sessionsOffset = 0;
   bool _hasMoreSessions = false;
   bool _loadingMoreSessions = false;
@@ -106,6 +112,43 @@ class _SessionListScreenState extends State<SessionListScreen> {
   /// still alive, and pruning against the filtered set would wipe its
   /// assignment as if the session had been deleted.
   final Set<String> _rawLoadedIds = {};
+
+  /// Bumped by every full refresh ([_fetchSessions]). Load-more requests
+  /// capture it and discard their page (including any prune) when a refresh
+  /// started while they were in flight — a stale page must never append to,
+  /// or worse prune against, the accumulator a refresh just cleared.
+  int _sessionsGeneration = 0;
+
+  /// Consecutive pages (across refresh + load-more) that contributed zero
+  /// unseen ids. See [_requiredZeroNewPages] for why one such page does NOT
+  /// prove end-of-list when pins exist.
+  int _zeroNewIdPages = 0;
+
+  /// Upper bound on the number of pinned sessions, taken as the max count
+  /// of pinned rows seen on any single page. The stock gateway repeats
+  /// EVERY pin on EVERY page (window rows + back-fill, deduped), so one
+  /// page's pinned count already bounds the whole pin set.
+  int _seenPinCount = 0;
+
+  /// Consecutive zero-new-ids pages that PROVE end-of-list. Proof:
+  /// a non-pinned row appears only in its own LIMIT/OFFSET window
+  /// (windows are disjoint, pins are the only repeats), so a mid-store
+  /// window with zero unseen ids must consist ENTIRELY of pins — and each
+  /// such window consumes pageSize DISTINCT pins. k consecutive zero-new
+  /// windows therefore require k*pageSize pins to exist. Once k exceeds
+  /// pinCount ~/ pageSize, the newest zero-new window cannot be mid-store:
+  /// it is past the end, every earlier window's rows are all seen (new
+  /// non-pins or repeated pins), and the list is provably complete.
+  /// With no pins at all, one zero-new page already proves it (a full
+  /// all-pin window cannot exist when pinCount < pageSize).
+  /// The bound is exact because EVERY stock response carries EVERY pin
+  /// (window pins plus the include_pinned back-fill of the rest,
+  /// list_sessions_rich), so _seenPinCount equals the true pin count from
+  /// page one. Reviewer reproduction covered: offset 2 returning only
+  /// seen pins s2,s3 counts 1 < 2 required, so paging continues to the
+  /// unseen s4,s5 at offset 4.
+  static int _requiredZeroNewPages(int pinCount, int pageSize) =>
+      pinCount == 0 ? 1 : pinCount ~/ pageSize + 1;
 
   bool _healthOk = false;
   final Set<String> _deletingSessionIds = {};
@@ -664,6 +707,9 @@ class _SessionListScreenState extends State<SessionListScreen> {
     // ids across refreshes would keep a deleted session in the "live"
     // prune set forever, so its space assignment could never be pruned.
     _rawLoadedIds.clear();
+    _sessionsGeneration++;
+    _zeroNewIdPages = 0;
+    _seenPinCount = 0;
     try {
       final page = await _client.getSessionsPage(limit: _sessionPageSize);
       if (!mounted) return;
@@ -683,27 +729,25 @@ class _SessionListScreenState extends State<SessionListScreen> {
       // excluded-source sessions are alive too, and pruning against the
       // filtered list would wipe their assignments as if deleted.
       //
-      // Completeness is decided by NEW ids, not the server's `has_more`:
-      // the stock gateway computes has_more from the non-pinned rows in
-      // the combined response (api_server.py: windowed >= limit), so a
-      // pinned session already inside the base window makes that count
-      // fall below `limit` and report has_more=false while window rows
-      // still exist past the offset. Pruning on that early stop would wipe
-      // the assignments of every unfetched session. A page that adds no
-      // new ids is the only reliable end-of-list signal (pins repeat on
-      // every page, so past the store's end nothing new ever arrives).
-      final newIds = page.sessions
-          .map((session) => session.id)
-          .toSet()
-          .difference(_rawLoadedIds);
-      _rawLoadedIds.addAll(page.sessions.map((session) => session.id));
-      if (newIds.isEmpty) {
+      // Completeness is decided client-side, never by `has_more`: the stock
+      // gateway computes it from the non-pinned rows in the combined
+      // response (api_server.py: windowed >= limit), so any window holding
+      // a pin can report has_more=false while rows still exist past the
+      // offset. A single zero-new-ids page is NOT proof either: stock
+      // include_pinned repeats EVERY pin on EVERY page, so a later base
+      // window made entirely of already-seen pins contributes no new ids
+      // even while unseen non-pinned rows remain further along. The
+      // provable rule lives in _requiredZeroNewPages: k consecutive
+      // zero-new windows must consist entirely of pins, windows are
+      // disjoint, so k * pageSize pins exist — once that exceeds the pin
+      // bound observed on the pages, the end is proven.
+      _notePageForExhaustion(page.sessions);
+      final provenComplete = _isListProvenComplete;
+      if (provenComplete) {
         await store.pruneAssignments(Set.of(_rawLoadedIds));
       }
       final spaceState = await store.load();
       if (!mounted) return;
-      // `has_more` is NOT authoritative for stopping (see above): treat a
-      // page as "more may follow" iff it contributed new ids.
       setState(() {
         _spaceStore = store;
         _spaceState = spaceState;
@@ -714,7 +758,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
         // sessions.length would skip the gap between the window and the
         // back-fill on the next request.
         _sessionsOffset = _sessionPageSize;
-        _hasMoreSessions = newIds.isNotEmpty;
+        _hasMoreSessions = !provenComplete;
         _loading = false;
       });
     } catch (e) {
@@ -726,9 +770,34 @@ class _SessionListScreenState extends State<SessionListScreen> {
     }
   }
 
+  /// Folds one page into the exhaustion bookkeeping: accumulates raw ids,
+  /// tracks the pin bound, and counts consecutive zero-new-ids pages.
+  void _notePageForExhaustion(List<Session> pageSessions) {
+    final pageIds = pageSessions.map((session) => session.id).toSet();
+    final newIds = pageIds.difference(_rawLoadedIds);
+    _rawLoadedIds.addAll(pageIds);
+    // The stock gateway repeats every pin on every page (window rows plus
+    // back-fill, deduped), so any single page's pinned count already
+    // bounds the total pin set; take the max to stay safe against pages
+    // fetched across a pin/unpin race.
+    final pinsOnPage = pageSessions
+        .where((session) => session.pinned)
+        .length;
+    if (pinsOnPage > _seenPinCount) _seenPinCount = pinsOnPage;
+    if (newIds.isEmpty) {
+      _zeroNewIdPages++;
+    } else {
+      _zeroNewIdPages = 0;
+    }
+  }
+
+  bool get _isListProvenComplete =>
+      _zeroNewIdPages >= _requiredZeroNewPages(_seenPinCount, _sessionPageSize);
+
   /// Append the next page of sessions when the list is scrolled near bottom.
   Future<void> _loadMoreSessions() async {
     if (_loadingMoreSessions || !_hasMoreSessions) return;
+    final generation = _sessionsGeneration;
     setState(() => _loadingMoreSessions = true);
     try {
       final page = await _client.getSessionsPage(
@@ -736,6 +805,15 @@ class _SessionListScreenState extends State<SessionListScreen> {
         offset: _sessionsOffset,
       );
       if (!mounted) return;
+      // A full refresh started while this page was in flight: it cleared
+      // the raw-id accumulator and restarted paging. Discard this stale
+      // page entirely — appending its rows would double-list them and,
+      // worse, its exhaustion bookkeeping could prune assignments against
+      // the half-cleared accumulator.
+      if (generation != _sessionsGeneration) {
+        setState(() => _loadingMoreSessions = false);
+        return;
+      }
       final prefs = await SharedPreferences.getInstance();
       final excluded =
           prefs.getStringList('excluded_session_sources_${widget.connection.id}') ??
@@ -744,19 +822,18 @@ class _SessionListScreenState extends State<SessionListScreen> {
       final incoming = page.sessions
           .where((s) => !excluded.contains(s.source) && !existing.contains(s.id))
           .toList();
-      final pageIds = page.sessions.map((session) => session.id).toSet();
-      final newIds = pageIds.difference(_rawLoadedIds);
-      _rawLoadedIds.addAll(pageIds);
-      // Apply the same end-of-list rule as the initial page. `has_more` can
-      // be false on any window containing a pinned row, not only page zero.
-      // Only a page with no unseen ids proves that pagination is exhausted.
-      final exhausted = newIds.isEmpty;
-      if (exhausted) {
+      // Same end-of-list rule as the initial page: a zero-new page only
+      // proves exhaustion once the consecutive-zero count passes the pin
+      // bound (see _fetchSessions). Until then keep paging — a pin-only
+      // window is not the end.
+      _notePageForExhaustion(page.sessions);
+      final provenComplete = _isListProvenComplete;
+      if (provenComplete) {
         // Full list now loaded — safe to reconcile space assignments,
         // against the RAW ids of every page (see _fetchSessions: the
         // filtered set would prune live excluded-source sessions).
         await _spaceStore?.pruneAssignments(Set.of(_rawLoadedIds));
-        if (mounted) {
+        if (mounted && generation == _sessionsGeneration) {
           final reconciled = await _spaceStore?.load();
           if (mounted && reconciled != null) {
             setState(() => _spaceState = reconciled);
@@ -764,6 +841,12 @@ class _SessionListScreenState extends State<SessionListScreen> {
         }
       }
       if (!mounted) return;
+      if (generation != _sessionsGeneration) {
+        // A refresh landed while the prune was awaited; it owns the list
+        // state now. Drop this page's append.
+        setState(() => _loadingMoreSessions = false);
+        return;
+      }
       setState(() {
         _sessions = [..._sessions, ...incoming];
         // Advance by the requested window, never the returned row count:
@@ -771,7 +854,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
         // the offset past unfetched window rows (dedup below keeps the
         // repeated pins from showing twice).
         _sessionsOffset += _sessionPageSize;
-        _hasMoreSessions = !exhausted;
+        _hasMoreSessions = !provenComplete;
         _loadingMoreSessions = false;
       });
     } catch (e) {

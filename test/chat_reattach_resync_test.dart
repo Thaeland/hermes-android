@@ -199,6 +199,95 @@ void main() {
   );
 
   testWidgets(
+    'resync does not stop on the synchronously-persisted user row; it '
+    'waits for the terminal assistant reply beyond the old 3.5s budget',
+    (tester) async {
+      // The reviewer's real sequence: old history (ending in an assistant
+      // row) -> the stock prompt.submit-persisted USER row appears first
+      // -> the assistant reply lands LATER, past the old 4-attempt /
+      // 3.5-second budget. Length-based completion would return on the
+      // user row and strand the reply; the watermark must hold the resync
+      // open until a terminal assistant row exists beyond the pre-drop
+      // transcript.
+      final hook = TestDesktopConnectionHook();
+      final submission = Completer<void>();
+      // Requests 2..5 (the whole old budget) serve user-only; the reply
+      // lands on request 6 — ~7.5s after reconnect, beyond the old
+      // horizon.
+      final history = _ReattachChatHttpClient()
+        ..oldHistory = const [
+          {'role': 'user', 'content': 'Earlier question'},
+          {'role': 'assistant', 'content': 'Earlier answer'},
+        ]
+        ..userOnlyUntilRequest = 5;
+      final apiClient = ApiClient(
+        baseUrl: 'http://reattach.fixture',
+        apiKey: 'test-key',
+        httpClient: history,
+      );
+      await _pumpChat(
+        tester,
+        hook: hook,
+        apiClient: apiClient,
+        ensureCount: () {},
+        storedKey: 'stored_sess_longturn',
+        remoteSubmit:
+            ({required sessionId, required text, required onEvent}) {
+              return submission.future;
+            },
+      );
+
+      hook.handler?.call(DesktopConnectionState.connected);
+      await tester.pump();
+      await tester.enterText(find.byType(TextField), 'Long running task');
+      await tester.tap(find.byTooltip('Send'));
+      await tester.pump();
+      await tester.pump();
+
+      hook.handler?.call(DesktopConnectionState.reconnecting);
+      await tester.pump();
+      submission.completeError(
+        JsonRpcError('prompt.submit', 'Desktop gateway connection closed'),
+      );
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      // Reconnect: resync starts. Requests 2..5 grow the transcript (the
+      // user row) but must NOT end the resync.
+      hook.handler?.call(DesktopConnectionState.connected);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(history.messageRequestCount, 2);
+      expect(
+        find.text('Server-side final response'),
+        findsNothing,
+        reason: 'the user-only row must not render as a finished turn',
+      );
+
+      // Walk past the OLD budget (500+1000+2000+4000 = 7500ms of capped
+      // backoff): the new budget keeps retrying.
+      await tester.pump(const Duration(seconds: 4));
+      await tester.pump(const Duration(seconds: 4));
+
+      // Request 6 lands the reply: it renders, and the resync stops.
+      expect(
+        history.messageRequestCount,
+        greaterThan(5),
+        reason: 'the retry budget must cover a turn longer than 3.5s',
+      );
+      expect(find.text('Server-side final response'), findsOneWidget);
+      final settledCount = history.messageRequestCount;
+      await tester.pump(const Duration(seconds: 5));
+      expect(
+        history.messageRequestCount,
+        settledCount,
+        reason: 'the terminal assistant watermark must end the resync',
+      );
+    },
+  );
+
+  testWidgets(
     'submit failure with no resync landed still restores the composer',
     (tester) async {
       final hook = TestDesktopConnectionHook();
@@ -325,6 +414,22 @@ class _ReattachChatHttpClient extends http.BaseClient {
   int messageRequestCount = 0;
   bool includeCompletedTurn = false;
 
+  /// Rows served BEFORE the detached turn's rows — the transcript that
+  /// existed before the drop. The resync watermark counts growth past
+  /// this, so an old trailing assistant row must not satisfy it.
+  List<Map<String, dynamic>> oldHistory = const [];
+
+  /// Serve the synchronously-persisted USER row of the detached turn
+  /// without the assistant reply — the stock `prompt.submit` ordering the
+  /// resync must not mistake for completion.
+  bool userOnlyTurn = false;
+
+  /// While the /messages request count is at or below this number, serve
+  /// the user-only turn; after it, the completed turn. Models a long
+  /// model turn whose reply lands beyond the resync retry budget's OLD
+  /// 3.5-second horizon.
+  int userOnlyUntilRequest = 0;
+
   /// /messages requests BEYOND this count get a 404 (simulates the
   /// stored row not being readable yet while the detached turn settles).
   /// 0 = never fail.
@@ -345,12 +450,16 @@ class _ReattachChatHttpClient extends http.BaseClient {
           headers: {'content-type': 'application/json'},
         );
       }
-      final messages = includeCompletedTurn
-          ? <Map<String, dynamic>>[
-              {'role': 'user', 'content': 'Long running task'},
-              {'role': 'assistant', 'content': 'Server-side final response'},
-            ]
-          : <Map<String, dynamic>>[];
+      final messages = [
+        ...oldHistory,
+        if (includeCompletedTurn ||
+            (userOnlyUntilRequest > 0 &&
+                messageRequestCount > userOnlyUntilRequest)) ...[
+          {'role': 'user', 'content': 'Long running task'},
+          {'role': 'assistant', 'content': 'Server-side final response'},
+        ] else if (userOnlyTurn || userOnlyUntilRequest > 0)
+          {'role': 'user', 'content': 'Long running task'},
+      ];
       return http.StreamedResponse(
         Stream.value(utf8.encode(jsonEncode({'data': messages}))),
         200,

@@ -65,6 +65,7 @@ class _PinnedBackfillClient extends http.BaseClient {
     required this.totalWindow,
     required this.pinnedIds,
     this.pinnedWindowIndexes = const {},
+    this.pinnedWindowRanges = const [],
   });
 
   final int totalWindow;
@@ -76,7 +77,17 @@ class _PinnedBackfillClient extends http.BaseClient {
   /// has_more=false even while rows exist past the offset.
   final Set<int> pinnedWindowIndexes;
 
+  /// Inclusive [start, end] window-index ranges that are THEMSELVES
+  /// pinned — the full reviewer reproduction: a later base window made
+  /// ENTIRELY of pins contributes zero unseen ids while unseen non-pinned
+  /// rows still sit at a further offset.
+  final List<List<int>> pinnedWindowRanges;
+
   final List<String> requestedOffsets = [];
+
+  bool _isPinnedWindowIndex(int i) =>
+      pinnedWindowIndexes.contains(i) ||
+      pinnedWindowRanges.any((r) => i >= r[0] && i <= r[1]);
 
   http.StreamedResponse _json(Map<String, dynamic> body, {int status = 200}) =>
       http.StreamedResponse(
@@ -102,17 +113,24 @@ class _PinnedBackfillClient extends http.BaseClient {
       final limit = int.tryParse(uri.queryParameters['limit'] ?? '') ?? 50;
       final windowRows = [
         for (var i = offset; i < offset + limit && i < totalWindow; i++)
-          if (pinnedWindowIndexes.contains(i))
+          if (_isPinnedWindowIndex(i))
             _pinnedRow('w$i')
           else
             _windowRow(i),
       ];
-      // Back-fill: pins not already in the window get appended (the stock
-      // dedupes by seen ids).
+      // Back-fill: stock appends EVERY pinned row the window missed
+      // (external pins AND pinned window rows outside the current
+      // window), deduped against the window.
       final windowIds = windowRows.map((r) => r['id']).toSet();
-      final backfill = pinnedIds
-          .where((id) => !windowIds.contains(id))
-          .map(_pinnedRow)
+      final allPinned = [
+        ...pinnedIds.map(_pinnedRow),
+        for (var i = 0; i < totalWindow; i++)
+          if (_isPinnedWindowIndex(i)) _pinnedRow('w$i'),
+      ];
+      final seenBackfill = <String>{};
+      final backfill = allPinned
+          .where((r) =>
+              !windowIds.contains(r['id']) && seenBackfill.add(r['id']!))
           .toList();
       // Pins lead the payload so they always render in the viewport; the
       // stock gateway repeats them on every page.
@@ -354,6 +372,95 @@ void main() {
         );
         await tester.pumpAndSettle();
         expect(find.text('Window chat 119'), findsOneWidget);
+      },
+    );
+
+    testWidgets(
+      'a pin-ONLY base window does not stop pagination or prune against '
+      'the partial set (reviewer reproduction)',
+      (tester) async {
+        // The reviewer's exact stock-SessionDB reproduction, at page size
+        // 2: offset 0 -> s0,s1 (+ pins back-filled); offset 2 -> ONLY the
+        // already-seen pinned s2,s3 (zero new ids, has_more=false) while
+        // unseen s4,s5 still sit at offset 4. The old rule stopped at
+        // offset 2 AND pruned space assignments against that partial set,
+        // wiping s4's assignment as if the chat had been deleted.
+        final fake = _PinnedBackfillClient(
+          totalWindow: 6,
+          pinnedIds: const [],
+          pinnedWindowRanges: const [
+            [2, 3],
+          ],
+        );
+        // w4 is filed into a space; a stale 'gone' assignment must still
+        // be pruned once the FULL list is proven loaded.
+        final prefs = await SharedPreferences.getInstance();
+        prefs.setString('chat_spaces_v1_paging-pinonly', jsonEncode({
+          'spaces': [
+            {'id': 'sp1', 'name': 'Work', 'created_at': 1},
+          ],
+          'assignments': {'w4': 'sp1', 'gone': 'sp1'},
+        }));
+        final controller = GatewayTurnApplicationController(
+          sessionFactory: (_) => InertTurnApplicationSession(),
+        );
+        addTearDown(controller.close);
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: SessionListScreen(
+              connection: _connection('paging-pinonly'),
+              turnApplicationController: controller,
+              testHttpClient: fake,
+              testSessionPageSize: 2,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final list = find.descendant(
+          of: find.byType(RefreshIndicator),
+          matching: find.byType(ListView),
+        );
+        // Reach the bottom repeatedly so every window loads.
+        for (var i = 0; i < 8; i++) {
+          await tester.drag(list, const Offset(0, -3000));
+          await tester.pumpAndSettle();
+        }
+
+        // Paging walked PAST the pin-only window at offset 2 to the
+        // unseen rows at offset 4.
+        expect(
+          fake.requestedOffsets,
+          contains('4'),
+          reason: 'a zero-new pin-only window must not end pagination',
+        );
+        final scrollable = find.descendant(
+          of: list,
+          matching: find.byType(Scrollable),
+        );
+        await tester.scrollUntilVisible(
+          find.text('Window chat 5'),
+          400,
+          scrollable: scrollable,
+          maxScrolls: 40,
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Window chat 5'), findsOneWidget);
+
+        // Pruning ran only against the PROVEN-complete set: w4's space
+        // assignment survived, the stale 'gone' assignment was pruned.
+        final stored = jsonDecode(
+          prefs.getString('chat_spaces_v1_paging-pinonly')!,
+        ) as Map<String, dynamic>;
+        final assignments = Map<String, dynamic>.from(
+          stored['assignments'] as Map,
+        );
+        expect(assignments['w4'], 'sp1', reason:
+            'prune must not run against a partial (pin-only-window '
+            'truncated) raw-id set');
+        expect(assignments.containsKey('gone'), isFalse, reason:
+            'prune must still run once completion is proven');
       },
     );
   });

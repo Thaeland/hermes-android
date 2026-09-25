@@ -292,6 +292,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     final all = <Session>[];
     final seenIds = <String>{};
     var offset = 0;
+    // Upper bound on the total pin set: stock repeats EVERY pin on EVERY
+    // page, so the max pinned count seen on any single page bounds them all.
+    var pinBound = 0;
+    // Consecutive pages that contributed zero unseen ids (see below).
+    var zeroNewPages = 0;
     for (var page = 0; page < maxPages; page++) {
       final result = await api.getSessionsPage(limit: pageSize, offset: offset);
       // The stock gateway back-fills pinned sessions past `limit` and
@@ -306,16 +311,29 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           newRows++;
         }
       }
+      final pinsOnPage = result.sessions
+          .where((session) => session.pinned)
+          .length;
+      if (pinsOnPage > pinBound) pinBound = pinsOnPage;
       // `has_more` is NOT trusted for stopping: the server computes it
       // from the non-pinned rows in the combined response
       // (api_server.py: windowed >= limit), so a pin that already sits
       // INSIDE the base window makes that count fall below `limit` and
       // report has_more=false while rows still exist past the offset.
-      // End-of-list is decided client-side on NEW ids instead: LIMIT/
-      // OFFSET window rows are disjoint across pages and only the
-      // back-filled pins repeat, so a page contributing zero unseen ids
-      // is provably past the end of the store.
-      if (newRows == 0) break;
+      // End-of-list is decided client-side — but a SINGLE zero-new page
+      // is not proof either: a later base window made entirely of
+      // already-seen pins contributes nothing new while unseen rows
+      // remain further along. k consecutive zero-new windows must be
+      // k*pageSize disjoint all-pin windows, so once k*pageSize exceeds
+      // the pin bound the end is proven. With no pins, one zero-new page
+      // already proves it.
+      if (newRows == 0) {
+        zeroNewPages++;
+        final required = pinBound == 0 ? 1 : pinBound ~/ pageSize + 1;
+        if (zeroNewPages >= required) break;
+      } else {
+        zeroNewPages = 0;
+      }
       offset += pageSize;
     }
     return all;

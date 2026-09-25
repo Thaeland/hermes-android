@@ -35,6 +35,17 @@ class _FakeDashboard {
   /// The browsed-home path value for GET /api/files.
   final String homePath = '/home/tester';
 
+  /// Hook fired AFTER the GET /api/files probe answers 404 for a path and
+  /// BEFORE the mkdir for that path is handled — the exact probe→mkdir
+  /// window a concurrent creator races through. Tests use it to plant a
+  /// directory (or a marker) mid-race.
+  void Function(String probedPath)? onProbeMissing;
+
+  /// Number of leading existence probes answered 200 (present) regardless
+  /// of [existing] — simulates taken candidate names when the real names
+  /// are random and cannot be pre-listed.
+  int probesAnsweredPresent = 0;
+
   _FakeDashboard({
     Set<String>? existing,
     Set<String>? forbiddenMkdirs,
@@ -66,6 +77,13 @@ class _FakeDashboard {
           200,
         );
       }
+      if (probesAnsweredPresent > 0) {
+        probesAnsweredPresent--;
+        return http.Response(
+          jsonEncode({'path': path, 'entries': <dynamic>[]}),
+          200,
+        );
+      }
       if (existing.contains(path)) {
         // List whatever marker files were written directly inside this dir
         // (mirrors the stock scandir-backed listing the claim check reads).
@@ -84,6 +102,8 @@ class _FakeDashboard {
           200,
         );
       }
+      // The probe just proved absence — the race window opens here.
+      onProbeMissing?.call(path);
       return http.Response('{"detail":"Path not found"}', 404);
     }
     if (uri.path == '/api/files/mkdir' && request.method == 'POST') {
@@ -130,6 +150,19 @@ class _FakeDashboard {
   }
 }
 
+/// Marker files written directly inside [dir] (test helper).
+List<String> _writtenUnder(_FakeDashboard dash, String dir) => dash
+    .writtenFiles.keys
+    .where((k) => k.substring(0, k.lastIndexOf('/')) == dir)
+    .map((k) => k.substring(k.lastIndexOf('/') + 1))
+    .toList();
+
+/// The candidate name is `<slug>-<16-hex-nonce>[-<suffix>]`; tests match
+/// the shape without pinning the random nonce.
+final _candidatePattern = RegExp(
+  r'^/home/tester/Projects/widget-lab-[0-9a-f]{16}(-\d+)?$',
+);
+
 void main() {
   group('provision', () {
     test('creates a fresh folder under <home>/Projects when unlocked', () async {
@@ -137,8 +170,9 @@ void main() {
       final folder = await DashboardFolderProvisioner(dash.client()).provision(
         'widget-lab',
       );
-      expect(folder, '/home/tester/Projects/widget-lab');
-      expect(dash.mkdirs, ['/home/tester/Projects/widget-lab']);
+      expect(folder, isNotNull);
+      expect(folder!, matches(_candidatePattern));
+      expect(dash.mkdirs, [folder]);
     });
 
     test('provisions inside the locked root when the dashboard is locked', () async {
@@ -146,40 +180,120 @@ void main() {
       final folder = await DashboardFolderProvisioner(dash.client()).provision(
         'widget-lab',
       );
-      expect(folder, '/opt/data/widget-lab');
+      expect(folder, isNotNull);
+      expect(
+        folder!,
+        matches(RegExp(r'^/opt/data/widget-lab-[0-9a-f]{16}(-\d+)?$')),
+      );
     });
 
-    test('NEVER adopts an already-existing folder; takes the next suffix', () async {
-      final dash = _FakeDashboard(
-        existing: {'/home/tester/Projects/widget-lab'},
+    test('the candidate name carries per-call randomness (unguessable)', () async {
+      // The probe→mkdir window cannot be closed by any check (stock mkdir
+      // is exist_ok=True), so the NAME must be impossible to pre-create.
+      // Two provisions of the same slug must never target the same path,
+      // and the nonce must not be derived from the slug — an actor who
+      // knows the slug cannot guess tomorrow's folder name.
+      final dash = _FakeDashboard();
+      final provisioner = DashboardFolderProvisioner(dash.client());
+      final first = await provisioner.provision('widget-lab');
+      final second = await provisioner.provision('widget-lab');
+      expect(first, isNotNull);
+      expect(second, isNotNull);
+      expect(first, isNot(second));
+      final dash2 = _FakeDashboard();
+      final third = await DashboardFolderProvisioner(dash2.client()).provision(
+        'widget-lab',
       );
+      expect(third, isNot(first));
+    });
+
+    test('an empty-directory racer cannot win: it cannot name our path', () async {
+      // The reviewer's race: after our 404 probe and before our mkdir, a
+      // concurrent actor creates the SAME empty directory and we adopt it.
+      // With a human-readable name the actor could guess it; with the
+      // nonce it cannot. The racer here plants the GUESSABLE legacy name
+      // the moment any probe reports absence — the old scheme's exact
+      // failure mode — and our unguessable candidate must be untouched.
+      final dash = _FakeDashboard();
+      dash.onProbeMissing = (probed) {
+        dash.existing.add('/home/tester/Projects/widget-lab');
+        dash.writtenFiles['/home/tester/Projects/widget-lab/foreign.txt'] = 'x';
+      };
       final folder = await DashboardFolderProvisioner(dash.client()).provision(
         'widget-lab',
       );
-      expect(folder, '/home/tester/Projects/widget-lab-1');
+      // We adopted OUR freshly created folder (nonce name), never the
+      // racer's legacy-named one.
+      expect(folder, isNotNull);
+      expect(folder!, matches(_candidatePattern));
+      expect(folder, isNot('/home/tester/Projects/widget-lab'));
+      // And the racer's directory never received our marker.
+      expect(
+        _writtenUnder(dash, '/home/tester/Projects/widget-lab'),
+        isNot(contains(startsWith('hermes-provision-'))),
+      );
+    });
+
+    test('a racer that plants a marker in our path mid-race is NOT adopted', () async {
+      // Defense-in-depth: even for an unguessable candidate, if something
+      // (host bug, symlink farm) puts a foreign entry inside between the
+      // probe and the claim check, the multi-entry listing must reject
+      // adoption and move to the next suffix.
+      final dash = _FakeDashboard();
+      var raced = false;
+      dash.onProbeMissing = (probed) {
+        if (raced) return;
+        raced = true;
+        // Pre-create the exact candidate WITH a foreign marker — our
+        // mkdir is exist_ok and succeeds, the claim check then sees two
+        // entries (foreign + ours) and refuses.
+        dash.existing.add(probed);
+        dash.writtenFiles['$probed/hermes-provision-aaa.owner'] = 'aaa';
+      };
+      final folder = await DashboardFolderProvisioner(dash.client()).provision(
+        'widget-lab',
+      );
+      // Never adopted the contested path; a later suffix is clean.
+      expect(folder, isNotNull);
+      expect(folder, isNot(dash.mkdirs.first));
+      expect(dash.mkdirs.length, greaterThan(1));
+    });
+
+    test('NEVER adopts an already-existing folder; takes the next suffix', () async {
+      final dash = _FakeDashboard()..probesAnsweredPresent = 1;
+      final folder = await DashboardFolderProvisioner(dash.client()).provision(
+        'widget-lab',
+      );
+      expect(folder, isNotNull);
+      // First candidate probed present → the -1 suffix candidate adopted.
+      expect(
+        folder!,
+        matches(RegExp(r'^/home/tester/Projects/widget-lab-[0-9a-f]{16}-1$')),
+      );
       // Only the fresh path was ever created; the pre-existing one was
       // probed, never written into.
-      expect(dash.mkdirs, ['/home/tester/Projects/widget-lab-1']);
+      expect(dash.mkdirs, [folder]);
     });
 
     test('skips every taken name until a free one is found', () async {
-      final dash = _FakeDashboard(
-        existing: {
-          '/home/tester/Projects/app',
-          '/home/tester/Projects/app-0',
-          '/home/tester/Projects/app-1',
-        },
-      );
+      final dash = _FakeDashboard()..probesAnsweredPresent = 3;
       final folder = await DashboardFolderProvisioner(dash.client()).provision(
         'app',
       );
-      expect(folder, '/home/tester/Projects/app-2');
+      expect(folder, isNotNull);
+      expect(
+        folder!,
+        matches(RegExp(r'^/home/tester/Projects/app-[0-9a-f]{16}-3$')),
+      );
     });
 
     test('a refused mkdir (403) stops the loop instead of suffix-spamming', () async {
-      final dash = _FakeDashboard(
-        forbiddenMkdirs: {'/home/tester/Projects/pairing'},
-      );
+      final dash = _FakeDashboard();
+      // The candidate name is random, so forbid mkdir on whatever the
+      // first probe reports free — the guard must stop the whole loop.
+      dash.onProbeMissing = (probed) {
+        dash.forbiddenMkdirs.add(probed);
+      };
       final folder = await DashboardFolderProvisioner(dash.client()).provision(
         'pairing',
       );
@@ -212,34 +326,30 @@ void main() {
       final folder = await DashboardFolderProvisioner(dash.client()).provision(
         '../../evil Name',
       );
-      expect(folder, '/home/tester/Projects/evil-name');
-      expect(folder!.contains('..'), isFalse);
-    });
-
-    test('a concurrent creator that won the race is NOT adopted', () async {
-      // The probe sees the candidate as free (not in `existing`), mkdir
-      // succeeds exist_ok-style, but the directory already carries the
-      // racer's marker — the claim check must reject it and move on.
-      final dash = _FakeDashboard();
-      dash.writtenFiles['/home/tester/Projects/raced/hermes-provision-aaa.owner'] =
-          'aaa';
-      final folder = await DashboardFolderProvisioner(dash.client()).provision(
-        'raced',
+      expect(folder, isNotNull);
+      expect(
+        folder!,
+        matches(
+          RegExp(r'^/home/tester/Projects/evil-name-[0-9a-f]{16}(-\d+)?$'),
+        ),
       );
-      // Never adopted the contested path; the -1 suffix is clean.
-      expect(folder, '/home/tester/Projects/raced-1');
-      expect(dash.mkdirs.first, '/home/tester/Projects/raced');
+      expect(folder.contains('..'), isFalse);
     });
 
     test('a read-only candidate directory is abandoned, never adopted', () async {
-      final dash = _FakeDashboard(
-        readOnlyDirs: {'/home/tester/Projects/locked-thing'},
-      );
+      final dash = _FakeDashboard();
+      // Refuse marker writes in the FIRST candidate only.
+      String? readOnly;
+      dash.onProbeMissing = (probed) {
+        readOnly ??= probed;
+        dash.readOnlyDirs.add(readOnly!);
+      };
       final folder = await DashboardFolderProvisioner(dash.client()).provision(
         'locked-thing',
       );
-      // Marker write refused → claim fails → next suffix succeeds.
-      expect(folder, '/home/tester/Projects/locked-thing-1');
+      // Marker write refused → claim fails → a later suffix succeeds.
+      expect(folder, isNotNull);
+      expect(folder, isNot(readOnly));
     });
 
     test('a corrupt marker read (token mismatch) never adopts', () async {

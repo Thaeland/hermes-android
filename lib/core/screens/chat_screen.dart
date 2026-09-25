@@ -840,8 +840,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   ///   already be restored and the optimistic turn stripped by the time
   ///   this runs. The detached server turn may also still be settling, so
   ///   a single immediate fetch can read history that lacks the reply.
-  ///   Retry with a short backoff until a fetch lands rows beyond what
-  ///   the transcript already had, or the retry budget is spent.
+  ///   Retry with a short backoff until an authoritative watermark lands,
+  ///   or the retry budget is spent.
+  /// - The watermark is NOT `messages.length > previousCount`: stock
+  ///   `prompt.submit` persists the user row SYNCHRONOUSLY before the
+  ///   model worker starts, so the first refetch after the optimistic turn
+  ///   was stripped can grow by exactly one — the user row alone. Waiting
+  ///   on length would then end the resync while the assistant reply is
+  ///   still detached and in flight, with no listener or retry left to
+  ///   ever surface it. The authoritative signal is a terminal assistant
+  ///   row (role assistant/agent, no tool_calls) appearing BEYOND the
+  ///   pre-drop transcript length: the old history may itself end in an
+  ///   assistant row, so only growth past the old watermark counts.
+  /// - The budget must cover a long turn, not just a settling write:
+  ///   backoff is capped so ~10 attempts span well over half a minute.
   /// - A newly created stock session lives in the DB under the gateway-
   ///   minted STORED key, not the mobile session id (the mobile id never
   ///   survives into gateway-side lookups). Fetching by `widget.session.id`
@@ -862,7 +874,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           widget.testStoredSessionKey?.call(widget.session.id) ??
           widget.session.id;
       final previousCount = _messages.length;
-      const maxAttempts = 4;
+      const maxAttempts = 10;
       for (var attempt = 0; attempt < maxAttempts; attempt++) {
         try {
           final messages = await _client.getMessages(storedId);
@@ -877,9 +889,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             _loading = false;
           });
           _scheduleInitialEndAlignment();
-          // The detached turn's reply is in: the refetch grew the
-          // transcript past what we had before the drop.
-          if (messages.length > previousCount) return;
+          // The detached turn's reply is in: a terminal assistant row
+          // (not a tool-call intermediate) exists beyond the pre-drop
+          // transcript. Length alone would stop on the synchronously
+          // persisted user row — see the method doc.
+          if (_hasTerminalAssistantBeyond(messages, previousCount)) return;
         } catch (e) {
           // 404 = the stored row isn't readable yet; any other error is
           // equally non-destructive here. Never clear `_messages` on the
@@ -888,13 +902,37 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           setState(() => _loading = false);
         }
         if (attempt < maxAttempts - 1) {
-          await Future<void>.delayed(Duration(milliseconds: 500 << attempt));
+          // Exponential backoff capped at 4s: 10 attempts span ~30s, so a
+          // long model turn finishes within the budget instead of stranding
+          // its reply after a 3.5s give-up.
+          final delayMs = 500 << attempt > 4000 ? 4000 : 500 << attempt;
+          await Future<void>.delayed(Duration(milliseconds: delayMs));
           if (!mounted) return;
         }
       }
     } finally {
       _reattachResyncing = false;
     }
+  }
+
+  /// Whether [messages] carries the detached turn's final reply: a
+  /// terminal assistant row (role assistant/agent, no tool_calls) at an
+  /// index at or beyond [previousCount]. Rows before the drop may include
+  /// older assistant turns; only growth past the pre-drop watermark is
+  /// evidence of the NEW reply.
+  static bool _hasTerminalAssistantBeyond(
+    List<Map<String, dynamic>> messages,
+    int previousCount,
+  ) {
+    for (var i = previousCount; i < messages.length; i++) {
+      final msg = messages[i];
+      final role = msg['role'];
+      if (role != 'assistant' && role != 'agent') continue;
+      final toolCalls = msg['tool_calls'];
+      if (toolCalls is List && toolCalls.isNotEmpty) continue;
+      return true;
+    }
+    return false;
   }
 
   Future<void> _resyncLegacyHistoryAfterResume() async {

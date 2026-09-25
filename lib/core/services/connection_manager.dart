@@ -1454,6 +1454,12 @@ class DashboardClient {
     final seenIds = <String>{};
     var offset = 0;
     var exhausted = false;
+    int? total;
+    // Fallback pin-bound bookkeeping for a router that omits `total`
+    // (see the loop comment): max pins on any page bounds the pin set, and
+    // k consecutive zero-new windows consume k*pageSize disjoint pins.
+    var pinBound = 0;
+    var zeroNewPages = 0;
     for (var page = 0; page < maxPages; page++) {
       final data = await apiGet('sessions', queryParameters: {
         'archived': 'only',
@@ -1463,6 +1469,15 @@ class DashboardClient {
         if (gatewayProfile != null && gatewayProfile.isNotEmpty)
           'profile': gatewayProfile,
       });
+      // The dashboard router reports the filtered row count alongside the
+      // page (`total = session_count(same scope)`), so the LIMIT/OFFSET
+      // windows together cover exactly `total` rows — pins inside the
+      // window are part of that count, back-filled pins are repeats of
+      // rows already counted. Advancing until the offset covers `total`
+      // cannot confuse a pin-only window (zero new ids, rows still ahead)
+      // with the end of the archive.
+      final reportedTotal = data['total'];
+      if (reportedTotal is int && reportedTotal >= 0) total = reportedTotal;
       final list = data['sessions'] as List? ?? [];
       final rows = list
           .whereType<Map<String, dynamic>>()
@@ -1475,15 +1490,30 @@ class DashboardClient {
           newRows++;
         }
       }
-      // No-progress termination: window rows are disjoint across
-      // offsets and only back-filled pins repeat, so a page with zero
-      // unseen ids is past the end. An empty page is the same signal for
-      // a router without back-fill.
-      if (rows.isEmpty || newRows == 0) {
-        exhausted = true;
-        break;
-      }
       offset += pageSize;
+      if (total != null) {
+        if (offset >= total) {
+          exhausted = true;
+          break;
+        }
+        continue;
+      }
+      // No `total` (non-standard router): fall back to the client-side
+      // proof — a single zero-new page is NOT exhaustion when pins exist
+      // (a later all-pin window repeats seen ids while unseen rows
+      // remain); k consecutive zero-new windows past the pin bound are.
+      final pinsOnPage = rows.where((row) => row.pinned).length;
+      if (pinsOnPage > pinBound) pinBound = pinsOnPage;
+      if (rows.isEmpty || newRows == 0) {
+        zeroNewPages++;
+        final required = pinBound == 0 ? 1 : pinBound ~/ pageSize + 1;
+        if (zeroNewPages >= required) {
+          exhausted = true;
+          break;
+        }
+      } else {
+        zeroNewPages = 0;
+      }
     }
     if (!exhausted) {
       throw StateError(
