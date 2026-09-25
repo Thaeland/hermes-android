@@ -682,12 +682,28 @@ class _SessionListScreenState extends State<SessionListScreen> {
       // on an unfetched page. The set is the RAW ids of every loaded page —
       // excluded-source sessions are alive too, and pruning against the
       // filtered list would wipe their assignments as if deleted.
+      //
+      // Completeness is decided by NEW ids, not the server's `has_more`:
+      // the stock gateway computes has_more from the non-pinned rows in
+      // the combined response (api_server.py: windowed >= limit), so a
+      // pinned session already inside the base window makes that count
+      // fall below `limit` and report has_more=false while window rows
+      // still exist past the offset. Pruning on that early stop would wipe
+      // the assignments of every unfetched session. A page that adds no
+      // new ids is the only reliable end-of-list signal (pins repeat on
+      // every page, so past the store's end nothing new ever arrives).
+      final newIds = page.sessions
+          .map((session) => session.id)
+          .toSet()
+          .difference(_rawLoadedIds);
       _rawLoadedIds.addAll(page.sessions.map((session) => session.id));
-      if (!page.hasMore) {
+      if (newIds.isEmpty) {
         await store.pruneAssignments(Set.of(_rawLoadedIds));
       }
       final spaceState = await store.load();
       if (!mounted) return;
+      // `has_more` is NOT authoritative for stopping (see above): treat a
+      // page as "more may follow" iff it contributed new ids.
       setState(() {
         _spaceStore = store;
         _spaceState = spaceState;
@@ -698,7 +714,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
         // sessions.length would skip the gap between the window and the
         // back-fill on the next request.
         _sessionsOffset = _sessionPageSize;
-        _hasMoreSessions = page.hasMore;
+        _hasMoreSessions = newIds.isNotEmpty;
         _loading = false;
       });
     } catch (e) {

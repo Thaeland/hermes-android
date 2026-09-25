@@ -1434,13 +1434,26 @@ class DashboardClient {
   /// (the router opens that profile's session DB); omitting it would list
   /// the dashboard process's own default profile instead — the wrong
   /// store on a multiplexed gateway.
+  ///
+  /// Termination is by offset/no-progress, never by comparing the
+  /// accumulated row count against `total`: the same pinned back-fill
+  /// semantics as the live list can repeat rows across pages, and an
+  /// inflated `all.length >= total` would stop before every offset
+  /// window has been read, truncating the archive. Rows are deduplicated
+  /// by session id so repeats never surface twice. [maxPages] is the
+  /// explicit safety cap: if it is reached while the list was not
+  /// exhausted the read throws rather than silently returning a partial
+  /// archive — callers degrade honestly on the error instead of showing
+  /// a truncated list as complete.
   Future<List<Session>> getArchivedSessions({
     int pageSize = 100,
     int maxPages = 20,
     String? gatewayProfile,
   }) async {
     final all = <Session>[];
+    final seenIds = <String>{};
     var offset = 0;
+    var exhausted = false;
     for (var page = 0; page < maxPages; page++) {
       final data = await apiGet('sessions', queryParameters: {
         'archived': 'only',
@@ -1455,12 +1468,29 @@ class DashboardClient {
           .whereType<Map<String, dynamic>>()
           .map((s) => Session.fromJson(s))
           .toList();
-      all.addAll(rows);
-      final total = data['total'] is num ? (data['total'] as num).toInt() : rows.length;
+      var newRows = 0;
+      for (final row in rows) {
+        if (seenIds.add(row.id)) {
+          all.add(row);
+          newRows++;
+        }
+      }
+      // No-progress termination: window rows are disjoint across
+      // offsets and only back-filled pins repeat, so a page with zero
+      // unseen ids is past the end. An empty page is the same signal for
+      // a router without back-fill.
+      if (rows.isEmpty || newRows == 0) {
+        exhausted = true;
+        break;
+      }
       offset += pageSize;
-      // Stop when the pages are exhausted or the server stopped making
-      // progress (guards a router that ignores offset and repeats page 1).
-      if (rows.isEmpty || all.length >= total || offset >= total) break;
+    }
+    if (!exhausted) {
+      throw StateError(
+        'Archived session list exceeded the $maxPages-page cap without '
+        'reaching its end; refusing to present a possibly truncated '
+        'archive as complete.',
+      );
     }
     return all;
   }

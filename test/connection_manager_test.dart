@@ -214,6 +214,18 @@ Future<void> _expectFailClosedPromptDisconnect(
   }
 }
 
+Map<String, dynamic> _archivedRow(String id) => {
+  'id': id,
+  'title': 'Archived $id',
+  'model': 'gpt-oss-20b',
+  'source': 'gateway',
+  'message_count': 2,
+  'preview': 'archived preview',
+  'started_at': 1750000000,
+  'last_active': 1750000000,
+  'archived': true,
+};
+
 void main() {
   group('SavedConnection', () {
     test('normalizes bare HTTP gateway hosts with fallback port', () {
@@ -924,6 +936,118 @@ void main() {
       expect(runs.single.source, 'cron');
       expect(runs.single.isActive, isFalse);
       expect(runs.single.lastActive, 1750000123);
+      client.close();
+    });
+
+    test('getArchivedSessions dedupes repeated pins and pages by offset '
+        'regardless of total', () async {
+      // 150 archived rows, page size 100, one pin repeated on every
+      // page. The old code compared the inflated all.length against
+      // total: after page 0 (101 rows >= 150? no) — but with two pins
+      // repeated, page 0 alone reaches 102 and page 1 pushes past total
+      // early while rows remain. Termination must be by no-progress on
+      // NEW ids, so every offset window gets read and pins appear once.
+      final requestedOffsets = <String>[];
+      final client = DashboardClient(
+        host: 'hermes.local',
+        port: 9119,
+        username: 'misha',
+        password: 'secret',
+        httpClient: MockClient((request) async {
+          if (request.url.path == '/auth/password-login') {
+            return http.Response(
+              '{"ok":true}',
+              200,
+              headers: {
+                'set-cookie':
+                    'hermes_session_at=TOK123; Path=/; HttpOnly; SameSite=Lax',
+              },
+            );
+          }
+          if (request.url.path == '/api/sessions' &&
+              request.url.queryParameters['archived'] == 'only') {
+            final offset = int.parse(request.url.queryParameters['offset']!);
+            requestedOffsets.add(request.url.queryParameters['offset']!);
+            final limit = int.parse(request.url.queryParameters['limit']!);
+            final rows = [
+              for (var i = offset; i < offset + limit && i < 150; i++)
+                _archivedRow('a$i'),
+            ];
+            // The pin repeats on every page (back-fill semantics).
+            final withPin = [
+              _archivedRow('pin-x'),
+              if (!rows.any((r) => r['id'] == 'pin-x')) ...rows,
+            ];
+            return http.Response(
+              jsonEncode({
+                'sessions': withPin,
+                'total': 151,
+                'limit': limit,
+                'offset': offset,
+              }),
+              200,
+            );
+          }
+          return http.Response('not found', 404);
+        }),
+      );
+
+      final sessions = await client.getArchivedSessions(pageSize: 100);
+
+      // Every offset window read: 0, 100, and the no-progress page at
+      // 200 that proves the end.
+      expect(requestedOffsets, ['0', '100', '200']);
+      // 150 window rows + 1 pin, deduped — never the inflated 153.
+      expect(sessions, hasLength(151));
+      final ids = sessions.map((s) => s.id).toSet();
+      expect(ids.length, 151, reason: 'no duplicate ids');
+      expect(ids.contains('pin-x'), isTrue);
+      expect(ids.contains('a149'), isTrue);
+      client.close();
+    });
+
+    test('getArchivedSessions throws rather than present a cap-truncated '
+        'archive as complete', () async {
+      // A store that never ends: every page carries fresh rows. The
+      // maxPages cap must surface an error, not a silent partial list.
+      final client = DashboardClient(
+        host: 'hermes.local',
+        port: 9119,
+        username: 'misha',
+        password: 'secret',
+        httpClient: MockClient((request) async {
+          if (request.url.path == '/auth/password-login') {
+            return http.Response(
+              '{"ok":true}',
+              200,
+              headers: {
+                'set-cookie':
+                    'hermes_session_at=TOK123; Path=/; HttpOnly; SameSite=Lax',
+              },
+            );
+          }
+          if (request.url.path == '/api/sessions') {
+            final offset = int.parse(request.url.queryParameters['offset']!);
+            final limit = int.parse(request.url.queryParameters['limit']!);
+            return http.Response(
+              jsonEncode({
+                'sessions': [
+                  for (var i = offset; i < offset + limit; i++)
+                    _archivedRow('endless$i'),
+                ],
+                'total': 999999,
+              }),
+              200,
+            );
+          }
+          return http.Response('not found', 404);
+        }),
+      );
+
+      expect(
+        client.getArchivedSessions(pageSize: 100, maxPages: 3),
+        throwsStateError,
+      );
       client.close();
     });
 

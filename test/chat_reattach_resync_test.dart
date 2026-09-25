@@ -1,8 +1,13 @@
-// Review blocker #3: a mid-turn socket drop must actually reattach. The
-// gateway keeps the turn alive detached (activity-staleness gate), so on
-// reconnect the screen must re-bind the session and refetch history —
-// and the submit catch path must not clobber the freshly-resynced
-// transcript with a composer-restore.
+// Review blocker #3: a mid-turn socket drop must actually reattach, with
+// the REAL production close ordering. WsClient._handleClosedConnection
+// rejects every pending RPC the instant the socket closes — so the submit
+// catch fires BEFORE the reconnect (composer restore, optimistic turn
+// stripped), and the resync runs later, on the fresh socket, while the
+// detached server turn may still be settling. The resync must therefore:
+// - fetch by the gateway's STORED session key (a newly created stock
+//   session's DB row is not addressable by the mobile session id),
+// - retry until the detached reply lands rather than trusting one fetch,
+// - never clear the transcript on a 404 (row not readable yet ≠ empty).
 import 'dart:async';
 import 'dart:convert';
 
@@ -23,7 +28,8 @@ void main() {
   });
 
   testWidgets(
-    'mid-turn drop then reconnect re-binds the session and resyncs history',
+    'production close ordering: submit fails at close, reconnect resyncs '
+    'by stored session id and lands the detached reply',
     (tester) async {
       final hook = TestDesktopConnectionHook();
       var ensureCount = 0;
@@ -31,7 +37,7 @@ void main() {
       final history = _ReattachChatHttpClient();
       final apiClient = ApiClient(
         baseUrl: 'http://reattach.fixture',
-        apiKey: 'fixture-key',
+        apiKey: 'reattach-key',
         httpClient: history,
       );
       await _pumpChat(
@@ -39,6 +45,7 @@ void main() {
         hook: hook,
         apiClient: apiClient,
         ensureCount: () => ensureCount++,
+        storedKey: 'stored_sess_9f3a',
         remoteSubmit:
             ({required sessionId, required text, required onEvent}) {
               return submission.future;
@@ -71,37 +78,123 @@ void main() {
       expect(ensureCount, 0);
       expect(history.messageRequestCount, 1);
 
+      // PRODUCTION ORDERING: WsClient rejects the pending prompt.submit AT
+      // CLOSE, before any reconnect. The catch restores the composer and
+      // strips the optimistic turn — this happens BEFORE the resync runs.
+      history.includeCompletedTurn = true;
+      submission.completeError(
+        JsonRpcError('prompt.submit', 'Desktop gateway connection closed'),
+      );
+      await tester.pump();
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        'Long running task',
+        reason: 'the catch-at-close path restores the composer before reconnect',
+      );
+      expect(history.messageRequestCount, 1, reason: 'no resync before reconnect');
+
       // The reconnect succeeds: the screen must re-bind and refetch now,
       // without waiting for any user action. The server finished the turn
-      // detached during the outage. (No pumpAndSettle: the submit is
-      // still pending and the streaming-follow loop keeps pumping.)
-      history.includeCompletedTurn = true;
+      // detached during the outage.
       hook.handler?.call(DesktopConnectionState.connected);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
       await tester.pump(const Duration(milliseconds: 100));
 
       expect(ensureCount, 1, reason: 'reattach must re-ensure the session');
-      expect(history.messageRequestCount, 2, reason: 'reattach must refetch history');
+      expect(
+        history.messageRequestCount,
+        2,
+        reason: 'reattach must refetch history',
+      );
+      // STORED IDENTITY: the refetch must target the gateway's stored DB
+      // key, not the mobile session id — a newly created stock session is
+      // not addressable by the mobile id, and a 404 there would wipe the
+      // transcript.
+      expect(
+        history.requestedMessagePaths.last,
+        contains('stored_sess_9f3a'),
+        reason: 'resync must fetch by the stored session identity',
+      );
       expect(find.text('Server-side final response'), findsOneWidget);
 
-      // The still-pending submit now fails with the socket-closed error.
-      // The catch path must NOT clobber the resynced transcript or shove
-      // the prompt back into the composer.
+      // The reply landed (transcript grew past the pre-resync count), so
+      // the resync is done: no further fetches were triggered.
+      await tester.pump(const Duration(seconds: 3));
+      expect(history.messageRequestCount, 2);
+    },
+  );
+
+  testWidgets(
+    'resync retries while the detached turn settles and never clears the '
+    'transcript on 404',
+    (tester) async {
+      final hook = TestDesktopConnectionHook();
+      final submission = Completer<void>();
+      // The initial history fetch (request 1) succeeds; the resync fetch
+      // (request 2) 404s — the stored row isn't readable yet.
+      final history = _ReattachChatHttpClient()..failMessagesAfterFirst = 1;
+      final apiClient = ApiClient(
+        baseUrl: 'http://reattach.fixture',
+        apiKey: 'reattach-key',
+        httpClient: history,
+      );
+      await _pumpChat(
+        tester,
+        hook: hook,
+        apiClient: apiClient,
+        ensureCount: () {},
+        storedKey: 'stored_sess_retry',
+        remoteSubmit:
+            ({required sessionId, required text, required onEvent}) {
+              return submission.future;
+            },
+      );
+
+      hook.handler?.call(DesktopConnectionState.connected);
+      await tester.pump();
+      await tester.enterText(find.byType(TextField), 'Slow settling turn');
+      await tester.tap(find.byTooltip('Send'));
+      await tester.pump();
+      await tester.pump();
+
+      // Close-ordering: submit fails at close, composer restored.
+      hook.handler?.call(DesktopConnectionState.reconnecting);
+      await tester.pump();
       submission.completeError(
         JsonRpcError('prompt.submit', 'Desktop gateway connection closed'),
       );
       await tester.pump();
       await tester.pumpAndSettle();
 
-      expect(find.text('Server-side final response'), findsOneWidget);
+      // Reconnect: the stored row is NOT readable yet — the first resync
+      // fetch 404s. The transcript must survive (never cleared by a
+      // failed resync) and the resync must retry, not give up on one shot.
+      hook.handler?.call(DesktopConnectionState.connected);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+
+      final afterFirstResync = history.messageRequestCount;
+      expect(afterFirstResync, 2, reason: 'first resync fetch attempted');
       expect(
         tester.widget<TextField>(find.byType(TextField)).controller!.text,
-        isEmpty,
-        reason: 'resynced history wins; composer must not be restored',
+        'Slow settling turn',
+        reason: 'a failed resync must not touch the composer either',
       );
-      // And the resync is one-shot: no further fetches were triggered.
-      expect(history.messageRequestCount, 2);
+
+      // The row becomes readable: the next retry must land the reply.
+      history.failMessagesAfterFirst = 0;
+      history.includeCompletedTurn = true;
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump(const Duration(seconds: 2));
+
+      expect(
+        history.messageRequestCount,
+        greaterThan(afterFirstResync),
+        reason: 'resync must retry until the settling turn lands',
+      );
+      expect(find.text('Server-side final response'), findsOneWidget);
     },
   );
 
@@ -112,7 +205,7 @@ void main() {
       final history = _ReattachChatHttpClient();
       final apiClient = ApiClient(
         baseUrl: 'http://reattach.fixture',
-        apiKey: 'fixture-key',
+        apiKey: 'reattach-key',
         httpClient: history,
       );
       await _pumpChat(
@@ -122,7 +215,10 @@ void main() {
         ensureCount: () {},
         remoteSubmit:
             ({required sessionId, required text, required onEvent}) async {
-              throw JsonRpcError('prompt.submit', 'Desktop gateway connection closed');
+              throw JsonRpcError(
+                'prompt.submit',
+                'Desktop gateway connection closed',
+              );
             },
       );
 
@@ -150,7 +246,7 @@ void main() {
       final history = _ReattachChatHttpClient();
       final apiClient = ApiClient(
         baseUrl: 'http://reattach.fixture',
-        apiKey: 'fixture-key',
+        apiKey: 'reattach-key',
         httpClient: history,
       );
       await _pumpChat(
@@ -189,6 +285,7 @@ Future<void> _pumpChat(
   required ApiClient apiClient,
   required VoidCallback ensureCount,
   required TestRemotePromptSubmit remoteSubmit,
+  String? storedKey,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
@@ -198,7 +295,7 @@ Future<void> _pumpChat(
           label: 'Reattach fixture',
           host: 'reattach.fixture',
           port: 8642,
-          apiKey: 'fixture-key',
+          apiKey: 'reattach-key',
         ),
         session: const Session(
           id: 'reattach-session',
@@ -214,6 +311,7 @@ Future<void> _pumpChat(
         testRemotePromptSubmit: remoteSubmit,
         testDesktopConnectionHook: hook,
         testDesktopSessionEnsured: ensureCount,
+        testStoredSessionKey: storedKey == null ? null : (_) => storedKey,
         testVoiceComposerAdapter: FakeVoiceComposerAdapter(),
       ),
     ),
@@ -227,10 +325,26 @@ class _ReattachChatHttpClient extends http.BaseClient {
   int messageRequestCount = 0;
   bool includeCompletedTurn = false;
 
+  /// /messages requests BEYOND this count get a 404 (simulates the
+  /// stored row not being readable yet while the detached turn settles).
+  /// 0 = never fail.
+  int failMessagesAfterFirst = 0;
+
+  final List<String> requestedMessagePaths = [];
+
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
     if (request.method == 'GET' && request.url.path.endsWith('/messages')) {
       messageRequestCount += 1;
+      requestedMessagePaths.add(request.url.path);
+      if (failMessagesAfterFirst > 0 &&
+          messageRequestCount > failMessagesAfterFirst) {
+        return http.StreamedResponse(
+          Stream.value(utf8.encode(jsonEncode({'error': 'not found'}))),
+          404,
+          headers: {'content-type': 'application/json'},
+        );
+      }
       final messages = includeCompletedTurn
           ? <Map<String, dynamic>>[
               {'role': 'user', 'content': 'Long running task'},

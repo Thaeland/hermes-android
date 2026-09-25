@@ -18,6 +18,17 @@ class _FakeDashboard {
   /// Paths whose mkdir is refused with 403.
   final Set<String> forbiddenMkdirs;
 
+  /// Directory paths where marker WRITES are refused (read-only mount).
+  final Set<String> readOnlyDirs;
+
+  /// When set, every fs/read-text returns this content instead of what
+  /// was written — simulates a host whose read cannot be trusted to echo
+  /// the claim back.
+  String? corruptReadText;
+
+  /// Marker files written via fs/write-text, keyed by path.
+  final Map<String, String> writtenFiles = {};
+
   /// Locked-root value for GET /api/files (null = unlocked, browses home).
   final String? lockedRoot;
 
@@ -27,9 +38,11 @@ class _FakeDashboard {
   _FakeDashboard({
     Set<String>? existing,
     Set<String>? forbiddenMkdirs,
+    Set<String>? readOnlyDirs,
     this.lockedRoot,
   }) : existing = existing ?? {},
-       forbiddenMkdirs = forbiddenMkdirs ?? {};
+       forbiddenMkdirs = forbiddenMkdirs ?? {},
+       readOnlyDirs = readOnlyDirs ?? {};
 
   DashboardClient client() => DashboardClient(
     host: 'localhost',
@@ -54,8 +67,20 @@ class _FakeDashboard {
         );
       }
       if (existing.contains(path)) {
+        // List whatever marker files were written directly inside this dir
+        // (mirrors the stock scandir-backed listing the claim check reads).
+        final entries = writtenFiles.entries
+            .where((e) {
+              final idx = e.key.lastIndexOf('/');
+              return idx > 0 && e.key.substring(0, idx) == path;
+            })
+            .map((e) => {
+              'name': e.key.substring(e.key.lastIndexOf('/') + 1),
+              'is_directory': false,
+            })
+            .toList();
         return http.Response(
-          jsonEncode({'path': path, 'entries': <dynamic>[]}),
+          jsonEncode({'path': path, 'entries': entries}),
           200,
         );
       }
@@ -69,6 +94,37 @@ class _FakeDashboard {
       _mkdirs.add(path);
       existing.add(path);
       return http.Response(jsonEncode({'ok': true, 'path': path}), 200);
+    }
+    if (uri.path == '/api/fs/write-text' && request.method == 'POST') {
+      final body = jsonDecode(request.body) as Map;
+      final path = body['path'] as String;
+      final content = body['content'] as String;
+      // The stock route requires the parent dir to exist; a read-only
+      // directory refuses the write like a mounted-ro folder would.
+      final parent = path.substring(0, path.lastIndexOf('/'));
+      if (!existing.contains(parent)) {
+        return http.Response('{"detail":"Parent does not exist"}', 400);
+      }
+      if (readOnlyDirs.contains(parent)) {
+        return http.Response('{"detail":"File is not writable"}', 403);
+      }
+      writtenFiles[path] = content;
+      return http.Response(jsonEncode({'ok': true, 'path': path}), 200);
+    }
+    if (uri.path == '/api/fs/read-text' && request.method == 'GET') {
+      final path = uri.queryParameters['path'];
+      final content = writtenFiles[path];
+      if (content == null) {
+        return http.Response('{"detail":"File not found"}', 404);
+      }
+      return http.Response(
+        jsonEncode({
+          'binary': false,
+          'text': corruptReadText ?? content,
+          'path': path,
+        }),
+        200,
+      );
     }
     return http.Response('not found', 404);
   }
@@ -158,6 +214,42 @@ void main() {
       );
       expect(folder, '/home/tester/Projects/evil-name');
       expect(folder!.contains('..'), isFalse);
+    });
+
+    test('a concurrent creator that won the race is NOT adopted', () async {
+      // The probe sees the candidate as free (not in `existing`), mkdir
+      // succeeds exist_ok-style, but the directory already carries the
+      // racer's marker — the claim check must reject it and move on.
+      final dash = _FakeDashboard();
+      dash.writtenFiles['/home/tester/Projects/raced/hermes-provision-aaa.owner'] =
+          'aaa';
+      final folder = await DashboardFolderProvisioner(dash.client()).provision(
+        'raced',
+      );
+      // Never adopted the contested path; the -1 suffix is clean.
+      expect(folder, '/home/tester/Projects/raced-1');
+      expect(dash.mkdirs.first, '/home/tester/Projects/raced');
+    });
+
+    test('a read-only candidate directory is abandoned, never adopted', () async {
+      final dash = _FakeDashboard(
+        readOnlyDirs: {'/home/tester/Projects/locked-thing'},
+      );
+      final folder = await DashboardFolderProvisioner(dash.client()).provision(
+        'locked-thing',
+      );
+      // Marker write refused → claim fails → next suffix succeeds.
+      expect(folder, '/home/tester/Projects/locked-thing-1');
+    });
+
+    test('a corrupt marker read (token mismatch) never adopts', () async {
+      final dash = _FakeDashboard()..corruptReadText = 'not-what-we-wrote';
+      final folder = await DashboardFolderProvisioner(dash.client()).provision(
+        'weird-host',
+      );
+      // Every candidate fails verification; the loop exhausts and
+      // degrades to folderless rather than adopting on a bad proof.
+      expect(folder, isNull);
     });
   });
 }

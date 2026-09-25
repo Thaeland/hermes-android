@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'connection_manager.dart';
 
 /// Provisions a fresh, collision-free folder on the gateway host for a
@@ -15,13 +17,20 @@ import 'connection_manager.dart';
 /// 400 (exists but is not a directory) or a transport failure is NOT
 /// evidence of absence, and treating it as such was the previous failure
 /// mode where a new project silently bound to a pre-existing directory.
-/// Because the stock `POST /api/files/mkdir` is `exist_ok=True` (it
-/// succeeds even when the directory already exists), the probe alone
-/// cannot close the create race, so every successful mkdir is
-/// post-verified: the path must answer as a directory with zero entries.
-/// A folder that turns out non-empty belongs to someone else and is never
-/// returned. Only a path this call just created, proven empty, is ever
-/// returned.
+///
+/// **Ownership is proven by a marker, not by emptiness.** The stock
+/// `POST /api/files/mkdir` is `exist_ok=True`: a 200 says nothing about
+/// who created the directory, and a post-create emptiness check cannot
+/// distinguish "I just made this" from "a concurrent creator made this
+/// empty folder a moment ago" — both callers of a racing pair would
+/// happily adopt the same directory. Instead, after mkdir the provisioner
+/// writes an unguessable marker file (`hermes-provision-<random>.owner`)
+/// inside the candidate and reads it back: the marker content must match
+/// the token this call wrote. Only the writer that can read its own
+/// unguessable token back has provably claimed the folder; a directory
+/// created by anyone else can never contain it. A candidate whose marker
+/// cannot be written or verified is abandoned (never adopted, never
+/// deleted — it may not be ours).
 abstract class ProjectFolderProvisioner {
   /// Returns the absolute path of a newly created folder for [slug], or
   /// `null` when nothing could be provisioned (no projects root reachable,
@@ -112,17 +121,77 @@ class DashboardFolderProvisioner implements ProjectFolderProvisioner {
         continue;
       }
       // The stock mkdir is exist_ok=True: a 200 here does NOT prove we
-      // created the directory — a concurrent writer (or a path that
-      // appeared between probe and create) passes the same check. The
-      // fail-if-exists contract is enforced post-hoc: only a directory
-      // that answers as freshly created (zero entries) may be adopted.
-      if (await _isFreshlyCreatedEmpty(candidate)) {
+      // created the directory. Claim it instead: write an unguessable
+      // marker inside and read it back. Only a folder this call owns
+      // (created by us, or at least writable exclusively enough to hold
+      // our secret token) can pass this check; a directory a concurrent
+      // creator made first will not contain our marker, and a folder we
+      // cannot even write into is not ours to adopt either.
+      if (await _claimOwnership(candidate)) {
         return candidate;
       }
       consecutiveUnknown = 0;
       continue;
     }
     return null;
+  }
+
+  /// Writes an unguessable ownership marker into [path] and verifies the
+  /// directory is exclusively ours: the listing must contain exactly one
+  /// entry and it must be our marker file. Emptiness proves nothing about
+  /// who created the folder, and a marker that merely exists proves only
+  /// that we can write here — two racing callers could each drop their own
+  /// marker and both "verify". Requiring our marker to be the ONLY entry
+  /// makes adoption mutually exclusive: once a racer's marker also lands,
+  /// the directory shows two entries and neither caller adopts it.
+  /// A failed write, a mismatched read, or a multi-entry listing means
+  /// the candidate is abandoned — never adopted, never deleted (it may
+  /// belong to the concurrent creator that won the mkdir race).
+  Future<bool> _claimOwnership(String path) async {
+    final token = _ownerToken();
+    final markerName = 'hermes-provision-$token.owner';
+    final markerPath = '$path/$markerName';
+    try {
+      await dashboard.apiPost('fs/write-text', body: {
+        'path': markerPath,
+        'content': token,
+      });
+    } catch (_) {
+      // Write refused (read-only mount, permission, path policy): the
+      // folder is not ours to claim.
+      return false;
+    }
+    try {
+      final res = await dashboard.apiGet('files', queryParameters: {'path': path});
+      final entries = res['entries'];
+      if (entries is! List || entries.length != 1) return false;
+      final entry = entries.first;
+      if (entry is! Map) return false;
+      if (entry['name'] != markerName) return false;
+      // Confirm the marker content round-trips: the listing proves the
+      // name, the read proves the unguessable token is really on disk.
+      final marker = await dashboard.apiGet(
+        'fs/read-text',
+        queryParameters: {'path': markerPath},
+      );
+      return marker['text'] == token && marker['binary'] != true;
+    } catch (_) {
+      // Listing/read unverifiable after a "successful" write: abandon the
+      // candidate rather than adopt on a partial proof.
+      return false;
+    }
+  }
+
+  /// 128 bits of randomness in hex — the marker name and content are
+  /// both unguessable, so no other writer can forge a claim by guessing
+  /// the token, and the random name avoids colliding with a real file.
+  static String _ownerToken() {
+    final rand = Random.secure();
+    final buffer = StringBuffer();
+    for (var i = 0; i < 32; i++) {
+      buffer.write(rand.nextInt(16).toRadixString(16));
+    }
+    return buffer.toString();
   }
 
   /// The directory new project folders live under.
@@ -166,20 +235,6 @@ class DashboardFolderProvisioner implements ProjectFolderProvisioner {
       };
     } catch (_) {
       return _Probe.unknown;
-    }
-  }
-
-  /// Post-create proof: [path] must answer as a directory with zero
-  /// entries. A non-empty directory means someone else's folder won the
-  /// race and must never be adopted; an unreadable result after a
-  /// "successful" mkdir is equally untrustworthy.
-  Future<bool> _isFreshlyCreatedEmpty(String path) async {
-    try {
-      final res = await dashboard.apiGet('files', queryParameters: {'path': path});
-      final entries = res['entries'];
-      return entries is List && entries.isEmpty;
-    } catch (_) {
-      return false;
     }
   }
 

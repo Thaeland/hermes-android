@@ -193,6 +193,12 @@ class ChatScreen extends StatefulWidget {
   @visibleForTesting
   final VoidCallback? testDesktopSessionEnsured;
 
+  /// Test seam mirroring `DesktopGatewayClient.storedSessionKeyFor`: maps
+  /// the mobile session id to the gateway's stored DB key so a test can
+  /// assert the reattach history refetch targets the stored identity.
+  @visibleForTesting
+  final String? Function(String mobileSessionId)? testStoredSessionKey;
+
   const ChatScreen({
     required this.connection,
     required this.session,
@@ -212,6 +218,7 @@ class ChatScreen extends StatefulWidget {
     this.testTurnNotifications,
     this.testDesktopConnectionHook,
     this.testDesktopSessionEnsured,
+    this.testStoredSessionKey,
     super.key,
   });
 
@@ -785,14 +792,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
   }
 
-  Future<void> _fetchMessages() async {
+  Future<void> _fetchMessages({String? sessionId}) async {
     setState(() {
       _loading = true;
       _error = null;
     });
 
     try {
-      final messages = await _client.getMessages(widget.session.id);
+      final messages = await _client.getMessages(sessionId ?? widget.session.id);
       if (!mounted) return;
       _extractToolMessages(messages);
       setState(() {
@@ -826,13 +833,65 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// the session on the fresh socket (single-flights with the client's own
   /// reconnect rebind) and refetch history so a reply that completed
   /// server-side while the socket was down lands in the transcript.
+  ///
+  /// Two production-ordering facts shape this:
+  /// - WsClient rejects every pending RPC the instant the socket closes,
+  ///   so the submit catch fires BEFORE the reconnect — the composer may
+  ///   already be restored and the optimistic turn stripped by the time
+  ///   this runs. The detached server turn may also still be settling, so
+  ///   a single immediate fetch can read history that lacks the reply.
+  ///   Retry with a short backoff until a fetch lands rows beyond what
+  ///   the transcript already had, or the retry budget is spent.
+  /// - A newly created stock session lives in the DB under the gateway-
+  ///   minted STORED key, not the mobile session id (the mobile id never
+  ///   survives into gateway-side lookups). Fetching by `widget.session.id`
+  ///   404s and would wipe the transcript, so the refetch targets
+  ///   `storedSessionKeyFor()` after the rebind, falling back to the
+  ///   mobile id only when no stored binding exists.
+  /// - A 404 here NEVER clears the transcript: it means the stored row
+  ///   isn't readable yet (turn still settling), not that the chat is
+  ///   empty. Only a successful fetch replaces `_messages`.
   Future<void> _resyncAfterReattach() async {
     if (_reattachResyncing) return;
     _reattachResyncing = true;
     try {
       await _ensureDesktopSession();
       if (!mounted) return;
-      await _fetchMessages();
+      final storedId =
+          _desktopGateway?.storedSessionKeyFor(widget.session.id) ??
+          widget.testStoredSessionKey?.call(widget.session.id) ??
+          widget.session.id;
+      final previousCount = _messages.length;
+      const maxAttempts = 4;
+      for (var attempt = 0; attempt < maxAttempts; attempt++) {
+        try {
+          final messages = await _client.getMessages(storedId);
+          if (!mounted) return;
+          _extractToolMessages(messages);
+          setState(() {
+            _messages = messages;
+            // Server history is now authoritative; a submit catch that
+            // starts after this point must not clobber it with composer-
+            // restore.
+            _historyGeneration++;
+            _loading = false;
+          });
+          _scheduleInitialEndAlignment();
+          // The detached turn's reply is in: the refetch grew the
+          // transcript past what we had before the drop.
+          if (messages.length > previousCount) return;
+        } catch (e) {
+          // 404 = the stored row isn't readable yet; any other error is
+          // equally non-destructive here. Never clear `_messages` on the
+          // strength of a failed resync fetch.
+          if (!mounted) return;
+          setState(() => _loading = false);
+        }
+        if (attempt < maxAttempts - 1) {
+          await Future<void>.delayed(Duration(milliseconds: 500 << attempt));
+          if (!mounted) return;
+        }
+      }
     } finally {
       _reattachResyncing = false;
     }

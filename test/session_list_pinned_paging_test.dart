@@ -55,15 +55,27 @@ Map<String, dynamic> _pinnedRow(String id) => {
 /// - serves `limit` window rows for the requested offset,
 /// - APPENDS the pinned rows beyond `limit` (back-fill),
 /// - repeats the pins on EVERY page,
-/// - `has_more` is decided by the window rows only (pins don't count).
+/// - `has_more` is decided by the window rows only (pins don't count):
+///   `has_more = (non-pinned rows in the combined response) >= limit`.
 ///
 /// Records every paged offset so the test can assert the client advanced
 /// by the REQUESTED window rather than the returned row count.
 class _PinnedBackfillClient extends http.BaseClient {
-  _PinnedBackfillClient({required this.totalWindow, required this.pinnedIds});
+  _PinnedBackfillClient({
+    required this.totalWindow,
+    required this.pinnedIds,
+    this.pinnedWindowIndexes = const {},
+  });
 
   final int totalWindow;
   final List<String> pinnedIds;
+
+  /// Window indices that are THEMSELVES pinned — the case the reviewer
+  /// flagged: a pin that already sits inside the base window makes the
+  /// non-pinned count fall below `limit`, so the server reports
+  /// has_more=false even while rows exist past the offset.
+  final Set<int> pinnedWindowIndexes;
+
   final List<String> requestedOffsets = [];
 
   http.StreamedResponse _json(Map<String, dynamic> body, {int status = 200}) =>
@@ -90,12 +102,25 @@ class _PinnedBackfillClient extends http.BaseClient {
       final limit = int.tryParse(uri.queryParameters['limit'] ?? '') ?? 50;
       final windowRows = [
         for (var i = offset; i < offset + limit && i < totalWindow; i++)
-          _windowRow(i),
+          if (pinnedWindowIndexes.contains(i))
+            _pinnedRow('w$i')
+          else
+            _windowRow(i),
       ];
+      // Back-fill: pins not already in the window get appended (the stock
+      // dedupes by seen ids).
+      final windowIds = windowRows.map((r) => r['id']).toSet();
+      final backfill = pinnedIds
+          .where((id) => !windowIds.contains(id))
+          .map(_pinnedRow)
+          .toList();
       // Pins lead the payload so they always render in the viewport; the
       // stock gateway repeats them on every page.
-      final rows = [...pinnedIds.map(_pinnedRow), ...windowRows];
-      final windowed = windowRows.length;
+      final rows = [...backfill, ...windowRows];
+      // The stock computation: only non-pinned rows decide has_more
+      // (api_server.py: windowed = sum(not pinned); has_more = windowed
+      // >= limit). A pinned-in-window row drops the count below limit.
+      final windowed = rows.where((r) => r['pinned'] != true).length;
       return _json({
         'object': 'list',
         'data': rows,
@@ -168,8 +193,17 @@ void main() {
 
       // The second page must be requested at the REQUESTED window offset
       // (50), not at 52 — advancing by the returned row count (50 window
-      // + 2 back-filled pins) would skip 'Window chat 50' and 51.
-      expect(fake.requestedOffsets, ['0', '50']);
+      // + 2 back-filled pins) would skip 'Window chat 50' and 51. A
+      // terminal no-progress request at offset 100 is expected: the
+      // loader keeps paging until a page contributes zero new ids.
+      expect(fake.requestedOffsets.first, '0');
+      expect(fake.requestedOffsets, contains('50'));
+      expect(
+        fake.requestedOffsets.every((o) => int.parse(o) % 50 == 0),
+        isTrue,
+        reason: 'offsets must advance by the requested window, never by '
+            'the returned row count',
+      );
 
       // Skip proof: the rows the old offset bug skipped exist in the
       // list — scrollUntilVisible only succeeds for rows actually built.
@@ -190,6 +224,78 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Window chat 59'), findsOneWidget);
     });
+
+    testWidgets(
+      'a pin INSIDE the base window (has_more=false too early) does not '
+      'stop pagination',
+      (tester) async {
+        // 60 window rows, page size 50. Window row 10 is itself pinned:
+        // page 0's combined response carries 49 non-pinned rows, so the
+        // stock has_more computation (windowed >= limit) reports FALSE
+        // even though rows 50-59 still exist. A client that trusts
+        // has_more stops after page 0 — truncating the list AND pruning
+        // space assignments against an incomplete raw-id set.
+        final fake = _PinnedBackfillClient(
+          totalWindow: 60,
+          pinnedIds: const ['pin-a'],
+          pinnedWindowIndexes: const {10},
+        );
+        final controller = GatewayTurnApplicationController(
+          sessionFactory: (_) => InertTurnApplicationSession(),
+        );
+        addTearDown(controller.close);
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: SessionListScreen(
+              connection: _connection('paging-inwin'),
+              turnApplicationController: controller,
+              testHttpClient: fake,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        // Sanity: a pinned row renders (viewport-clipped, so just
+        // requires at least one "Pinned chat" on screen).
+        expect(find.text('Pinned chat'), findsWidgets);
+
+        final list = find.descendant(
+          of: find.byType(RefreshIndicator),
+          matching: find.byType(ListView),
+        );
+        final scrollable = find.descendant(
+          of: list,
+          matching: find.byType(Scrollable),
+        );
+
+        // Scroll to the bottom to trigger the load-more path. With the
+        // early-stop bug _hasMoreSessions would be false and no second
+        // request would ever fire.
+        await tester.drag(list, const Offset(0, -3000));
+        await tester.pumpAndSettle();
+        await tester.drag(list, const Offset(0, -3000));
+        await tester.pumpAndSettle();
+
+        expect(
+          fake.requestedOffsets,
+          contains('50'),
+          reason:
+              'has_more=false from a pinned-in-window row must not stop '
+              'pagination',
+        );
+
+        // The rows past the falsely-terminated window are present.
+        await tester.scrollUntilVisible(
+          find.text('Window chat 55'),
+          500,
+          scrollable: scrollable,
+          maxScrolls: 60,
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Window chat 55'), findsOneWidget);
+      },
+    );
   });
 
   group('WorkspaceScreen Home loader paging vs pinned back-fill', () {
@@ -251,9 +357,16 @@ void main() {
       // Second page requested at the window offset (100), not 101 —
       // advancing by the returned rows (100 window + 1 pin) would skip
       // 'Window chat 100'. The loader legitimately runs more than once
-      // (Home refresh + Chats data), so assert the offset SET is exactly
-      // the window boundaries and never a back-fill-shifted value.
-      expect(fake.requestedOffsets.toSet(), {'0', '100'});
+      // (Home refresh + Chats data), and a terminal no-progress probe at
+      // offset 200 confirms the end, so assert every offset is a clean
+      // window boundary and the real pages were read.
+      expect(fake.requestedOffsets, contains('100'));
+      expect(
+        fake.requestedOffsets.every((o) => int.parse(o) % 100 == 0),
+        isTrue,
+        reason: 'offsets must advance by the requested window, never by '
+            'the returned row count',
+      );
 
       final chatsScope = find.byType(WorkspaceSessionsScreen);
       // The Chats browser's ListView CLIPS: rows outside the viewport are
@@ -308,5 +421,94 @@ void main() {
         findsOneWidget,
       );
     });
+
+    testWidgets(
+      'a pin INSIDE the base window (has_more=false too early) does not '
+      'stop the Home loader',
+      (tester) async {
+        // Home pages at 100; 120 window rows. Window row 5 is itself
+        // pinned: page 0's combined response carries 99 non-pinned rows,
+        // so the stock has_more (windowed >= limit) reports FALSE even
+        // though rows 100-119 exist. The loader must keep paging on the
+        // new-id signal instead.
+        final fake = _PinnedBackfillClient(
+          totalWindow: 120,
+          pinnedIds: const ['pin-a'],
+          pinnedWindowIndexes: const {5},
+        );
+        tester.view.physicalSize = const Size(500, 1200);
+        tester.view.devicePixelRatio = 1.0;
+        addTearDown(tester.view.reset);
+
+        final repository = ProjectsRepository(
+          client: ProjectsGatewayClient((method, params) async {
+            if (method == 'projects.list') {
+              return {
+                'jsonrpc': '2.0',
+                'id': 1,
+                'result': {'projects': const [], 'active_id': null},
+              };
+            }
+            if (method == 'projects.tree') {
+              return {
+                'jsonrpc': '2.0',
+                'id': 1,
+                'result': {
+                  'projects': const [],
+                  'active_id': null,
+                  'scoped_session_ids': const [],
+                },
+              };
+            }
+            return {'jsonrpc': '2.0', 'id': 1, 'result': const {}};
+          }),
+          preferences: await SharedPreferences.getInstance(),
+          connectionId: 'paging-inwin-home',
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: hermesTheme(Brightness.dark),
+            home: WorkspaceScreen(
+              connection: _connection('paging-inwin-home'),
+              repositoryFactory: (_) => repository,
+              testSessionsHttpClient: fake,
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.text(HermesDestination.chats.label).last);
+        await tester.pumpAndSettle();
+        expect(find.byType(WorkspaceSessionsScreen), findsOneWidget);
+
+        expect(
+          fake.requestedOffsets.toSet(),
+          contains('100'),
+          reason:
+              'has_more=false from a pinned-in-window row must not stop '
+              'the Home loader',
+        );
+
+        final chatsScope = find.byType(WorkspaceSessionsScreen);
+        final chatsScrollable = find.descendant(
+          of: chatsScope,
+          matching: find.byWidgetPredicate(
+            (w) => w is Scrollable && w.axis == Axis.vertical,
+          ),
+        );
+        await tester.scrollUntilVisible(
+          find.descendant(of: chatsScope, matching: find.text('Window chat 119')),
+          400,
+          scrollable: chatsScrollable,
+          maxScrolls: 80,
+        );
+        await tester.pumpAndSettle();
+        expect(
+          find.descendant(of: chatsScope, matching: find.text('Window chat 119')),
+          findsOneWidget,
+        );
+      },
+    );
   });
 }

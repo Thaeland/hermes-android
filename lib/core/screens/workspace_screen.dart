@@ -299,12 +299,24 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       // the window size: advance by the requested pageSize or window
       // rows between the window and the back-fill are skipped, and dedupe
       // by id so a repeated pin never shows twice.
+      var newRows = 0;
       for (final session in result.sessions) {
-        if (seenIds.add(session.id)) all.add(session);
+        if (seenIds.add(session.id)) {
+          all.add(session);
+          newRows++;
+        }
       }
-      if (!result.hasMore) break;
+      // `has_more` is NOT trusted for stopping: the server computes it
+      // from the non-pinned rows in the combined response
+      // (api_server.py: windowed >= limit), so a pin that already sits
+      // INSIDE the base window makes that count fall below `limit` and
+      // report has_more=false while rows still exist past the offset.
+      // End-of-list is decided client-side on NEW ids instead: LIMIT/
+      // OFFSET window rows are disjoint across pages and only the
+      // back-filled pins repeat, so a page contributing zero unseen ids
+      // is provably past the end of the store.
+      if (newRows == 0) break;
       offset += pageSize;
-      if (result.sessions.isEmpty) break; // guard: server returned no progress
     }
     return all;
   }
