@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Mutation gate for the PR #106 completion rules: whitelisted line
+     ranges only — end-of-list proofs, prune safety, generation discard,
+     resync watermark, retry budget. A surviving mutant here means a
+     reviewer-visible blocker class hides behind green CI. -->
+<mutations version="1.2">
+  <files>
+    <file>lib/core/screens/session_list_screen.dart
+      <lines begin="149" end="152"/>
+      <lines begin="780" end="796"/>
+      <lines begin="805" end="850"/>
+    </file>
+    <file>lib/core/screens/workspace_screen.dart
+      <lines begin="325" end="340"/>
+    </file>
+    <file>lib/core/services/connection_manager.dart
+      <lines begin="1488" end="1515"/>
+    </file>
+    <file>lib/core/screens/chat_screen.dart
+      <lines begin="876" end="908"/>
+      <lines begin="922" end="938"/>
+    </file>
+  </files>
+  <commands>
+    <command group="test" expected-return="0" working-directory="." timeout="240">flutter test --no-pub test/session_list_pinned_paging_test.dart test/chat_reattach_resync_test.dart test/connection_manager_test.dart test/project_folder_provisioner_test.dart</command>
+  </commands>
+</mutations>

@@ -288,6 +288,163 @@ void main() {
   );
 
   testWidgets(
+    'watermark accepts an agent-role reply as terminal (not just '
+    'assistant-role)',
+    (tester) async {
+      // The watermark's role check is `role != 'assistant' && role !=
+      // 'agent'` — some stock rows carry role 'agent'. If the 'agent'
+      // branch were dropped, this reply would never satisfy the watermark
+      // and the resync would spin the whole budget instead of stopping.
+      final hook = TestDesktopConnectionHook();
+      final submission = Completer<void>();
+      final history = _ReattachChatHttpClient()
+        ..oldHistory = const [
+          {'role': 'user', 'content': 'Earlier question'},
+          {'role': 'assistant', 'content': 'Earlier answer'},
+        ]
+        ..userOnlyUntilRequest = 2
+        ..replyRole = 'agent';
+      final apiClient = ApiClient(
+        baseUrl: 'http://reattach.fixture',
+        apiKey: 'reattach-key',
+        httpClient: history,
+      );
+      await _pumpChat(
+        tester,
+        hook: hook,
+        apiClient: apiClient,
+        ensureCount: () {},
+        storedKey: 'stored_sess_agentrole',
+        remoteSubmit:
+            ({required sessionId, required text, required onEvent}) {
+              return submission.future;
+            },
+      );
+
+      hook.handler?.call(DesktopConnectionState.connected);
+      await tester.pump();
+      await tester.enterText(find.byType(TextField), 'Long running task');
+      await tester.tap(find.byTooltip('Send'));
+      await tester.pump();
+      await tester.pump();
+
+      hook.handler?.call(DesktopConnectionState.reconnecting);
+      await tester.pump();
+      submission.completeError(
+        JsonRpcError('prompt.submit', 'Desktop gateway connection closed'),
+      );
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      hook.handler?.call(DesktopConnectionState.connected);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(seconds: 4));
+
+      // The agent-role reply satisfies the watermark: the resync STOPS
+      // promptly instead of burning all 10 attempts. (The text itself
+      // does not render — the display builder only shows user/assistant
+      // rows — so the observable is the settled request count, not a
+      // rendered bubble.)
+      final settledCount = history.messageRequestCount;
+      expect(
+        settledCount,
+        lessThanOrEqualTo(5),
+        reason: 'an agent-role terminal row must end the resync, not '
+            'spin the full 10-attempt budget',
+      );
+      await tester.pump(const Duration(seconds: 5));
+      expect(
+        history.messageRequestCount,
+        settledCount,
+        reason: 'an agent-role terminal row must end the resync',
+      );
+    },
+  );
+
+  testWidgets(
+    'watermark rejects a tool-call intermediate reply; resync keeps '
+    'waiting for the final row',
+    (tester) async {
+      // A reply row with a non-empty tool_calls list is an intermediate,
+      // not the final answer. If the tool_calls skip were dropped, the
+      // resync would stop on the intermediate and never show the real
+      // final reply that lands later.
+      final hook = TestDesktopConnectionHook();
+      final submission = Completer<void>();
+      final history = _ReattachChatHttpClient()
+        ..oldHistory = const [
+          {'role': 'user', 'content': 'Earlier question'},
+          {'role': 'assistant', 'content': 'Earlier answer'},
+        ]
+        ..userOnlyUntilRequest = 2
+        ..replyHasToolCalls = true;
+      final apiClient = ApiClient(
+        baseUrl: 'http://reattach.fixture',
+        apiKey: 'reattach-key',
+        httpClient: history,
+      );
+      await _pumpChat(
+        tester,
+        hook: hook,
+        apiClient: apiClient,
+        ensureCount: () {},
+        storedKey: 'stored_sess_toolcall',
+        remoteSubmit:
+            ({required sessionId, required text, required onEvent}) {
+              return submission.future;
+            },
+      );
+
+      hook.handler?.call(DesktopConnectionState.connected);
+      await tester.pump();
+      await tester.enterText(find.byType(TextField), 'Long running task');
+      await tester.tap(find.byTooltip('Send'));
+      await tester.pump();
+      await tester.pump();
+
+      hook.handler?.call(DesktopConnectionState.reconnecting);
+      await tester.pump();
+      submission.completeError(
+        JsonRpcError('prompt.submit', 'Desktop gateway connection closed'),
+      );
+      await tester.pump();
+      await tester.pumpAndSettle();
+
+      hook.handler?.call(DesktopConnectionState.connected);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump(const Duration(seconds: 4));
+
+      // Past the point where the tool-call row was served: the resync is
+      // STILL running (count keeps climbing) because the intermediate is
+      // not terminal.
+      expect(
+        history.messageRequestCount,
+        greaterThan(3),
+        reason: 'a tool-call intermediate must not end the resync',
+      );
+      // Drain the whole retry budget so no timer outlives the test, and
+      // confirm the loop ran to exhaustion — with only an intermediate
+      // served, the watermark is never satisfied, so every attempt
+      // fires. A mutant that accepted the intermediate would stop early
+      // and the count would settle below maxAttempts.
+      for (var i = 0; i < 12; i++) {
+        await tester.pump(const Duration(seconds: 4));
+      }
+      await tester.pumpAndSettle();
+      expect(
+        history.messageRequestCount,
+        greaterThanOrEqualTo(10),
+        reason: 'resync must keep polling past the intermediate until '
+            'the budget is exhausted',
+      );
+    },
+  );
+
+  testWidgets(
     'submit failure with no resync landed still restores the composer',
     (tester) async {
       final hook = TestDesktopConnectionHook();
@@ -437,6 +594,15 @@ class _ReattachChatHttpClient extends http.BaseClient {
 
   final List<String> requestedMessagePaths = [];
 
+  /// Role used for the completed turn's reply row. 'assistant' by
+  /// default; 'agent' exercises the second branch of the watermark's
+  /// role check (both count as terminal).
+  String replyRole = 'assistant';
+
+  /// When true, the completed reply carries a non-empty tool_calls list:
+  /// a tool-call intermediate that must NOT satisfy the watermark.
+  bool replyHasToolCalls = false;
+
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
     if (request.method == 'GET' && request.url.path.endsWith('/messages')) {
@@ -456,7 +622,11 @@ class _ReattachChatHttpClient extends http.BaseClient {
             (userOnlyUntilRequest > 0 &&
                 messageRequestCount > userOnlyUntilRequest)) ...[
           {'role': 'user', 'content': 'Long running task'},
-          {'role': 'assistant', 'content': 'Server-side final response'},
+          {
+            'role': replyRole,
+            'content': 'Server-side final response',
+            if (replyHasToolCalls) 'tool_calls': const [{'id': 'tc1'}],
+          },
         ] else if (userOnlyTurn || userOnlyUntilRequest > 0)
           {'role': 'user', 'content': 'Long running task'},
       ];
