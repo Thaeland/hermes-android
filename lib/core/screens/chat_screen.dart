@@ -36,6 +36,7 @@ import '../utils/chat_display_items.dart';
 import '../utils/chat_history_scroll.dart';
 import '../utils/message_content.dart';
 import '../utils/responsive.dart';
+import '../utils/streaming_rate_tracker.dart';
 import '../utils/turn_recovery_fallback.dart';
 import 'files_screen.dart';
 import '../widgets/gateway_activity_card.dart';
@@ -272,6 +273,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _sending = false;
   bool _streaming = false;
   GatewayTurnStatus? _gatewayTurnStatus;
+
+  /// Live output-speed estimate from streamed deltas (gateway transport only).
+  final StreamingRateTracker _rateTracker = StreamingRateTracker();
+  String? _rateLabel;
+  DateTime? _lastRateLabelAt;
+  static const _rateLabelRefreshInterval = Duration(milliseconds: 500);
+
+  void _resetRateTracking() {
+    _rateTracker.reset();
+    _rateLabel = null;
+    _lastRateLabelAt = null;
+  }
+
   _ResponseTransport _activeResponseTransport = _ResponseTransport.none;
   String? _activeClientTurnId;
   bool _recoveringTurn = false;
@@ -2015,6 +2029,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     // gateway client appends the current prompt exactly once.
     final history = buildRestChatHistory(_messages);
     _scrollCoordinator.beginStreaming(isNearEnd: _isNearEnd());
+    _resetRateTracking();
 
     setState(() {
       _sending = true;
@@ -2208,6 +2223,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           ].where((part) => part.trim().isNotEmpty).join('\n\n');
           _textController.clear();
           _scrollCoordinator.beginStreaming(isNearEnd: _isNearEnd());
+          _resetRateTracking();
           setState(() {
             _streaming = true;
             _gatewayTurnStatus = const GatewayTurnStatus(
@@ -2401,6 +2417,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     ].where((part) => part.trim().isNotEmpty).join('\n\n');
     _textController.clear();
     _scrollCoordinator.beginStreaming(isNearEnd: _isNearEnd());
+    _resetRateTracking();
     setState(() {
       _streaming = true;
       _gatewayTurnStatus = const GatewayTurnStatus(
@@ -2508,6 +2525,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (event.type == 'message.delta') {
       final token = event.data['text']?.toString() ?? '';
       if (token.isEmpty) return;
+      final rate = _rateTracker.addSample(token.length, at: DateTime.now());
+      final now = DateTime.now();
+      if (_lastRateLabelAt == null ||
+          now.difference(_lastRateLabelAt!) >= _rateLabelRefreshInterval) {
+        _lastRateLabelAt = now;
+        _rateLabel = StreamingRateTracker.format(rate);
+      }
       setState(() {
         _gatewayTurnStatus = null;
         final assistant = _lastAssistantMessage();
@@ -2544,6 +2568,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       return;
     }
     if (event.type == 'message.complete') {
+      _resetRateTracking();
       final completeText =
           event.data['rendered']?.toString() ??
           event.data['text']?.toString() ??
@@ -2987,6 +3012,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final activeClientTurnId = _activeClientTurnId;
     ++_responseGeneration;
     _scrollCoordinator.cancelStreaming();
+    _resetRateTracking();
     setState(() {
       _streaming = false;
       _sending = false;
@@ -3296,7 +3322,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (_gatewayTurnStatus != null && (_sending || _streaming))
+            if ((_gatewayTurnStatus != null || _rateLabel != null) &&
+                (_sending || _streaming))
               Container(
                 width: double.infinity,
                 margin: const EdgeInsets.fromLTRB(4, 2, 4, 2),
@@ -3319,12 +3346,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        _gatewayTurnStatus!.text,
+                        _gatewayTurnStatus?.text ?? 'Hermes is responding…',
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ),
+                    if (_rateLabel != null) ...[
+                      const SizedBox(width: 8),
+                      Text(
+                        _rateLabel!,
+                        key: const Key('chat-stream-rate'),
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          fontFeatures: const [FontFeature.tabularFigures()],
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
