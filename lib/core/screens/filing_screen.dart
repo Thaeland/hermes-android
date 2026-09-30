@@ -106,6 +106,14 @@ class _FilingScreenState extends State<FilingScreen> {
   Future<void> _accept(FilingSuggestion s) async {
     final client = _gateway?.filing;
     if (client == null || _busySessions.contains(s.sessionId)) return;
+    if (s.cwd.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Suggestion has no folder path — cannot apply.'),
+        ),
+      );
+      return;
+    }
     setState(() => _busySessions.add(s.sessionId));
     try {
       final note = await client.apply(path: s.cwd, project: s.projectName);
@@ -124,6 +132,14 @@ class _FilingScreenState extends State<FilingScreen> {
   Future<void> _reject(FilingSuggestion s) async {
     final client = _gateway?.filing;
     if (client == null || _busySessions.contains(s.sessionId)) return;
+    if (s.cwd.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Suggestion has no folder path — cannot record.'),
+        ),
+      );
+      return;
+    }
     setState(() => _busySessions.add(s.sessionId));
     try {
       final note = await client.reject(path: s.cwd, project: s.projectName);

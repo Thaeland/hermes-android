@@ -297,10 +297,11 @@ class _AssetsScreenState extends State<AssetsScreen> {
     final source = asset.projectName != null && asset.projectName!.isNotEmpty
         ? asset.projectName!
         : (asset.sessionTitle.isNotEmpty ? asset.sessionTitle : 'Unassigned');
-    final when = DateTime.fromMillisecondsSinceEpoch(
-            (asset.modifiedAt * 1000).round())
-        .toString()
-        .substring(0, 16);
+    final when = asset.modifiedAt > 0
+        ? DateTime.fromMillisecondsSinceEpoch((asset.modifiedAt * 1000).round())
+              .toString()
+              .substring(0, 16)
+        : 'unknown time';
     return '$source · $when';
   }
 

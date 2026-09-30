@@ -33,17 +33,29 @@ class OrganizationBatchResult {
     required this.batchId,
     required this.applied,
     required this.failed,
+    this.appliedCountHint,
   });
 
   bool get partial => failed.isNotEmpty;
 
+  /// Number of sessions the server applied. Tolerates both contract
+  /// shapes: `applied` as the list of applied ids, or as a plain count
+  /// (then carried in [appliedCountHint]).
+  int get appliedCount => applied.isNotEmpty
+      ? applied.length
+      : (appliedCountHint ?? applied.length);
+
+  final int? appliedCountHint;
+
   static OrganizationBatchResult fromJson(Map<String, dynamic> json) {
     final rows = json['failed'];
+    final appliedRaw = json['applied'];
     return OrganizationBatchResult(
       batchId: json['batch_id'] is String ? json['batch_id'] as String : '',
-      applied: json['applied'] is List
-          ? (json['applied'] as List).whereType<String>().toList()
+      applied: appliedRaw is List
+          ? appliedRaw.whereType<String>().toList()
           : const [],
+      appliedCountHint: appliedRaw is num ? appliedRaw.toInt() : null,
       failed: rows is List
           ? rows
               .whereType<Map>()
@@ -98,24 +110,8 @@ class OrganizationGatewayClient {
 
   final GatewayRpcCall _call;
   final CapabilityRegistry? capabilities;
-  bool? _supported;
 
   OrganizationGatewayClient(this._call, {this.capabilities});
-
-  /// Whether this gateway serves `organization.*` (probed by the first call).
-  Future<bool> isSupported() async {
-    final known = _supported;
-    if (known != null) return known;
-    try {
-      await history();
-      return true;
-    } on OrganizationUnsupportedException {
-      return false;
-    }
-  }
-
-  /// The last known support verdict without contacting the gateway.
-  bool? get cachedSupport => _supported;
 
   Future<OrganizationBatchResult> pin(
     List<String> sessionIds, {
@@ -193,10 +189,8 @@ class OrganizationGatewayClient {
         throw OrganizationUnsupportedException(method, rpcError.message);
       }
       // A real organization error proves the family exists.
-      _supported = true;
       throw rpcError;
     }
-    _supported = true;
     capabilities?.recordSuccess(method);
     final result = response['result'];
     return result is Map

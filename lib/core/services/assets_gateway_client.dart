@@ -109,25 +109,8 @@ class AssetsGatewayClient {
 
   final GatewayRpcCall _call;
   final CapabilityRegistry? capabilities;
-  bool? _supported;
 
   AssetsGatewayClient(this._call, {this.capabilities});
-
-  /// Whether this gateway serves `assets.*` (probed by the first call).
-  Future<bool> isSupported() async {
-    final known = _supported;
-    if (known != null) return known;
-    try {
-      final assetsStatus = await status();
-      _supported = assetsStatus.available;
-      return assetsStatus.available;
-    } on AssetsUnsupportedException {
-      return false;
-    }
-  }
-
-  /// The last known support verdict without contacting the gateway.
-  bool? get cachedSupport => _supported;
 
   Future<AssetsStatus> status() async {
     final result = await _request('assets.status', const {});
@@ -185,10 +168,8 @@ class AssetsGatewayClient {
         throw AssetsUnsupportedException(method, rpcError.message);
       }
       // A real assets error proves the family exists.
-      _supported = true;
       throw rpcError;
     }
-    _supported = true;
     capabilities?.recordSuccess(method);
     final result = response['result'];
     return result is Map
