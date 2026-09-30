@@ -468,6 +468,8 @@ void main() {
     }) async {
       await tester.pumpWidget(
         MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
           theme: hermesTheme(Brightness.dark),
           // Embedded screens render inside the workspace shell's Scaffold;
           // the batch SnackBars need one to present to.
