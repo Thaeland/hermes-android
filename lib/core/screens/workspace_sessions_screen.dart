@@ -324,6 +324,11 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
   final Set<String> _selected = {};
   bool _batchBusy = false;
 
+  /// Batch ids already undone this screen — a snackbar's Undo stays tappable
+  /// after firing, and re-sending `organization.undo` for the same id has
+  /// server-dependent semantics.
+  final Set<String> _undoneBatches = {};
+
   bool get _selectMode => widget.runBatch != null && _selected.isNotEmpty;
 
   /// The active chip filter in the embedded Chats browser.
@@ -462,7 +467,10 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
 
   Future<void> _undoBatch(String batchId) async {
     final undo = widget.undoBatch;
-    if (undo == null || _batchBusy) return;
+    // Guard per-batch as well as globally: SnackBarAction does not dismiss
+    // its snackbar, so a double-tap would otherwise fire undo(batchId) twice.
+    if (undo == null || _batchBusy || _undoneBatches.contains(batchId)) return;
+    _undoneBatches.add(batchId);
     setState(() => _batchBusy = true);
     try {
       await undo(batchId);
@@ -474,6 +482,7 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
       await _load();
     } catch (error) {
       if (!mounted) return;
+      _undoneBatches.remove(batchId);
       setState(() => _batchBusy = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Undo failed: $error')),
@@ -575,7 +584,11 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
                       icon: const Icon(Icons.clear),
                     ),
             ),
-            onChanged: (value) => setState(() => _query = value),
+            onChanged: (value) => setState(() {
+              _query = value;
+              // Same as the chip filter: never batch invisible sessions.
+              _selected.clear();
+            }),
           ),
           if (widget.embedded) ...[
             const SizedBox(height: HermesSpacing.md),
@@ -710,6 +723,9 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
                 selected: _filter == filter,
                 onSelected: (_) => setState(() {
                   _filter = filter;
+                  // Selections hidden by the new filter would still be
+                  // counted and batched invisibly — drop them.
+                  _selected.clear();
                 }),
               ),
             ),
@@ -812,7 +828,7 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
               ],
             ),
           ),
-          if (showPromote)
+          if (showPromote && !_selectMode)
             _promoting.contains(session.id)
                 ? const SizedBox.square(
                     dimension: 24,

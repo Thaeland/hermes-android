@@ -134,25 +134,8 @@ class FilingGatewayClient {
 
   final GatewayRpcCall _call;
   final CapabilityRegistry? capabilities;
-  bool? _supported;
 
   FilingGatewayClient(this._call, {this.capabilities});
-
-  /// Whether this gateway serves `filing.*` (probed by the first call).
-  Future<bool> isSupported() async {
-    final known = _supported;
-    if (known != null) return known;
-    try {
-      final filingStatus = await status();
-      _supported = filingStatus.available;
-      return filingStatus.available;
-    } on FilingUnsupportedException {
-      return false;
-    }
-  }
-
-  /// The last known support verdict without contacting the gateway.
-  bool? get cachedSupport => _supported;
 
   Future<FilingStatus> status() async {
     final result = await _request('filing.status', const {});
@@ -235,10 +218,8 @@ class FilingGatewayClient {
         throw FilingUnsupportedException(method, rpcError.message);
       }
       // A real filing error proves the family exists.
-      _supported = true;
       throw rpcError;
     }
-    _supported = true;
     capabilities?.recordSuccess(method);
     final result = response['result'];
     return result is Map

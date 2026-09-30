@@ -152,6 +152,7 @@ void main() {
       final entries = {
         for (final section in buildMoreSections(
           dashboardReachable: true,
+          l10n: l10n,
           assetsAvailable: true,
         ))
           for (final entry in section.entries) entry.id: entry,
@@ -166,6 +167,7 @@ void main() {
       final entries = {
         for (final section in buildMoreSections(
           dashboardReachable: true,
+          l10n: l10n,
           filingAvailable: true,
         ))
           for (final entry in section.entries) entry.id: entry,
@@ -186,6 +188,7 @@ void main() {
       final entries = {
         for (final section in buildMoreSections(
           dashboardReachable: true,
+          l10n: l10n,
           organizationAvailable: true,
         ))
           for (final entry in section.entries) entry.id: entry,
