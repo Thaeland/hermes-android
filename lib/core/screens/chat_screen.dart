@@ -2084,6 +2084,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             await _attachmentDraftService.removeCachedFile(pendingImage);
           }
           if (!mounted || responseGeneration != _responseGeneration) return;
+          _resetRateTracking();
           setState(() {
             _messages = messages;
             if (pendingImage != null) {
@@ -2111,6 +2112,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         } catch (e) {
           if (!mounted || responseGeneration != _responseGeneration) return;
           _scrollCoordinator.cancelStreaming();
+          _resetRateTracking();
           setState(() {
             _streaming = false;
             _sending = false;
@@ -2525,8 +2527,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (event.type == 'message.delta') {
       final token = event.data['text']?.toString() ?? '';
       if (token.isEmpty) return;
-      final rate = _rateTracker.addSample(token.length, at: DateTime.now());
       final now = DateTime.now();
+      final rate = _rateTracker.addSample(token.length, at: now);
       if (_lastRateLabelAt == null ||
           now.difference(_lastRateLabelAt!) >= _rateLabelRefreshInterval) {
         _lastRateLabelAt = now;
@@ -3088,6 +3090,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   void _handleSendError(Object e, {bool removePendingUserMessage = false}) {
     _scrollCoordinator.cancelStreaming();
+    _resetRateTracking();
     setState(() {
       _sending = false;
       _streaming = false;

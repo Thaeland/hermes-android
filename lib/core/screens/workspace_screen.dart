@@ -20,11 +20,15 @@ import '../models/hermes_project.dart';
 import '../models/projects_tree_overview.dart';
 import '../services/android_share_intent_service.dart';
 import '../services/attachment_draft_service.dart';
+import '../services/assets_gateway_client.dart' show AssetsUnsupportedException;
 import '../services/chat_space_store.dart';
 import '../services/connection_manager.dart';
 import '../services/desktop_gateway_client.dart';
+import '../services/filing_gateway_client.dart' show FilingUnsupportedException;
 import '../services/gateway_turn_application_controller.dart';
 import '../services/gateway_turn_journal.dart';
+import '../services/organization_gateway_client.dart'
+    show OrganizationUnsupportedException;
 import '../services/project_folder_provisioner.dart';
 import '../services/projects_repository.dart';
 import '../services/quick_chat_store.dart';
@@ -1372,6 +1376,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
 
   final Map<String, Future<void>> _capabilityProbes = {};
 
+  /// Transient (transport) probe failures per family, capped at
+  /// [_maxProbeRetries] so a blip re-probes a few times instead of
+  /// pinning a wrong verdict forever.
+  final Map<String, int> _probeTransientFailures = {};
+  static const _maxProbeRetries = 3;
+
   /// Runs a capability probe at most once, no matter how many rebuilds ask.
   /// Concurrent requests share the same in-flight future, so a burst of
   /// rebuilds (each probe completing triggers a setState that re-enters
@@ -1384,35 +1394,59 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     Future<bool> Function(DesktopGatewayClient gateway) probe,
     void Function(bool available) apply,
   ) {
-    return _capabilityProbes.putIfAbsent(family, () async {
+    Future<void> run() async {
       var gateway = _ownedGateway;
       var ownsProbeOnly = false;
       if (gateway == null) {
         final gatewayUrl = widget.connection.desktopGatewayUrl?.trim() ?? '';
-        if (gatewayUrl.isEmpty) return;
+        if (gatewayUrl.isEmpty) {
+          // No URL yet: do not pin a verdict — a later call may re-probe
+          // once the connection is configured.
+          _capabilityProbes.remove(family);
+          return;
+        }
         try {
           gateway = DesktopGatewayClient.fromConnection(widget.connection);
           ownsProbeOnly = true;
         } catch (_) {
+          _capabilityProbes.remove(family);
           return;
         }
       }
       try {
         final available = await probe(gateway);
+        _probeTransientFailures.remove(family);
         if (mounted) setState(() => apply(available));
-      } catch (_) {
-        if (mounted) setState(() => apply(false));
+      } on Object catch (_) {
+        // A throw here is a transport/RPC blip, not an unknown-method
+        // denial (the clients convert those to their Unsupported exception
+        // and the probe maps them to `false`). Per the capability doctrine
+        // ("silence is not a denial") allow a bounded number of re-probes
+        // so a blip does not pin the family off for the screen's lifetime.
+        // The verdict is left untouched (no setState): a rebuild-triggered
+        // re-probe must never form a settle loop.
+        final failures = (_probeTransientFailures[family] ?? 0) + 1;
+        _probeTransientFailures[family] = failures;
+        if (failures < _maxProbeRetries) _capabilityProbes.remove(family);
       } finally {
         if (ownsProbeOnly) gateway.close();
       }
-    });
+    }
+
+    return _capabilityProbes.putIfAbsent(family, run);
   }
 
   /// Probes `filing.status` once so the More pane can gate AI-assisted
   /// filing on the server's real answer.
   Future<void> _probeFiling() => _probeCapability(
         'filing',
-        (gateway) async => (await gateway.filing.status()).available,
+        (gateway) async {
+          try {
+            return (await gateway.filing.status()).available;
+          } on FilingUnsupportedException {
+            return false;
+          }
+        },
         (available) => _filingAvailable = available,
       );
 
@@ -1421,7 +1455,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   Future<void> _probeOrganization() => _probeCapability(
         'organization',
         (gateway) async {
-          await gateway.organization.history();
+          try {
+            await gateway.organization.history();
+          } on OrganizationUnsupportedException {
+            return false;
+          }
           return true;
         },
         (available) => _orgAvailable = available,
@@ -1431,7 +1469,13 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   /// gallery on the gateway's real answer.
   Future<void> _probeAssets() => _probeCapability(
         'assets',
-        (gateway) async => (await gateway.assets.status()).available,
+        (gateway) async {
+          try {
+            return (await gateway.assets.status()).available;
+          } on AssetsUnsupportedException {
+            return false;
+          }
+        },
         (available) => _assetsAvailable = available,
       );
 
@@ -1466,9 +1510,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       return WorkspaceBatchOutcome(
         batchId: result.batchId,
         requested: sessionIds.length,
-        applied: result.applied.length,
+        applied: result.appliedCount,
         failed: result.failed.length,
       );
+    } on OrganizationUnsupportedException {
+      // The history probe passed but the mutation surface is missing:
+      // degrade the batch UI now rather than on every future attempt.
+      if (mounted) setState(() => _orgAvailable = false);
+      rethrow;
     } finally {
       if (!identical(gateway, _ownedGateway)) gateway.close();
     }

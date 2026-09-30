@@ -311,6 +311,11 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
   final Set<String> _selected = {};
   bool _batchBusy = false;
 
+  /// Batch ids already undone this screen — a snackbar's Undo stays tappable
+  /// after firing, and re-sending `organization.undo` for the same id has
+  /// server-dependent semantics.
+  final Set<String> _undoneBatches = {};
+
   bool get _selectMode => widget.runBatch != null && _selected.isNotEmpty;
 
   /// The active chip filter in the embedded Chats browser.
@@ -449,7 +454,10 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
 
   Future<void> _undoBatch(String batchId) async {
     final undo = widget.undoBatch;
-    if (undo == null || _batchBusy) return;
+    // Guard per-batch as well as globally: SnackBarAction does not dismiss
+    // its snackbar, so a double-tap would otherwise fire undo(batchId) twice.
+    if (undo == null || _batchBusy || _undoneBatches.contains(batchId)) return;
+    _undoneBatches.add(batchId);
     setState(() => _batchBusy = true);
     try {
       await undo(batchId);
@@ -461,6 +469,7 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
       await _load();
     } catch (error) {
       if (!mounted) return;
+      _undoneBatches.remove(batchId);
       setState(() => _batchBusy = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Undo failed: $error')),
@@ -541,59 +550,66 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
           child: RefreshIndicator(
             onRefresh: _load,
             child: ListView(
-        padding: const EdgeInsets.fromLTRB(
-          HermesSpacing.lg,
-          HermesSpacing.md,
-          HermesSpacing.lg,
-          HermesSpacing.xl,
-        ),
-        children: [
-          TextField(
-            key: kWorkspaceSessionSearchKey,
-            autofocus: widget.view == WorkspaceSessionView.search,
-            decoration: InputDecoration(
-              hintText: 'Search conversations',
-              prefixIcon: const Icon(Icons.search),
-              suffixIcon: _query.isEmpty
-                  ? null
-                  : IconButton(
-                      tooltip: 'Clear search',
-                      onPressed: () => setState(() => _query = ''),
-                      icon: const Icon(Icons.clear),
-                    ),
-            ),
-            onChanged: (value) => setState(() => _query = value),
-          ),
-          if (widget.embedded) ...[
-            const SizedBox(height: HermesSpacing.md),
-            _buildChips(),
-          ],
-          const SizedBox(height: HermesSpacing.lg),
-          if (sessions.isEmpty)
-            EmptyState(
-              icon: _emptyIcon,
-              title: _query.isEmpty ? 'Nothing here' : 'No matches',
-              message: _emptyMessage,
-            )
-          else
-            for (final group in groups) ...[
-              Padding(
-                padding: const EdgeInsets.only(
-                  top: HermesSpacing.xs,
-                  bottom: HermesSpacing.sm,
-                ),
-                child: Text(
-                  widget.embedded ? group.key.label : widget.title,
-                  style: HermesTokens.of(context).typography.section,
-                ),
+              padding: const EdgeInsets.fromLTRB(
+                HermesSpacing.lg,
+                HermesSpacing.md,
+                HermesSpacing.lg,
+                HermesSpacing.xl,
               ),
-              for (final session in group.value)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: HermesSpacing.sm),
-                  child: _buildSessionRow(session, data),
+              children: [
+                TextField(
+                  key: kWorkspaceSessionSearchKey,
+                  autofocus: widget.view == WorkspaceSessionView.search,
+                  decoration: InputDecoration(
+                    hintText: 'Search conversations',
+                    prefixIcon: const Icon(Icons.search),
+                    suffixIcon: _query.isEmpty
+                        ? null
+                        : IconButton(
+                            tooltip: 'Clear search',
+                            onPressed: () => setState(() => _query = ''),
+                            icon: const Icon(Icons.clear),
+                          ),
+                  ),
+                  onChanged: (value) => setState(() {
+                    _query = value;
+                    // Same as the chip filter: never batch invisible
+                    // sessions.
+                    _selected.clear();
+                  }),
                 ),
-            ],
-          ],
+                if (widget.embedded) ...[
+                  const SizedBox(height: HermesSpacing.md),
+                  _buildChips(),
+                ],
+                const SizedBox(height: HermesSpacing.lg),
+                if (sessions.isEmpty)
+                  EmptyState(
+                    icon: _emptyIcon,
+                    title: _query.isEmpty ? 'Nothing here' : 'No matches',
+                    message: _emptyMessage,
+                  )
+                else
+                  for (final group in groups) ...[
+                    Padding(
+                      padding: const EdgeInsets.only(
+                        top: HermesSpacing.xs,
+                        bottom: HermesSpacing.sm,
+                      ),
+                      child: Text(
+                        widget.embedded ? group.key.label : widget.title,
+                        style: HermesTokens.of(context).typography.section,
+                      ),
+                    ),
+                    for (final session in group.value)
+                      Padding(
+                        padding: const EdgeInsets.only(
+                          bottom: HermesSpacing.sm,
+                        ),
+                        child: _buildSessionRow(session, data),
+                      ),
+                  ],
+              ],
             ),
           ),
         ),
@@ -695,6 +711,9 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
                 selected: _filter == filter,
                 onSelected: (_) => setState(() {
                   _filter = filter;
+                  // Selections hidden by the new filter would still be
+                  // counted and batched invisibly — drop them.
+                  _selected.clear();
                 }),
               ),
             ),
@@ -795,7 +814,7 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
               ],
             ),
           ),
-          if (showPromote)
+          if (showPromote && !_selectMode)
             _promoting.contains(session.id)
                 ? const SizedBox.square(
                     dimension: 24,
