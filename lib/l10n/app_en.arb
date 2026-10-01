@@ -621,5 +621,6 @@
   "nav_more": "More",
   "status_completed": "Completed",
   "filter_all": "All",
-  "filter_recent": "Recent"
+  "filter_recent": "Recent",
+  "connection_address_key": "{address}  •  Key: {status}"
 }

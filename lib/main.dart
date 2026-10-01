@@ -915,8 +915,10 @@ class HomeScreenState extends State<HomeScreen> {
         leading: const Icon(Icons.router, color: Color(0xFFD4AF37)),
         title: Text(conn.label),
         subtitle: Text(
-          '${conn.host}:${conn.port}${conn.gatewayPrefix != null && conn.gatewayPrefix!.isNotEmpty ? conn.gatewayPrefix! : ''}'
-          '  \u2022  Key: ${conn.apiKey.isNotEmpty ? "\u2713" : "\u2717"}',
+          context.l10n.connection_address_key(
+            '${conn.host}:${conn.port}${conn.gatewayPrefix != null && conn.gatewayPrefix!.isNotEmpty ? conn.gatewayPrefix! : ''}',
+            conn.apiKey.isNotEmpty ? "\u2713" : "\u2717",
+          ),
           style: TextStyle(color: Colors.grey[600]),
         ),
         trailing: PopupMenuButton<String>(

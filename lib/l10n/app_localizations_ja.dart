@@ -2206,4 +2206,9 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get filter_recent => '最近';
+
+  @override
+  String connection_address_key(Object address, Object status) {
+    return '$address  •  キー: $status';
+  }
 }

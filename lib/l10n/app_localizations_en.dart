@@ -2239,4 +2239,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get filter_recent => 'Recent';
+
+  @override
+  String connection_address_key(Object address, Object status) {
+    return '$address  •  Key: $status';
+  }
 }

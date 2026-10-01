@@ -3850,6 +3850,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Recent'**
   String get filter_recent;
+
+  /// No description provided for @connection_address_key.
+  ///
+  /// In en, this message translates to:
+  /// **'{address}  •  Key: {status}'**
+  String connection_address_key(Object address, Object status);
 }
 
 class _AppLocalizationsDelegate
