@@ -2421,7 +2421,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
 
     final attachmentLabels = attachments
-        .map((attachment) => '[Attached file: ${attachment.name}]')
+        .map(
+          (attachment) =>
+              '[${context.l10n.attached_file}: ${attachment.name}]',
+        )
         .join('\n');
     final localContent = [
       text,
