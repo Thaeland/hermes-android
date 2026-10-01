@@ -18,6 +18,7 @@ import '../models/hermes_project.dart';
 import '../theme/hermes_theme.dart';
 import '../utils/new_chat_options.dart';
 
+import 'package:hermes_android/core/l10n/l10n.dart';
 /// Asks which chat to start. Pops the chosen mode, or null when dismissed.
 class NewChatSheet extends StatelessWidget {
   final List<NewChatOption> options;
@@ -41,7 +42,7 @@ class NewChatSheet extends StatelessWidget {
               HermesSpacing.sm,
             ),
             child: Text(
-              'Start something new',
+              context.l10n.start_something_new,
               style: tokens.typography.title.copyWith(color: tokens.onSurface),
             ),
           ),
@@ -50,8 +51,10 @@ class NewChatSheet extends StatelessWidget {
               enabled: option.enabled,
               // A disabled row still explains itself, so the reason replaces
               // the description rather than hiding beside it.
-              title: Text(option.label),
-              subtitle: Text(option.disabledReason ?? option.description),
+              title: Text(option.label(context.l10n)),
+              subtitle: Text(
+                option.disabledReason ?? option.description(context.l10n),
+              ),
               leading: Icon(
                 option.mode == NewChatMode.quickChat
                     ? Icons.bolt_outlined
@@ -94,7 +97,7 @@ class ProjectPickerSheet extends StatelessWidget {
               HermesSpacing.sm,
             ),
             child: Text(
-              'Which project?',
+              context.l10n.which_project,
               style: tokens.typography.title.copyWith(color: tokens.onSurface),
             ),
           ),

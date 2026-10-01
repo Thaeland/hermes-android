@@ -24,6 +24,8 @@
 /// See `docs/ANDROID_DAILY_DRIVER_ROADMAP.md`.
 library;
 
+import 'package:hermes_android/core/l10n/l10n.dart';
+
 import '../models/hermes_project.dart';
 import '../models/session.dart';
 import '../services/projects_repository.dart';
@@ -42,22 +44,21 @@ enum NewChatMode {
   /// An unfiled, clearly marked chat that auto-archives after 72 hours.
   quickChat;
 
-  String get label {
+  String label(AppLocalizations l10n) {
     switch (this) {
       case NewChatMode.projectChat:
-        return 'Project chat';
+        return l10n.project_chat;
       case NewChatMode.quickChat:
-        return 'Quick chat';
+        return l10n.quick_chat;
     }
   }
 
-  String get description {
+  String description(AppLocalizations l10n) {
     switch (this) {
       case NewChatMode.projectChat:
-        return 'Durable work inside one of your projects, shared with Desktop.';
+        return l10n.durable_work_inside_one_of_your_projects_shared_with_desktop;
       case NewChatMode.quickChat:
-        return 'A one-off question. Archives itself after 72 hours; anything '
-            'worth keeping is still remembered.';
+        return l10n.a_one_off_question_archives_itself_after_72_hours_anything;
     }
   }
 }
@@ -76,9 +77,9 @@ class NewChatOption {
     this.disabledReason,
   });
 
-  String get label => mode.label;
+  String label(AppLocalizations l10n) => mode.label(l10n);
 
-  String get description => mode.description;
+  String description(AppLocalizations l10n) => mode.description(l10n);
 }
 
 /// Builds the New sheet entries for the current Projects state.
@@ -90,20 +91,20 @@ List<NewChatOption> buildNewChatOptions({
   required ProjectsSupport support,
   required List<HermesProject> projects,
   bool isStale = false,
+  required AppLocalizations l10n,
 }) {
   final usable = projects.where((project) => !project.archived).toList();
 
   String? projectChatBlocker;
   switch (support) {
     case ProjectsSupport.unknown:
-      projectChatBlocker = 'Still loading your projects.';
+      projectChatBlocker = l10n.still_loading_your_projects;
     case ProjectsSupport.unsupported:
       projectChatBlocker =
-          'This gateway does not host projects yet. Update the gateway to '
-          'organize chats across your devices.';
+          l10n.this_gateway_does_not_host_projects_yet_update_the_gateway;
     case ProjectsSupport.native:
       projectChatBlocker = usable.isEmpty
-          ? 'Create a project first, then chats can live inside it.'
+          ? l10n.create_a_project_first_then_chats_can_live_inside_it
           : null;
   }
 
@@ -121,11 +122,15 @@ List<NewChatOption> buildNewChatOptions({
 
 /// Convenience over [buildNewChatOptions] reading a [ProjectsView] directly,
 /// so a caller cannot drift from the repository's own view of support.
-List<NewChatOption> buildNewChatOptionsFor(ProjectsView view) {
+List<NewChatOption> buildNewChatOptionsFor(
+  AppLocalizations l10n,
+  ProjectsView view,
+) {
   return buildNewChatOptions(
     support: view.support,
     projects: view.projects,
     isStale: view.isStale,
+    l10n: l10n,
   );
 }
 
@@ -168,6 +173,7 @@ NewChatDraft buildNewChatDraft({
   required NewChatMode mode,
   required String sessionId,
   required DateTime now,
+  required AppLocalizations l10n,
   HermesProject? project,
   String? model,
 }) {
@@ -183,8 +189,10 @@ NewChatDraft buildNewChatDraft({
 
   final projectName = project?.name.trim() ?? '';
   final title = isQuick
-      ? 'Quick chat'
-      : (projectName.isEmpty ? 'New chat' : 'New chat · $projectName');
+      ? l10n.quick_chat
+      : (projectName.isEmpty
+            ? l10n.new_chat_2
+            : l10n.new_chat_3(projectName));
 
   return NewChatDraft(
     session: Session(

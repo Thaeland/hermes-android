@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'package:hermes_android/core/l10n/l10n.dart';
 /// Splits raw markdown into text segments and fenced code blocks.
 ///
 /// Returns a list of [String] (regular markdown, rendered by MarkdownBody)
@@ -55,8 +56,8 @@ class _MarkdownCodeBlockState extends State<MarkdownCodeBlock> {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
-        const SnackBar(
-          content: Text('Code copied'),
+        SnackBar(
+          content: Text(context.l10n.code_copied),
           duration: Duration(seconds: 2),
         ),
       );
@@ -130,7 +131,7 @@ class _MarkdownCodeBlockState extends State<MarkdownCodeBlock> {
                 ),
                 if (_wrap)
                   Tooltip(
-                    message: 'Scroll horizontally',
+                    message: context.l10n.scroll_horizontally,
                     child: IconButton(
                       icon: const Icon(Icons.swap_horiz, size: 18),
                       onPressed: () => setState(() => _wrap = false),
@@ -141,7 +142,7 @@ class _MarkdownCodeBlockState extends State<MarkdownCodeBlock> {
                     ),
                   ),
                 Tooltip(
-                  message: 'Wrap lines',
+                  message: context.l10n.wrap_lines,
                   child: IconButton(
                     icon: const Icon(Icons.wrap_text, size: 18),
                     onPressed: () => setState(() => _wrap = true),
@@ -152,7 +153,7 @@ class _MarkdownCodeBlockState extends State<MarkdownCodeBlock> {
                   ),
                 ),
                 Tooltip(
-                  message: 'Copy code',
+                  message: context.l10n.copy_code,
                   child: IconButton(
                     icon: const Icon(Icons.copy_outlined, size: 18),
                     onPressed: _copy,

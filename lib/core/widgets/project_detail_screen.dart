@@ -30,6 +30,7 @@ import '../utils/project_session_filter.dart';
 import '../utils/relative_time.dart';
 import 'hermes_components.dart';
 
+import 'package:hermes_android/core/l10n/l10n.dart';
 /// Reads one project's chats. Mirrors `ProjectsRepository.projectSessions` so
 /// the screen can be driven by a fake in tests without a gateway.
 typedef ProjectSessionsLoader =
@@ -151,21 +152,21 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Padding(
+            Padding(
               padding: EdgeInsets.fromLTRB(
                 HermesSpacing.lg,
                 HermesSpacing.lg,
                 HermesSpacing.lg,
                 HermesSpacing.sm,
               ),
-              child: Text('Move conversation'),
+              child: Text(context.l10n.move_conversation),
             ),
             ListTile(
               leading: const Icon(Icons.inbox_outlined),
-              title: const Text('Unassigned'),
+              title: Text(context.l10n.unassigned),
               onTap: () => Navigator.pop(
                 context,
-                const _MoveTarget(projectId: null, label: 'Unassigned'),
+                _MoveTarget(projectId: null, label: context.l10n.unassigned),
               ),
             ),
             for (final project in widget.projects)
@@ -195,7 +196,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
         // files chats by folder and cannot un-file one). Report the real
         // reason instead of a generic failure with a doomed Retry.
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Couldn\u2019t move to ${target.label}: $reason')),
+          SnackBar(content: Text(context.l10n.couldn_t_move_to(target.label, reason))),
         );
         return;
       }
@@ -203,15 +204,15 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Moved to ${target.label}')));
+      ).showSnackBar(SnackBar(content: Text(context.l10n.moved_to(target.label))));
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           persist: false,
-          content: const Text('Couldn’t move conversation'),
+          content: Text(context.l10n.couldn_t_move_conversation),
           action: SnackBarAction(
-            label: 'Retry',
+            label: context.l10n.retry,
             onPressed: () => _moveSession(session, target),
           ),
         ),
@@ -226,26 +227,26 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
     final name = await showDialog<String>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: Text('Rename $_projectName'),
+        title: Text(context.l10n.rename_2(_projectName)),
         content: TextFormField(
           key: const Key('rename-project-name'),
           initialValue: _projectName,
           autofocus: true,
           maxLength: 80,
-          decoration: const InputDecoration(labelText: 'Name'),
+          decoration: InputDecoration(labelText: context.l10n.name),
           onChanged: (value) => draft = value,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
+            child: Text(context.l10n.cancel),
           ),
           FilledButton(
             onPressed: () {
               final value = draft.trim();
               if (value.isNotEmpty) Navigator.pop(dialogContext, value);
             },
-            child: const Text('Rename'),
+            child: Text(context.l10n.rename),
           ),
         ],
       ),
@@ -271,19 +272,18 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: Text('Archive $_projectName?'),
-        content: const Text(
-          'The Project will move to Archived. Its chats and files stay intact, '
-          'and you can restore it later.',
+        title: Text(context.l10n.archive_2(_projectName)),
+        content: Text(
+          context.l10n.the_project_will_move_to_archived_its_chats_and_files_2,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
+            child: Text(context.l10n.cancel),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Archive'),
+            child: Text(context.l10n.archive),
           ),
         ],
       ),
@@ -312,11 +312,18 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
   }
 
   void _showManagementError(String action, Future<void> Function() retry) {
+    final actionLabel = switch (action) {
+      'create' => context.l10n.action_create,
+      'rename' => context.l10n.action_rename,
+      'archive' => context.l10n.action_archive,
+      'restore' => context.l10n.action_restore,
+      _ => action,
+    };
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         persist: false,
-        content: Text('Couldn’t $action project'),
-        action: SnackBarAction(label: 'Retry', onPressed: retry),
+        content: Text(context.l10n.couldn_t_project(actionLabel)),
+        action: SnackBarAction(label: context.l10n.retry, onPressed: retry),
       ),
     );
   }
@@ -325,22 +332,21 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: Text('Delete $_projectName?'),
-        content: const Text(
-          'This permanently deletes the Project. Chats will not be deleted; '
-          'they’ll return to Unassigned.',
+        title: Text(context.l10n.delete_3(_projectName)),
+        content: Text(
+          context.l10n.this_permanently_deletes_the_project_chats_will_not_be_deleted,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
+            child: Text(context.l10n.cancel),
           ),
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, true),
             style: TextButton.styleFrom(
               foregroundColor: Theme.of(context).colorScheme.error,
             ),
-            child: const Text('Delete'),
+            child: Text(context.l10n.delete),
           ),
         ],
       ),
@@ -370,9 +376,9 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           persist: false,
-          content: const Text('Couldn’t delete project'),
+          content: Text(context.l10n.couldn_t_delete_project),
           action: SnackBarAction(
-            label: 'Retry',
+            label: context.l10n.retry,
             onPressed: () => _deleteProject(),
           ),
         ),
@@ -404,7 +410,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
               )
             else
               PopupMenuButton<String>(
-                tooltip: 'Project actions',
+                tooltip: context.l10n.project_actions,
                 onSelected: (action) {
                   switch (action) {
                     case 'rename':
@@ -417,14 +423,14 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
                 },
                 itemBuilder: (context) => [
                   if (widget.onRenameProject != null)
-                    const PopupMenuItem<String>(
+                    PopupMenuItem<String>(
                       value: 'rename',
-                      child: Text('Rename project'),
+                      child: Text(context.l10n.rename_project),
                     ),
                   if (widget.onArchiveProject != null)
-                    const PopupMenuItem<String>(
+                    PopupMenuItem<String>(
                       value: 'archive',
-                      child: Text('Archive project'),
+                      child: Text(context.l10n.archive_project),
                     ),
                   if (widget.onDeleteProject != null)
                     PopupMenuItem<String>(
@@ -437,7 +443,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
                           ),
                           const SizedBox(width: HermesSpacing.sm),
                           Text(
-                            'Delete project',
+                            context.l10n.delete_project,
                             style: TextStyle(
                               color: Theme.of(context).colorScheme.error,
                             ),
@@ -450,12 +456,12 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
         ],
         bottom: TabBar(
           controller: _tabs,
-          tabs: const [
-            Tab(text: 'Chats'),
-            Tab(text: 'Overview'),
-            Tab(text: 'Files'),
-            Tab(text: 'Assets'),
-            Tab(text: 'Activity'),
+          tabs: [
+            Tab(text: context.l10n.chats),
+            Tab(text: context.l10n.overview),
+            Tab(text: context.l10n.files),
+            Tab(text: context.l10n.assets),
+            Tab(text: context.l10n.activity),
           ],
           isScrollable: true,
         ),
@@ -467,7 +473,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
               key: kProjectNewChatButtonKey,
               onPressed: widget.onNewChat,
               icon: const Icon(Icons.add_rounded),
-              label: const Text('New chat'),
+              label: Text(context.l10n.new_chat_2),
             ),
     );
   }
@@ -483,20 +489,19 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
     // An older gateway is not a crash and not an empty project: saying "no
     // chats" here would state something this gateway cannot actually know.
     if (view.support == ProjectsSupport.unsupported) {
-      return const ErrorState.unsupported(
-        title: 'Project chats unavailable',
+      return ErrorState.unsupported(
+        title: context.l10n.project_chats_unavailable,
         message:
-            'This Hermes gateway does not support opening a project yet. '
-            'Update Hermes on the server to browse a project from your phone.',
+            context.l10n.this_hermes_gateway_does_not_support_opening_a_project_yet,
       );
     }
 
     // Only a *first* read with nothing to show is an error screen.
     if (view.error != null && view.sessions.isEmpty && !view.isStale) {
       return ErrorState(
-        title: 'Could not open this project',
+        title: context.l10n.could_not_open_this_project,
         message:
-            'Check that the gateway is running and reachable, then try again.',
+            context.l10n.check_that_the_gateway_is_running_and_reachable_then_try,
         onRetry: () => _load(refresh: true),
       );
     }
@@ -540,13 +545,13 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
                   key: kProjectSearchFieldKey,
                   controller: _searchController,
                   onChanged: _onSearchChanged,
-                  hintText: 'Search chats',
+                  hintText: context.l10n.search_chats,
                   leading: const Icon(Icons.search),
                   trailing: [
                     if (querying)
                       IconButton(
                         icon: const Icon(Icons.close),
-                        tooltip: 'Clear search',
+                        tooltip: context.l10n.clear_search,
                         onPressed: () {
                           _searchController.clear();
                           _onSearchChanged('');
@@ -561,10 +566,9 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
               hasScrollBody: false,
               child: EmptyState(
                 icon: Icons.forum_outlined,
-                title: 'No chats yet',
+                title: context.l10n.no_chats_yet,
                 message:
-                    'Chats you start in this project will appear here, on '
-                    'every device signed in to this Hermes.',
+                    context.l10n.chats_you_start_in_this_project_will_appear_here_on,
               ),
             )
           else if (filtered.isEmpty)
@@ -575,10 +579,9 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
               hasScrollBody: false,
               child: EmptyState(
                 icon: Icons.search_off,
-                title: 'No matches',
+                title: context.l10n.no_matches,
                 message:
-                    'No chats in this project match '
-                    '“${_searchQuery.trim()}”.',
+                    context.l10n.no_chats_in_this_project_match(_searchQuery.trim()),
               ),
             )
           else
@@ -622,7 +625,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
         padding: const EdgeInsets.only(bottom: HermesSpacing.xl),
         children: [
           if (view.isStale) const _OfflineNotice(),
-          const SectionHeader(title: 'Chats'),
+          SectionHeader(title: context.l10n.chats),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: HermesSpacing.lg),
             child: HermesCard(
@@ -632,7 +635,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
                   const SizedBox(width: HermesSpacing.md),
                   Expanded(
                     child: Text(
-                      'Conversations in this project',
+                      context.l10n.conversations_in_this_project,
                       style: tokens.typography.body.copyWith(
                         color: tokens.onSurface,
                       ),
@@ -650,7 +653,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
             ),
           ),
           if (tree != null && tree.repos.isNotEmpty) ...[
-            const SectionHeader(title: 'Repositories'),
+            SectionHeader(title: context.l10n.repositories),
             for (final repo in tree.repos)
               Padding(
                 padding: const EdgeInsets.fromLTRB(
@@ -663,7 +666,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
               ),
           ],
           if (tree?.path != null) ...[
-            const SectionHeader(title: 'Location'),
+            SectionHeader(title: context.l10n.location),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: HermesSpacing.lg),
               child: HermesCard(
@@ -709,18 +712,17 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
         children: [
           if (view.isStale) const _OfflineNotice(),
           if (paths.isEmpty)
-            const Padding(
+            Padding(
               padding: EdgeInsets.only(top: HermesSpacing.xl),
               child: EmptyState(
                 icon: Icons.folder_open_outlined,
-                title: 'No folders yet',
+                title: context.l10n.no_folders_yet,
                 message:
-                    'The server has not reported folders for this project yet. '
-                    'Global Files stays available from More.',
+                    context.l10n.the_server_has_not_reported_folders_for_this_project_yet,
               ),
             )
           else ...[
-            const SectionHeader(title: 'Folders'),
+            SectionHeader(title: context.l10n.folders),
             for (final path in paths)
               Padding(
                 padding: const EdgeInsets.fromLTRB(
@@ -765,13 +767,12 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
         padding: const EdgeInsets.only(bottom: HermesSpacing.xl),
         children: [
           if (view.isStale) const _OfflineNotice(),
-          const Padding(
+          Padding(
             padding: EdgeInsets.only(top: HermesSpacing.xl),
             child: ErrorState.unsupported(
-              title: 'Assets unavailable',
+              title: context.l10n.assets_unavailable,
               message:
-                  'Assets need a server-authoritative Assets index in the '
-                  'Hermes Gateway before they can be shown per project.',
+                  context.l10n.assets_need_a_server_authoritative_assets_index_in_the_hermes,
             ),
           ),
         ],
@@ -795,14 +796,13 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
         children: [
           if (view.isStale) const _OfflineNotice(),
           if (sessions.isEmpty)
-            const Padding(
+            Padding(
               padding: EdgeInsets.only(top: HermesSpacing.xl),
               child: EmptyState(
                 icon: Icons.bolt_outlined,
-                title: 'No activity yet',
+                title: context.l10n.no_activity_yet,
                 message:
-                    'Chats in this project will show their state and last '
-                    'activity here.',
+                    context.l10n.chats_in_this_project_will_show_their_state_and_last,
               ),
             )
           else
@@ -824,7 +824,7 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
                           children: [
                             Text(
                               session.title.trim().isEmpty
-                                  ? 'Untitled chat'
+                                  ? context.l10n.untitled_chat
                                   : session.title,
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
@@ -876,7 +876,7 @@ class _OfflineNotice extends StatelessWidget {
           const SizedBox(width: HermesSpacing.sm),
           Expanded(
             child: Text(
-              'Offline — showing the last known chats',
+              context.l10n.offline_showing_the_last_known_chats,
               style: tokens.typography.label.copyWith(color: tokens.warning),
             ),
           ),
@@ -931,7 +931,7 @@ class _SessionCard extends StatelessWidget {
                 const SizedBox(width: HermesSpacing.xs),
                 IconButton(
                   key: Key('move-session-${session.id}'),
-                  tooltip: 'Move conversation',
+                  tooltip: context.l10n.move_conversation,
                   onPressed: onMove,
                   icon: const Icon(Icons.drive_file_move_outline, size: 20),
                 ),
@@ -995,7 +995,9 @@ class _RepoCard extends StatelessWidget {
               children: [
                 for (final lane in lanes)
                   Text(
-                    lane.isMain ? '${lane.label} · main' : lane.label,
+                    lane.isMain
+                        ? context.l10n.branch_main(lane.label)
+                        : lane.label,
                     style: tokens.typography.label.copyWith(
                       color: lane.isMain ? tokens.accent : tokens.muted,
                     ),
