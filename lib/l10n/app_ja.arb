@@ -622,5 +622,6 @@
   "status_completed": "完了",
   "filter_all": "すべて",
   "filter_recent": "最近",
-  "connection_address_key": "{address}  •  キー: {status}"
+  "connection_address_key": "{address}  •  キー: {status}",
+  "model_via_provider": "{model}  \n{provider} 経由"
 }

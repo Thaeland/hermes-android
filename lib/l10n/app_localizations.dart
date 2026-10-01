@@ -3856,6 +3856,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{address}  •  Key: {status}'**
   String connection_address_key(Object address, Object status);
+
+  /// No description provided for @model_via_provider.
+  ///
+  /// In en, this message translates to:
+  /// **'{model}  \nvia `{provider}`'**
+  String model_via_provider(Object model, Object provider);
 }
 
 class _AppLocalizationsDelegate

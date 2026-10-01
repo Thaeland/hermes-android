@@ -2211,4 +2211,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String connection_address_key(Object address, Object status) {
     return '$address  •  キー: $status';
   }
+
+  @override
+  String model_via_provider(Object model, Object provider) {
+    return '$model  \n$provider 経由';
+  }
 }

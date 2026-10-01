@@ -225,7 +225,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    '${_modelInfo!['model'] ?? '???'}  \nvia `${_modelInfo!['provider'] ?? '???'}`',
+                    context.l10n.model_via_provider(
+                      _modelInfo!['model'] ?? '???',
+                      _modelInfo!['provider'] ?? '???',
+                    ),
                     style: Theme.of(context).textTheme.bodyMedium,
                   ),
                   if (_modelInfo!['effective_context_length'] != null &&

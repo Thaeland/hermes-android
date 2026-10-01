@@ -622,5 +622,6 @@
   "status_completed": "Completed",
   "filter_all": "All",
   "filter_recent": "Recent",
-  "connection_address_key": "{address}  •  Key: {status}"
+  "connection_address_key": "{address}  •  Key: {status}",
+  "model_via_provider": "{model}  \nvia `{provider}`"
 }
