@@ -3862,6 +3862,72 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{model}  \nvia `{provider}`'**
   String model_via_provider(Object model, Object provider);
+
+  /// No description provided for @deny.
+  ///
+  /// In en, this message translates to:
+  /// **'Deny'**
+  String get deny;
+
+  /// No description provided for @connect.
+  ///
+  /// In en, this message translates to:
+  /// **'Connect'**
+  String get connect;
+
+  /// No description provided for @appearance.
+  ///
+  /// In en, this message translates to:
+  /// **'Appearance'**
+  String get appearance;
+
+  /// No description provided for @connection_section.
+  ///
+  /// In en, this message translates to:
+  /// **'Connection'**
+  String get connection_section;
+
+  /// No description provided for @about.
+  ///
+  /// In en, this message translates to:
+  /// **'About'**
+  String get about;
+
+  /// No description provided for @version_label.
+  ///
+  /// In en, this message translates to:
+  /// **'Version {version}'**
+  String version_label(Object version);
+
+  /// No description provided for @matched.
+  ///
+  /// In en, this message translates to:
+  /// **'Matched'**
+  String get matched;
+
+  /// No description provided for @search.
+  ///
+  /// In en, this message translates to:
+  /// **'Search'**
+  String get search;
+
+  /// No description provided for @on.
+  ///
+  /// In en, this message translates to:
+  /// **'On'**
+  String get on;
+
+  /// No description provided for @off.
+  ///
+  /// In en, this message translates to:
+  /// **'Off'**
+  String get off;
+
+  /// No description provided for @reasoning_off.
+  ///
+  /// In en, this message translates to:
+  /// **'Off'**
+  String get reasoning_off;
 }
 
 class _AppLocalizationsDelegate

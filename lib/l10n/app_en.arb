@@ -623,5 +623,20 @@
   "filter_all": "All",
   "filter_recent": "Recent",
   "connection_address_key": "{address}  •  Key: {status}",
-  "model_via_provider": "{model}  \nvia `{provider}`"
+  "model_via_provider": "{model}  \nvia `{provider}`",
+  "deny": "Deny",
+  "connect": "Connect",
+  "appearance": "Appearance",
+  "connection_section": "Connection",
+  "about": "About",
+  "version_label": "Version {version}",
+  "matched": "Matched",
+  "search": "Search",
+  "on": "On",
+  "off": "Off",
+  "reasoning_off": "Off",
+  "reasoning_minimal": "Minimal",
+  "reasoning_low": "Low",
+  "reasoning_medium": "Medium",
+  "reasoning_high": "High"
 }

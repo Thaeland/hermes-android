@@ -56,7 +56,7 @@ class _GatewayApprovalDialogState extends State<GatewayApprovalDialog> {
       GatewayApprovalChoice.session => context.l10n.allow_for_this_session,
       GatewayApprovalChoice.always =>
         _confirmAlways ? context.l10n.confirm_always_allow : context.l10n.always_allow,
-      GatewayApprovalChoice.deny => 'Deny',
+      GatewayApprovalChoice.deny => context.l10n.deny,
     };
   }
 

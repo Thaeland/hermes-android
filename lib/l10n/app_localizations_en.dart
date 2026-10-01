@@ -2249,4 +2249,39 @@ class AppLocalizationsEn extends AppLocalizations {
   String model_via_provider(Object model, Object provider) {
     return '$model  \nvia `$provider`';
   }
+
+  @override
+  String get deny => 'Deny';
+
+  @override
+  String get connect => 'Connect';
+
+  @override
+  String get appearance => 'Appearance';
+
+  @override
+  String get connection_section => 'Connection';
+
+  @override
+  String get about => 'About';
+
+  @override
+  String version_label(Object version) {
+    return 'Version $version';
+  }
+
+  @override
+  String get matched => 'Matched';
+
+  @override
+  String get search => 'Search';
+
+  @override
+  String get on => 'On';
+
+  @override
+  String get off => 'Off';
+
+  @override
+  String get reasoning_off => 'Off';
 }

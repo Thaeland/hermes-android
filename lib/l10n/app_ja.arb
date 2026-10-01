@@ -623,5 +623,20 @@
   "filter_all": "すべて",
   "filter_recent": "最近",
   "connection_address_key": "{address}  •  キー: {status}",
-  "model_via_provider": "{model}  \n{provider} 経由"
+  "model_via_provider": "{model}  \n{provider} 経由",
+  "deny": "拒否",
+  "connect": "接続",
+  "appearance": "外観",
+  "connection_section": "接続",
+  "about": "このアプリ",
+  "version_label": "バージョン {version}",
+  "matched": "一致",
+  "search": "検索",
+  "on": "オン",
+  "off": "オフ",
+  "reasoning_off": "オフ",
+  "reasoning_minimal": "最小",
+  "reasoning_low": "低",
+  "reasoning_medium": "中",
+  "reasoning_high": "高"
 }

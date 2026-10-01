@@ -1202,7 +1202,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       WorkspaceSessionView.all => context.l10n.all_chats,
       WorkspaceSessionView.unassigned => context.l10n.unassigned_chats,
       WorkspaceSessionView.archivedQuick => context.l10n.archived_quick_chats,
-      WorkspaceSessionView.search => 'Search',
+      WorkspaceSessionView.search => context.l10n.search,
     };
     _push(
       WorkspaceSessionsScreen(

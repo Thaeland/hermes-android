@@ -3514,7 +3514,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   ),
                 Semantics(
                   label: context.l10n.spoken_replies,
-                  value: _voiceReplyEnabled ? 'On' : 'Off',
+                  value: _voiceReplyEnabled ? context.l10n.on : context.l10n.off,
                   toggled: _voiceReplyEnabled,
                   button: true,
                   excludeSemantics: true,

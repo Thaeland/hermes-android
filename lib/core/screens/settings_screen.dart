@@ -327,7 +327,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         const SizedBox(height: 16),
 
         // ---- Section: Theme ----
-        _buildSectionHeader('Appearance'),
+        _buildSectionHeader(context.l10n.appearance),
         _ThemeToggle(),
         const SizedBox(height: 8),
         TextSizeSettingsCard(
@@ -357,7 +357,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         const SizedBox(height: 16),
 
         // ---- Section: Connection ----
-        _buildSectionHeader('Connection'),
+        _buildSectionHeader(context.l10n.connection_section),
         Card(
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -388,7 +388,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         const SizedBox(height: 16),
 
         // ---- Section: About ----
-        _buildSectionHeader('About'),
+        _buildSectionHeader(context.l10n.about),
         _AboutCard(),
       ],
     );
@@ -520,7 +520,11 @@ class _AboutCardState extends State<_AboutCard> {
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 4),
-            Text('Version ${_version.isNotEmpty ? _version : '…'}'),
+            Text(
+              context.l10n.version_label(
+                _version.isNotEmpty ? _version : '…',
+              ),
+            ),
             const SizedBox(height: 8),
             Text(
               context.l10n.browse_and_manage_your_hermes_agent_sessions_from_your_phone,

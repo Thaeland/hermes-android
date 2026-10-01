@@ -2216,4 +2216,39 @@ class AppLocalizationsJa extends AppLocalizations {
   String model_via_provider(Object model, Object provider) {
     return '$model  \n$provider 経由';
   }
+
+  @override
+  String get deny => '拒否';
+
+  @override
+  String get connect => '接続';
+
+  @override
+  String get appearance => '外観';
+
+  @override
+  String get connection_section => '接続';
+
+  @override
+  String get about => 'このアプリ';
+
+  @override
+  String version_label(Object version) {
+    return 'バージョン $version';
+  }
+
+  @override
+  String get matched => '一致';
+
+  @override
+  String get search => '検索';
+
+  @override
+  String get on => 'オン';
+
+  @override
+  String get off => 'オフ';
+
+  @override
+  String get reasoning_off => 'オフ';
 }

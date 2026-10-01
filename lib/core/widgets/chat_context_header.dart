@@ -65,7 +65,7 @@ class ChatContextHeader extends StatelessWidget {
               const SizedBox(width: HermesSpacing.sm),
               _ContextChip(
                 icon: Icons.psychology_outlined,
-                label: _reasoningLabel(reasoningEffort),
+                label: _reasoningLabel(context, reasoningEffort),
               ),
               const SizedBox(width: HermesSpacing.sm),
               Semantics(
@@ -99,10 +99,16 @@ class ChatContextHeader extends StatelessWidget {
     };
   }
 
-  String _reasoningLabel(String value) {
+  String _reasoningLabel(BuildContext context, String value) {
     final normalized = value.trim().toLowerCase();
-    if (normalized.isEmpty || normalized == 'none') return 'Off';
-    return normalized[0].toUpperCase() + normalized.substring(1);
+    return switch (normalized) {
+      '' || 'none' => context.l10n.reasoning_off,
+      'minimal' => context.l10n.reasoning_minimal,
+      'low' => context.l10n.reasoning_low,
+      'medium' => context.l10n.reasoning_medium,
+      'high' => context.l10n.reasoning_high,
+      _ => value,
+    };
   }
 }
 

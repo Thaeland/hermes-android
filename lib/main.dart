@@ -1466,7 +1466,7 @@ class _AddDialogState extends State<_AddDialog> {
                     color: Colors.white,
                   ),
                 )
-              : Text(_isEditing ? context.l10n.save_changes : 'Connect'),
+              : Text(_isEditing ? context.l10n.save_changes : context.l10n.connect),
         ),
       ],
     );

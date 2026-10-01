@@ -43,7 +43,7 @@ class AttachmentDraftTile extends StatelessWidget {
           child: Text(
             draft.status == AttachmentDraftStatus.failed
                 ? context.l10n.upload_failed_tap_retry
-                : '${_formatFileSize(draft.byteLength)} • ${draft.status.name}',
+                : '${_formatFileSize(draft.byteLength)} • ${_statusLabel(context)}',
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
           ),

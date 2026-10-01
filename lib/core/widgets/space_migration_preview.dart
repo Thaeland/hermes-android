@@ -239,7 +239,7 @@ class _EntryCard extends StatelessWidget {
                 status: matched == null
                     ? HermesStatus.blocked
                     : HermesStatus.completed,
-                label: matched == null ? context.l10n.new_project : 'Matched',
+                label: matched == null ? context.l10n.new_project : context.l10n.matched,
               ),
             ],
           ),
