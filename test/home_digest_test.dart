@@ -2,6 +2,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hermes_android/core/models/session.dart';
 import 'package:hermes_android/core/theme/hermes_theme.dart';
 import 'package:hermes_android/core/utils/home_digest.dart';
+import 'support/l10n_test_utils.dart';
+import 'package:hermes_android/l10n/app_localizations.dart';
+
 
 /// A fixed clock so window boundaries are asserted, not approximated.
 final _now = DateTime.utc(2026, 8, 27, 12, 0, 0);
@@ -44,6 +47,11 @@ List<String> _ids(HomeDigest digest, HomeSectionKind kind) {
 }
 
 void main() {
+  late AppLocalizations l10n;
+
+  setUpAll(() async {
+    l10n = await loadTestL10n();
+  });
   group('HomeSectionKind', () {
     test('ranks attention above everything else', () {
       expect(HomeSectionKind.values, [
@@ -57,8 +65,8 @@ void main() {
     test('each kind carries a distinct human title', () {
       final titles = <String>{};
       for (final kind in HomeSectionKind.values) {
-        expect(kind.title, isNotEmpty);
-        titles.add(kind.title);
+        expect(kind.title(l10n), isNotEmpty);
+        titles.add(kind.title(l10n));
       }
       expect(titles, hasLength(HomeSectionKind.values.length));
     });

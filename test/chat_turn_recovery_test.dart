@@ -17,6 +17,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/fake_voice_composer_adapter.dart';
+import 'package:hermes_android/l10n/app_localizations.dart';
 
 const _clientTurnId = '123e4567-e89b-42d3-a456-426614174000';
 const _turnId = 'server-turn';
@@ -559,6 +560,8 @@ Future<void> _pumpChat(
   );
   await tester.pumpWidget(
     MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
       home: ChatScreen(
         connection: SavedConnection(
           id: 'recovery-fixture',

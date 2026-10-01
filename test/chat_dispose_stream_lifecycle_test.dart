@@ -19,6 +19,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:hermes_android/core/screens/chat_screen.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
+import 'package:hermes_android/l10n/app_localizations.dart';
 
 void main() {
   setUp(() {
@@ -173,6 +174,8 @@ Future<void> _pumpChat(
 }) async {
   await tester.pumpWidget(
     MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
       home: ChatScreen(
         connection: SavedConnection(
           id: 'conn-fixture',
@@ -214,7 +217,9 @@ Future<void> _sendPrompt(WidgetTester tester, String text) async {
 
 /// Replaces the tree so the chat screen's [State.dispose] runs.
 Future<void> _dispose(WidgetTester tester) async {
-  await tester.pumpWidget(const MaterialApp(home: SizedBox.shrink()));
+  await tester.pumpWidget(MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,home: SizedBox.shrink()));
   await tester.pump();
 }
 

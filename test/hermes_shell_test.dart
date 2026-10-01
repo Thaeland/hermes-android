@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hermes_android/core/theme/hermes_theme.dart';
 import 'package:hermes_android/core/widgets/hermes_shell.dart';
+import 'support/l10n_test_utils.dart';
+import 'package:hermes_android/l10n/app_localizations.dart';
+
 
 Future<void> _pumpShell(
   WidgetTester tester, {
@@ -19,6 +22,8 @@ Future<void> _pumpShell(
 
   await tester.pumpWidget(
     MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
       theme: hermesTheme(brightness),
       home: Builder(
         builder: (context) => MediaQuery(
@@ -43,6 +48,11 @@ Future<void> _pumpShell(
 }
 
 void main() {
+  late AppLocalizations l10n;
+
+  setUpAll(() async {
+    l10n = await loadTestL10n();
+  });
   group('HermesDestination', () {
     test('declares the five validated top-level destinations in order', () {
       expect(HermesDestination.values, [
@@ -58,8 +68,8 @@ void main() {
       final labels = <String>{};
       final icons = <IconData>{};
       for (final destination in HermesDestination.values) {
-        expect(destination.label, isNotEmpty);
-        labels.add(destination.label);
+        expect(destination.label(l10n), isNotEmpty);
+        labels.add(destination.label(l10n));
         icons.add(destination.icon);
         expect(destination.selectedIcon, isNotNull);
       }
@@ -80,6 +90,8 @@ void main() {
       final built = <HermesDestination>[];
       await tester.pumpWidget(
         MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
           theme: hermesTheme(Brightness.dark),
           home: HermesShell(
             builder: (context, destination) {
@@ -93,7 +105,7 @@ void main() {
 
       expect(built.toSet(), {HermesDestination.home});
 
-      await tester.tap(find.text(HermesDestination.chats.label));
+      await tester.tap(find.text(HermesDestination.chats.label(l10n)));
       await tester.pumpAndSettle();
 
       expect(built.toSet(), {HermesDestination.home, HermesDestination.chats});
@@ -173,7 +185,7 @@ void main() {
       await _pumpShell(tester);
 
       for (final destination in HermesDestination.values) {
-        await tester.tap(find.text(destination.label));
+        await tester.tap(find.text(destination.label(l10n)));
         await tester.pumpAndSettle();
         expect(find.text('pane:${destination.name}'), findsOneWidget);
       }
@@ -225,9 +237,9 @@ void main() {
 
       for (final destination in HermesDestination.values) {
         expect(
-          find.bySemanticsLabel(RegExp(destination.label)),
+          find.bySemanticsLabel(RegExp(destination.label(l10n))),
           findsWidgets,
-          reason: '${destination.label} must be reachable by screen reader',
+          reason: '${destination.label(l10n)} must be reachable by screen reader',
         );
       }
     });
@@ -246,7 +258,7 @@ void main() {
         ),
       );
 
-      await tester.tap(find.text(HermesDestination.more.label));
+      await tester.tap(find.text(HermesDestination.more.label(l10n)));
       await tester.pumpAndSettle();
 
       expect(find.text('pane:more'), findsOneWidget);
@@ -287,7 +299,7 @@ void main() {
       );
 
       expect(find.byType(FloatingActionButton), findsOneWidget);
-      await tester.tap(find.text(HermesDestination.more.label));
+      await tester.tap(find.text(HermesDestination.more.label(l10n)));
       await tester.pumpAndSettle();
       expect(find.text('pane:more'), findsOneWidget);
     });
