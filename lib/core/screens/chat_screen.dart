@@ -747,6 +747,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         : context.l10n.turn_completed;
     unawaited(
       _turnNotifications.showTurnCompleted(
+        title: context.l10n.hermes_response_ready,
         turnSummary: '${widget.session.title}: $summary',
         turnId: turnId,
       ),
@@ -2224,7 +2225,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             refTexts.join('\n'),
           ].where((part) => part.trim().isNotEmpty).join('\n\n');
           final attachmentLabels = attachments
-              .map((attachment) => '[Attached file: ${attachment.name}]')
+              .map(
+                (attachment) =>
+                    '[${context.l10n.attached_file}: ${attachment.name}]',
+              )
               .join('\n');
           final localContent = [
             text,
@@ -2796,6 +2800,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final request = GatewaySensitivePromptRequest.fromEventData(
       kind: kind,
       data: event.data,
+      l10n: context.l10n,
     );
     if (request == null) return;
     final duplicate =

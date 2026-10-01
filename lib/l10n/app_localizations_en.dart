@@ -2284,4 +2284,30 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get reasoning_off => 'Off';
+
+  @override
+  String get hermes_response_ready => 'Hermes response ready';
+
+  @override
+  String get admin_password_needed => 'Administrator password needed';
+
+  @override
+  String get hermes_needs_a_sudo_password_for_the_pending_terminal_command =>
+      'Hermes needs a sudo password for the pending terminal command.';
+
+  @override
+  String get sudo_password => 'Sudo password';
+
+  @override
+  String get secret_needed => 'Secret needed';
+
+  @override
+  String get hermes_needs_a_secret_for_the_pending_skill =>
+      'Hermes needs a secret for the pending skill.';
+
+  @override
+  String get secret_value => 'Secret value';
+
+  @override
+  String get attached_file => 'Attached file';
 }

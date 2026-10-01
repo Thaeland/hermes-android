@@ -3928,6 +3928,54 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Off'**
   String get reasoning_off;
+
+  /// No description provided for @hermes_response_ready.
+  ///
+  /// In en, this message translates to:
+  /// **'Hermes response ready'**
+  String get hermes_response_ready;
+
+  /// No description provided for @admin_password_needed.
+  ///
+  /// In en, this message translates to:
+  /// **'Administrator password needed'**
+  String get admin_password_needed;
+
+  /// No description provided for @hermes_needs_a_sudo_password_for_the_pending_terminal_command.
+  ///
+  /// In en, this message translates to:
+  /// **'Hermes needs a sudo password for the pending terminal command.'**
+  String get hermes_needs_a_sudo_password_for_the_pending_terminal_command;
+
+  /// No description provided for @sudo_password.
+  ///
+  /// In en, this message translates to:
+  /// **'Sudo password'**
+  String get sudo_password;
+
+  /// No description provided for @secret_needed.
+  ///
+  /// In en, this message translates to:
+  /// **'Secret needed'**
+  String get secret_needed;
+
+  /// No description provided for @hermes_needs_a_secret_for_the_pending_skill.
+  ///
+  /// In en, this message translates to:
+  /// **'Hermes needs a secret for the pending skill.'**
+  String get hermes_needs_a_secret_for_the_pending_skill;
+
+  /// No description provided for @secret_value.
+  ///
+  /// In en, this message translates to:
+  /// **'Secret value'**
+  String get secret_value;
+
+  /// No description provided for @attached_file.
+  ///
+  /// In en, this message translates to:
+  /// **'Attached file'**
+  String get attached_file;
 }
 
 class _AppLocalizationsDelegate

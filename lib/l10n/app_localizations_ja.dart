@@ -2251,4 +2251,30 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get reasoning_off => 'オフ';
+
+  @override
+  String get hermes_response_ready => 'Hermesの応答';
+
+  @override
+  String get admin_password_needed => '管理者パスワードが必要です';
+
+  @override
+  String get hermes_needs_a_sudo_password_for_the_pending_terminal_command =>
+      '保留中のターミナルコマンドの実行にsudoパスワードが必要です。';
+
+  @override
+  String get sudo_password => 'sudoパスワード';
+
+  @override
+  String get secret_needed => 'シークレットが必要です';
+
+  @override
+  String get hermes_needs_a_secret_for_the_pending_skill =>
+      '保留中のスキルの実行にシークレットが必要です。';
+
+  @override
+  String get secret_value => 'シークレットの値';
+
+  @override
+  String get attached_file => '添付ファイル';
 }

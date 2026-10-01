@@ -638,5 +638,13 @@
   "reasoning_minimal": "最小",
   "reasoning_low": "低",
   "reasoning_medium": "中",
-  "reasoning_high": "高"
+  "reasoning_high": "高",
+  "hermes_response_ready": "Hermesの応答",
+  "admin_password_needed": "管理者パスワードが必要です",
+  "hermes_needs_a_sudo_password_for_the_pending_terminal_command": "保留中のターミナルコマンドの実行にsudoパスワードが必要です。",
+  "sudo_password": "sudoパスワード",
+  "secret_needed": "シークレットが必要です",
+  "hermes_needs_a_secret_for_the_pending_skill": "保留中のスキルの実行にシークレットが必要です。",
+  "secret_value": "シークレットの値",
+  "attached_file": "添付ファイル"
 }

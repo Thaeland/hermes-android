@@ -638,5 +638,13 @@
   "reasoning_minimal": "Minimal",
   "reasoning_low": "Low",
   "reasoning_medium": "Medium",
-  "reasoning_high": "High"
+  "reasoning_high": "High",
+  "hermes_response_ready": "Hermes response ready",
+  "admin_password_needed": "Administrator password needed",
+  "hermes_needs_a_sudo_password_for_the_pending_terminal_command": "Hermes needs a sudo password for the pending terminal command.",
+  "sudo_password": "Sudo password",
+  "secret_needed": "Secret needed",
+  "hermes_needs_a_secret_for_the_pending_skill": "Hermes needs a secret for the pending skill.",
+  "secret_value": "Secret value",
+  "attached_file": "Attached file"
 }
