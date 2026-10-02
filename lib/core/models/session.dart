@@ -56,13 +56,19 @@ class Session {
     final endedAt = json['ended_at'];
     final startedAt = asDouble(json['started_at']);
     final lastActive = asDouble(json['last_active'], startedAt);
+    // The Gateway reports session liveness via `is_active`. `ended_at` is
+    // only set for explicitly ended sessions, so it is NOT a liveness
+    // signal on its own — using it alone marks every finished-but-not-ended
+    // session as running. Fall back to the ended_at heuristic only when
+    // `is_active` is absent (older gateways).
+    final isActiveJson = json['is_active'];
     return Session(
       id: json['id'] ?? '',
       title: json['title'] ?? 'Untitled',
       model: json['model'] ?? 'Default',
       source: json['source'] ?? '',
       messageCount: asInt(json['message_count']),
-      isActive: endedAt == null,
+      isActive: isActiveJson is bool ? isActiveJson : (endedAt == null),
       preview: json['preview'] ?? '',
       startedAt: startedAt,
       endedAt: endedAt == null ? null : asDouble(endedAt),
