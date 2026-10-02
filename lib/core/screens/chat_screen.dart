@@ -54,6 +54,23 @@ import '../widgets/voice_composer_controls.dart';
 const hermesUserMessageBubbleBackground = Color(0xFFD4AF37);
 const hermesUserMessageForeground = Color(0xFF1C1B1F);
 
+/// Recovery v2 opens a new server session and cannot yet target an existing
+/// Gateway session. Keep it confined to locally-created drafts; a session from
+/// `GET /sessions` must submit through the legacy transport that accepts its
+/// exact session id.
+@visibleForTesting
+bool shouldUseRecoveryV2ForSession(Session session) => session.isLocalDraft;
+
+/// Avoid opening the same local draft once through the legacy client's
+/// `session.create` path and again through recovery v2's `session.open` path.
+/// If recovery v2 is explicitly unsupported, the local draft may safely fall
+/// back to the legacy transport and establish its first server session there.
+@visibleForTesting
+bool shouldEstablishLegacyDesktopSession(
+  Session session, {
+  required bool legacyTransportFallback,
+}) => !session.isLocalDraft || legacyTransportFallback;
+
 class _ModelChoice {
   final String provider;
   final String model;
@@ -414,7 +431,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     };
     _turnApplicationSession =
         widget.testTurnApplicationSession ??
-        (_desktopGateway != null
+        (_desktopGateway != null &&
+                shouldUseRecoveryV2ForSession(widget.session)
             ? widget.turnApplicationController?.sessionFor(widget.connection)
             : null);
     final turnApplicationSession = _turnApplicationSession;
@@ -601,6 +619,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _ensureDesktopSession() async {
+    if (!shouldEstablishLegacyDesktopSession(
+      widget.session,
+      legacyTransportFallback: _legacyTransportFallback,
+    )) {
+      return;
+    }
     final gateway = _desktopGateway;
     widget.testDesktopSessionEnsured?.call();
     if (gateway == null) return;

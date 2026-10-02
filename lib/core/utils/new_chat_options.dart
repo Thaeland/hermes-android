@@ -196,6 +196,7 @@ NewChatDraft buildNewChatDraft({
       isActive: true,
       preview: '',
       startedAt: now.millisecondsSinceEpoch / 1000.0,
+      isLocalDraft: true,
     ),
     mode: mode,
     // A Quick chat never inherits the active project, even when one is passed.

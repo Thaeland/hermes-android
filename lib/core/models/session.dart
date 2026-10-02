@@ -23,6 +23,13 @@ class Session {
   /// Whether the Gateway archived the session.
   final bool archived;
 
+  /// Whether this session exists only as a client-side draft.
+  ///
+  /// Recovery v2 may call `session.open`, so it is safe only before the first
+  /// server session exists. Sessions parsed from the Gateway always keep this
+  /// false and must use the exact-session legacy submit transport.
+  final bool isLocalDraft;
+
   const Session({
     required this.id,
     required this.title,
@@ -36,6 +43,7 @@ class Session {
     this.lastActive = 0,
     this.pinned = false,
     this.archived = false,
+    this.isLocalDraft = false,
   });
 
   factory Session.fromJson(Map<String, dynamic> json) {
@@ -75,6 +83,7 @@ class Session {
       lastActive: lastActive,
       pinned: json['pinned'] == true,
       archived: json['archived'] == true,
+      isLocalDraft: false,
     );
   }
 }
