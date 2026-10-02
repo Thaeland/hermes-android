@@ -57,6 +57,7 @@ Map<String, dynamic> _sessionRow({
   double lastActive = 1750000900,
   double? endedAt,
   int messageCount = 12,
+  bool? isActive,
 }) {
   return {
     'id': id,
@@ -75,7 +76,9 @@ Map<String, dynamic> _sessionRow({
     'actual_cost_usd': null,
     'estimated_cost_usd': 0.004,
     'model': 'claude-opus-5',
-    'is_active': false,
+    // Omitted (null) by default so the ended_at fallback stays exercised;
+    // pass explicitly to assert Gateway is_active precedence.
+    'is_active': ?isActive,
     'cwd': '/home/carlos/dev/hermes-android',
     'git_branch': 'main',
     'git_repo_root': '/home/carlos/dev/hermes-android',
