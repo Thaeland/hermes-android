@@ -4,6 +4,24 @@ All notable changes to this project are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Release notes for
 versions prior to 1.0.7 are in the **What's new** sections of the [README](README.md).
 
+## [2.1.9] - 2026-10-02
+
+### Fixed
+
+- Gateway clarification, approval, sudo, and secret requests now reach the
+  phone during a running turn, with safe socket ownership and reconnect replay
+  (#116, PR #118).
+- Large server-side chats open with a bounded recent transcript, keep the
+  composer usable during hydration, and preserve authoritative history across
+  failed, concurrent, completed, and stopped turns (#117, PR #119).
+- Session activity now follows the Gateway's explicit `is_active` state while
+  retaining compatibility with older gateways that omit it (PR #121).
+
+### Thanks
+
+- @maebahesioru for correcting session liveness handling and adding focused
+  regression coverage in PR #121.
+
 ## [2.1.8] - 2026-09-30
 
 ### Fixed
