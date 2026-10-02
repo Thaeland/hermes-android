@@ -4,6 +4,19 @@ All notable changes to this project are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Release notes for
 versions prior to 1.0.7 are in the **What's new** sections of the [README](README.md).
 
+## [2.1.10] - 2026-10-02
+
+### Fixed
+
+- Sending from an existing server-side chat now targets that exact session
+  instead of opening and submitting into a new sibling session (#120, PR #122).
+- Local drafts no longer race legacy `session.create` against recovery v2
+  `session.open`; explicit legacy fallback still establishes one session.
+
+### Thanks
+
+- No external contributors in this patch.
+
 ## [2.1.9] - 2026-10-02
 
 ### Fixed
