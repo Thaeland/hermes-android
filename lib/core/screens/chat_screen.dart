@@ -308,6 +308,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// authoritative before it restores the composer.
   int _historyGeneration = 0;
   int _responseGeneration = 0;
+  bool _deferredHistoryRefreshPending = false;
+  bool _deferredHistoryRefreshing = false;
+  bool _stopResponseInFlight = false;
   bool _approvalDialogOpen = false;
   bool _approvalRouteOpen = false;
   String? _activeApprovalServerRequestId;
@@ -910,6 +913,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       // replace them with a stale transcript page.
       if (responseGeneration != _responseGeneration) {
         setState(() => _loading = false);
+        _deferHistoryRefresh();
         return;
       }
       _extractToolMessages(messages);
@@ -929,6 +933,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (!mounted) return;
       if (responseGeneration != _responseGeneration) {
         setState(() => _loading = false);
+        _deferHistoryRefresh();
         return;
       }
       final errStr = e.toString();
@@ -954,6 +959,70 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Future<List<Map<String, dynamic>>> _getRecentMessages(String sessionId) =>
       _client.getMessages(sessionId, limit: _historyPageSize, latest: true);
+
+  /// A remote turn may start while the initial bounded transcript request is
+  /// still in flight. Its stale response must not overwrite optimistic or
+  /// streamed messages, but dropping it permanently would leave the existing
+  /// transcript blank. Refresh once the turn is idle, using the authoritative
+  /// post-turn page instead.
+  void _deferHistoryRefresh() {
+    _deferredHistoryRefreshPending = true;
+    unawaited(_refreshDeferredHistoryIfIdle());
+  }
+
+  Future<void> _refreshDeferredHistoryIfIdle() async {
+    if (!mounted ||
+        !_deferredHistoryRefreshPending ||
+        _deferredHistoryRefreshing ||
+        _sending ||
+        _streaming ||
+        _stopResponseInFlight ||
+        _pendingReattachResync) {
+      return;
+    }
+    _deferredHistoryRefreshPending = false;
+    _deferredHistoryRefreshing = true;
+    final responseGeneration = _responseGeneration;
+    var retryAfterSettlement = false;
+    try {
+      final sessionId =
+          _desktopGateway?.storedSessionKeyFor(widget.session.id) ??
+          widget.testStoredSessionKey?.call(widget.session.id) ??
+          widget.session.id;
+      final messages = await _getRecentMessages(sessionId);
+      if (!mounted) return;
+      if (responseGeneration != _responseGeneration ||
+          _sending ||
+          _streaming ||
+          _stopResponseInFlight ||
+          _pendingReattachResync) {
+        _deferredHistoryRefreshPending = true;
+        retryAfterSettlement = true;
+        return;
+      }
+      _extractToolMessages(messages);
+      setState(() {
+        _messages = messages;
+        _historyGeneration += 1;
+        _error = null;
+      });
+      _scheduleInitialEndAlignment();
+    } catch (_) {
+      // Keep the refresh pending. A later terminal/rollback transition can
+      // retry without turning background hydration into a composer blocker.
+      _deferredHistoryRefreshPending = true;
+    } finally {
+      _deferredHistoryRefreshing = false;
+      if (retryAfterSettlement &&
+          mounted &&
+          !_sending &&
+          !_streaming &&
+          !_stopResponseInFlight &&
+          !_pendingReattachResync) {
+        unawaited(_refreshDeferredHistoryIfIdle());
+      }
+    }
+  }
 
   /// Reattach resync: the socket came back after a mid-turn drop. Re-bind
   /// the session on the fresh socket (single-flights with the client's own
@@ -1320,6 +1389,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _scheduleStreamingFollow();
     } else {
       _scheduleScrollTarget(_scrollCoordinator.endStreaming());
+      unawaited(_refreshDeferredHistoryIfIdle());
     }
   }
 
@@ -2308,6 +2378,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _gatewayTurnStatus = null;
         _activeResponseTransport = _ResponseTransport.none;
       });
+      unawaited(_refreshDeferredHistoryIfIdle());
       unawaited(_resyncLegacyHistoryAfterResume());
       _scheduleScrollTarget(_scrollCoordinator.endStreaming());
       if (_awaitingVoiceReply) {
@@ -2345,6 +2416,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         });
       }
       _handleSendError(error);
+      unawaited(_refreshDeferredHistoryIfIdle());
       unawaited(_resyncLegacyHistoryAfterResume());
     }
   }
@@ -2439,6 +2511,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           ..error = null;
       }
       _handleSendError(error);
+      unawaited(_refreshDeferredHistoryIfIdle());
       return;
     }
 
@@ -2500,6 +2573,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             ..addAll(attachments);
         });
         _handleSendError(error);
+        unawaited(_refreshDeferredHistoryIfIdle());
         return;
       }
       setState(() {
@@ -3228,6 +3302,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     final transport = _activeResponseTransport;
     final activeClientTurnId = _activeClientTurnId;
+    _stopResponseInFlight = true;
     ++_responseGeneration;
     _scrollCoordinator.cancelStreaming();
     setState(() {
@@ -3300,6 +3375,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           duration: const Duration(seconds: 6),
         ),
       );
+    } finally {
+      _stopResponseInFlight = false;
+      unawaited(_refreshDeferredHistoryIfIdle());
     }
   }
 
