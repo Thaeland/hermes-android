@@ -151,6 +151,11 @@ class _GatewayFixture {
       socket.listen(
         (raw) async {
           final request = jsonDecode(raw as String) as Map<String, dynamic>;
+          // WsClient negotiates interactive server requests for every socket.
+          // This fixture exercises turn recovery, so exclude that independent,
+          // best-effort negotiation from turn request assertions. Dedicated
+          // transport tests cover its response contract.
+          if (request['method'] == 'client.capabilities') return;
           requests.add(request);
           order.add(request['method'] as String);
           final result = await (handler == null
@@ -617,7 +622,62 @@ void _expectPayloadFreePoison(GatewayTurnRecoveryState? failure) {
   expect(failure.snapshot, isNull);
 }
 
+Future<void> _waitFor(
+  bool Function() condition, {
+  Duration timeout = const Duration(seconds: 5),
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (!condition()) {
+    if (DateTime.now().isAfter(deadline)) {
+      throw StateError('condition not met within $timeout');
+    }
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+  }
+}
+
 void main() {
+  test(
+    'coordinator reports runtime binding and preserves inherited events',
+    () async {
+      final fixture = await _GatewayFixture.start();
+      addTearDown(fixture.close);
+      final inheritedEvents = <StreamEvent>[];
+      final runtimeBindings = <String, String>{};
+      final coordinator =
+          GatewayTurnCoordinator(
+              connectionId: 'connection-a',
+              endpointDigest: _digest,
+              localSessionId: 'local-a',
+              journal: GatewayTurnJournal(store: _MemoryJournalStore()),
+              freshSocketFactory: () async {
+                final client = WsClient(fixture.baseUrl);
+                client.onStreamEvent = inheritedEvents.add;
+                return client;
+              },
+              uuidFactory: () => _clientA,
+              clock: () => DateTime.fromMillisecondsSinceEpoch(
+                _baseMs + 1000,
+                isUtc: true,
+              ),
+            )
+            ..onRuntimeBound = (localSessionId, runtimeSessionId) {
+              runtimeBindings[localSessionId] = runtimeSessionId;
+            };
+      addTearDown(coordinator.close);
+
+      await coordinator.ensureOpen();
+      expect(runtimeBindings, {'local-a': 'runtime-1'});
+
+      fixture.sendEvent({
+        'type': 'request.cancel',
+        'session_id': 'runtime-1',
+        'payload': {'id': 'srq-1', 'method': 'clarify'},
+      });
+      await _waitFor(() => inheritedEvents.isNotEmpty);
+      expect(inheritedEvents.single.type, 'request.cancel');
+    },
+  );
+
   group('GatewayTurnRecoveryState rehydrate', () {
     test('accepts unresolved and known nonterminal durable states', () {
       final unresolved = GatewayTurnRecoveryState.rehydrate(
@@ -2242,50 +2302,41 @@ void main() {
       },
     );
 
-    test(
-      'v2 protocol without turn_recovery is also a clean absence',
-      () async {
-        final ready = _readyFrame();
-        final payload =
-            (ready['params'] as Map<String, dynamic>)['payload']
-                as Map<String, dynamic>;
-        (payload['capabilities'] as Map<String, dynamic>).remove(
-          'turn_recovery',
-        );
-        final fixture = await _GatewayFixture.start(
-          readyFrame: ready,
-          handler: (request, _) => throw StateError(
-            'Unsupported ready must not call ${request['method']}',
+    test('v2 protocol without turn_recovery is also a clean absence', () async {
+      final ready = _readyFrame();
+      final payload =
+          (ready['params'] as Map<String, dynamic>)['payload']
+              as Map<String, dynamic>;
+      (payload['capabilities'] as Map<String, dynamic>).remove('turn_recovery');
+      final fixture = await _GatewayFixture.start(
+        readyFrame: ready,
+        handler: (request, _) => throw StateError(
+          'Unsupported ready must not call ${request['method']}',
+        ),
+      );
+      final coordinator = _coordinator(
+        fixture: fixture,
+        journal: GatewayTurnJournal(store: _MemoryJournalStore()),
+      );
+
+      try {
+        await expectLater(
+          coordinator.recoverPending(),
+          throwsA(
+            isA<GatewayTurnCoordinatorException>()
+                .having(
+                  (error) => error.failure,
+                  'failure',
+                  GatewayTurnCoordinatorFailure.unsupportedCapability,
+                )
+                .having((error) => error.stockGateway, 'stockGateway', isTrue),
           ),
         );
-        final coordinator = _coordinator(
-          fixture: fixture,
-          journal: GatewayTurnJournal(store: _MemoryJournalStore()),
-        );
-
-        try {
-          await expectLater(
-            coordinator.recoverPending(),
-            throwsA(
-              isA<GatewayTurnCoordinatorException>()
-                  .having(
-                    (error) => error.failure,
-                    'failure',
-                    GatewayTurnCoordinatorFailure.unsupportedCapability,
-                  )
-                  .having(
-                    (error) => error.stockGateway,
-                    'stockGateway',
-                    isTrue,
-                  ),
-            ),
-          );
-        } finally {
-          await coordinator.close();
-          await fixture.close();
-        }
-      },
-    );
+      } finally {
+        await coordinator.close();
+        await fixture.close();
+      }
+    });
 
     test(
       'a wrong protocol name is a mismatch, never a clean absence',
@@ -2294,8 +2345,7 @@ void main() {
         final payload =
             (ready['params'] as Map<String, dynamic>)['payload']
                 as Map<String, dynamic>;
-        (payload['protocol'] as Map<String, dynamic>)['name'] =
-            'not-hermes';
+        (payload['protocol'] as Map<String, dynamic>)['name'] = 'not-hermes';
         final fixture = await _GatewayFixture.start(
           readyFrame: ready,
           handler: (request, _) => throw StateError(

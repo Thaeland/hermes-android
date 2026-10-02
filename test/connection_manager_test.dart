@@ -3450,6 +3450,7 @@ void main() {
         await client.connect();
         await client.respondToClarify(
           requestId: 'clarify-request-123',
+          questionId: 'q1',
           answer: 'Balanced',
         );
         final request = await requestSeen.future;
@@ -3457,6 +3458,7 @@ void main() {
         expect(request['method'], 'clarify.respond');
         expect(request['params'], {
           'request_id': 'clarify-request-123',
+          'question_id': 'q1',
           'answer': 'Balanced',
         });
       } finally {
@@ -3466,7 +3468,7 @@ void main() {
       }
     });
 
-    test('echoes question_id back for batch clarify answers', () async {
+    test('locks batch clarify answers with clarify.lock', () async {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       final requestSeen = Completer<Map<String, dynamic>>();
       final socketSubscription = server
@@ -3492,10 +3494,11 @@ void main() {
           requestId: 'clarify-request-123',
           questionId: 'q1',
           answer: 'Balanced',
+          lockAnswer: true,
         );
         final request = await requestSeen.future;
 
-        expect(request['method'], 'clarify.respond');
+        expect(request['method'], 'clarify.lock');
         expect(request['params'], {
           'request_id': 'clarify-request-123',
           'question_id': 'q1',

@@ -645,6 +645,41 @@ class _FakeTurnSession implements GatewayTurnApplicationSession {
   int closeCount = 0;
   final List<String> submittedTexts = [];
 
+  @override
+  Object setAsyncEventListener(
+    String localSessionId,
+    DesktopAsyncEventCallback listener,
+  ) => Object();
+
+  @override
+  void removeAsyncEventListener(String localSessionId, Object registration) {}
+
+  @override
+  Future<bool> tryRespondToApproval({
+    required String sessionId,
+    required String choice,
+    String? requestId,
+  }) async => false;
+
+  @override
+  Future<bool> tryRespondToClarify({
+    required String requestId,
+    required String answer,
+    String? questionId,
+  }) async => false;
+
+  @override
+  Future<bool> tryRespondToSudo({
+    required String requestId,
+    required String password,
+  }) async => false;
+
+  @override
+  Future<bool> tryRespondToSecret({
+    required String requestId,
+    required String value,
+  }) async => false;
+
   _FakeTurnSession(
     this._recoverResults, {
     this.submitResult,

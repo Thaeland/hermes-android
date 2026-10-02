@@ -12,6 +12,7 @@ import 'ws_client.dart';
 
 typedef DesktopAsyncEventCallback =
     void Function(String mobileSessionId, StreamEvent event);
+typedef DesktopAsyncEventSessionPredicate = bool Function(String sessionId);
 typedef DesktopConnectionCallback =
     void Function(DesktopConnectionState connectionState);
 
@@ -28,6 +29,9 @@ enum DesktopConnectionState {
 /// profiles. When a connection supplies [SavedConnection.desktopGatewayUrl],
 /// chat writes and interactive events use this one Desktop session transport.
 class DesktopGatewayClient {
+  static int _nextServerRequestNamespace = 1;
+
+  final int _serverRequestNamespace = _nextServerRequestNamespace++;
   final String _connectionId;
   final String _baseUrl;
   final DashboardClient _dashboard;
@@ -44,7 +48,16 @@ class DesktopGatewayClient {
   final Map<String, String> _gatewaySessionIds = {};
   final Map<String, String> _storedSessionIds = {};
   final Map<String, String> _workingDirectories = {};
+  final Map<String, GatewayServerRequest> _serverRequests = {};
+  final Map<String, WsClient> _serverRequestClients = {};
+  final Map<String, String> _serverRequestMobileSessionIds = {};
+  final Map<String, StreamEvent> _serverRequestEvents = {};
+  final Map<WsClient, int> _serverRequestClientOrdinals = Map.identity();
+  int _nextServerRequestClientOrdinal = 1;
+  final Map<String, Set<String>> _serverClarifyRemaining = {};
+  final Map<String, String> _serverApprovalByMobileSession = {};
   DesktopAsyncEventCallback? _asyncEventListener;
+  DesktopAsyncEventSessionPredicate? _asyncEventAcceptsSession;
   DesktopConnectionCallback? _connectionListener;
   GatewayTurnCoordinatorRegistry? _turnCoordinatorRegistry;
   ProjectsGatewayClient? _projects;
@@ -68,6 +81,7 @@ class DesktopGatewayClient {
     'turn.end',
     'turn.error',
     'error',
+    'request.cancel',
   };
 
   DesktopGatewayClient._({
@@ -254,6 +268,12 @@ class DesktopGatewayClient {
     );
     existing?.close();
     _gatewaySessionIds.clear();
+    _serverRequests.clear();
+    _serverRequestClients.clear();
+    _serverRequestMobileSessionIds.clear();
+    _serverRequestEvents.clear();
+    _serverClarifyRemaining.clear();
+    _serverApprovalByMobileSession.clear();
     // A fresh socket means a possibly-replaced server: forget old
     // -32601 verdicts so an upgraded gateway's methods are re-discovered
     // instead of staying short-circuited until app restart. gateway.ready
@@ -263,7 +283,9 @@ class DesktopGatewayClient {
     if (_closed) throw StateError('DesktopGatewayClient is closed.');
     final client = WsClient(_baseUrl, ticket: ticket, profile: _gatewayProfile);
     _installAsyncEventBridge(client);
+    final inheritedConnectionListener = client.onConnectionChanged;
     client.onConnectionChanged = (connected) {
+      inheritedConnectionListener?.call(connected);
       if (connected) {
         // Fires inside connect() before _ws is assigned, so no identical()
         // guard is possible here. The single-flight in _ensureSocket keeps
@@ -407,6 +429,11 @@ class DesktopGatewayClient {
     _gatewaySessionIds[mobileSessionId] = binding.runtimeSessionId;
     _storedSessionIds[mobileSessionId] = binding.storedSessionId;
     final resumed = binding.resumed;
+    if (resumed != null && resumed.openRequests.isNotEmpty) {
+      // The resume payload carries unanswered server→client requests. Deliver
+      // only after the runtime sid is mapped back to this mobile chat.
+      _ws?.deliverOpenRequests(resumed.openRequests);
+    }
     final inflight = resumed?.inflight;
     final error = inflight?['error']?.toString().trim() ?? '';
     final status = (inflight?['status'] ?? resumed?.status)
@@ -551,15 +578,25 @@ class DesktopGatewayClient {
   GatewayTurnCoordinatorRegistry enableTurnRecoveryCoordinator({
     GatewayTurnJournal? journal,
   }) {
-    return _turnCoordinatorRegistry ??= GatewayTurnCoordinatorRegistry(
-      connectionId: _connectionId,
-      endpointDigest: _endpointDigest(_baseUrl),
-      journal: journal ?? GatewayTurnJournal(),
-      freshSocketFactory: () async {
-        final ticket = await _dashboard.mintWebSocketTicket();
-        return WsClient(_baseUrl, ticket: ticket, profile: _gatewayProfile);
-      },
-    );
+    return _turnCoordinatorRegistry ??=
+        GatewayTurnCoordinatorRegistry(
+            connectionId: _connectionId,
+            endpointDigest: _endpointDigest(_baseUrl),
+            journal: journal ?? GatewayTurnJournal(),
+            freshSocketFactory: () async {
+              final ticket = await _dashboard.mintWebSocketTicket();
+              final client = WsClient(
+                _baseUrl,
+                ticket: ticket,
+                profile: _gatewayProfile,
+              );
+              _installAsyncEventBridge(client);
+              return client;
+            },
+          )
+          ..onRuntimeBound = (localSessionId, runtimeSessionId) {
+            _gatewaySessionIds[localSessionId] = runtimeSessionId;
+          };
   }
 
   void setConnectionListener(DesktopConnectionCallback? listener) {
@@ -604,31 +641,210 @@ class DesktopGatewayClient {
   /// listener is attached. The async path is required after socket close,
   /// when a detached turn can settle on the resumed session; ChatScreen
   /// ignores the duplicate unless legacy reattach recovery is pending.
-  void setAsyncEventListener(DesktopAsyncEventCallback? listener) {
+  void setAsyncEventListener(
+    DesktopAsyncEventCallback? listener, {
+    DesktopAsyncEventSessionPredicate? acceptsSession,
+  }) {
     _asyncEventListener = listener;
+    _asyncEventAcceptsSession = listener == null ? null : acceptsSession;
   }
 
   void _installAsyncEventBridge(WsClient client) {
     // Every socket greets us with gateway.ready; that greeting is where the
     // capability registry learns what this Hermes instance offers.
     _capabilities.bindTo(client);
+    _serverRequestClientOrdinals.putIfAbsent(
+      client,
+      () => _nextServerRequestClientOrdinal++,
+    );
+    client.onServerRequest = (request) => _handleServerRequest(client, request);
+    client.onConnectionClosed = () => _forgetServerRequestsFrom(client);
     client.onStreamEvent = (event) {
       if (!_asyncEventTypes.contains(event.type)) return;
-      final gatewaySessionId = event.data['session_id']?.toString();
-      String? mobileSessionId;
-      if (gatewaySessionId != null && gatewaySessionId.isNotEmpty) {
-        for (final entry in _gatewaySessionIds.entries) {
-          if (entry.value == gatewaySessionId) {
-            mobileSessionId = entry.key;
-            break;
-          }
+      var deliveredEvent = event;
+      if (event.type == 'request.cancel') {
+        final wireRequestId = event.data['id']?.toString() ?? '';
+        final requestId = _findServerRequestKey(client, wireRequestId);
+        if (requestId != null) {
+          _forgetServerRequest(requestId);
+          deliveredEvent = StreamEvent(
+            type: event.type,
+            data: {...event.data, 'id': requestId},
+            sessionId: event.sessionId,
+          );
         }
-      } else if (_gatewaySessionIds.length == 1) {
-        mobileSessionId = _gatewaySessionIds.keys.single;
       }
+      final mobileSessionId = _mobileSessionIdFor(
+        event.data['session_id']?.toString(),
+      );
       if (mobileSessionId == null) return;
-      _asyncEventListener?.call(mobileSessionId, event);
+      _asyncEventListener?.call(mobileSessionId, deliveredEvent);
     };
+  }
+
+  String _serverRequestKey(WsClient client, String wireRequestId) =>
+      '$_serverRequestNamespace.${_serverRequestClientOrdinals[client]}:'
+      '$wireRequestId';
+
+  String? _findServerRequestKey(WsClient client, String wireRequestId) {
+    for (final entry in _serverRequestClients.entries) {
+      if (identical(entry.value, client) &&
+          _serverRequests[entry.key]?.id == wireRequestId) {
+        return entry.key;
+      }
+    }
+    return null;
+  }
+
+  String? _mobileSessionIdFor(String? gatewaySessionId) {
+    if (gatewaySessionId != null && gatewaySessionId.isNotEmpty) {
+      for (final entry in _gatewaySessionIds.entries) {
+        if (entry.value == gatewaySessionId) return entry.key;
+      }
+    } else if (_gatewaySessionIds.length == 1) {
+      return _gatewaySessionIds.keys.single;
+    }
+    return null;
+  }
+
+  bool _handleServerRequest(WsClient client, GatewayServerRequest request) {
+    const supported = {'clarify', 'approval', 'sudo', 'secret'};
+    if (!supported.contains(request.method)) return false;
+
+    final gatewaySessionId = request.params['session_id']?.toString();
+    final mobileSessionId = _mobileSessionIdFor(gatewaySessionId);
+    if (mobileSessionId == null || _asyncEventListener == null) return false;
+    final acceptsSession = _asyncEventAcceptsSession;
+    if (acceptsSession != null && !acceptsSession(mobileSessionId)) {
+      return false;
+    }
+
+    final requestId = _serverRequestKey(client, request.id);
+    _serverRequests[requestId] = request;
+    _serverRequestClients[requestId] = client;
+    _serverRequestMobileSessionIds[requestId] = mobileSessionId;
+    final data = Map<String, dynamic>.from(request.params);
+    data['server_request_id'] = requestId;
+
+    if (request.method == 'clarify') {
+      data['request_id'] = requestId;
+      final questions = data['questions'];
+      final lockedAnswers = data['answers'];
+      final lockedQuestionIds = lockedAnswers is Map
+          ? lockedAnswers.keys.map((key) => key.toString()).toSet()
+          : const <String>{};
+      final qids = <String>{};
+      final remainingQuestions = <dynamic>[];
+      if (questions is List) {
+        for (final raw in questions) {
+          if (raw is! Map) continue;
+          final qid = raw['qid']?.toString().trim() ?? '';
+          if (qid.isEmpty || lockedQuestionIds.contains(qid)) continue;
+          qids.add(qid);
+          remainingQuestions.add(raw);
+        }
+      }
+      if (qids.isEmpty) {
+        _forgetServerRequest(requestId);
+        return false;
+      }
+      data['questions'] = remainingQuestions;
+      _serverClarifyRemaining[requestId] = qids;
+    } else if (request.method == 'approval') {
+      final previous = _serverApprovalByMobileSession[mobileSessionId];
+      if (previous != null && previous != requestId) {
+        // ChatScreen presents one approval route at a time. Reject a concurrent
+        // request instead of replacing the visible request and stranding both.
+        _forgetServerRequest(requestId);
+        return false;
+      }
+      _serverApprovalByMobileSession[mobileSessionId] = requestId;
+    } else {
+      // Legacy event models key sensitive prompts by `request_id`; for the
+      // peer-to-peer protocol the JSON-RPC id is the response correlation.
+      data['request_id'] = requestId;
+    }
+
+    final event = StreamEvent(
+      type: '${request.method}.request',
+      data: data,
+      sessionId: gatewaySessionId,
+    );
+    _serverRequestEvents[requestId] = event;
+    _asyncEventListener!.call(mobileSessionId, event);
+    return true;
+  }
+
+  void _forgetServerRequest(String requestId) {
+    _serverRequests.remove(requestId);
+    _serverRequestClients.remove(requestId);
+    _serverRequestMobileSessionIds.remove(requestId);
+    _serverRequestEvents.remove(requestId);
+    _serverClarifyRemaining.remove(requestId);
+    _serverApprovalByMobileSession.removeWhere((_, id) => id == requestId);
+  }
+
+  void _forgetServerRequestsFrom(WsClient client) {
+    final requestIds = _serverRequestClients.entries
+        .where((entry) => identical(entry.value, client))
+        .map((entry) => entry.key)
+        .toList(growable: false);
+    for (final requestId in requestIds) {
+      final request = _serverRequests[requestId];
+      final mobileSessionId = _serverRequestMobileSessionIds[requestId];
+      _forgetServerRequest(requestId);
+      if (request != null && mobileSessionId != null) {
+        _asyncEventListener?.call(
+          mobileSessionId,
+          StreamEvent(
+            type: 'request.cancel',
+            data: {'id': requestId, 'method': request.method},
+          ),
+        );
+      }
+    }
+    _serverRequestClientOrdinals.remove(client);
+  }
+
+  void _rejectServerRequest(String requestId, String message) {
+    _serverRequests[requestId]?.fail(-32601, message);
+    _forgetServerRequest(requestId);
+  }
+
+  /// Replays unresolved requests when a replacement route mounts.
+  void replayServerRequestsForSession(String mobileSessionId) {
+    final listener = _asyncEventListener;
+    if (listener == null) return;
+    for (final entry in _serverRequestMobileSessionIds.entries.toList()) {
+      if (entry.value != mobileSessionId) continue;
+      final event = _serverRequestEvents[entry.key];
+      if (event != null) listener(mobileSessionId, event);
+    }
+  }
+
+  /// Rejects requests that no mounted route can answer.
+  void rejectServerRequestsForSession(String mobileSessionId) {
+    final requestIds = _serverRequestMobileSessionIds.entries
+        .where((entry) => entry.value == mobileSessionId)
+        .map((entry) => entry.key)
+        .toList(growable: false);
+    for (final requestId in requestIds) {
+      _rejectServerRequest(
+        requestId,
+        'No mounted client can answer this request',
+      );
+    }
+  }
+
+  /// Whether this client owns an unresolved peer-to-peer request.
+  bool ownsServerRequest(String requestId, String method) =>
+      _serverRequests[requestId]?.method == method;
+
+  /// Whether this client owns the active approval for [sessionId].
+  bool ownsApprovalRequest(String sessionId) {
+    final requestId = _serverApprovalByMobileSession[sessionId];
+    return requestId != null &&
+        _serverRequests[requestId]?.method == 'approval';
   }
 
   /// Interrupts the active turn in the Desktop gateway runtime.
@@ -642,12 +858,28 @@ class DesktopGatewayClient {
     return true;
   }
 
-  /// Resolves an approval against the gateway session mapped to this mobile
-  /// chat. Approval requests are session-keyed and do not carry a request ID.
+  /// Resolves an approval against an exact peer request when available, or
+  /// falls back to the legacy session-keyed approval method.
   Future<void> respondToApproval({
     required String sessionId,
     required String choice,
+    String? serverRequestId,
   }) async {
+    final effectiveRequestId =
+        serverRequestId ?? _serverApprovalByMobileSession[sessionId];
+    final serverRequest = effectiveRequestId == null
+        ? null
+        : _serverRequests[effectiveRequestId];
+    if (serverRequest != null) {
+      if (!serverRequest.respond({'choice': choice})) {
+        throw StateError('The server request socket is no longer connected');
+      }
+      _forgetServerRequest(effectiveRequestId!);
+      return;
+    }
+    if (serverRequestId != null) {
+      throw StateError('The approval request is no longer active');
+    }
     final gatewaySessionId = _gatewaySessionIds[sessionId];
     final client = _ws;
     if (gatewaySessionId == null || client == null || !client.isConnected) {
@@ -660,6 +892,14 @@ class DesktopGatewayClient {
     required String requestId,
     required String password,
   }) async {
+    final serverRequest = _serverRequests[requestId];
+    if (serverRequest?.method == 'sudo') {
+      if (!serverRequest!.respond({'value': password})) {
+        throw StateError('The server request socket is no longer connected');
+      }
+      _forgetServerRequest(requestId);
+      return;
+    }
     final client = _connectedClient();
     await client.respondToSudo(requestId: requestId, password: password);
   }
@@ -668,6 +908,14 @@ class DesktopGatewayClient {
     required String requestId,
     required String value,
   }) async {
+    final serverRequest = _serverRequests[requestId];
+    if (serverRequest?.method == 'secret') {
+      if (!serverRequest!.respond({'value': value})) {
+        throw StateError('The server request socket is no longer connected');
+      }
+      _forgetServerRequest(requestId);
+      return;
+    }
     final client = _connectedClient();
     await client.respondToSecret(requestId: requestId, value: value);
   }
@@ -677,7 +925,71 @@ class DesktopGatewayClient {
     required String answer,
     String? questionId,
   }) async {
-    final client = _connectedClient();
+    final serverRequest = _serverRequests[requestId];
+    final client = serverRequest?.method == 'clarify'
+        ? _serverRequestClients[requestId]
+        : _ws;
+    if (client == null || !client.isConnected) {
+      throw StateError('The Desktop gateway session is no longer connected');
+    }
+    if (serverRequest?.method == 'clarify') {
+      final qid = questionId?.trim() ?? '';
+      if (qid.isEmpty) {
+        throw ArgumentError('questionId is required for a clarify request');
+      }
+      // Current Hermes locks each batch answer through clarify.lock; the last
+      // lock resolves the original server request on the backend.
+      final result = await client.respondToClarify(
+        requestId: serverRequest!.id,
+        answer: answer,
+        questionId: qid,
+        lockAnswer: true,
+      );
+      final status = result['status']?.toString();
+      final rawRemaining = result['remaining'];
+      final remaining =
+          rawRemaining is List
+                ? rawRemaining.map((value) => value.toString()).toSet()
+                : status == 'expired'
+                ? <String>{}
+                : (_serverClarifyRemaining[requestId] ?? <String>{})
+            ..remove(qid);
+      _serverClarifyRemaining[requestId] = remaining;
+      if (remaining.isNotEmpty) {
+        final replayEvent = _serverRequestEvents[requestId];
+        final rawQuestions = replayEvent?.data['questions'];
+        if (replayEvent != null && rawQuestions is List) {
+          _serverRequestEvents[requestId] = StreamEvent(
+            type: replayEvent.type,
+            data: {
+              ...replayEvent.data,
+              'questions': rawQuestions
+                  .where(
+                    (raw) =>
+                        raw is Map &&
+                        remaining.contains(raw['qid']?.toString()),
+                  )
+                  .toList(growable: false),
+            },
+            sessionId: replayEvent.sessionId,
+          );
+        }
+      }
+      final mobileSessionId = _serverRequestMobileSessionIds[requestId];
+      if (mobileSessionId != null) {
+        _asyncEventListener?.call(
+          mobileSessionId,
+          StreamEvent(
+            type: 'clarify.remaining',
+            data: {'id': requestId, 'remaining': remaining.toList()},
+          ),
+        );
+      }
+      if (remaining.isEmpty) {
+        _forgetServerRequest(requestId);
+      }
+      return;
+    }
     await client.respondToClarify(
       requestId: requestId,
       answer: answer,
@@ -761,6 +1073,7 @@ class DesktopGatewayClient {
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
     _asyncEventListener = null;
+    _asyncEventAcceptsSession = null;
     _connectionListener = null;
     _projects = null;
     _ws?.close();
@@ -768,6 +1081,13 @@ class DesktopGatewayClient {
     _gatewaySessionIds.clear();
     _storedSessionIds.clear();
     _workingDirectories.clear();
+    _serverRequests.clear();
+    _serverRequestClients.clear();
+    _serverRequestMobileSessionIds.clear();
+    _serverRequestEvents.clear();
+    _serverRequestClientOrdinals.clear();
+    _serverClarifyRemaining.clear();
+    _serverApprovalByMobileSession.clear();
     final turnCoordinatorRegistry = _turnCoordinatorRegistry;
     _turnCoordinatorRegistry = null;
     if (turnCoordinatorRegistry != null) {

@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hermes_android/core/models/gateway_turn_contract.dart';
 import 'package:hermes_android/core/screens/chat_screen.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
+import 'package:hermes_android/core/services/desktop_gateway_client.dart';
 import 'package:hermes_android/core/services/gateway_turn_application_controller.dart';
 import 'package:hermes_android/core/services/gateway_turn_coordinator.dart';
 import 'package:hermes_android/core/services/gateway_turn_recovery.dart';
@@ -156,6 +157,41 @@ GatewayTurnRecoveryState _completedState() =>
 /// can fire it the way the real gateway would.
 class _CallbackCapturingTurnSession implements GatewayTurnApplicationSession {
   GatewayTurnSettledCallback? _onTurnSettled;
+
+  @override
+  Object setAsyncEventListener(
+    String localSessionId,
+    DesktopAsyncEventCallback listener,
+  ) => Object();
+
+  @override
+  void removeAsyncEventListener(String localSessionId, Object registration) {}
+
+  @override
+  Future<bool> tryRespondToApproval({
+    required String sessionId,
+    required String choice,
+    String? requestId,
+  }) async => false;
+
+  @override
+  Future<bool> tryRespondToClarify({
+    required String requestId,
+    required String answer,
+    String? questionId,
+  }) async => false;
+
+  @override
+  Future<bool> tryRespondToSudo({
+    required String requestId,
+    required String password,
+  }) async => false;
+
+  @override
+  Future<bool> tryRespondToSecret({
+    required String requestId,
+    required String value,
+  }) async => false;
 
   void settle(GatewayTurnRecoveryState state) => _onTurnSettled?.call(state);
 

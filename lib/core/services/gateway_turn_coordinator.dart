@@ -24,6 +24,11 @@ typedef GatewayTurnSettledCallback =
 typedef GatewayTurnSessionBoundCallback =
     void Function(String localSessionId, String storedSessionId);
 
+/// Fired whenever a coordinator socket binds a local session to the live
+/// runtime id carried by server-request and event frames.
+typedef GatewayTurnRuntimeBoundCallback =
+    void Function(String localSessionId, String runtimeSessionId);
+
 enum GatewayTurnCoordinatorFailure {
   closed,
   transportUnavailable,
@@ -139,6 +144,10 @@ class GatewayTurnCoordinatorRegistry {
   /// server-side records once a draft session gains its durable stored id.
   GatewayTurnSessionBoundCallback? onSessionBound;
 
+  /// Set on every coordinator so request/event routing can translate the live
+  /// runtime session id back to the app's local session id.
+  GatewayTurnRuntimeBoundCallback? onRuntimeBound;
+
   GatewayTurnCoordinatorRegistry({
     required this.connectionId,
     required this.endpointDigest,
@@ -182,7 +191,8 @@ class GatewayTurnCoordinatorRegistry {
                 clock: clock,
               )
               ..onTurnSettled = onTurnSettled
-              ..onSessionBound = onSessionBound,
+              ..onSessionBound = onSessionBound
+              ..onRuntimeBound = onRuntimeBound,
       );
       Object? firstError;
       StackTrace? firstStack;
@@ -381,6 +391,9 @@ class GatewayTurnCoordinator {
 
   /// Called when `session.open` first binds this draft session to a stored id.
   GatewayTurnSessionBoundCallback? onSessionBound;
+
+  /// Called whenever this coordinator binds to a live runtime session id.
+  GatewayTurnRuntimeBoundCallback? onRuntimeBound;
 
   GatewayTurnCoordinator({
     required this.connectionId,
@@ -809,10 +822,14 @@ class GatewayTurnCoordinator {
       throw StateError('The coordinator socket factory reused a transport.');
     }
     _usedSockets[client] = true;
+    final inheritedStreamListener = client.onStreamEvent;
     client.onStreamEvent = (event) {
+      inheritedStreamListener?.call(event);
       _observeSocketAction(client, () => _handleLiveEvent(client, event));
     };
+    final inheritedConnectionListener = client.onConnectionChanged;
     client.onConnectionChanged = (connected) {
+      inheritedConnectionListener?.call(connected);
       if (!connected) {
         _observeSocketAction(client, () => _markTransportLost(client));
       }
@@ -889,6 +906,7 @@ class GatewayTurnCoordinator {
       _client = client;
       _runtimeBinding = binding;
       _durableBinding = durable;
+      onRuntimeBound?.call(localSessionId, binding.runtimeSessionId);
       if (recoverJournal) await _recoverJournal();
     } catch (error, stack) {
       if (identical(_client, client)) {
