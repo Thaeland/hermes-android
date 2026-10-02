@@ -2084,6 +2084,9 @@ void main() {
           }
           expect(frames.first['params'], {
             'session_id': 'abc',
+            'omit_messages': true,
+            'defer_history': true,
+            'inline_images': false,
             'profile': 'sol',
           });
         } finally {
@@ -2916,7 +2919,12 @@ void main() {
         });
         final request = await requestSeen.future;
         expect(request['method'], 'session.resume');
-        expect(request['params'], {'session_id': 'stored-123'});
+        expect(request['params'], {
+          'session_id': 'stored-123',
+          'omit_messages': true,
+          'defer_history': true,
+          'inline_images': false,
+        });
       } finally {
         client.close();
         await socketSubscription.cancel();
@@ -3165,8 +3173,18 @@ void main() {
             'cwd': '/srv/projects/hermes-android',
           });
           expect(resumeCalls, hasLength(2));
-          expect(resumeCalls.first['params'], {'session_id': 'mobile-project'});
-          expect(resumeCalls.last['params'], {'session_id': 'stored-project'});
+          expect(resumeCalls.first['params'], {
+            'session_id': 'mobile-project',
+            'omit_messages': true,
+            'defer_history': true,
+            'inline_images': false,
+          });
+          expect(resumeCalls.last['params'], {
+            'session_id': 'stored-project',
+            'omit_messages': true,
+            'defer_history': true,
+            'inline_images': false,
+          });
         },
       );
 

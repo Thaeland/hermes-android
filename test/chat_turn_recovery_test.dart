@@ -97,6 +97,46 @@ void main() {
     expect(find.text('Done'), findsOneWidget);
   });
 
+  testWidgets('v2 terminal state refreshes history skipped during submit', (
+    tester,
+  ) async {
+    final submitGate = Completer<void>();
+    final history = _DelayedRefreshChatHttpClient();
+    final session = _FakeTurnSession(
+      [const <GatewayTurnRecoveryState>[]],
+      submitResult: _completedState('Done'),
+      submitGate: submitGate,
+    );
+    await _pumpChat(
+      tester,
+      turnSession: session,
+      apiClient: ApiClient(
+        baseUrl: 'http://recovery.fixture',
+        apiKey: 'test-key',
+        httpClient: history,
+      ),
+    );
+    await history.firstMessagesUri.future;
+
+    await tester.enterText(find.byType(TextField), 'Durable turn');
+    await tester.tap(find.byTooltip('Send'));
+    await tester.pump();
+    expect(session.submitCount, 1);
+
+    history.releaseFirst();
+    await history.firstResponseReturned.future;
+    await tester.pump();
+    submitGate.complete();
+    final refreshedUri = await history.refreshedMessagesUri.future;
+    expect(refreshedUri.queryParameters, {'limit': '50', 'order': 'latest'});
+    await tester.pumpAndSettle();
+
+    expect(find.text('Stale transcript row'), findsNothing);
+    expect(find.text('Existing transcript row'), findsOneWidget);
+    expect(find.text('Durable turn'), findsOneWidget);
+    expect(find.text('Done'), findsOneWidget);
+  });
+
   testWidgets('a recovery-v2 turn never arms legacy reattach polling', (
     tester,
   ) async {
@@ -790,6 +830,53 @@ class _EmptyChatHttpClient extends http.BaseClient {
       headers: {'content-type': 'application/json'},
     );
   }
+}
+
+class _DelayedRefreshChatHttpClient extends http.BaseClient {
+  final Completer<Uri> firstMessagesUri = Completer<Uri>();
+  final Completer<Uri> refreshedMessagesUri = Completer<Uri>();
+  final Completer<void> firstResponseReturned = Completer<void>();
+  final Completer<void> _releaseFirst = Completer<void>();
+  int _messageRequestCount = 0;
+
+  void releaseFirst() {
+    if (!_releaseFirst.isCompleted) _releaseFirst.complete();
+  }
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    if (request.method == 'GET' && request.url.path.endsWith('/messages')) {
+      _messageRequestCount += 1;
+      if (_messageRequestCount == 1) {
+        firstMessagesUri.complete(request.url);
+        await _releaseFirst.future;
+        firstResponseReturned.complete();
+        return _response([
+          {'role': 'assistant', 'content': 'Stale transcript row'},
+        ]);
+      }
+      if (!refreshedMessagesUri.isCompleted) {
+        refreshedMessagesUri.complete(request.url);
+      }
+      return _response([
+        {'role': 'assistant', 'content': 'Existing transcript row'},
+        {'role': 'user', 'content': 'Durable turn'},
+        {'role': 'assistant', 'content': 'Done'},
+      ]);
+    }
+    return http.StreamedResponse(
+      Stream.value(utf8.encode(jsonEncode({'error': 'unexpected request'}))),
+      404,
+      headers: {'content-type': 'application/json'},
+    );
+  }
+
+  http.StreamedResponse _response(List<Map<String, dynamic>> messages) =>
+      http.StreamedResponse(
+        Stream.value(utf8.encode(jsonEncode({'data': messages}))),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
 }
 
 class _ResyncChatHttpClient extends http.BaseClient {

@@ -1111,7 +1111,16 @@ class WsClient {
 
   /// Resume an existing session while preserving retained turn state.
   Future<ResumedGatewaySession> resumeSessionDetails(String sessionId) async {
-    final result = await send('session.resume', {'session_id': sessionId});
+    final result = await send('session.resume', {
+      'session_id': sessionId,
+      // Session attachment must not carry the rendered transcript. Android
+      // hydrates its visible history through bounded REST requests; returning
+      // it here duplicates a potentially multi-megabyte transfer and can make
+      // the attach RPC itself exceed the request deadline.
+      'omit_messages': true,
+      'defer_history': true,
+      'inline_images': false,
+    });
     if (result['error'] != null) {
       throw _gatewayResponseError(
         'session.resume',

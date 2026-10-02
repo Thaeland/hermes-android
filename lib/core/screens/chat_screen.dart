@@ -295,6 +295,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Timer? _reattachRetryTimer;
   static const _reattachRetryBaseDelay = Duration(milliseconds: 500);
   static const _reattachRetryMaxDelay = Duration(seconds: 30);
+  static const _historyPageSize = 50;
 
   /// Backstop for [releaseClientAfterStreamSettles] on the dispose path: a
   /// stream that never settles must not hold this screen's HTTP client open
@@ -307,6 +308,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// authoritative before it restores the composer.
   int _historyGeneration = 0;
   int _responseGeneration = 0;
+  bool _deferredHistoryRefreshPending = false;
+  bool _deferredHistoryRefreshing = false;
+  bool _stopResponseInFlight = false;
   bool _approvalDialogOpen = false;
   bool _approvalRouteOpen = false;
   String? _activeApprovalServerRequestId;
@@ -689,7 +693,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _startVoiceInput() async {
-    if (_streaming || _sending || _loading || _pendingReattachResync) return;
+    if (_streaming ||
+        _sending ||
+        _transcriptLoadBlocksComposer ||
+        _pendingReattachResync) {
+      return;
+    }
     if (widget.testVoiceComposerAdapter == null) {
       await _flutterTts.stop();
     }
@@ -890,16 +899,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Future<void> _fetchMessages({String? sessionId}) async {
     if (_pendingReattachResync && sessionId == null) return;
+    final responseGeneration = _responseGeneration;
     setState(() {
       _loading = true;
       _error = null;
     });
 
     try {
-      final messages = await _client.getMessages(
-        sessionId ?? widget.session.id,
-      );
+      final messages = await _getRecentMessages(sessionId ?? widget.session.id);
       if (!mounted) return;
+      // A remote turn can start while history is still hydrating. Its local
+      // optimistic messages and stream are newer than this response, so never
+      // replace them with a stale transcript page.
+      if (responseGeneration != _responseGeneration) {
+        setState(() => _loading = false);
+        _deferHistoryRefresh();
+        return;
+      }
       _extractToolMessages(messages);
       final completedPendingReattach =
           _pendingReattachResync &&
@@ -915,6 +931,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (completedPendingReattach) _clearPendingReattachResync();
     } catch (e) {
       if (!mounted) return;
+      if (responseGeneration != _responseGeneration) {
+        setState(() => _loading = false);
+        _deferHistoryRefresh();
+        return;
+      }
       final errStr = e.toString();
       if (errStr.contains('404') || errStr.contains('not found')) {
         if (_pendingReattachResync) {
@@ -933,6 +954,73 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _error = errStr;
         _loading = false;
       });
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _getRecentMessages(String sessionId) =>
+      _client.getMessages(sessionId, limit: _historyPageSize, latest: true);
+
+  /// A remote turn may start while the initial bounded transcript request is
+  /// still in flight. Its stale response must not overwrite optimistic or
+  /// streamed messages, but dropping it permanently would leave the existing
+  /// transcript blank. Refresh once the turn is idle, using the authoritative
+  /// post-turn page instead.
+  void _deferHistoryRefresh() {
+    _deferredHistoryRefreshPending = true;
+    unawaited(_refreshDeferredHistoryIfIdle());
+  }
+
+  Future<void> _refreshDeferredHistoryIfIdle() async {
+    if (!mounted ||
+        !_deferredHistoryRefreshPending ||
+        _deferredHistoryRefreshing ||
+        _sending ||
+        _streaming ||
+        _stopResponseInFlight ||
+        _pendingReattachResync) {
+      return;
+    }
+    _deferredHistoryRefreshPending = false;
+    _deferredHistoryRefreshing = true;
+    final responseGeneration = _responseGeneration;
+    var retryAfterSettlement = false;
+    try {
+      final sessionId =
+          _desktopGateway?.storedSessionKeyFor(widget.session.id) ??
+          widget.testStoredSessionKey?.call(widget.session.id) ??
+          widget.session.id;
+      final messages = await _getRecentMessages(sessionId);
+      if (!mounted) return;
+      if (responseGeneration != _responseGeneration ||
+          _sending ||
+          _streaming ||
+          _stopResponseInFlight ||
+          _pendingReattachResync) {
+        _deferredHistoryRefreshPending = true;
+        retryAfterSettlement = true;
+        return;
+      }
+      _extractToolMessages(messages);
+      setState(() {
+        _messages = messages;
+        _historyGeneration += 1;
+        _error = null;
+      });
+      _scheduleInitialEndAlignment();
+    } catch (_) {
+      // Keep the refresh pending. A later terminal/rollback transition can
+      // retry without turning background hydration into a composer blocker.
+      _deferredHistoryRefreshPending = true;
+    } finally {
+      _deferredHistoryRefreshing = false;
+      if (retryAfterSettlement &&
+          mounted &&
+          !_sending &&
+          !_streaming &&
+          !_stopResponseInFlight &&
+          !_pendingReattachResync) {
+        unawaited(_refreshDeferredHistoryIfIdle());
+      }
     }
   }
 
@@ -1109,7 +1197,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _desktopGateway?.storedSessionKeyFor(widget.session.id) ??
           widget.testStoredSessionKey?.call(widget.session.id) ??
           widget.session.id;
-      final messages = await _client.getMessages(storedSessionId);
+      final messages = await _getRecentMessages(storedSessionId);
       if (!_canRunReattachResync || generation != _reattachGeneration) return;
       _extractToolMessages(messages);
       final completed = _hasTerminalAssistantAfterWatermark(messages);
@@ -1159,7 +1247,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     _legacyHistoryResyncing = true;
     try {
-      final messages = await _client.getMessages(widget.session.id);
+      final messages = await _getRecentMessages(widget.session.id);
       if (!mounted || _appInBackground) return;
       _extractToolMessages(messages);
       setState(() {
@@ -1301,6 +1389,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _scheduleStreamingFollow();
     } else {
       _scheduleScrollTarget(_scrollCoordinator.endStreaming());
+      unawaited(_refreshDeferredHistoryIfIdle());
     }
   }
 
@@ -1376,7 +1465,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _showAttachmentPicker() async {
-    if (_loading || _streaming || _sending || _pendingReattachResync) return;
+    if (_transcriptLoadBlocksComposer ||
+        _streaming ||
+        _sending ||
+        _pendingReattachResync) {
+      return;
+    }
 
     await showModalBottomSheet<void>(
       context: context,
@@ -1969,6 +2063,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final attachments = List<AttachmentDraft>.from(_attachmentDrafts);
     if (text.isEmpty && attachments.isEmpty) return;
     if (_sending || _streaming || _pendingReattachResync) return;
+    if (_transcriptLoadBlocksComposer) return;
+    if (_loading || _error != null) {
+      // Remote transports own their session history server-side. Let a prompt
+      // proceed independently of a slow or failed visible transcript request.
+      setState(() {
+        _loading = false;
+        _error = null;
+      });
+    }
     await _sessionModelRestore;
     if (!mounted) return;
 
@@ -2079,7 +2182,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         if (!mounted || responseGeneration != _responseGeneration) return;
         // Refresh messages to get the final server-side state
         try {
-          final messages = await _client.getMessages(widget.session.id);
+          final messages = await _getRecentMessages(widget.session.id);
           if (!mounted || responseGeneration != _responseGeneration) return;
           _extractToolMessages(messages);
           if (pendingImage != null) {
@@ -2275,6 +2378,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _gatewayTurnStatus = null;
         _activeResponseTransport = _ResponseTransport.none;
       });
+      unawaited(_refreshDeferredHistoryIfIdle());
       unawaited(_resyncLegacyHistoryAfterResume());
       _scheduleScrollTarget(_scrollCoordinator.endStreaming());
       if (_awaitingVoiceReply) {
@@ -2312,6 +2416,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         });
       }
       _handleSendError(error);
+      unawaited(_refreshDeferredHistoryIfIdle());
       unawaited(_resyncLegacyHistoryAfterResume());
     }
   }
@@ -2406,6 +2511,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           ..error = null;
       }
       _handleSendError(error);
+      unawaited(_refreshDeferredHistoryIfIdle());
       return;
     }
 
@@ -2467,6 +2573,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             ..addAll(attachments);
         });
         _handleSendError(error);
+        unawaited(_refreshDeferredHistoryIfIdle());
         return;
       }
       setState(() {
@@ -3195,6 +3302,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     final transport = _activeResponseTransport;
     final activeClientTurnId = _activeClientTurnId;
+    _stopResponseInFlight = true;
     ++_responseGeneration;
     _scrollCoordinator.cancelStreaming();
     setState(() {
@@ -3267,6 +3375,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           duration: const Duration(seconds: 6),
         ),
       );
+    } finally {
+      _stopResponseInFlight = false;
+      unawaited(_refreshDeferredHistoryIfIdle());
     }
   }
 
@@ -3330,6 +3441,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     _scheduleStreamingFollow();
   }
+
+  bool get _transcriptLoadBlocksComposer =>
+      _loading &&
+      _desktopGateway == null &&
+      _turnApplicationSession == null &&
+      widget.testRemotePromptSubmit == null;
 
   ChatConnectionStatus get _chatConnectionStatus {
     if (_desktopGateway == null) {
@@ -3630,7 +3747,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   label: 'Add attachment',
                   button: true,
                   enabled:
-                      !_loading &&
+                      !_transcriptLoadBlocksComposer &&
                       !_streaming &&
                       !_sending &&
                       !_pendingReattachResync,
@@ -3638,7 +3755,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   child: IconButton(
                     icon: const Icon(Icons.attach_file),
                     onPressed:
-                        (!_loading &&
+                        (!_transcriptLoadBlocksComposer &&
                             !_streaming &&
                             !_sending &&
                             !_pendingReattachResync)
@@ -3675,7 +3792,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                       keyboardType: TextInputType.multiline,
                       textInputAction: TextInputAction.send,
                       enabled:
-                          !_loading && !_streaming && !_pendingReattachResync,
+                          !_transcriptLoadBlocksComposer &&
+                          !_streaming &&
+                          !_pendingReattachResync,
                       onSubmitted: (_) => _sendMessage(),
                     ),
                   ),
@@ -3684,7 +3803,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 if (!_voiceComposer.listening)
                   VoiceComposerStartButton(
                     enabled:
-                        !_loading &&
+                        !_transcriptLoadBlocksComposer &&
                         !_streaming &&
                         !_sending &&
                         !_pendingReattachResync,
@@ -3721,7 +3840,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   button: true,
                   enabled:
                       _streaming ||
-                      (!_loading &&
+                      (!_transcriptLoadBlocksComposer &&
                           !_sending &&
                           !_pendingReattachResync &&
                           !_voiceComposer.listening),
@@ -3746,7 +3865,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                           : IconButton(
                               icon: const Icon(Icons.send, size: 20),
                               onPressed:
-                                  _loading ||
+                                  _transcriptLoadBlocksComposer ||
                                       _sending ||
                                       _pendingReattachResync ||
                                       _voiceComposer.listening
