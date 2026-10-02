@@ -65,5 +65,34 @@ void main() {
       expect(session.archived, isTrue);
       expect(session.lastActive, 1740000000.0);
     });
+
+    test(
+      'is_active:false marks a finished session idle even without ended_at',
+      () {
+        // Regression: the Gateway keeps `ended_at` null for sessions that
+        // are done but not explicitly ended; liveness comes from `is_active`.
+        // Using ended_at alone showed every finished session as running.
+        final session = Session.fromJson({
+          'id': 's5',
+          'title': 'Finished test session',
+          'started_at': 1750000000.5,
+          'ended_at': null,
+          'is_active': false,
+        });
+
+        expect(session.isActive, isFalse);
+      },
+    );
+
+    test('is_active:true wins over an absent ended_at', () {
+      final session = Session.fromJson({
+        'id': 's6',
+        'title': 'Live now',
+        'started_at': 1750000000.5,
+        'is_active': true,
+      });
+
+      expect(session.isActive, isTrue);
+    });
   });
 }
