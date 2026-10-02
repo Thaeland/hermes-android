@@ -29,6 +29,54 @@ void main() {
     SharedPreferences.setMockInitialValues({'verbose_mode': false});
   });
 
+  test('recovery v2 is reserved for local drafts, not server sessions', () {
+    const serverSession = Session(
+      id: 'server-existing',
+      title: 'Existing chat',
+      model: 'hermes-agent',
+      source: 'gateway',
+      messageCount: 4,
+      isActive: false,
+      preview: 'Earlier message',
+      startedAt: 1,
+    );
+    const localDraft = Session(
+      id: 'mobile-draft',
+      title: 'New chat',
+      model: 'hermes-agent',
+      source: 'mobile',
+      messageCount: 0,
+      isActive: true,
+      preview: '',
+      startedAt: 2,
+      isLocalDraft: true,
+    );
+
+    expect(shouldUseRecoveryV2ForSession(serverSession), isFalse);
+    expect(shouldUseRecoveryV2ForSession(localDraft), isTrue);
+    expect(
+      shouldEstablishLegacyDesktopSession(
+        serverSession,
+        legacyTransportFallback: false,
+      ),
+      isTrue,
+    );
+    expect(
+      shouldEstablishLegacyDesktopSession(
+        localDraft,
+        legacyTransportFallback: false,
+      ),
+      isFalse,
+    );
+    expect(
+      shouldEstablishLegacyDesktopSession(
+        localDraft,
+        legacyTransportFallback: true,
+      ),
+      isTrue,
+    );
+  });
+
   testWidgets('resume reconciles and materializes one authoritative response', (
     tester,
   ) async {
