@@ -28,7 +28,7 @@ void main() {
       expect(ja.version_label('2.1.8'), 'バージョン 2.1.8');
       expect(
         ja.model_via_provider('deepseek-v4.1-flash', 'opencode-go'),
-        'deepseek-v4.1-flash  \nopencode-go 経由',
+        'deepseek-v4.1-flash  \n`opencode-go` 経由',
       );
     });
 

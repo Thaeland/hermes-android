@@ -647,7 +647,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String explain_this_content_clearly(Object text) {
-    return 'この内容をわかりやすく説明して: $text';
+    return 'この内容をわかりやすく説明して:\n\n$text';
   }
 
   @override
@@ -680,7 +680,7 @@ class AppLocalizationsJa extends AppLocalizations {
   extract_the_decisions_deadlines_owners_and_actionable_action_items_from_2(
     Object text,
   ) {
-    return 'この内容から、決定事項・締め切り・担当者・実行可能なアクション項目を抽出して: $text';
+    return 'この内容から、決定事項・締め切り・担当者・実行可能なアクション項目を抽出して:\n\n$text';
   }
 
   @override
@@ -892,7 +892,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get memory_entries_are_cross_session_facts_the_agent_remembers_they =>
-      'メモリは、エージェントが記憶するセッション横断の事実です。~/.hermes/config.yaml で設定します';
+      'メモリは、エージェントが記憶するセッション横断の事実です。\n~/.hermes/config.yaml で設定します';
 
   @override
   String get merge => 'マージ';
@@ -1330,7 +1330,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String research_this_content_verify_the_important_claims_and_cite_sources(
     Object text,
   ) {
-    return 'この内容を調査し、重要な主張を検証して、出典を引用して: $text';
+    return 'この内容を調査し、重要な主張を検証して、出典を引用して:\n\n$text';
   }
 
   @override
@@ -1416,7 +1416,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String save_the_durable_facts_from_this_content_to_memory_then(Object text) {
-    return 'この内容の永続的な事実をメモリに保存し、保存された内容を確認して: $text';
+    return 'この内容の永続的な事実をメモリに保存し、保存された内容を確認して:\n\n$text';
   }
 
   @override
@@ -1588,7 +1588,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String summarize_this_content(Object text) {
-    return 'この内容を要約して: $text';
+    return 'この内容を要約して:\n\n$text';
   }
 
   @override
@@ -1602,7 +1602,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get tap_to_add_a_remote_hermes_gateway_api_server_port =>
-      '+ をタップしてリモートHermesゲートウェイを追加（APIサーバー、ポート8642）';
+      '+ をタップしてリモートHermesゲートウェイを追加\n（APIサーバー、ポート8642）';
 
   @override
   String get tap_the_button_to_start_a_new_chat => '+ ボタンをタップして新しいチャットを開始';
@@ -1815,7 +1815,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String use_this_content_to_identify_and_fill_the_relevant_document(
     Object text,
   ) {
-    return 'この内容を使って、関連する書類やフォームの項目を特定して記入して。送信する前には必ず確認して: $text';
+    return 'この内容を使って、関連する書類やフォームの項目を特定して記入して。送信する前には必ず確認して:\n\n$text';
   }
 
   @override
@@ -2226,7 +2226,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String model_via_provider(Object model, Object provider) {
-    return '$model  \n$provider 経由';
+    return '$model  \n`$provider` 経由';
   }
 
   @override
