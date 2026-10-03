@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hermes_android/core/models/gateway_insight.dart';
 import 'package:hermes_android/core/widgets/gateway_insight_card.dart';
+import 'package:hermes_android/l10n/app_localizations.dart';
 
 void main() {
   group('GatewayReasoningUpdate', () {
@@ -136,6 +137,8 @@ void main() {
   ) async {
     await tester.pumpWidget(
       MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
         home: Scaffold(
           body: ListView(
             children: const [
@@ -168,7 +171,9 @@ void main() {
 
   testWidgets('subagent card exposes delegated progress', (tester) async {
     await tester.pumpWidget(
-      const MaterialApp(
+      MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
         home: Scaffold(
           body: GatewaySubagentCard(
             activities: [

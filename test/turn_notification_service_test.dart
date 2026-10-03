@@ -35,7 +35,7 @@ void main() {
 
         // Initialization must not rethrow: the app has to keep running on a
         // device where notifications are unavailable.
-        await service.showTurnCompleted(turnSummary: 'Done', turnId: 't-1');
+        await service.showTurnCompleted(title: 'Ready', turnSummary: 'Done', turnId: 't-1');
         expect(sink.shown, isEmpty);
       },
     );
@@ -49,7 +49,7 @@ void main() {
       await service.ensureInitialized();
 
       expect(sink.initializeCount, 2);
-      await service.showTurnCompleted(turnSummary: 'Done', turnId: 't-1');
+      await service.showTurnCompleted(title: 'Ready', turnSummary: 'Done', turnId: 't-1');
       expect(sink.shown, hasLength(1));
     });
   });
@@ -58,7 +58,7 @@ void main() {
     test(
       'drops the notification when the service was never initialized',
       () async {
-        await service.showTurnCompleted(turnSummary: 'Done', turnId: 't-1');
+        await service.showTurnCompleted(title: 'Ready', turnSummary: 'Done', turnId: 't-1');
 
         expect(sink.shown, isEmpty);
       },
@@ -70,13 +70,14 @@ void main() {
         await service.ensureInitialized();
 
         await service.showTurnCompleted(
+          title: 'Ready',
           turnSummary: 'Roadmap: Response ready',
           turnId: 'turn-42',
         );
 
         expect(sink.shown, hasLength(1));
         final posted = sink.shown.single;
-        expect(posted.title, 'Hermes response ready');
+        expect(posted.title, 'Ready');
         expect(posted.body, 'Roadmap: Response ready');
         // The payload is the deep-link seed Phase 3 will extend.
         expect(posted.payload, 'turn-42');
@@ -95,10 +96,12 @@ void main() {
         await service.ensureInitialized();
 
         await service.showTurnCompleted(
+          title: 'Ready',
           turnSummary: 'first',
           turnId: 'turn-42',
         );
         await service.showTurnCompleted(
+          title: 'Ready',
           turnSummary: 'second',
           turnId: 'turn-42',
         );
@@ -111,8 +114,8 @@ void main() {
     test('gives distinct turns distinct ids', () async {
       await service.ensureInitialized();
 
-      await service.showTurnCompleted(turnSummary: 'a', turnId: 'turn-1');
-      await service.showTurnCompleted(turnSummary: 'b', turnId: 'turn-2');
+      await service.showTurnCompleted(title: 'Ready', turnSummary: 'a', turnId: 'turn-1');
+      await service.showTurnCompleted(title: 'Ready', turnSummary: 'b', turnId: 'turn-2');
 
       expect(sink.shown.map((n) => n.id).toSet(), hasLength(2));
     });
@@ -126,7 +129,7 @@ void main() {
         'a very long server issued turn identifier 0123456789',
         '',
       ]) {
-        await service.showTurnCompleted(turnSummary: 's', turnId: turnId);
+        await service.showTurnCompleted(title: 'Ready', turnSummary: 's', turnId: turnId);
       }
 
       expect(sink.shown.map((n) => n.id), everyElement(isNonNegative));
@@ -168,7 +171,7 @@ void main() {
       sink.permissionResult = true;
 
       await service.ensureInitialized();
-      await service.showTurnCompleted(turnSummary: 'done', turnId: 'turn-1');
+      await service.showTurnCompleted(title: 'Ready', turnSummary: 'done', turnId: 'turn-1');
 
       expect(service.permissionGranted, isTrue);
       expect(sink.shown, hasLength(1));
@@ -179,7 +182,7 @@ void main() {
       sink.permissionResult = null;
 
       await service.ensureInitialized();
-      await service.showTurnCompleted(turnSummary: 'done', turnId: 'turn-1');
+      await service.showTurnCompleted(title: 'Ready', turnSummary: 'done', turnId: 'turn-1');
 
       expect(service.permissionGranted, isTrue);
       expect(sink.shown, hasLength(1));
@@ -193,7 +196,7 @@ void main() {
         await service.ensureInitialized();
 
         // The app must keep running; notifications degrade, they never crash.
-        await service.showTurnCompleted(turnSummary: 'done', turnId: 'turn-1');
+        await service.showTurnCompleted(title: 'Ready', turnSummary: 'done', turnId: 'turn-1');
         expect(sink.shown, hasLength(1));
       },
     );
@@ -202,7 +205,7 @@ void main() {
   group('cancellation', () {
     test('cancels the exact id that was shown for that turn', () async {
       await service.ensureInitialized();
-      await service.showTurnCompleted(turnSummary: 'done', turnId: 'turn-42');
+      await service.showTurnCompleted(title: 'Ready', turnSummary: 'done', turnId: 'turn-42');
 
       await service.cancelTurnCompleted('turn-42');
 
@@ -219,8 +222,8 @@ void main() {
 
     test('cancelAll clears every Hermes turn notification', () async {
       await service.ensureInitialized();
-      await service.showTurnCompleted(turnSummary: 'a', turnId: 'turn-1');
-      await service.showTurnCompleted(turnSummary: 'b', turnId: 'turn-2');
+      await service.showTurnCompleted(title: 'Ready', turnSummary: 'a', turnId: 'turn-1');
+      await service.showTurnCompleted(title: 'Ready', turnSummary: 'b', turnId: 'turn-2');
 
       await service.cancelAll();
 

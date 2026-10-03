@@ -7,6 +7,7 @@ import '../theme/hermes_theme.dart';
 import '../utils/relative_time.dart';
 import '../widgets/hermes_components.dart';
 
+import 'package:hermes_android/core/l10n/l10n.dart';
 const kWorkspaceSessionSearchKey = Key('workspace-session-search');
 
 enum WorkspaceSessionView { all, unassigned, archivedQuick, search }
@@ -14,24 +15,36 @@ enum WorkspaceSessionView { all, unassigned, archivedQuick, search }
 /// The chip filters the Chats browser offers (decision #4 of the final UI
 /// spec): every conversation, recent activity, unassigned, and archived.
 enum WorkspaceChatsFilter {
-  all('All'),
-  recent('Recent'),
-  unassigned('Unassigned'),
-  archived('Archived');
+  all,
+  recent,
+  unassigned,
+  archived;
 
-  final String label;
-  const WorkspaceChatsFilter(this.label);
+  String label(AppLocalizations l10n) {
+    return switch (this) {
+      WorkspaceChatsFilter.all => l10n.filter_all,
+      WorkspaceChatsFilter.recent => l10n.filter_recent,
+      WorkspaceChatsFilter.unassigned => l10n.unassigned,
+      WorkspaceChatsFilter.archived => l10n.archived,
+    };
+  }
 }
 
 /// How recently a conversation was last active, for date group headers.
 enum ChatDateBucket {
-  today('Today'),
-  yesterday('Yesterday'),
-  thisWeek('This week'),
-  earlier('Earlier');
+  today,
+  yesterday,
+  thisWeek,
+  earlier;
 
-  final String label;
-  const ChatDateBucket(this.label);
+  String label(AppLocalizations l10n) {
+    return switch (this) {
+      ChatDateBucket.today => l10n.date_today,
+      ChatDateBucket.yesterday => l10n.date_yesterday,
+      ChatDateBucket.thisWeek => l10n.this_week,
+      ChatDateBucket.earlier => l10n.date_earlier,
+    };
+  }
 }
 
 /// How long "Recent" means in the Chats browser.
@@ -328,7 +341,7 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
       }
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('Moved to a Project')));
+      ).showSnackBar(SnackBar(content: Text(context.l10n.moved_to_a_project)));
     } catch (error) {
       if (!mounted) return;
       setState(() => _promoting.remove(session.id));
@@ -336,9 +349,9 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           persist: false,
-          content: const Text('Couldn’t promote conversation'),
+          content: Text(context.l10n.couldn_t_promote_conversation),
           action: SnackBarAction(
-            label: 'Retry',
+            label: context.l10n.retry,
             onPressed: () => unawaited(_promote(session)),
           ),
         ),
@@ -356,8 +369,8 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
                   child: LoadingSkeleton(rows: 5),
                 )
               : ErrorState(
-                  title: 'Could not load conversations',
-                  message: 'Check the connection and try again.',
+                  title: context.l10n.could_not_load_conversations,
+                  message: context.l10n.check_the_connection_and_try_again,
                   onRetry: _load,
                 )
         : _buildLoaded(data);
@@ -426,12 +439,12 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
             key: kWorkspaceSessionSearchKey,
             autofocus: widget.view == WorkspaceSessionView.search,
             decoration: InputDecoration(
-              hintText: 'Search conversations',
+              hintText: context.l10n.search_conversations,
               prefixIcon: const Icon(Icons.search),
               suffixIcon: _query.isEmpty
                   ? null
                   : IconButton(
-                      tooltip: 'Clear search',
+                      tooltip: context.l10n.clear_search,
                       onPressed: () => setState(() => _query = ''),
                       icon: const Icon(Icons.clear),
                     ),
@@ -446,7 +459,7 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
           if (sessions.isEmpty)
             EmptyState(
               icon: _emptyIcon,
-              title: _query.isEmpty ? 'Nothing here' : 'No matches',
+              title: _query.isEmpty ? context.l10n.nothing_here : context.l10n.no_matches,
               message: _emptyMessage,
             )
           else
@@ -457,7 +470,9 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
                   bottom: HermesSpacing.sm,
                 ),
                 child: Text(
-                  widget.embedded ? group.key.label : widget.title,
+                  widget.embedded
+                      ? group.key.label(context.l10n)
+                      : widget.title,
                   style: HermesTokens.of(context).typography.section,
                 ),
               ),
@@ -481,7 +496,7 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
             Padding(
               padding: const EdgeInsets.only(right: HermesSpacing.sm),
               child: ChoiceChip(
-                label: Text(filter.label),
+                label: Text(filter.label(context.l10n)),
                 selected: _filter == filter,
                 onSelected: (_) => setState(() {
                   _filter = filter;
@@ -522,7 +537,7 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  session.title.isEmpty ? 'Untitled chat' : session.title,
+                  session.title.isEmpty ? context.l10n.untitled_chat : session.title,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -543,7 +558,9 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
                       status: session.isActive
                           ? HermesStatus.running
                           : HermesStatus.completed,
-                      label: session.isActive ? 'Running' : 'Done',
+                      label: session.isActive
+                          ? context.l10n.status_running
+                          : context.l10n.status_done,
                     ),
                     if (projectLabel != null)
                       _MetaChip(
@@ -552,7 +569,7 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
                       )
                     else if (data.projectsKnown)
                       _MetaChip(
-                        label: 'Unassigned',
+                        label: context.l10n.unassigned,
                         icon: Icons.inbox_outlined,
                       ),
                     Text(
@@ -574,8 +591,8 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
                   )
                 : IconButton(
                     tooltip: _isUnassignedSurface
-                        ? 'Move to project'
-                        : 'Promote to project',
+                        ? context.l10n.move_to_project
+                        : context.l10n.promote_to_project,
                     onPressed: () => unawaited(_promote(session)),
                     icon: const Icon(Icons.drive_file_move_outline),
                   ),
@@ -602,20 +619,20 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
     if (widget.embedded) {
       return switch (_filter) {
         WorkspaceChatsFilter.unassigned =>
-          'Every conversation is already assigned to a Project.',
-        WorkspaceChatsFilter.archived => 'Archived conversations appear here.',
+          context.l10n.every_conversation_is_already_assigned_to_a_project,
+        WorkspaceChatsFilter.archived => context.l10n.archived_conversations_appear_here,
         WorkspaceChatsFilter.recent =>
-          'Nothing changed in the last seven days.',
-        WorkspaceChatsFilter.all => 'No conversation matches this view.',
+          context.l10n.nothing_changed_in_the_last_seven_days,
+        WorkspaceChatsFilter.all => context.l10n.no_conversation_matches_this_view,
       };
     }
     return switch (widget.view) {
       WorkspaceSessionView.unassigned =>
-        'Every conversation is already assigned to a Project.',
+        context.l10n.every_conversation_is_already_assigned_to_a_project,
       WorkspaceSessionView.archivedQuick =>
-        'Quick chats appear here after their retention period.',
+        context.l10n.quick_chats_appear_here_after_their_retention_period,
       WorkspaceSessionView.all ||
-      WorkspaceSessionView.search => 'No conversation matches this view.',
+      WorkspaceSessionView.search => context.l10n.no_conversation_matches_this_view,
     };
   }
 

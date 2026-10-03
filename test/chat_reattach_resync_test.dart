@@ -21,6 +21,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/fake_voice_composer_adapter.dart';
+import 'package:hermes_android/l10n/app_localizations.dart';
 
 void main() {
   setUp(() {
@@ -957,6 +958,8 @@ Future<void> _pumpChat(
 }) async {
   await tester.pumpWidget(
     MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
       home: ChatScreen(
         connection: SavedConnection(
           id: 'reattach-fixture',

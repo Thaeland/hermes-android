@@ -12,6 +12,7 @@ import 'package:hermes_android/core/services/connection_manager.dart';
 import 'package:hermes_android/core/services/ws_client.dart';
 import 'package:hermes_android/core/utils/chat_history_scroll.dart';
 import 'package:hermes_android/core/widgets/chat_end_affordance.dart';
+import 'package:hermes_android/l10n/app_localizations.dart';
 
 void main() {
   setUp(() {
@@ -489,6 +490,8 @@ Future<void> _pumpChat(
   );
   await tester.pumpWidget(
     MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
       builder: (context, child) => MediaQuery(
         data: MediaQuery.of(context).copyWith(
           textScaler: TextScaler.linear(textScale),

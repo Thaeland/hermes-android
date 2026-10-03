@@ -33,6 +33,8 @@ import '../models/gateway_turn_contract.dart';
 import '../services/gateway_turn_journal.dart';
 import '../theme/hermes_theme.dart';
 
+import 'package:hermes_android/core/l10n/l10n.dart';
+
 /// How long a running turn may go without a journal update before Activity
 /// reports it as stalled instead of live.
 ///
@@ -61,16 +63,16 @@ enum ActivityGroupKind {
   /// Work that finished or was stopped by the user.
   completed;
 
-  String get title {
+  String title(AppLocalizations l10n) {
     switch (this) {
       case ActivityGroupKind.needsYou:
-        return 'Needs you';
+        return l10n.needs_you;
       case ActivityGroupKind.running:
-        return 'Running now';
+        return l10n.running_now;
       case ActivityGroupKind.failed:
-        return 'Failed';
+        return l10n.status_failed;
       case ActivityGroupKind.completed:
-        return 'Completed';
+        return l10n.status_completed;
     }
   }
 }
@@ -126,7 +128,7 @@ class ActivityGroup {
     required this.totalCount,
   });
 
-  String get title => kind.title;
+  String title(AppLocalizations l10n) => kind.title(l10n);
 
   /// How many rows the cap hid.
   int get overflow => totalCount - items.length;

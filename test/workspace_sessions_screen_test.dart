@@ -4,6 +4,9 @@ import 'package:hermes_android/core/models/session.dart';
 import 'package:hermes_android/core/screens/workspace_sessions_screen.dart';
 import 'package:hermes_android/core/theme/hermes_theme.dart';
 import 'package:hermes_android/core/widgets/hermes_components.dart';
+import 'support/l10n_test_utils.dart';
+import 'package:hermes_android/l10n/app_localizations.dart';
+
 
 Session _session(
   String id,
@@ -28,6 +31,11 @@ Session _session(
 );
 
 void main() {
+  late AppLocalizations l10n;
+
+  setUpAll(() async {
+    l10n = await loadTestL10n();
+  });
   test('Unassigned excludes every server-scoped session', () {
     final result = filterWorkspaceSessions(
       sessions: [_session('s1', 'Filed'), _session('s2', 'Inbox')],
@@ -46,7 +54,7 @@ void main() {
         WorkspaceChatsFilter.archived,
       ]);
       for (final filter in WorkspaceChatsFilter.values) {
-        expect(filter.label, isNotEmpty);
+        expect(filter.label(l10n), isNotEmpty);
       }
     });
 
@@ -78,7 +86,7 @@ void main() {
           filter: filter,
           now: now,
         );
-        expect(result.map((s) => s.id), ['s1'], reason: filter.label);
+        expect(result.map((s) => s.id), ['s1'], reason: filter.label(l10n));
       }
     });
 
@@ -205,10 +213,10 @@ void main() {
     });
 
     test('bucket labels are human readable', () {
-      expect(ChatDateBucket.today.label, 'Today');
-      expect(ChatDateBucket.yesterday.label, 'Yesterday');
-      expect(ChatDateBucket.thisWeek.label, 'This week');
-      expect(ChatDateBucket.earlier.label, 'Earlier');
+      expect(ChatDateBucket.today.label(l10n), 'Today');
+      expect(ChatDateBucket.yesterday.label(l10n), 'Yesterday');
+      expect(ChatDateBucket.thisWeek.label(l10n), 'This week');
+      expect(ChatDateBucket.earlier.label(l10n), 'Earlier');
     });
   });
 
@@ -234,6 +242,8 @@ void main() {
   ) async {
     await tester.pumpWidget(
       MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
         theme: hermesTheme(Brightness.dark),
         home: WorkspaceSessionsScreen(
           title: 'Chats',
@@ -263,6 +273,8 @@ void main() {
     Future<void> pumpChats(WidgetTester tester) async {
       await tester.pumpWidget(
         MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
           theme: hermesTheme(Brightness.dark),
           home: WorkspaceSessionsScreen(
             title: 'Chats',
@@ -287,7 +299,7 @@ void main() {
       await pumpChats(tester);
 
       for (final filter in WorkspaceChatsFilter.values) {
-        expect(find.widgetWithText(ChoiceChip, filter.label), findsOneWidget);
+        expect(find.widgetWithText(ChoiceChip, filter.label(l10n)), findsOneWidget);
       }
     });
 
@@ -337,6 +349,8 @@ void main() {
       );
       await tester.pumpWidget(
         MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
           theme: hermesTheme(Brightness.dark),
           home: WorkspaceSessionsScreen(
             title: 'Chats',
@@ -366,8 +380,8 @@ void main() {
     testWidgets('groups rows under date headers', (tester) async {
       await pumpChats(tester);
 
-      expect(find.text(ChatDateBucket.today.label), findsOneWidget);
-      expect(find.text(ChatDateBucket.earlier.label), findsOneWidget);
+      expect(find.text(ChatDateBucket.today.label(l10n)), findsOneWidget);
+      expect(find.text(ChatDateBucket.earlier.label(l10n)), findsOneWidget);
     });
   });
 
@@ -381,6 +395,8 @@ void main() {
     }) async {
       await tester.pumpWidget(
         MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
           theme: hermesTheme(Brightness.dark),
           home: WorkspaceSessionsScreen(
             title: 'Chats',
@@ -449,6 +465,8 @@ void main() {
     final promoted = <String>[];
     await tester.pumpWidget(
       MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
         theme: hermesTheme(Brightness.dark),
         home: WorkspaceSessionsScreen(
           title: 'Archived Quick chats',
@@ -485,6 +503,8 @@ void main() {
     final moved = <String>[];
     await tester.pumpWidget(
       MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
         theme: hermesTheme(Brightness.dark),
         home: WorkspaceSessionsScreen(
           title: 'Unassigned chats',
@@ -521,6 +541,8 @@ void main() {
   ) async {
     await tester.pumpWidget(
       MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
         theme: hermesTheme(Brightness.dark),
         home: Scaffold(
           body: WorkspaceSessionsScreen(

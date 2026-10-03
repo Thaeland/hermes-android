@@ -205,6 +205,7 @@ class TurnNotificationService {
   /// [turnSummary] is a short description (e.g. session title or prompt
   /// excerpt); [turnId] ensures the notification is stable and replaceable.
   Future<void> showTurnCompleted({
+    required String title,
     required String turnSummary,
     required String turnId,
   }) async {
@@ -213,7 +214,7 @@ class TurnNotificationService {
     await _sink.show(
       TurnNotification(
         id: notificationIdFor(turnId),
-        title: 'Hermes response ready',
+        title: title,
         body: turnSummary,
         payload: turnId,
         channel: turnChannel,

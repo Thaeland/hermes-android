@@ -8,6 +8,8 @@ library;
 
 import 'package:flutter/material.dart';
 
+import 'package:hermes_android/core/l10n/l10n.dart';
+
 import '../theme/hermes_theme.dart';
 
 /// A top-level destination of the Hermes app.
@@ -27,19 +29,14 @@ enum HermesDestination {
   /// Everything else: files, assets, search, cron, skills, settings.
   more;
 
-  String get label {
-    switch (this) {
-      case HermesDestination.home:
-        return 'Home';
-      case HermesDestination.chats:
-        return 'Chats';
-      case HermesDestination.projects:
-        return 'Projects';
-      case HermesDestination.activity:
-        return 'Activity';
-      case HermesDestination.more:
-        return 'More';
-    }
+  String label(AppLocalizations l10n) {
+    return switch (this) {
+      HermesDestination.home => l10n.nav_home,
+      HermesDestination.chats => l10n.chats,
+      HermesDestination.projects => l10n.projects,
+      HermesDestination.activity => l10n.activity,
+      HermesDestination.more => l10n.nav_more,
+    };
   }
 
   IconData get icon {
@@ -188,7 +185,7 @@ class _HermesShellState extends State<HermesShell> {
                   NavigationRailDestination(
                     icon: _icon(destination, selected: false),
                     selectedIcon: _icon(destination, selected: true),
-                    label: Text(destination.label),
+                    label: Text(destination.label(context.l10n)),
                   ),
               ],
             ),
@@ -214,7 +211,7 @@ class _HermesShellState extends State<HermesShell> {
             NavigationDestination(
               icon: _icon(destination, selected: false),
               selectedIcon: _icon(destination, selected: true),
-              label: destination.label,
+              label: destination.label(context.l10n),
             ),
         ],
       ),

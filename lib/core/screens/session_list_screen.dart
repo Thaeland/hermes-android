@@ -20,6 +20,7 @@ import 'cron_screen.dart';
 import 'skills_screen.dart';
 import 'workspace_screen.dart';
 
+import 'package:hermes_android/core/l10n/l10n.dart';
 Future<String?> showSessionNameDialog({
   required BuildContext context,
   required String title,
@@ -41,7 +42,7 @@ Future<String?> showSessionNameDialog({
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(dialogContext),
-          child: const Text('Cancel'),
+          child: Text(context.l10n.cancel),
         ),
         FilledButton(
           onPressed: () => Navigator.pop(dialogContext, draft.trim()),
@@ -347,14 +348,12 @@ class _SessionListScreenState extends State<SessionListScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'AI search model',
+                        context.l10n.ai_search_model,
                         style: Theme.of(sheetContext).textTheme.titleLarge,
                       ),
                       const SizedBox(height: 4),
-                      const Text(
-                        'The model only rewrites your question into a short '
-                        'full-text query. Hermes uses the provider credentials '
-                        'already configured on the host.',
+                      Text(
+                        context.l10n.the_model_only_rewrites_your_question_into_a_short_full,
                       ),
                     ],
                   ),
@@ -377,7 +376,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
                         title: Text(choice.model),
                         subtitle: Text(
                           choice.isRecommended
-                              ? '${choice.provider} • Recommended: small and inexpensive'
+                              ? context.l10n.model_recommended(choice.provider)
                               : choice.provider,
                         ),
                         trailing: isSelected
@@ -407,7 +406,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not load AI search models: $error')),
+          SnackBar(content: Text(context.l10n.could_not_load_ai_search_models(error))),
         );
       }
       return null;
@@ -435,8 +434,8 @@ class _SessionListScreenState extends State<SessionListScreen> {
       if (requestMode == SessionSearchMode.ai) {
         final selected = _aiSearchModel;
         if (selected == null) {
-          throw const AiSearchRewriteException(
-            'Choose an AI search model before using AI search.',
+          throw AiSearchRewriteException(
+            context.l10n.choose_an_ai_search_model_before_using_ai_search,
           );
         }
         effectiveQuery = await _ensureAiRewriter().rewrite(
@@ -472,7 +471,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
     } catch (error) {
       if (!requestIsCurrent()) return;
       setState(() {
-        _searchError = 'Session search failed: $error';
+        _searchError = context.l10n.session_search_failed(error);
         _serverResults = null;
         _searching = false;
       });
@@ -517,13 +516,13 @@ class _SessionListScreenState extends State<SessionListScreen> {
 
   PopupMenuButton<String> _buildProfileSelector() {
     return PopupMenuButton<String>(
-      tooltip: 'Switch profile',
+      tooltip: context.l10n.switch_profile,
       icon: const Icon(Icons.account_tree_outlined),
       onSelected: _switchProfile,
       itemBuilder: (context) => [
-        const PopupMenuItem<String>(
+        PopupMenuItem<String>(
           enabled: false,
-          child: Text('Profile', style: TextStyle(fontWeight: FontWeight.w700)),
+          child: Text(context.l10n.profile, style: TextStyle(fontWeight: FontWeight.w700)),
         ),
         ..._profiles.map(
           (profile) => PopupMenuItem<String>(
@@ -581,9 +580,9 @@ class _SessionListScreenState extends State<SessionListScreen> {
     final gateway = _desktopGateway;
     if (gateway == null) return;
     final title = await _askForName(
-      title: 'Rename chat',
+      title: context.l10n.rename_chat,
       initialValue: session.title,
-      actionLabel: 'Rename',
+      actionLabel: context.l10n.rename,
     );
     if (title == null || !mounted) return;
     try {
@@ -593,7 +592,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Could not rename chat: $error')));
+      ).showSnackBar(SnackBar(content: Text(context.l10n.could_not_rename_chat(error))));
     }
   }
 
@@ -605,9 +604,9 @@ class _SessionListScreenState extends State<SessionListScreen> {
     setState(() => _branchingSessionIds.add(session.id));
     try {
       final name = await _askForName(
-        title: 'Branch chat',
+        title: context.l10n.branch_chat,
         initialValue: '${session.title} branch',
-        actionLabel: 'Create branch',
+        actionLabel: context.l10n.create_branch,
       );
       if (name == null || !mounted) return;
       requestedName = name;
@@ -631,8 +630,8 @@ class _SessionListScreenState extends State<SessionListScreen> {
         return;
       }
       final message = error is JsonRpcError && error.code == 4008
-          ? 'This chat has no messages available in the Desktop session yet.'
-          : 'Could not branch chat: $error';
+          ? context.l10n.this_chat_has_no_messages_available_in_the_desktop_session
+          : context.l10n.could_not_branch_chat(error);
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(message)));
@@ -645,7 +644,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
 
   void _showBranchCreated() {
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Branch created in Hermes history.')),
+      SnackBar(content: Text(context.l10n.branch_created_in_hermes_history)),
     );
   }
 
@@ -676,13 +675,13 @@ class _SessionListScreenState extends State<SessionListScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const ListTile(
-              title: Text('Move chat'),
-              subtitle: Text('Choose its destination space'),
+            ListTile(
+              title: Text(context.l10n.move_chat),
+              subtitle: Text(context.l10n.choose_its_destination_space),
             ),
             ListTile(
               leading: const Icon(Icons.inbox_outlined),
-              title: const Text('Unassigned'),
+              title: Text(context.l10n.unassigned),
               onTap: () => Navigator.pop(sheetContext, ''),
             ),
             for (final space in _spaceState.spaces)
@@ -842,7 +841,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
       setState(() => _loadingMoreSessions = false);
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Could not load more chats: $e')));
+      ).showSnackBar(SnackBar(content: Text(context.l10n.could_not_load_more_chats(e))));
     }
   }
 
@@ -857,26 +856,26 @@ class _SessionListScreenState extends State<SessionListScreen> {
 
   Future<void> _confirmDeleteSession(Session session) async {
     final title = session.title.trim().isEmpty
-        ? 'Untitled session'
+        ? context.l10n.untitled_session
         : session.title;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete session?'),
+        title: Text(context.l10n.delete_session),
         content: Text(
-          'Delete "$title" from the remote Hermes history? This cannot be undone.',
+          context.l10n.delete_from_the_remote_hermes_history_this_cannot_be_undone(title),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
+            child: Text(context.l10n.cancel),
           ),
           TextButton(
             style: TextButton.styleFrom(
               foregroundColor: Theme.of(dialogContext).colorScheme.error,
             ),
             onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Delete'),
+            child: Text(context.l10n.delete),
           ),
         ],
       ),
@@ -903,14 +902,14 @@ class _SessionListScreenState extends State<SessionListScreen> {
         _deletingSessionIds.remove(session.id);
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Session deleted from remote Hermes.')),
+        SnackBar(content: Text(context.l10n.session_deleted_from_remote_hermes)),
       );
     } catch (e) {
       if (!mounted) return;
       setState(() => _deletingSessionIds.remove(session.id));
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('Could not delete session: $e')));
+      ).showSnackBar(SnackBar(content: Text(context.l10n.could_not_delete_session(e))));
     }
   }
 
@@ -918,7 +917,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
     final sessionId = GatewayChatClient.generateSessionId();
     final session = Session(
       id: sessionId,
-      title: 'New Chat',
+      title: context.l10n.new_chat,
       model: 'hermes-agent',
       source: 'mobile',
       messageCount: 0,
@@ -960,8 +959,8 @@ class _SessionListScreenState extends State<SessionListScreen> {
 
   String get _spaceScopeLabel {
     return switch (_spaceScope.kind) {
-      ChatSpaceScopeKind.all => 'All chats',
-      ChatSpaceScopeKind.unassigned => 'Unassigned',
+      ChatSpaceScopeKind.all => context.l10n.all_chats,
+      ChatSpaceScopeKind.unassigned => context.l10n.unassigned,
       ChatSpaceScopeKind.space =>
         _spaceState.spaces
                 .where((space) => space.id == _spaceScope.spaceId)
@@ -1019,7 +1018,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
       ),
       drawer: _buildDrawer(),
       floatingActionButton: FloatingActionButton(
-        tooltip: 'New Chat',
+        tooltip: context.l10n.new_chat,
         onPressed: _createNewSession,
         child: const Icon(Icons.chat, color: Colors.black),
       ),
@@ -1062,7 +1061,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
             ListTile(
               key: const Key('open-spaces'),
               leading: const Icon(Icons.folder_copy_outlined),
-              title: const Text('Spaces'),
+              title: Text(context.l10n.spaces),
               subtitle: Text(_spaceScopeLabel),
               enabled: _spaceStore != null,
               onTap: () => _openSpaces(closeDrawer: true),
@@ -1070,8 +1069,8 @@ class _SessionListScreenState extends State<SessionListScreen> {
             ListTile(
               key: const Key('open-workspace'),
               leading: const Icon(Icons.dashboard_outlined),
-              title: const Text('Workspace'),
-              subtitle: const Text('Projects, Activity — new navigation'),
+              title: Text(context.l10n.workspace),
+              subtitle: Text(context.l10n.projects_activity_new_navigation),
               onTap: () {
                 Navigator.pop(context);
                 _openScreen(
@@ -1087,26 +1086,26 @@ class _SessionListScreenState extends State<SessionListScreen> {
             const Divider(),
             ListTile(
               leading: const Icon(Icons.memory),
-              title: const Text('Memory'),
+              title: Text(context.l10n.memory),
               onTap: () =>
                   _openScreen(MemoryScreen(connection: widget.connection)),
             ),
             ListTile(
               leading: const Icon(Icons.schedule),
-              title: const Text('Cron Jobs'),
+              title: Text(context.l10n.cron_jobs),
               onTap: () =>
                   _openScreen(CronScreen(connection: widget.connection)),
             ),
             ListTile(
               leading: const Icon(Icons.auto_awesome),
-              title: const Text('Skills'),
+              title: Text(context.l10n.skills),
               onTap: () =>
                   _openScreen(SkillsScreen(connection: widget.connection)),
             ),
             const Divider(),
             ListTile(
               leading: const Icon(Icons.settings),
-              title: const Text('Settings'),
+              title: Text(context.l10n.settings),
               onTap: () =>
                   _openScreen(SettingsScreen(connection: widget.connection)),
             ),
@@ -1129,17 +1128,17 @@ class _SessionListScreenState extends State<SessionListScreen> {
             ),
             const SizedBox(height: 16),
             Text(
-              'Connecting to ${widget.connection.baseUrl}...',
+              context.l10n.connecting_to(widget.connection.baseUrl),
               style: Theme.of(context).textTheme.titleMedium,
             ),
             const SizedBox(height: 8),
             Text(
-              'Make sure the Gateway API Server is running\n(hermes gateway status)',
+              context.l10n.make_sure_the_gateway_api_server_is_running_hermes_gateway,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 24),
-            ElevatedButton(onPressed: _checkHealth, child: const Text('Retry')),
+            ElevatedButton(onPressed: _checkHealth, child: Text(context.l10n.retry)),
           ],
         ),
       );
@@ -1155,7 +1154,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
             Icon(Icons.error_outline, size: 48, color: Colors.orange),
             const SizedBox(height: 16),
             Text(
-              'Connection issue',
+              context.l10n.connection_issue,
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 8),
@@ -1170,7 +1169,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
             const SizedBox(height: 24),
             ElevatedButton(
               onPressed: _fetchSessions,
-              child: const Text('Retry'),
+              child: Text(context.l10n.retry),
             ),
           ],
         ),
@@ -1185,12 +1184,12 @@ class _SessionListScreenState extends State<SessionListScreen> {
             Icon(Icons.chat_bubble_outline, size: 48, color: Colors.grey),
             const SizedBox(height: 16),
             Text(
-              'No sessions yet',
+              context.l10n.no_sessions_yet,
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 8),
             Text(
-              'Tap the + button to start a new chat',
+              context.l10n.tap_the_button_to_start_a_new_chat,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodyMedium,
             ),
@@ -1249,7 +1248,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
                           dimension: 22,
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
-                      : const Text('Load more…'),
+                      : Text(context.l10n.load_more),
                 ),
               );
             }
@@ -1283,14 +1282,14 @@ class _SessionListScreenState extends State<SessionListScreen> {
                             )
                           : const Icon(Icons.search),
                       hintText: aiMode
-                          ? 'Ask AI to find a conversation'
+                          ? context.l10n.ask_ai_to_find_a_conversation
                           : serverMode
-                          ? 'Search all message content'
-                          : 'Search loaded chats',
+                          ? context.l10n.search_all_message_content
+                          : context.l10n.search_loaded_chats,
                       trailing: [
                         if (rawQuery.isNotEmpty)
                           IconButton(
-                            tooltip: 'Clear search',
+                            tooltip: context.l10n.clear_search,
                             icon: const Icon(Icons.close),
                             onPressed: () {
                               _searchDebounceTimer?.cancel();
@@ -1307,7 +1306,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
                           ),
                         if (aiMode)
                           IconButton(
-                            tooltip: 'Change AI search model',
+                            tooltip: context.l10n.change_ai_search_model,
                             icon: _loadingAiModels
                                 ? const SizedBox.square(
                                     dimension: 18,
@@ -1321,7 +1320,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
                                 : _showAiModelSelector,
                           ),
                         PopupMenuButton<SessionSearchMode>(
-                          tooltip: 'Search mode',
+                          tooltip: context.l10n.search_mode,
                           icon: Icon(
                             aiMode
                                 ? Icons.auto_awesome
@@ -1334,22 +1333,22 @@ class _SessionListScreenState extends State<SessionListScreen> {
                             CheckedPopupMenuItem(
                               value: SessionSearchMode.local,
                               checked: !serverMode,
-                              child: const ListTile(
+                              child: ListTile(
                                 contentPadding: EdgeInsets.zero,
                                 leading: Icon(Icons.phone_android),
-                                title: Text('On-device'),
-                                subtitle: Text('Titles, previews, and models'),
+                                title: Text(context.l10n.on_device),
+                                subtitle: Text(context.l10n.titles_previews_and_models),
                               ),
                             ),
                             CheckedPopupMenuItem(
                               value: SessionSearchMode.server,
                               enabled: _serverSearchAvailable,
                               checked: _searchMode == SessionSearchMode.server,
-                              child: const ListTile(
+                              child: ListTile(
                                 contentPadding: EdgeInsets.zero,
                                 leading: Icon(Icons.manage_search),
-                                title: Text('Full-text'),
-                                subtitle: Text('All stored message content'),
+                                title: Text(context.l10n.full_text),
+                                subtitle: Text(context.l10n.all_stored_message_content),
                               ),
                             ),
                             CheckedPopupMenuItem(
@@ -1359,10 +1358,10 @@ class _SessionListScreenState extends State<SessionListScreen> {
                               child: ListTile(
                                 contentPadding: EdgeInsets.zero,
                                 leading: const Icon(Icons.auto_awesome),
-                                title: const Text('AI + full-text'),
+                                title: Text(context.l10n.ai_full_text),
                                 subtitle: Text(
                                   _aiSearchModel == null
-                                      ? 'Choose a small model to rewrite queries'
+                                      ? context.l10n.choose_a_small_model_to_rewrite_queries
                                       : '${_aiSearchModel!.provider} • ${_aiSearchModel!.model}',
                                 ),
                               ),
@@ -1386,7 +1385,9 @@ class _SessionListScreenState extends State<SessionListScreen> {
                           const SizedBox(width: 6),
                           Expanded(
                             child: Text(
-                              'AI searched for: $_aiRewrittenQuery',
+                              context.l10n.ai_searched_for(
+                                _aiRewrittenQuery ?? '',
+                              ),
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: Theme.of(context).textTheme.bodySmall,
@@ -1425,7 +1426,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
                               TextButton(
                                 onPressed: () =>
                                     _setSearchMode(SessionSearchMode.local),
-                                child: const Text('Use on-device'),
+                                child: Text(context.l10n.use_on_device),
                               ),
                             ],
                           ),
@@ -1437,8 +1438,8 @@ class _SessionListScreenState extends State<SessionListScreen> {
                       Center(
                         child: Text(
                           _spaceScope.kind == ChatSpaceScopeKind.space
-                              ? 'No chats in this space yet. Tap + to start one.'
-                              : 'No unassigned chats.',
+                              ? context.l10n.no_chats_in_this_space_yet_tap_to_start_one
+                              : context.l10n.no_unassigned_chats,
                           textAlign: TextAlign.center,
                         ),
                       ),
@@ -1450,7 +1451,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
                         serverHitsCurrent != null &&
                         serverHitsCurrent.isEmpty) ...[
                       const SizedBox(height: 16),
-                      const Center(child: Text('No message-content matches')),
+                      Center(child: Text(context.l10n.no_message_content_matches)),
                     ],
                   ],
                 ),
@@ -1477,38 +1478,38 @@ class _SessionListScreenState extends State<SessionListScreen> {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : PopupMenuButton<String>(
-                        tooltip: 'Chat actions',
+                        tooltip: context.l10n.chat_actions,
                         onSelected: (action) =>
                             _handleSessionAction(action, session),
                         itemBuilder: (_) => [
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'move',
                             child: ListTile(
                               leading: Icon(Icons.drive_file_move_outline),
-                              title: Text('Move to space'),
+                              title: Text(context.l10n.move_to_space),
                             ),
                           ),
                           if (_desktopGateway != null)
-                            const PopupMenuItem(
+                            PopupMenuItem(
                               value: 'rename',
                               child: ListTile(
                                 leading: Icon(Icons.edit_outlined),
-                                title: Text('Rename'),
+                                title: Text(context.l10n.rename),
                               ),
                             ),
                           if (_desktopGateway != null)
-                            const PopupMenuItem(
+                            PopupMenuItem(
                               value: 'branch',
                               child: ListTile(
                                 leading: Icon(Icons.call_split_outlined),
-                                title: Text('Branch'),
+                                title: Text(context.l10n.branch),
                               ),
                             ),
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'delete',
                             child: ListTile(
                               leading: Icon(Icons.delete_outline),
-                              title: Text('Delete'),
+                              title: Text(context.l10n.delete),
                             ),
                           ),
                         ],
@@ -1522,7 +1523,11 @@ class _SessionListScreenState extends State<SessionListScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '${session.messageCount} msgs \u2022 ${session.model} \u2022 ${_formatTime(session.startedAt)}',
+                      context.l10n.session_meta(
+                        session.messageCount,
+                        session.model,
+                        _formatTime(session.startedAt),
+                      ),
                       style: Theme.of(context).textTheme.bodySmall,
                     ),
                     if (searchHit?.snippet.isNotEmpty == true)

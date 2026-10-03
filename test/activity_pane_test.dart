@@ -6,6 +6,9 @@ import 'package:hermes_android/core/theme/hermes_theme.dart';
 import 'package:hermes_android/core/utils/activity_feed.dart';
 import 'package:hermes_android/core/widgets/activity_pane.dart';
 import 'package:hermes_android/core/widgets/hermes_components.dart';
+import 'support/l10n_test_utils.dart';
+import 'package:hermes_android/l10n/app_localizations.dart';
+
 
 final _now = DateTime.utc(2026, 8, 28, 12, 0, 0);
 
@@ -64,6 +67,8 @@ Future<void> _pump(
 
   await tester.pumpWidget(
     MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
       theme: hermesTheme(Brightness.dark),
       home: Scaffold(
         body: ActivityPane(
@@ -78,6 +83,11 @@ Future<void> _pump(
 }
 
 void main() {
+  late AppLocalizations l10n;
+
+  setUpAll(() async {
+    l10n = await loadTestL10n();
+  });
   testWidgets('holds a skeleton until the first read lands', (tester) async {
     final gate = Completer<ActivityFeed>();
     await _pump(tester, loadFeed: () => gate.future);
@@ -131,12 +141,12 @@ void main() {
     double topOf(String text) => tester.getTopLeft(find.text(text).first).dy;
 
     expect(
-      topOf(ActivityGroupKind.needsYou.title),
-      lessThan(topOf(ActivityGroupKind.running.title)),
+      topOf(ActivityGroupKind.needsYou.title(l10n)),
+      lessThan(topOf(ActivityGroupKind.running.title(l10n))),
     );
     expect(
-      topOf(ActivityGroupKind.running.title),
-      lessThan(topOf(ActivityGroupKind.failed.title)),
+      topOf(ActivityGroupKind.running.title(l10n)),
+      lessThan(topOf(ActivityGroupKind.failed.title(l10n))),
     );
   });
 

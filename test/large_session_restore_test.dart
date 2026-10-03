@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hermes_android/core/l10n/l10n.dart';
 import 'package:hermes_android/core/screens/chat_screen.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
 import 'package:http/http.dart' as http;
@@ -29,6 +30,9 @@ void main() {
 
       await tester.pumpWidget(
         MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: preferredSupportedLocales(),
+          localeListResolutionCallback: resolvePreferredLocale,
           home: ChatScreen(
             connection: SavedConnection(
               id: 'large-session-fixture',
@@ -128,6 +132,9 @@ void main() {
 
       await tester.pumpWidget(
         MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: preferredSupportedLocales(),
+          localeListResolutionCallback: resolvePreferredLocale,
           home: ChatScreen(
             connection: SavedConnection(
               id: 'large-session-fixture',
@@ -205,6 +212,9 @@ void main() {
 
       await tester.pumpWidget(
         MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: preferredSupportedLocales(),
+          localeListResolutionCallback: resolvePreferredLocale,
           home: ChatScreen(
             connection: SavedConnection(
               id: 'large-session-fixture',
@@ -291,6 +301,9 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: preferredSupportedLocales(),
+        localeListResolutionCallback: resolvePreferredLocale,
         home: ChatScreen(
           connection: SavedConnection(
             id: 'large-session-fixture',
