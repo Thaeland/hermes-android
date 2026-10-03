@@ -76,8 +76,8 @@ Map<String, dynamic> _sessionRow({
     'actual_cost_usd': null,
     'estimated_cost_usd': 0.004,
     'model': 'claude-opus-5',
-    // Omitted (null) by default so the ended_at fallback stays exercised;
-    // pass explicitly to assert Gateway is_active precedence.
+    // Omitted (null) by default; pass explicitly to pin liveness in a test
+    // (the recency fallback rules live in session_model_test.dart).
     'is_active': ?isActive,
     'cwd': '/home/carlos/dev/hermes-android',
     'git_branch': 'main',
@@ -119,7 +119,7 @@ Map<String, dynamic> _projectNode({
                 'isMain': true,
                 'isKanban': false,
                 'sessions': [
-                  _sessionRow(),
+                  _sessionRow(isActive: true),
                   _sessionRow(
                     id: 's2',
                     title: 'Activity timeline',
