@@ -4,6 +4,25 @@ All notable changes to this project are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Release notes for
 versions prior to 1.0.7 are in the **What's new** sections of the [README](README.md).
 
+## [2.1.11] - 2026-10-04
+
+### Added
+
+- Added complete app localisation for Japanese, Simplified Chinese, Korean,
+  Spanish, French, German, Brazilian Portuguese, and Russian, with English kept
+  as the fallback for unsupported locales (PR #115).
+
+### Changed
+
+- App copy now uses generated Flutter localisation catalogues, including
+  locale-aware Russian plurals and region-safe Chinese and Portuguese
+  resolution.
+
+### Thanks
+
+- @maebahesioru for the localisation implementation, regression coverage,
+  on-device Japanese QA, and thorough review follow-up in PR #115.
+
 ## [2.1.10] - 2026-10-02
 
 ### Fixed

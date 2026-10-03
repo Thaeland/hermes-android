@@ -1,4 +1,4 @@
-# Hermes Android — v2.1.10
+# Hermes Android — v2.1.11
 
 Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — chat with your Hermes sessions from a phone or tablet over local Wi-Fi or a private Tailscale network.
 
@@ -14,7 +14,7 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
 
 ## Current release
 
-- Version: **2.1.10** (build 2150)
+- Version: **2.1.11** (build 2151)
 - Package: `com.hermesagent.hermes_android`
 - Recommended APK for modern phones: ARM64 release build from the
   [Releases](https://github.com/rusty4444/hermes-android/releases) page.
@@ -57,6 +57,14 @@ gateway explicitly advertises the compatible recovery contract.
 See [CHANGELOG.md](CHANGELOG.md) for the complete `.13` change list and
 [docs/HERMESAPK_DEVELOPMENT_LOG.md](docs/HERMESAPK_DEVELOPMENT_LOG.md) for the
 sanitized implementation and validation record.
+
+## What's new in v2.1.11
+
+- **Eight new languages** — the app is now localised in Japanese, Simplified
+  Chinese, Korean, Spanish, French, German, Brazilian Portuguese, and Russian.
+- **Reliable locale behaviour** — unsupported locales fall back to English,
+  Russian counts use the correct plural forms, and Chinese and Portuguese
+  region variants do not receive an incompatible catalogue.
 
 ## What's new in v2.1.10
 
@@ -563,7 +571,7 @@ cp build/app/outputs/flutter-apk/app-*-release.apk release-apks/
 block in `android/app/build.gradle.kts` derives per-ABI codes as
 `base * 10 + ABI code` (armeabi-v7a = 1, arm64-v8a = 2, x86_64 = 3), so the
 codes stay ordered armeabi-v7a < arm64-v8a < x86_64 as fdroiddata requires.
-For v2.1.10, base `2150` therefore produces codes `21501`/`21502`/`21503`.
+For v2.1.11, base `2151` therefore produces codes `21511`/`21512`/`21513`.
 CI reads the completed arm64 APK with `aapt` and fails if that relationship
 drifts. Release-floor checks continue to apply to the base value and must not
 be weakened to rely on the ABI code.
@@ -674,8 +682,10 @@ lib/
 
 ## Credits
 
-- **maebahesioru** — corrected Gateway session liveness handling and added
-  focused model and project-tree regressions in PR #121. Released in v2.1.9.
+- **maebahesioru** — corrected Gateway session liveness handling with focused
+  regressions in PR #121 (v2.1.9), then added complete Flutter localisation for
+  eight languages, locale-resolution and plural coverage, and on-device
+  Japanese QA in PR #115 (v2.1.11).
 - **igitur** — diagnosed and fixed explicit HTTPS port handling (PR #111) and
   preserved running Hermes turns when leaving a chat (PR #113), with focused
   regression coverage for both fixes. Released in v2.1.8.
