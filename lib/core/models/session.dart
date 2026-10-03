@@ -55,7 +55,17 @@ class Session {
     this.isLocalDraft = false,
   });
 
-  factory Session.fromJson(Map<String, dynamic> json) {
+  /// Parses one session row.
+  ///
+  /// Set [ignoreIsActive] when the payload's `is_active` is a fixed
+  /// placeholder rather than a liveness signal — the Projects RPC hardcodes
+  /// `is_active: false` on every row (`_project_tree_row` in the gateway's
+  /// `methods_projects`), so project rows must fall back to the recency
+  /// window instead of rendering every fresh chat as Done.
+  factory Session.fromJson(
+    Map<String, dynamic> json, {
+    bool ignoreIsActive = false,
+  }) {
     // Type-tolerant readers: one row with a string-typed number must not
     // take down the whole session list with a TypeError mid-map.
     double asDouble(Object? value, [double fallback = 0]) {
@@ -79,9 +89,9 @@ class Session {
     // session as running. When `is_active` is absent (the current Gateway
     // API does not send it), mirror the Hermes dashboard's definition of an
     // active session: not ended, and touched within
-    // [kSessionActiveWindowSeconds]. Without the recency check, sessions
-    // that finished long ago but were never explicitly ended kept showing
-    // as running.
+    // [kSessionActiveWindowSeconds]. Payloads whose `is_active` is a fixed
+    // placeholder (Projects RPC rows) pass [ignoreIsActive] and always take
+    // the recency path.
     final isActiveJson = json['is_active'];
     return Session(
       id: json['id'] ?? '',
@@ -89,7 +99,7 @@ class Session {
       model: json['model'] ?? 'Default',
       source: json['source'] ?? '',
       messageCount: asInt(json['message_count']),
-      isActive: isActiveJson is bool
+      isActive: !ignoreIsActive && isActiveJson is bool
           ? isActiveJson
           : (endedAt == null &&
               (DateTime.now().millisecondsSinceEpoch / 1000.0 - lastActive) <

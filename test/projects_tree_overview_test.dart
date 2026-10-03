@@ -71,6 +71,9 @@ Map<String, dynamic> _sessionRow({String id = 's1', String title = 'Chat'}) {
     'source': 'cli',
     'message_count': 12,
     'model': 'claude-opus-5',
+    // The Projects RPC hardcodes `is_active: false` on every row; project
+    // rows ignore it, so liveness comes from the recency window.
+    'is_active': false,
     'cwd': '/home/carlos/dev/hermes-android',
   };
 }
