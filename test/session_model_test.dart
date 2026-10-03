@@ -24,6 +24,18 @@ void main() {
       expect(session.lastActive, 1750000090.25);
       expect(session.pinned, isTrue);
       expect(session.archived, isFalse);
+      expect(session.isLocalDraft, isFalse);
+    });
+
+    test('gateway JSON cannot opt a server session into draft routing', () {
+      final session = Session.fromJson({
+        'id': 'server-existing',
+        'title': 'Existing chat',
+        'started_at': 1750000000.5,
+        'is_local_draft': true,
+      });
+
+      expect(session.isLocalDraft, isFalse);
     });
 
     test(

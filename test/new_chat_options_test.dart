@@ -191,6 +191,7 @@ void main() {
       expect(draft.projectName, isNull);
       expect(draft.projectWorkingDirectory, isNull);
       expect(draft.session.id, 'mob-1');
+      expect(draft.session.isLocalDraft, isTrue);
     });
 
     test('a quick chat never inherits the active project', () {
@@ -241,6 +242,7 @@ void main() {
       expect(draft.projectName, 'Hermes Android');
       expect(draft.projectWorkingDirectory, '/srv/projects/hermes-android');
       expect(draft.session.title, contains('Hermes Android'));
+      expect(draft.session.isLocalDraft, isTrue);
       expect(draft.expiresAt, isNull);
     });
 

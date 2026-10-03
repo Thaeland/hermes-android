@@ -699,13 +699,27 @@ class ApiClient {
 
   // ── Messages ─────────────────────────────────────────────────────────
 
-  Future<List<Map<String, dynamic>>> getMessages(String sessionId) async {
-    final res = await _http
-        .get(
-          Uri.parse('$baseUrl/api/sessions/$sessionId/messages'),
-          headers: _headers,
-        )
-        .timeout(requestTimeout);
+  Future<List<Map<String, dynamic>>> getMessages(
+    String sessionId, {
+    int? limit,
+    int offset = 0,
+    bool latest = false,
+  }) async {
+    if (limit != null && limit < 0) {
+      throw ArgumentError.value(limit, 'limit', 'must not be negative');
+    }
+    if (offset < 0) {
+      throw ArgumentError.value(offset, 'offset', 'must not be negative');
+    }
+    final query = <String, String>{
+      if (limit != null) 'limit': '$limit',
+      if (offset != 0) 'offset': '$offset',
+      if (latest) 'order': 'latest',
+    };
+    final uri = Uri.parse(
+      '$baseUrl/api/sessions/$sessionId/messages',
+    ).replace(queryParameters: query.isEmpty ? null : query);
+    final res = await _http.get(uri, headers: _headers).timeout(requestTimeout);
     if (res.statusCode != 200) {
       throw Exception('HTTP ${res.statusCode}: ${res.body}');
     }

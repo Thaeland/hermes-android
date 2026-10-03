@@ -924,6 +924,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
       isActive: true,
       preview: '',
       startedAt: DateTime.now().millisecondsSinceEpoch.toDouble() / 1000,
+      isLocalDraft: true,
     );
     if (_spaceScope.kind == ChatSpaceScopeKind.space && _spaceStore != null) {
       await _spaceStore!.assignSession(sessionId, _spaceScope.spaceId);
