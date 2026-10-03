@@ -1038,7 +1038,7 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get no_tts_voices_found_ninstall_google_text_to_speech_and =>
-      'Голоса TTS не найдены.\\nУстановите Google Text-to-Speech и скачайте голосовые данные.';
+      'Голоса TTS не найдены.\nУстановите Google Text-to-Speech и скачайте голосовые данные.';
 
   @override
   String get no_active_projects_on_this_gateway =>
@@ -1962,11 +1962,16 @@ class AppLocalizationsRu extends AppLocalizations {
   }
 
   @override
-  String get chats_count_one => '1 чат';
-
-  @override
-  String chats_count_many(Object count) {
-    return '$count чатов';
+  String chats_count(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count чата',
+      many: '$count чатов',
+      few: '$count чата',
+      one: '$count чат',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -1975,22 +1980,32 @@ class AppLocalizationsRu extends AppLocalizations {
   }
 
   @override
-  String get spaces_count_one => '1 пространство';
-
-  @override
-  String spaces_count_many(Object count) {
-    return '$count пространств';
+  String spaces_count(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count пространства',
+      many: '$count пространств',
+      few: '$count пространства',
+      one: '$count пространство',
+    );
+    return '$_temp0';
   }
 
   @override
   String get no_new_projects_needed => 'новые проекты не нужны';
 
   @override
-  String get one_project_to_create => '1 проект для создания';
-
-  @override
-  String projects_to_create_many(Object count) {
-    return '$count проектов для создания';
+  String projects_to_create(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count проекта для создания',
+      many: '$count проектов для создания',
+      few: '$count проекта для создания',
+      one: '$count проект для создания',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -2054,11 +2069,16 @@ class AppLocalizationsRu extends AppLocalizations {
   }
 
   @override
-  String get new_message_one => '1 новое сообщение';
-
-  @override
-  String new_messages_many(Object count) {
-    return '$count новых сообщений';
+  String new_messages(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count нового сообщения',
+      many: '$count новых сообщений',
+      few: '$count новых сообщения',
+      one: '$count новое сообщение',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -2194,11 +2214,16 @@ class AppLocalizationsRu extends AppLocalizations {
   String get upload_status_uploaded => 'Отправлено';
 
   @override
-  String get attachment_count_one => '1 вложение';
-
-  @override
-  String attachment_count_many(Object count) {
-    return '$count вложений';
+  String attachment_count(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count вложения',
+      many: '$count вложений',
+      few: '$count вложения',
+      one: '$count вложение',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -2220,11 +2245,16 @@ class AppLocalizationsRu extends AppLocalizations {
   String get migrate => 'Перенести';
 
   @override
-  String get assigned_chats_one => '1 назначенный чат';
-
-  @override
-  String assigned_chats_many(Object count) {
-    return '$count назначенных чатов';
+  String assigned_chats(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count назначенного чата',
+      many: '$count назначенных чатов',
+      few: '$count назначенных чата',
+      one: '$count назначенный чат',
+    );
+    return '$_temp0';
   }
 
   @override

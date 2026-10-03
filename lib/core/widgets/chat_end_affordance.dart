@@ -23,8 +23,7 @@ class ChatEndAffordance extends StatelessWidget {
         : context.l10n.latest_label;
     final semanticsValue = switch (newMessageCount) {
       0 => context.l10n.no_new_messages,
-      1 => context.l10n.new_message_one,
-      _ => context.l10n.new_messages_many(newMessageCount),
+      _ => context.l10n.new_messages(newMessageCount),
     };
 
     return Semantics(

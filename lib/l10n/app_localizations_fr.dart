@@ -1049,7 +1049,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get no_tts_voices_found_ninstall_google_text_to_speech_and =>
-      'Aucune voix TTS trouvée.\\nInstallez Google Text-to-Speech et téléchargez les données vocales.';
+      'Aucune voix TTS trouvée.\nInstallez Google Text-to-Speech et téléchargez les données vocales.';
 
   @override
   String get no_active_projects_on_this_gateway =>
@@ -1972,11 +1972,14 @@ class AppLocalizationsFr extends AppLocalizations {
   }
 
   @override
-  String get chats_count_one => '1 discussion';
-
-  @override
-  String chats_count_many(Object count) {
-    return '$count discussions';
+  String chats_count(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count discussions',
+      one: '$count discussion',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -1985,22 +1988,28 @@ class AppLocalizationsFr extends AppLocalizations {
   }
 
   @override
-  String get spaces_count_one => '1 espace';
-
-  @override
-  String spaces_count_many(Object count) {
-    return '$count espaces';
+  String spaces_count(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count espaces',
+      one: '$count espace',
+    );
+    return '$_temp0';
   }
 
   @override
   String get no_new_projects_needed => 'aucun nouveau projet nécessaire';
 
   @override
-  String get one_project_to_create => '1 projet à créer';
-
-  @override
-  String projects_to_create_many(Object count) {
-    return '$count projets à créer';
+  String projects_to_create(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count projets à créer',
+      one: '$count projet à créer',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -2064,11 +2073,14 @@ class AppLocalizationsFr extends AppLocalizations {
   }
 
   @override
-  String get new_message_one => '1 nouveau message';
-
-  @override
-  String new_messages_many(Object count) {
-    return '$count nouveaux messages';
+  String new_messages(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count nouveaux messages',
+      one: '$count nouveau message',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -2204,11 +2216,14 @@ class AppLocalizationsFr extends AppLocalizations {
   String get upload_status_uploaded => 'Envoyé';
 
   @override
-  String get attachment_count_one => '1 pièce jointe';
-
-  @override
-  String attachment_count_many(Object count) {
-    return '$count pièces jointes';
+  String attachment_count(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count pièces jointes',
+      one: '$count pièce jointe',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -2230,11 +2245,14 @@ class AppLocalizationsFr extends AppLocalizations {
   String get migrate => 'Migrer';
 
   @override
-  String get assigned_chats_one => '1 discussion affectée';
-
-  @override
-  String assigned_chats_many(Object count) {
-    return '$count discussions affectées';
+  String assigned_chats(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count discussions affectées',
+      one: '$count discussion affectée',
+    );
+    return '$_temp0';
   }
 
   @override

@@ -72,7 +72,8 @@ class _StartupRecoveryApp extends StatelessWidget {
       key: _rootKey,
       debugShowCheckedModeBanner: false,
       localizationsDelegates: AppLocalizations.localizationsDelegates,
-      supportedLocales: AppLocalizations.supportedLocales,
+      supportedLocales: preferredSupportedLocales(),
+      localeListResolutionCallback: resolvePreferredLocale,
       home: Builder(
         builder: (context) => Scaffold(
           body: Center(
@@ -211,7 +212,8 @@ class HermesAppState extends State<HermesApp> {
     return MaterialApp(
       onGenerateTitle: (context) => context.l10n.hermes_agent,
       localizationsDelegates: AppLocalizations.localizationsDelegates,
-      supportedLocales: AppLocalizations.supportedLocales,
+      supportedLocales: preferredSupportedLocales(),
+      localeListResolutionCallback: resolvePreferredLocale,
       themeMode: HermesApp.getThemeMode(widget.connManager.prefs),
       theme: hermesTheme(Brightness.light),
       darkTheme: hermesTheme(Brightness.dark),

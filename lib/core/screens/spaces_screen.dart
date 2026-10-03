@@ -129,9 +129,7 @@ class _SpacesScreenState extends State<SpacesScreen> {
     }
   }
 
-  String _countLabel(int count) => count == 1
-      ? context.l10n.chats_count_one
-      : context.l10n.chats_count_many(count);
+  String _countLabel(int count) => context.l10n.chats_count(count);
 
   String? _activityLabel(double? timestamp) {
     if (timestamp == null) return null;

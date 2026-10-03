@@ -417,9 +417,7 @@ class _LocalSpaceCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = HermesTokens.of(context);
-    final chats = sessionCount == 1
-        ? context.l10n.chats_count_one
-        : context.l10n.chats_count_many(sessionCount);
+    final chats = context.l10n.chats_count(sessionCount);
 
     return HermesCard(
       child: Row(
@@ -555,9 +553,7 @@ class _ProjectCard extends StatelessWidget {
                 if (overview != null) ...[
                   const SizedBox(height: HermesSpacing.xs),
                   Text(
-                    overview!.sessionCount == 1
-                        ? context.l10n.chats_count_one
-                        : context.l10n.chats_count_many(overview!.sessionCount),
+                    context.l10n.chats_count(overview!.sessionCount),
                     style: tokens.typography.label.copyWith(
                       color: tokens.muted,
                     ),

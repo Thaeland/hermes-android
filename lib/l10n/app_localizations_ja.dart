@@ -822,7 +822,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get inbox_is_clear => '受信トレイは空です';
 
   @override
-  String get insert_a_remote_file_reference => 'リモートの@ファイル参照を挿入';
+  String get insert_a_remote_file_reference => 'リモートの@file参照を挿入';
 
   @override
   String get invalid_port_number => 'ポート番号が無効です。';
@@ -1018,7 +1018,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get no_tts_voices_found_ninstall_google_text_to_speech_and =>
-      'TTS音声が見つかりません。\\nGoogle Text-to-Speechをインストールして音声データをダウンロードしてください。';
+      'TTS音声が見つかりません。\nGoogle Text-to-Speechをインストールして音声データをダウンロードしてください。';
 
   @override
   String get no_active_projects_on_this_gateway =>
@@ -1918,11 +1918,13 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
-  String get chats_count_one => 'チャット1件';
-
-  @override
-  String chats_count_many(Object count) {
-    return 'チャット$count件';
+  String chats_count(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'チャット$count件',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -1931,22 +1933,26 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
-  String get spaces_count_one => 'スペース1件';
-
-  @override
-  String spaces_count_many(Object count) {
-    return 'スペース$count件';
+  String spaces_count(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'スペース$count件',
+    );
+    return '$_temp0';
   }
 
   @override
   String get no_new_projects_needed => '新しいプロジェクトは不要';
 
   @override
-  String get one_project_to_create => 'プロジェクトを1件作成';
-
-  @override
-  String projects_to_create_many(Object count) {
-    return 'プロジェクトを$count件作成';
+  String projects_to_create(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'プロジェクトを$count件作成',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -2010,11 +2016,13 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
-  String get new_message_one => '新着メッセージ1件';
-
-  @override
-  String new_messages_many(Object count) {
-    return '新着メッセージ$count件';
+  String new_messages(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '新着メッセージ$count件',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -2150,11 +2158,13 @@ class AppLocalizationsJa extends AppLocalizations {
   String get upload_status_uploaded => 'アップロード済み';
 
   @override
-  String get attachment_count_one => '添付1件';
-
-  @override
-  String attachment_count_many(Object count) {
-    return '添付$count件';
+  String attachment_count(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '添付$count件',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -2176,11 +2186,13 @@ class AppLocalizationsJa extends AppLocalizations {
   String get migrate => '移行';
 
   @override
-  String get assigned_chats_one => '割り当て済みチャット1件';
-
-  @override
-  String assigned_chats_many(Object count) {
-    return '割り当て済みチャット$count件';
+  String assigned_chats(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '割り当て済みチャット$count件',
+    );
+    return '$_temp0';
   }
 
   @override

@@ -108,8 +108,10 @@ abstract class AppLocalizations {
     Locale('ja'),
     Locale('ko'),
     Locale('pt'),
+    Locale('pt', 'BR'),
     Locale('ru'),
     Locale('zh'),
+    Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
   ];
 
   /// No description provided for @a_one_off_question_archives_itself_after_72_hours_anything.
@@ -1835,7 +1837,7 @@ abstract class AppLocalizations {
   /// No description provided for @no_tts_voices_found_ninstall_google_text_to_speech_and.
   ///
   /// In en, this message translates to:
-  /// **'No TTS voices found.\\nInstall Google Text-to-Speech and download voice data.'**
+  /// **'No TTS voices found.\nInstall Google Text-to-Speech and download voice data.'**
   String get no_tts_voices_found_ninstall_google_text_to_speech_and;
 
   /// No description provided for @no_active_projects_on_this_gateway.
@@ -3394,17 +3396,11 @@ abstract class AppLocalizations {
   /// **'and {count} more'**
   String and_more(Object count);
 
-  /// No description provided for @chats_count_one.
+  /// No description provided for @chats_count.
   ///
   /// In en, this message translates to:
-  /// **'1 chat'**
-  String get chats_count_one;
-
-  /// No description provided for @chats_count_many.
-  ///
-  /// In en, this message translates to:
-  /// **'{count} chats'**
-  String chats_count_many(Object count);
+  /// **'{count, plural, one{{count} chat} other{{count} chats}}'**
+  String chats_count(num count);
 
   /// No description provided for @on_this_device_only.
   ///
@@ -3412,17 +3408,11 @@ abstract class AppLocalizations {
   /// **'{chats} · on this device only'**
   String on_this_device_only(Object chats);
 
-  /// No description provided for @spaces_count_one.
+  /// No description provided for @spaces_count.
   ///
   /// In en, this message translates to:
-  /// **'1 space'**
-  String get spaces_count_one;
-
-  /// No description provided for @spaces_count_many.
-  ///
-  /// In en, this message translates to:
-  /// **'{count} spaces'**
-  String spaces_count_many(Object count);
+  /// **'{count, plural, one{{count} space} other{{count} spaces}}'**
+  String spaces_count(num count);
 
   /// No description provided for @no_new_projects_needed.
   ///
@@ -3430,17 +3420,11 @@ abstract class AppLocalizations {
   /// **'no new projects needed'**
   String get no_new_projects_needed;
 
-  /// No description provided for @one_project_to_create.
+  /// No description provided for @projects_to_create.
   ///
   /// In en, this message translates to:
-  /// **'1 project to create'**
-  String get one_project_to_create;
-
-  /// No description provided for @projects_to_create_many.
-  ///
-  /// In en, this message translates to:
-  /// **'{count} projects to create'**
-  String projects_to_create_many(Object count);
+  /// **'{count, plural, one{{count} project to create} other{{count} projects to create}}'**
+  String projects_to_create(num count);
 
   /// No description provided for @chats_migrated_projects_created.
   ///
@@ -3523,17 +3507,11 @@ abstract class AppLocalizations {
   /// **'{count} new'**
   String new_count_indicator(Object count);
 
-  /// No description provided for @new_message_one.
+  /// No description provided for @new_messages.
   ///
   /// In en, this message translates to:
-  /// **'1 new message'**
-  String get new_message_one;
-
-  /// No description provided for @new_messages_many.
-  ///
-  /// In en, this message translates to:
-  /// **'{count} new messages'**
-  String new_messages_many(Object count);
+  /// **'{count, plural, one{{count} new message} other{{count} new messages}}'**
+  String new_messages(num count);
 
   /// No description provided for @activity_failed_summary.
   ///
@@ -3757,17 +3735,11 @@ abstract class AppLocalizations {
   /// **'Uploaded'**
   String get upload_status_uploaded;
 
-  /// No description provided for @attachment_count_one.
+  /// No description provided for @attachment_count.
   ///
   /// In en, this message translates to:
-  /// **'1 attachment'**
-  String get attachment_count_one;
-
-  /// No description provided for @attachment_count_many.
-  ///
-  /// In en, this message translates to:
-  /// **'{count} attachments'**
-  String attachment_count_many(Object count);
+  /// **'{count, plural, one{{count} attachment} other{{count} attachments}}'**
+  String attachment_count(num count);
 
   /// No description provided for @action_create.
   ///
@@ -3805,17 +3777,11 @@ abstract class AppLocalizations {
   /// **'Migrate'**
   String get migrate;
 
-  /// No description provided for @assigned_chats_one.
+  /// No description provided for @assigned_chats.
   ///
   /// In en, this message translates to:
-  /// **'1 assigned chat'**
-  String get assigned_chats_one;
-
-  /// No description provided for @assigned_chats_many.
-  ///
-  /// In en, this message translates to:
-  /// **'{count} assigned chats'**
-  String assigned_chats_many(Object count);
+  /// **'{count, plural, one{{count} assigned chat} other{{count} assigned chats}}'**
+  String assigned_chats(num count);
 
   /// No description provided for @date_today.
   ///
@@ -4019,6 +3985,30 @@ class _AppLocalizationsDelegate
 }
 
 AppLocalizations lookupAppLocalizations(Locale locale) {
+  // Lookup logic when language+script codes are specified.
+  switch (locale.languageCode) {
+    case 'zh':
+      {
+        switch (locale.scriptCode) {
+          case 'Hans':
+            return AppLocalizationsZhHans();
+        }
+        break;
+      }
+  }
+
+  // Lookup logic when language+country codes are specified.
+  switch (locale.languageCode) {
+    case 'pt':
+      {
+        switch (locale.countryCode) {
+          case 'BR':
+            return AppLocalizationsPtBr();
+        }
+        break;
+      }
+  }
+
   // Lookup logic when only language code is specified.
   switch (locale.languageCode) {
     case 'de':

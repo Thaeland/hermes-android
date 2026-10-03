@@ -39,20 +39,15 @@ class _SpaceMigrationPreviewState extends State<SpaceMigrationPreview> {
   SpaceMigrationResult? _result;
   Object? _error;
 
-  String _chats(int count) => count == 1
-      ? context.l10n.chats_count_one
-      : context.l10n.chats_count_many(count);
+  String _chats(int count) => context.l10n.chats_count(count);
 
   String get _summary {
     final plan = widget.plan;
-    final spaces = plan.entries.length == 1
-        ? context.l10n.spaces_count_one
-        : context.l10n.spaces_count_many(plan.entries.length);
+    final spaces = context.l10n.spaces_count(plan.entries.length);
     final toCreate = plan.projectsToCreate;
     final projects = switch (toCreate) {
       0 => context.l10n.no_new_projects_needed,
-      1 => context.l10n.one_project_to_create,
-      _ => context.l10n.projects_to_create_many(toCreate),
+      _ => context.l10n.projects_to_create(toCreate),
     };
     return '$spaces · ${_chats(plan.sessionsToLink)} · $projects';
   }
@@ -213,9 +208,7 @@ class _EntryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final tokens = HermesTokens.of(context);
     final matched = entry.matchedProject;
-    final assigned = entry.sessionCount == 1
-        ? context.l10n.assigned_chats_one
-        : context.l10n.assigned_chats_many(entry.sessionCount);
+    final assigned = context.l10n.assigned_chats(entry.sessionCount);
 
     return HermesCard(
       child: Column(

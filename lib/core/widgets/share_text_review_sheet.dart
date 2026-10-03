@@ -125,11 +125,7 @@ class _ShareTextReviewSheetState extends State<ShareTextReviewSheet> {
                     if (widget.sharedFiles.isNotEmpty) ...[
                       const SizedBox(height: HermesSpacing.md),
                       Text(
-                        widget.sharedFiles.length == 1
-                            ? context.l10n.attachment_count_one
-                            : context.l10n.attachment_count_many(
-                                widget.sharedFiles.length,
-                              ),
+                        context.l10n.attachment_count(widget.sharedFiles.length),
                         style: Theme.of(context).textTheme.titleSmall,
                       ),
                       const SizedBox(height: HermesSpacing.xs),

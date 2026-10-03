@@ -1016,7 +1016,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get no_tts_voices_found_ninstall_google_text_to_speech_and =>
-      '사용 가능한 TTS 음성이 없습니다.\\nGoogle Text-to-Speech를 설치하고 음성 데이터를 다운로드하세요.';
+      '사용 가능한 TTS 음성이 없습니다.\nGoogle Text-to-Speech를 설치하고 음성 데이터를 다운로드하세요.';
 
   @override
   String get no_active_projects_on_this_gateway => '이 게이트웨이에 활성 프로젝트가 없습니다';
@@ -1920,11 +1920,13 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
-  String get chats_count_one => '채팅 1개';
-
-  @override
-  String chats_count_many(Object count) {
-    return '채팅 $count개';
+  String chats_count(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '채팅 $count개',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -1933,22 +1935,26 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
-  String get spaces_count_one => '스페이스 1개';
-
-  @override
-  String spaces_count_many(Object count) {
-    return '스페이스 $count개';
+  String spaces_count(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '스페이스 $count개',
+    );
+    return '$_temp0';
   }
 
   @override
   String get no_new_projects_needed => '새 프로젝트 불필요';
 
   @override
-  String get one_project_to_create => '생성할 프로젝트 1개';
-
-  @override
-  String projects_to_create_many(Object count) {
-    return '생성할 프로젝트 $count개';
+  String projects_to_create(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '생성할 프로젝트 $count개',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -2012,11 +2018,13 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
-  String get new_message_one => '새 메시지 1개';
-
-  @override
-  String new_messages_many(Object count) {
-    return '새 메시지 $count개';
+  String new_messages(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '새 메시지 $count개',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -2152,11 +2160,13 @@ class AppLocalizationsKo extends AppLocalizations {
   String get upload_status_uploaded => '업로드 완료';
 
   @override
-  String get attachment_count_one => '첨부 파일 1개';
-
-  @override
-  String attachment_count_many(Object count) {
-    return '첨부 파일 $count개';
+  String attachment_count(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '첨부 파일 $count개',
+    );
+    return '$_temp0';
   }
 
   @override
@@ -2178,11 +2188,13 @@ class AppLocalizationsKo extends AppLocalizations {
   String get migrate => '마이그레이션';
 
   @override
-  String get assigned_chats_one => '할당된 채팅 1개';
-
-  @override
-  String assigned_chats_many(Object count) {
-    return '할당된 채팅 $count개';
+  String assigned_chats(num count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '할당된 채팅 $count개',
+    );
+    return '$_temp0';
   }
 
   @override

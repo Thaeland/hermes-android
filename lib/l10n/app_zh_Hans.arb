@@ -1,5 +1,5 @@
 {
-  "@@locale": "zh",
+  "@@locale": "zh_Hans",
   "a_one_off_question_archives_itself_after_72_hours_anything": "一次性问题。将在 72 小时后自动归档；任何值得保留的内容都会被记住。",
   "ai_full_text": "AI + 全文",
   "ai_search_model": "AI 搜索模型",

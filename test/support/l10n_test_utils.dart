@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:hermes_android/l10n/app_localizations.dart';
+import 'package:hermes_android/core/l10n/l10n.dart';
 
 /// Loads the generated localizations for tests.
 ///
@@ -15,7 +15,8 @@ Widget testAppWithL10n(Widget child, {Locale locale = const Locale('en')}) {
   return MaterialApp(
     locale: locale,
     localizationsDelegates: AppLocalizations.localizationsDelegates,
-    supportedLocales: AppLocalizations.supportedLocales,
+    supportedLocales: preferredSupportedLocales(),
+    localeListResolutionCallback: resolvePreferredLocale,
     home: child,
   );
 }

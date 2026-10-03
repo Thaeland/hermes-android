@@ -107,6 +107,9 @@ class ChatContextHeader extends StatelessWidget {
       'low' => context.l10n.reasoning_low,
       'medium' => context.l10n.reasoning_medium,
       'high' => context.l10n.reasoning_high,
+      'xhigh' => context.l10n.extra_high,
+      'max' => context.l10n.reasoning_max,
+      'ultra' => context.l10n.reasoning_ultra,
       _ => value,
     };
   }
