@@ -385,6 +385,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _turnNotifications =
         widget.testTurnNotifications ?? TurnNotificationService.shared;
     unawaited(_turnNotifications.ensureInitialized());
+    // A notification action that could not answer directly (the request is
+    // owned by this screen's gateway, not the app-level controller) lands in
+    // the shared store; answer it as soon as this chat is up.
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _consumePendingNotificationApproval(),
+    );
     _client =
         widget.testApiClient ??
         ApiClient(
@@ -810,11 +816,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               title: context.l10n.the_turn_failed,
               turnSummary: '${widget.session.title}: $summary',
               turnId: turnId,
+              sessionId: widget.session.id,
+              connectionId: widget.connection.id,
             )
           : _turnNotifications.showTurnCompleted(
               title: context.l10n.hermes_response_ready,
               turnSummary: '${widget.session.title}: $summary',
               turnId: turnId,
+              sessionId: widget.session.id,
+              connectionId: widget.connection.id,
             ),
     );
   }
@@ -843,6 +853,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ],
         payload: jsonEncode({
           'sessionId': widget.session.id,
+          'connectionId': widget.connection.id,
           'requestId': serverRequestId,
         }),
       ),
@@ -860,7 +871,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         title: '${context.l10n.input_needed} — ${widget.session.title}',
         body: trimmed.length > 140 ? '${trimmed.substring(0, 140)}…' : trimmed,
         sessionId: widget.session.id,
-        payload: jsonEncode({'sessionId': widget.session.id}),
+        payload: jsonEncode({
+          'sessionId': widget.session.id,
+          'connectionId': widget.connection.id,
+        }),
       ),
     );
   }
@@ -883,7 +897,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             : context.l10n.plugin_notifications,
         body: notification.text,
         sessionId: widget.session.id,
-        payload: jsonEncode({'sessionId': widget.session.id}),
+        payload: jsonEncode({
+          'sessionId': widget.session.id,
+          'connectionId': widget.connection.id,
+        }),
       ),
     );
   }
@@ -898,7 +915,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         title: context.l10n.background_task_completed,
         body: notice.text,
         sessionId: widget.session.id,
-        payload: jsonEncode({'sessionId': widget.session.id}),
+        payload: jsonEncode({
+          'sessionId': widget.session.id,
+          'connectionId': widget.connection.id,
+        }),
       ),
     );
   }
@@ -3028,6 +3048,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       sessionId: widget.session.id,
       choice: choice,
       serverRequestId: requestId,
+    );
+  }
+
+  /// Answers an approval that a notification action left pending for this
+  /// session — the action could not reach this screen's route-local gateway,
+  /// so the tap routes here and this chat resolves it the normal way.
+  void _consumePendingNotificationApproval() {
+    final pending = pendingNotificationApproval.value;
+    if (pending == null || pending.sessionId != widget.session.id) return;
+    pendingNotificationApproval.value = null;
+    unawaited(
+      _respondToGatewayApproval(pending.choice, requestId: pending.requestId),
     );
   }
 

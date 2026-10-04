@@ -177,6 +177,25 @@ void main() {
     expect(posted.actions.map((a) => a.id), ['approve', 'reject']);
     expect(posted.payload, contains('req-1'));
   });
+
+  testWidgets('a pending notification approval is answered once the chat is up', (
+    WidgetTester tester,
+  ) async {
+    pendingNotificationApproval.value = const PendingNotificationApproval(
+      sessionId: 'notif-session',
+      requestId: 'req-9',
+      choice: 'once',
+    );
+    addTearDown(() => pendingNotificationApproval.value = null);
+
+    await pumpChat(tester);
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(turnSession.approvalResponses, [
+      ('notif-session', 'once', 'req-9'),
+    ]);
+    expect(pendingNotificationApproval.value, isNull);
+  });
 }
 
 GatewayTurnRecoveryState _completedState() =>
@@ -232,12 +251,19 @@ class _CallbackCapturingTurnSession implements GatewayTurnApplicationSession {
   @override
   void removeAsyncEventListener(String localSessionId, Object registration) {}
 
+  /// Approval responses this fake was asked to send.
+  final List<(String sessionId, String choice, String? requestId)>
+  approvalResponses = [];
+
   @override
   Future<bool> tryRespondToApproval({
     required String sessionId,
     required String choice,
     String? requestId,
-  }) async => false;
+  }) async {
+    approvalResponses.add((sessionId, choice, requestId));
+    return true;
+  }
 
   @override
   Future<bool> tryRespondToClarify({

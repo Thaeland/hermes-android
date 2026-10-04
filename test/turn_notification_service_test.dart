@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hermes_android/core/services/notification_prefs.dart';
 import 'package:hermes_android/core/services/turn_notification_service.dart';
@@ -82,7 +85,7 @@ void main() {
         expect(posted.title, 'Ready');
         expect(posted.body, 'Roadmap: Response ready');
         // The payload is the deep-link seed Phase 3 will extend.
-        expect(posted.payload, 'turn-42');
+        expect(posted.payload, contains('turn-42'));
         expect(posted.channel.id, 'hermes_turn_notifications');
         expect(posted.channel.name, 'Hermes Turns');
         expect(
@@ -366,7 +369,7 @@ void main() {
       final posted = sink.shown.single;
       expect(posted.channel.id, 'hermes_turn_notifications');
       expect(posted.body, 'Roadmap: oops');
-      expect(posted.payload, 'turn-9');
+      expect(posted.payload, contains('turn-9'));
     });
 
     test('the test notification bypasses the prefs and reports delivery', () async {
@@ -381,6 +384,89 @@ void main() {
 
       expect(ok, isTrue);
       expect(sink.shown.single.title, 'Test');
+    });
+  });
+
+  group('routing', () {
+    test('turn payloads carry session and connection for tap routing', () async {
+      await service.ensureInitialized();
+      await service.showTurnCompleted(
+        title: 'Ready',
+        turnSummary: 'Roadmap: done',
+        turnId: 'turn-7',
+        sessionId: 'notif-session',
+        connectionId: 'conn-1',
+      );
+
+      final payload =
+          jsonDecode(sink.shown.single.payload) as Map<String, dynamic>;
+      expect(payload, {
+        'turnId': 'turn-7',
+        'sessionId': 'notif-session',
+        'connectionId': 'conn-1',
+      });
+    });
+
+    test('a cold-start launch response is consumed exactly once', () async {
+      sink.initialLaunchResponse = const NotificationResponse(
+        id: 1,
+        actionId: 'approve',
+        payload: '{"sessionId":"s","connectionId":"c","requestId":"r"}',
+        notificationResponseType: NotificationResponseType.selectedNotification,
+      );
+
+      final first = await service.takeInitialNotificationResponse();
+      expect(first?.actionId, 'approve');
+
+      final second = await service.takeInitialNotificationResponse();
+      expect(second, isNull);
+    });
+
+    test('routes parse JSON payloads into routing fields', () {
+      final route = NotificationRoute.fromResponse(
+        const NotificationResponse(
+        id: 1,
+          actionId: 'reject',
+          payload: '{"sessionId":"s1","connectionId":"c1","requestId":"r1"}',
+        notificationResponseType: NotificationResponseType.selectedNotification,
+      ),
+      );
+
+      expect(route.sessionId, 's1');
+      expect(route.connectionId, 'c1');
+      expect(route.requestId, 'r1');
+      expect(route.actionId, 'reject');
+      expect(route.approvalChoice, 'deny');
+    });
+
+    test('legacy plain-string payloads parse with no routing fields', () {
+      final route = NotificationRoute.fromResponse(
+        const NotificationResponse(
+          id: 1,
+          payload: 'turn-42',
+          notificationResponseType: NotificationResponseType.selectedNotification,
+        ),
+      );
+
+      expect(route.sessionId, isNull);
+      expect(route.connectionId, isNull);
+      expect(route.requestId, isNull);
+      expect(route.approvalChoice, isNull);
+    });
+
+    test('only approve and reject map to approval choices', () {
+      String? choiceFor(String? actionId) => NotificationRoute.fromResponse(
+        NotificationResponse(
+          id: 1,
+          actionId: actionId,
+          notificationResponseType: NotificationResponseType.selectedNotification,
+        ),
+      ).approvalChoice;
+
+      expect(choiceFor('approve'), 'once');
+      expect(choiceFor('reject'), 'deny');
+      expect(choiceFor('other'), isNull);
+      expect(choiceFor(null), isNull);
     });
   });
 }

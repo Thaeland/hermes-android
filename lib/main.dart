@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -201,12 +200,23 @@ class HermesApp extends StatefulWidget {
 class HermesAppState extends State<HermesApp> {
   late final GatewayTurnApplicationController _turnApplicationController;
 
+  /// Pushes from the app root (notification taps) need a navigator below the
+  /// MaterialApp this state builds.
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+
   @override
   void initState() {
     super.initState();
     _turnApplicationController = GatewayTurnApplicationController();
     unawaited(NotificationPrefsStore.load());
     notificationResponseHandler = _handleNotificationResponse;
+    // A notification that launched a terminated app carries its tap/action in
+    // the platform's launch details; route it once the first frame is up.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final initial = await TurnNotificationService.shared
+          .takeInitialNotificationResponse();
+      if (initial != null && mounted) _handleNotificationResponse(initial);
+    });
   }
 
   /// The connection a notification response should act on: the last one the
@@ -224,29 +234,19 @@ class HermesAppState extends State<HermesApp> {
 
   /// Routes a notification tap (or one of its action buttons) into the app.
   ///
-  /// Approval actions answer through the turn controller — the same path the
-  /// in-app dialog uses — and every response lands the user on the session the
-  /// notification was about, falling back to the workspace.
+  /// Approval actions answer through the turn controller when it owns the
+  /// request; otherwise the action is left pending for the chat that does, and
+  /// every response lands the user on the session the notification was about.
   void _handleNotificationResponse(NotificationResponse response) {
-    final connection = _notificationConnection();
+    final route = NotificationRoute.fromResponse(response);
+    final connection =
+        _connectionById(route.connectionId) ?? _notificationConnection();
     if (connection == null) return;
 
-    Map<String, dynamic> payload = const {};
-    final rawPayload = response.payload;
-    if (rawPayload != null && rawPayload.isNotEmpty) {
-      try {
-        final decoded = jsonDecode(rawPayload);
-        if (decoded is Map<String, dynamic>) payload = decoded;
-      } catch (_) {
-        // Plain-string payloads (older turns) carry no routing fields.
-      }
-    }
-
-    final sessionId = payload['sessionId']?.toString();
-    final requestId = payload['requestId']?.toString();
-    final actionId = response.actionId;
-    if (actionId != null && sessionId != null && requestId != null) {
-      final choice = actionId == 'approve' ? 'once' : 'deny';
+    final choice = route.approvalChoice;
+    final sessionId = route.sessionId;
+    final requestId = route.requestId;
+    if (choice != null && sessionId != null && requestId != null) {
       try {
         final session = _turnApplicationController.sessionFor(connection);
         unawaited(
@@ -256,7 +256,19 @@ class HermesAppState extends State<HermesApp> {
                 choice: choice,
                 requestId: requestId,
               )
-              .catchError((_) => false),
+              .then((answered) {
+                // The request belongs to an open chat's route-local gateway:
+                // leave it pending so that screen answers it normally.
+                if (!answered) {
+                  pendingNotificationApproval.value =
+                      PendingNotificationApproval(
+                        sessionId: sessionId,
+                        requestId: requestId,
+                        choice: choice,
+                      );
+                }
+              })
+              .catchError((_) {}),
         );
       } catch (_) {
         // A closed controller cannot answer; the in-app dialog still can.
@@ -264,6 +276,15 @@ class HermesAppState extends State<HermesApp> {
     }
 
     unawaited(_openNotificationSession(connection, sessionId));
+  }
+
+  /// The connection a payload names, or null when it no longer exists.
+  SavedConnection? _connectionById(String? id) {
+    if (id == null || id.isEmpty) return null;
+    return widget.connManager
+        .getConnections()
+        .where((connection) => connection.id == id)
+        .firstOrNull;
   }
 
   /// Opens the chat a notification was about; falls back to the workspace when
@@ -279,6 +300,7 @@ class HermesAppState extends State<HermesApp> {
         client = ApiClient(
           baseUrl: connection.baseUrl,
           apiKey: connection.apiKey,
+          pathPrefix: connection.gatewayPrefix ?? '',
         );
         final sessions = await client.getSessions();
         session = sessions.where((item) => item.id == sessionId).firstOrNull;
@@ -294,8 +316,7 @@ class HermesAppState extends State<HermesApp> {
       connection.id,
     );
     if (session == null) {
-      Navigator.push(
-        context,
+      _navigatorKey.currentState?.push(
         MaterialPageRoute(
           builder: (_) => WorkspaceScreen(
             connection: connection,
@@ -305,8 +326,7 @@ class HermesAppState extends State<HermesApp> {
       );
       return;
     }
-    Navigator.push(
-      context,
+    _navigatorKey.currentState?.push(
       MaterialPageRoute(
         builder: (_) => ChatScreen(connection: connection, session: session!),
       ),
@@ -321,6 +341,7 @@ class HermesAppState extends State<HermesApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: _navigatorKey,
       onGenerateTitle: (context) => context.l10n.hermes_agent,
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: preferredSupportedLocales(),

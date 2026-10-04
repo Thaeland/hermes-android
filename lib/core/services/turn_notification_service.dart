@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'notification_prefs.dart';
@@ -75,6 +78,10 @@ abstract class TurnNotificationSink {
   /// is already allowed.
   Future<bool?> requestPermission();
 
+  /// The tap or action that launched a terminated app, when the platform
+  /// reports one. Consumed once by the service so a cold start still routes.
+  Future<NotificationResponse?> takeInitialLaunchResponse();
+
   Future<void> show(TurnNotification notification);
 
   Future<void> cancel(int id);
@@ -132,6 +139,13 @@ class PluginTurnNotificationSink implements TurnNotificationSink {
 
     // No platform implementation resolved: nothing gates posting here.
     return null;
+  }
+
+  @override
+  Future<NotificationResponse?> takeInitialLaunchResponse() async {
+    final details = await _plugin.getNotificationAppLaunchDetails();
+    if (details?.didNotificationLaunchApp != true) return null;
+    return details?.notificationResponse;
   }
 
   @override
@@ -302,10 +316,14 @@ class TurnNotificationService {
   ///
   /// [turnSummary] is a short description (e.g. session title or prompt
   /// excerpt); [turnId] ensures the notification is stable and replaceable.
+  /// [sessionId]/[connectionId] are carried in the payload so a tap can route
+  /// back to the originating chat, even across multiple connections.
   Future<void> showTurnCompleted({
     required String title,
     required String turnSummary,
     required String turnId,
+    String? sessionId,
+    String? connectionId,
   }) async {
     if (!_initialized) return;
 
@@ -314,7 +332,11 @@ class TurnNotificationService {
         id: notificationIdFor(turnId),
         title: title,
         body: turnSummary,
-        payload: turnId,
+        payload: _turnPayload(
+          turnId: turnId,
+          sessionId: sessionId,
+          connectionId: connectionId,
+        ),
         channel: turnChannel,
       ),
     );
@@ -332,6 +354,8 @@ class TurnNotificationService {
     required String title,
     required String turnSummary,
     required String turnId,
+    String? sessionId,
+    String? connectionId,
   }) async {
     if (!_initialized) return;
 
@@ -340,11 +364,28 @@ class TurnNotificationService {
         id: notificationIdFor(turnId),
         title: title,
         body: turnSummary,
-        payload: turnId,
+        payload: _turnPayload(
+          turnId: turnId,
+          sessionId: sessionId,
+          connectionId: connectionId,
+        ),
         channel: turnChannel,
       ),
     );
   }
+
+  /// JSON payload so a tap can route back to the originating chat, even
+  /// across multiple connections.
+  static String _turnPayload({
+    required String turnId,
+    String? sessionId,
+    String? connectionId,
+  }) => jsonEncode({
+    'turnId': turnId,
+    if (sessionId != null && sessionId.isNotEmpty) 'sessionId': sessionId,
+    if (connectionId != null && connectionId.isNotEmpty)
+      'connectionId': connectionId,
+  });
 
   // De-dupe replayed events for the same kind+session. Self-evicting: entries
   // older than the window are pruned on every dispatch, so the map can't grow.
@@ -419,6 +460,20 @@ class TurnNotificationService {
     }
   }
 
+  bool _initialLaunchConsumed = false;
+
+  /// The tap or action that launched a terminated app, if any — consumed once
+  /// so a cold start still routes to the originating chat.
+  Future<NotificationResponse?> takeInitialNotificationResponse() async {
+    if (_initialLaunchConsumed) return null;
+    _initialLaunchConsumed = true;
+    try {
+      return await _sink.takeInitialLaunchResponse();
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Removes all Hermes turn notifications.
   Future<void> cancelAll() async {
     if (!_initialized) return;
@@ -432,3 +487,75 @@ class TurnNotificationService {
   /// replaces its own notification instead of stacking duplicates.
   static int notificationIdFor(String turnId) => turnId.hashCode & 0x7fffffff;
 }
+
+/// A notification tap or action, parsed from the platform response payload.
+///
+/// Current payloads are JSON (`sessionId`/`connectionId`/`requestId`); older
+/// turn notifications carried a plain turn id, which parses to a route with
+/// no routing fields.
+@immutable
+class NotificationRoute {
+  final String? sessionId;
+  final String? connectionId;
+  final String? requestId;
+  final String? actionId;
+
+  const NotificationRoute({
+    this.sessionId,
+    this.connectionId,
+    this.requestId,
+    this.actionId,
+  });
+
+  static NotificationRoute fromResponse(NotificationResponse response) {
+    String? sessionId;
+    String? connectionId;
+    String? requestId;
+    final raw = response.payload;
+    if (raw != null && raw.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map<String, dynamic>) {
+          sessionId = decoded['sessionId']?.toString();
+          connectionId = decoded['connectionId']?.toString();
+          requestId = decoded['requestId']?.toString();
+        }
+      } catch (_) {
+        // A plain-string payload (older turns) carries only the turn id.
+      }
+    }
+    return NotificationRoute(
+      sessionId: sessionId,
+      connectionId: connectionId,
+      requestId: requestId,
+      actionId: response.actionId,
+    );
+  }
+
+  /// The approval choice an action press maps to, or null for a body tap.
+  String? get approvalChoice => switch (actionId) {
+    'approve' => 'once',
+    'reject' => 'deny',
+    _ => null,
+  };
+}
+
+/// An approval a notification action could not answer directly — the request
+/// belongs to an open chat's route-local gateway. That chat screen consumes
+/// this and responds through its own gateway.
+@immutable
+class PendingNotificationApproval {
+  final String sessionId;
+  final String requestId;
+  final String choice;
+
+  const PendingNotificationApproval({
+    required this.sessionId,
+    required this.requestId,
+    required this.choice,
+  });
+}
+
+/// The single pending approval a notification action left behind, if any.
+final ValueNotifier<PendingNotificationApproval?> pendingNotificationApproval =
+    ValueNotifier(null);

@@ -96,10 +96,10 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get approval_needed_description =>
-      'A command is waiting for your approval or denial.';
+      'Um comando aguarda sua aprovação ou recusa.';
 
   @override
-  String get approve => 'Approve';
+  String get approve => 'Aprovar';
 
   @override
   String get archive => 'Arquivar';
@@ -174,11 +174,11 @@ class AppLocalizationsPt extends AppLocalizations {
       'Recuperação em segundo plano indisponível — transporte legado';
 
   @override
-  String get background_task_completed => 'Background task complete';
+  String get background_task_completed => 'Tarefa em segundo plano concluída';
 
   @override
   String get background_task_completed_description =>
-      'A background terminal command finished.';
+      'Um comando de terminal em segundo plano foi concluído.';
 
   @override
   String get backup_restore => 'Backup e restauração';
@@ -498,11 +498,11 @@ class AppLocalizationsPt extends AppLocalizations {
   String get create_branch => 'Criar ramificação';
 
   @override
-  String get credit_notifications => 'Credit notifications';
+  String get credit_notifications => 'Notificações de crédito';
 
   @override
   String get credit_notifications_description =>
-      'Credit usage was stopped or restored.';
+      'O uso de crédito foi interrompido ou restaurado.';
 
   @override
   String get cron => 'Cron';
@@ -663,11 +663,11 @@ class AppLocalizationsPt extends AppLocalizations {
   String get edit_and_resend => 'Editar e reenviar';
 
   @override
-  String get enable_notifications => 'Enable notifications';
+  String get enable_notifications => 'Ativar notificações';
 
   @override
   String get enable_notifications_description =>
-      'Turning this off disables every notification below.';
+      'Desativar isto desativa todas as notificações abaixo.';
 
   @override
   String get enables_file_attachments_through_the_desktop_remote_gateway =>
@@ -874,11 +874,11 @@ class AppLocalizationsPt extends AppLocalizations {
   String get inbox_is_clear => 'Caixa de entrada vazia';
 
   @override
-  String get input_needed => 'Input needed';
+  String get input_needed => 'Entrada necessária';
 
   @override
   String get input_needed_description =>
-      'Hermes asked a question or needs a password or secret.';
+      'O Hermes fez uma pergunta ou precisa de uma senha ou segredo.';
 
   @override
   String get insert_a_remote_file_reference =>
@@ -1191,11 +1191,11 @@ class AppLocalizationsPt extends AppLocalizations {
   String get nothing_to_migrate => 'Nada para migrar';
 
   @override
-  String get notifications => 'Notifications';
+  String get notifications => 'Notificações';
 
   @override
   String get notifications_permission_denied =>
-      'Notifications are blocked at the OS level. Enable them for this app in Android settings.';
+      'As notificações estão bloqueadas pelo sistema. Ative-as para este app nas configurações do Android.';
 
   @override
   String get off_no_thinking => 'Desativado (sem raciocínio)';
@@ -1255,11 +1255,11 @@ class AppLocalizationsPt extends AppLocalizations {
   String get pin_batch_and_undo => 'Fixar, em lote e desfazer';
 
   @override
-  String get plugin_notifications => 'Plugin notifications';
+  String get plugin_notifications => 'Notificações de plugins';
 
   @override
   String get plugin_notifications_description =>
-      'The gateway sent a notice while the app was in the background.';
+      'O gateway enviou um aviso enquanto o app estava em segundo plano.';
 
   @override
   String get port => 'Porta';
@@ -1437,11 +1437,11 @@ class AppLocalizationsPt extends AppLocalizations {
       'Resposta fechada localmente; nenhum turno ativo do Gateway foi encontrado.';
 
   @override
-  String get response_complete => 'Response complete';
+  String get response_complete => 'Resposta concluída';
 
   @override
   String get response_complete_description =>
-      'A turn completed while the app was in the background.';
+      'Um turno foi concluído enquanto o app estava em segundo plano.';
 
   @override
   String get response_ready => 'Resposta pronta';
@@ -1573,7 +1573,7 @@ class AppLocalizationsPt extends AppLocalizations {
   String get send_message => 'Enviar mensagem';
 
   @override
-  String get send_test_notification => 'Send test notification';
+  String get send_test_notification => 'Enviar notificação de teste';
 
   @override
   String get session_sources => 'Fontes de sessões';
@@ -1715,17 +1715,17 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get test_notification_body =>
-      'If you can see this, native notifications are working.';
+      'Se você está vendo isto, as notificações estão funcionando.';
 
   @override
-  String get test_notification_sent => 'Test notification sent.';
+  String get test_notification_sent => 'Notificação de teste enviada.';
 
   @override
-  String get test_notification_title => 'Hermes notification test';
+  String get test_notification_title => 'Teste de notificação do Hermes';
 
   @override
   String get test_notification_unsupported =>
-      'Could not send the notification — check that the OS allows notifications.';
+      'Não foi possível enviar a notificação — verifique se o sistema permite notificações.';
 
   @override
   String get text_size => 'Tamanho do texto';
@@ -1871,11 +1871,11 @@ class AppLocalizationsPt extends AppLocalizations {
   String get turn_completed => 'Turno concluído';
 
   @override
-  String get turn_failed => 'Turn failed';
+  String get turn_failed => 'Turno falhou';
 
   @override
   String get turn_failed_description =>
-      'A background turn ended with an error.';
+      'Um turno em segundo plano terminou com erro.';
 
   @override
   String get turn_recovery_failed => 'Falha na recuperação do turno';
