@@ -15,6 +15,7 @@ Future<void> _pumpShell(
   Size size = const Size(360, 720),
   double textScale = 1.0,
   Brightness brightness = Brightness.dark,
+  Locale? locale,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1.0;
@@ -24,6 +25,7 @@ Future<void> _pumpShell(
     MaterialApp(
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
+      locale: locale,
       theme: hermesTheme(brightness),
       home: Builder(
         builder: (context) => MediaQuery(
@@ -222,6 +224,37 @@ void main() {
       expect(tester.takeException(), isNull);
       expect(find.text('pane:home'), findsOneWidget);
     });
+
+    testWidgets(
+      'Japanese destination labels stay on one line at the narrowest width '
+      'and the app text-size preferences',
+      (tester) async {
+        // ja ships the widest bar labels. 320dp is the narrowest phone the
+        // shell supports, and 1.30x is the largest app text-size preference
+        // (on top of whatever the system scaler adds).
+        await _pumpShell(
+          tester,
+          size: const Size(320, 640),
+          textScale: 1.3,
+          locale: const Locale('ja'),
+        );
+
+        for (final label in const [
+          'ホーム',
+          'チャット',
+          'プロジェクト',
+          '活動',
+          'その他',
+        ]) {
+          final labelSize = tester.getSize(find.text(label));
+          expect(
+            labelSize.height,
+            lessThan(20),
+            reason: '$label must render as a single line',
+          );
+        }
+      },
+    );
 
     testWidgets('renders in the light theme', (tester) async {
       await _pumpShell(tester, brightness: Brightness.light);

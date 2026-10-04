@@ -272,6 +272,7 @@
   "moved_to": "Перемещено в {label}",
   "name": "Имя",
   "name_prompt_and_schedule_are_required": "Имя, промпт и расписание обязательны",
+  "nav_activity": "Активность",
   "needs_a_correction_aware_filing_contract_in_the_hermes_gateway": "Требуется контракт сортировки с учётом исправлений в шлюзе Hermes.",
   "needs_a_reachable_hermes_dashboard_check_the_host_port_and": "Требуется доступная панель управления Hermes. Проверьте хост, порт и учётные данные этого подключения.",
   "needs_a_server_authoritative_assets_index_in_the_hermes_gateway": "Требуется серверный авторитетный индекс ресурсов в шлюзе Hermes.",

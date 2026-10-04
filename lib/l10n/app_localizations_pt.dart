@@ -997,6 +997,9 @@ class AppLocalizationsPt extends AppLocalizations {
       'Nome, prompt e agendamento são obrigatórios';
 
   @override
+  String get nav_activity => 'Activity';
+
+  @override
   String get needs_a_correction_aware_filing_contract_in_the_hermes_gateway =>
       'Requer um contrato de arquivamento com correção no Gateway do Hermes.';
 
@@ -3338,6 +3341,9 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   @override
   String get name_prompt_and_schedule_are_required =>
       'Nome, prompt e agendamento são obrigatórios';
+
+  @override
+  String get nav_activity => 'Atividade';
 
   @override
   String get needs_a_correction_aware_filing_contract_in_the_hermes_gateway =>

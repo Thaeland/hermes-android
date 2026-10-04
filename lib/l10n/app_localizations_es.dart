@@ -997,6 +997,9 @@ class AppLocalizationsEs extends AppLocalizations {
       'El nombre, el prompt y la programación son obligatorios';
 
   @override
+  String get nav_activity => 'Actividad';
+
+  @override
   String get needs_a_correction_aware_filing_contract_in_the_hermes_gateway =>
       'Requiere un contrato de archivado con corrección de errores en el Gateway de Hermes.';
 

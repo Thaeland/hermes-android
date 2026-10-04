@@ -963,6 +963,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get name_prompt_and_schedule_are_required => '名称、提示词和计划均为必填项';
 
   @override
+  String get nav_activity => 'Activity';
+
+  @override
   String get needs_a_correction_aware_filing_contract_in_the_hermes_gateway =>
       'Hermes 网关中需要具备支持纠错感知的文件归档契约。';
 
@@ -3233,6 +3236,9 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get name_prompt_and_schedule_are_required => '名称、提示词和计划均为必填项';
+
+  @override
+  String get nav_activity => '活动';
 
   @override
   String get needs_a_correction_aware_filing_contract_in_the_hermes_gateway =>

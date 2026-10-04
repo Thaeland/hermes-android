@@ -989,6 +989,9 @@ class AppLocalizationsRu extends AppLocalizations {
       'Имя, промпт и расписание обязательны';
 
   @override
+  String get nav_activity => 'Активность';
+
+  @override
   String get needs_a_correction_aware_filing_contract_in_the_hermes_gateway =>
       'Требуется контракт сортировки с учётом исправлений в шлюзе Hermes.';
 

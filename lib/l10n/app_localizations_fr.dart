@@ -1000,6 +1000,9 @@ class AppLocalizationsFr extends AppLocalizations {
       'Le nom, le prompt et la planification sont obligatoires';
 
   @override
+  String get nav_activity => 'Activité';
+
+  @override
   String get needs_a_correction_aware_filing_contract_in_the_hermes_gateway =>
       'Nécessite un contrat de classement tenant compte des corrections dans la passerelle Hermes.';
 

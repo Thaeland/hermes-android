@@ -272,6 +272,7 @@
   "moved_to": "{label}に移動しました",
   "name": "名前",
   "name_prompt_and_schedule_are_required": "名前・プロンプト・スケジュールは必須です",
+  "nav_activity": "活動",
   "needs_a_correction_aware_filing_contract_in_the_hermes_gateway": "Hermesゲートウェイに訂正対応の仕分けコントラクトが必要です。",
   "needs_a_reachable_hermes_dashboard_check_the_host_port_and": "到達可能なHermesダッシュボードが必要です。この接続のホスト・ポート・認証情報を確認してください。",
   "needs_a_server_authoritative_assets_index_in_the_hermes_gateway": "Hermesゲートウェイにサーバー権威のアセットインデックスが必要です。",

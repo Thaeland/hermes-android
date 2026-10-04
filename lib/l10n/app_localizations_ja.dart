@@ -969,6 +969,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get name_prompt_and_schedule_are_required => '名前・プロンプト・スケジュールは必須です';
 
   @override
+  String get nav_activity => '活動';
+
+  @override
   String get needs_a_correction_aware_filing_contract_in_the_hermes_gateway =>
       'Hermesゲートウェイに訂正対応の仕分けコントラクトが必要です。';
 

@@ -1756,6 +1756,12 @@ abstract class AppLocalizations {
   /// **'Name, prompt, and schedule are required'**
   String get name_prompt_and_schedule_are_required;
 
+  /// No description provided for @nav_activity.
+  ///
+  /// In en, this message translates to:
+  /// **'Activity'**
+  String get nav_activity;
+
   /// No description provided for @needs_a_correction_aware_filing_contract_in_the_hermes_gateway.
   ///
   /// In en, this message translates to:

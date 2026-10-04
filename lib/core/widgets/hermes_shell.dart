@@ -34,7 +34,7 @@ enum HermesDestination {
       HermesDestination.home => l10n.nav_home,
       HermesDestination.chats => l10n.chats,
       HermesDestination.projects => l10n.projects,
-      HermesDestination.activity => l10n.activity,
+      HermesDestination.activity => l10n.nav_activity,
       HermesDestination.more => l10n.nav_more,
     };
   }
@@ -200,20 +200,40 @@ class _HermesShellState extends State<HermesShell> {
       backgroundColor: tokens.surface,
       body: pane,
       floatingActionButton: widget.floatingActionButton,
-      bottomNavigationBar: NavigationBar(
-        backgroundColor: tokens.raised,
-        indicatorColor: tokens.accent.withValues(alpha: 0.18),
-        selectedIndex: _current.index,
-        onDestinationSelected: (index) =>
-            _select(HermesDestination.values[index]),
-        destinations: [
-          for (final destination in HermesDestination.values)
-            NavigationDestination(
-              icon: _icon(destination, selected: false),
-              selectedIcon: _icon(destination, selected: true),
-              label: destination.label(context.l10n),
-            ),
-        ],
+      // The bar keeps its labels on one line by opting out of text scaling:
+      // at the app's 1.15x/1.30x text-size preferences (on top of the system
+      // accessibility scaler) the longest destination labels would otherwise
+      // wrap again. Narrow phones get one size down so the widest locale
+      // labels still fit their destination. Pane content still honours the
+      // size preference.
+      bottomNavigationBar: MediaQuery.withNoTextScaling(
+        child: NavigationBarTheme(
+          data: NavigationBarThemeData(
+            labelTextStyle: WidgetStateProperty.resolveWith((states) {
+              final base = Theme.of(
+                context,
+              ).navigationBarTheme.labelTextStyle?.resolve(states);
+              return (base ?? const TextStyle()).copyWith(
+                fontSize: MediaQuery.sizeOf(context).width < 360 ? 10 : 11,
+              );
+            }),
+          ),
+          child: NavigationBar(
+            backgroundColor: tokens.raised,
+            indicatorColor: tokens.accent.withValues(alpha: 0.18),
+            selectedIndex: _current.index,
+            onDestinationSelected: (index) =>
+                _select(HermesDestination.values[index]),
+            destinations: [
+              for (final destination in HermesDestination.values)
+                NavigationDestination(
+                  icon: _icon(destination, selected: false),
+                  selectedIcon: _icon(destination, selected: true),
+                  label: destination.label(context.l10n),
+                ),
+            ],
+          ),
+        ),
       ),
     );
   }
