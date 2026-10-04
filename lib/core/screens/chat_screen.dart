@@ -4110,6 +4110,43 @@ class MessageBubble extends StatelessWidget {
       );
   }
 
+  /// Opens the message in a selection-enabled dialog so a single sentence can
+  /// be copied without taking the whole message. The rendering matches the
+  /// bubble; the text is selectable with the platform handles, which keeps the
+  /// long-press actions on the bubble itself untouched.
+  Future<void> _showSelectTextDialog(BuildContext context) async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) {
+        // The dialog renders on the dialog surface, not on a bubble: use the
+        // prose colours with the dialog's own onSurface. The user-bubble
+        // foreground is hardcoded for the gold bubble and would be unreadable
+        // on the dark dialog surface in dark mode.
+        final dialogTheme = Theme.of(dialogContext);
+        return AlertDialog(
+          title: Text(context.l10n.select_text),
+          content: SingleChildScrollView(
+            child: MarkdownBody(
+              data: content,
+              selectable: true,
+              styleSheet: _messageStyleSheet(
+                dialogTheme,
+                isUser: false,
+                assistantTextColor: dialogTheme.colorScheme.onSurface,
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(context.l10n.close),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
   MarkdownStyleSheet _messageStyleSheet(
     ThemeData theme, {
     required bool isUser,
@@ -4203,6 +4240,16 @@ class MessageBubble extends StatelessWidget {
                 onTap: () {
                   Navigator.of(sheetContext).pop();
                   unawaited(_copyMessage(context));
+                },
+              ),
+              _actionTile(
+                sheetContext,
+                label: context.l10n.select_text,
+                tooltip: context.l10n.select_text,
+                icon: Icons.select_all,
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  unawaited(_showSelectTextDialog(context));
                 },
               ),
               if (onReadAloud != null)

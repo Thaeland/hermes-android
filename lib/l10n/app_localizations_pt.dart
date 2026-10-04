@@ -1506,6 +1506,9 @@ class AppLocalizationsPt extends AppLocalizations {
       'Selecione uma ou mais opções e continue.';
 
   @override
+  String get select_text => 'Selecionar texto';
+
+  @override
   String get send => 'Enviar';
 
   @override
@@ -3847,6 +3850,9 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   @override
   String get select_one_or_more_options_then_continue =>
       'Selecione uma ou mais opções e continue.';
+
+  @override
+  String get select_text => 'Selecionar texto';
 
   @override
   String get send => 'Enviar';

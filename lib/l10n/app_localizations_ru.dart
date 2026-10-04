@@ -1499,6 +1499,9 @@ class AppLocalizationsRu extends AppLocalizations {
       'Выберите один или несколько вариантов и продолжите.';
 
   @override
+  String get select_text => 'Выделить текст';
+
+  @override
   String get send => 'Отправить';
 
   @override

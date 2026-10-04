@@ -1510,6 +1510,9 @@ class AppLocalizationsFr extends AppLocalizations {
       'Sélectionnez une ou plusieurs options, puis continuez.';
 
   @override
+  String get select_text => 'Sélectionner le texte';
+
+  @override
   String get send => 'Envoyer';
 
   @override
