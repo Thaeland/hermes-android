@@ -4,6 +4,19 @@ All notable changes to this project are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Release notes for
 versions prior to 1.0.7 are in the **What's new** sections of the [README](README.md).
 
+## [2.1.13] - 2026-10-05
+
+### Added
+
+- Long-pressing a chat message now opens a selectable-text dialog so any part
+  of the message can be copied, with readable light and dark themes and
+  complete localisation across all shipped languages (PR #127).
+
+### Thanks
+
+- @maebahesioru for the selectable-message-text implementation, localisation,
+  dark-theme handling, and focused regression coverage in PR #127.
+
 ## [2.1.12] - 2026-10-04
 
 ### Added
