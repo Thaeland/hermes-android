@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -9,11 +10,15 @@ import 'core/services/config_backup_io.dart';
 import 'core/services/config_backup_service.dart';
 import 'core/services/connection_manager.dart';
 import 'core/services/gateway_turn_application_controller.dart';
+import 'core/services/notification_prefs.dart';
 import 'core/services/text_size_preference.dart';
+import 'core/services/turn_notification_service.dart';
+import 'core/screens/chat_screen.dart';
 import 'core/screens/workspace_screen.dart';
 import 'core/theme/hermes_theme.dart';
 import 'core/utils/responsive.dart';
 import 'core/widgets/config_backup_card.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
 void main() async {
@@ -200,6 +205,112 @@ class HermesAppState extends State<HermesApp> {
   void initState() {
     super.initState();
     _turnApplicationController = GatewayTurnApplicationController();
+    unawaited(NotificationPrefsStore.load());
+    notificationResponseHandler = _handleNotificationResponse;
+  }
+
+  /// The connection a notification response should act on: the last one the
+  /// user opened, or the only configured one.
+  SavedConnection? _notificationConnection() {
+    final connections = widget.connManager.getConnections();
+    final lastId = widget.connManager.prefs.getString(
+      HomeScreenState._lastConnectionKey,
+    );
+    final preferred = connections
+        .where((connection) => connection.id == lastId)
+        .firstOrNull;
+    return preferred ?? (connections.length == 1 ? connections.single : null);
+  }
+
+  /// Routes a notification tap (or one of its action buttons) into the app.
+  ///
+  /// Approval actions answer through the turn controller — the same path the
+  /// in-app dialog uses — and every response lands the user on the session the
+  /// notification was about, falling back to the workspace.
+  void _handleNotificationResponse(NotificationResponse response) {
+    final connection = _notificationConnection();
+    if (connection == null) return;
+
+    Map<String, dynamic> payload = const {};
+    final rawPayload = response.payload;
+    if (rawPayload != null && rawPayload.isNotEmpty) {
+      try {
+        final decoded = jsonDecode(rawPayload);
+        if (decoded is Map<String, dynamic>) payload = decoded;
+      } catch (_) {
+        // Plain-string payloads (older turns) carry no routing fields.
+      }
+    }
+
+    final sessionId = payload['sessionId']?.toString();
+    final requestId = payload['requestId']?.toString();
+    final actionId = response.actionId;
+    if (actionId != null && sessionId != null && requestId != null) {
+      final choice = actionId == 'approve' ? 'once' : 'deny';
+      try {
+        final session = _turnApplicationController.sessionFor(connection);
+        unawaited(
+          session
+              .tryRespondToApproval(
+                sessionId: sessionId,
+                choice: choice,
+                requestId: requestId,
+              )
+              .catchError((_) => false),
+        );
+      } catch (_) {
+        // A closed controller cannot answer; the in-app dialog still can.
+      }
+    }
+
+    unawaited(_openNotificationSession(connection, sessionId));
+  }
+
+  /// Opens the chat a notification was about; falls back to the workspace when
+  /// the session cannot be fetched (deleted, or outside the recent list).
+  Future<void> _openNotificationSession(
+    SavedConnection connection,
+    String? sessionId,
+  ) async {
+    Session? session;
+    if (sessionId != null && sessionId.isNotEmpty) {
+      ApiClient? client;
+      try {
+        client = ApiClient(
+          baseUrl: connection.baseUrl,
+          apiKey: connection.apiKey,
+        );
+        final sessions = await client.getSessions();
+        session = sessions.where((item) => item.id == sessionId).firstOrNull;
+      } catch (_) {
+        session = null;
+      } finally {
+        client?.close();
+      }
+    }
+    if (!mounted) return;
+    widget.connManager.prefs.setString(
+      HomeScreenState._lastConnectionKey,
+      connection.id,
+    );
+    if (session == null) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => WorkspaceScreen(
+            connection: connection,
+            turnApplicationController: _turnApplicationController,
+          ),
+        ),
+      );
+      return;
+    }
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChatScreen(connection: connection, session: session!),
+      ),
+    );
   }
 
   Future<void> setTextSizePreference(TextSizePreference preference) async {

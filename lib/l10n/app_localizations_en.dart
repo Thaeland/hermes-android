@@ -94,6 +94,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get approval_needed => 'Approval needed';
 
   @override
+  String get approval_needed_description =>
+      'A command is waiting for your approval or denial.';
+
+  @override
+  String get approve => 'Approve';
+
+  @override
   String get archive => 'Archive';
 
   @override
@@ -162,6 +169,13 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get background_recovery_unavailable_legacy_transport =>
       'Background recovery unavailable — legacy transport';
+
+  @override
+  String get background_task_completed => 'Background task complete';
+
+  @override
+  String get background_task_completed_description =>
+      'A background terminal command finished.';
 
   @override
   String get backup_restore => 'Backup & restore';
@@ -476,6 +490,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get create_branch => 'Create branch';
 
   @override
+  String get credit_notifications => 'Credit notifications';
+
+  @override
+  String get credit_notifications_description =>
+      'Credit usage was stopped or restored.';
+
+  @override
   String get cron => 'Cron';
 
   @override
@@ -630,6 +651,13 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get edit_and_resend => 'Edit and resend';
+
+  @override
+  String get enable_notifications => 'Enable notifications';
+
+  @override
+  String get enable_notifications_description =>
+      'Turning this off disables every notification below.';
 
   @override
   String get enables_file_attachments_through_the_desktop_remote_gateway =>
@@ -832,6 +860,13 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get inbox_is_clear => 'Inbox is clear';
+
+  @override
+  String get input_needed => 'Input needed';
+
+  @override
+  String get input_needed_description =>
+      'Hermes asked a question or needs a password or secret.';
 
   @override
   String get insert_a_remote_file_reference =>
@@ -1142,6 +1177,13 @@ class AppLocalizationsEn extends AppLocalizations {
   String get nothing_to_migrate => 'Nothing to migrate';
 
   @override
+  String get notifications => 'Notifications';
+
+  @override
+  String get notifications_permission_denied =>
+      'Notifications are blocked at the OS level. Enable them for this app in Android settings.';
+
+  @override
   String get off_no_thinking => 'Off (no thinking)';
 
   @override
@@ -1197,6 +1239,13 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get pin_batch_and_undo => 'Pin, batch and undo';
+
+  @override
+  String get plugin_notifications => 'Plugin notifications';
+
+  @override
+  String get plugin_notifications_description =>
+      'The gateway sent a notice while the app was in the background.';
 
   @override
   String get port => 'Port';
@@ -1374,6 +1423,13 @@ class AppLocalizationsEn extends AppLocalizations {
       'Response closed locally; no active gateway turn was found.';
 
   @override
+  String get response_complete => 'Response complete';
+
+  @override
+  String get response_complete_description =>
+      'A turn completed while the app was in the background.';
+
+  @override
   String get response_ready => 'Response ready';
 
   @override
@@ -1500,6 +1556,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get send_message => 'Send message';
+
+  @override
+  String get send_test_notification => 'Send test notification';
 
   @override
   String get session_sources => 'Session Sources';
@@ -1638,6 +1697,20 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get terminal_sessions => 'Terminal sessions';
+
+  @override
+  String get test_notification_body =>
+      'If you can see this, native notifications are working.';
+
+  @override
+  String get test_notification_sent => 'Test notification sent.';
+
+  @override
+  String get test_notification_title => 'Hermes notification test';
+
+  @override
+  String get test_notification_unsupported =>
+      'Could not send the notification — check that the OS allows notifications.';
 
   @override
   String get text_size => 'Text size';
@@ -1780,6 +1853,13 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get turn_completed => 'Turn completed';
+
+  @override
+  String get turn_failed => 'Turn failed';
+
+  @override
+  String get turn_failed_description =>
+      'A background turn ended with an error.';
 
   @override
   String get turn_recovery_failed => 'Turn recovery failed';

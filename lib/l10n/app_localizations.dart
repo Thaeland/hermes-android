@@ -270,6 +270,18 @@ abstract class AppLocalizations {
   /// **'Approval needed'**
   String get approval_needed;
 
+  /// No description provided for @approval_needed_description.
+  ///
+  /// In en, this message translates to:
+  /// **'A command is waiting for your approval or denial.'**
+  String get approval_needed_description;
+
+  /// No description provided for @approve.
+  ///
+  /// In en, this message translates to:
+  /// **'Approve'**
+  String get approve;
+
   /// No description provided for @archive.
   ///
   /// In en, this message translates to:
@@ -389,6 +401,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Background recovery unavailable — legacy transport'**
   String get background_recovery_unavailable_legacy_transport;
+
+  /// No description provided for @background_task_completed.
+  ///
+  /// In en, this message translates to:
+  /// **'Background task complete'**
+  String get background_task_completed;
+
+  /// No description provided for @background_task_completed_description.
+  ///
+  /// In en, this message translates to:
+  /// **'A background terminal command finished.'**
+  String get background_task_completed_description;
 
   /// No description provided for @backup_restore.
   ///
@@ -891,6 +915,18 @@ abstract class AppLocalizations {
   /// **'Create branch'**
   String get create_branch;
 
+  /// No description provided for @credit_notifications.
+  ///
+  /// In en, this message translates to:
+  /// **'Credit notifications'**
+  String get credit_notifications;
+
+  /// No description provided for @credit_notifications_description.
+  ///
+  /// In en, this message translates to:
+  /// **'Credit usage was stopped or restored.'**
+  String get credit_notifications_description;
+
   /// No description provided for @cron.
   ///
   /// In en, this message translates to:
@@ -1156,6 +1192,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Edit and resend'**
   String get edit_and_resend;
+
+  /// No description provided for @enable_notifications.
+  ///
+  /// In en, this message translates to:
+  /// **'Enable notifications'**
+  String get enable_notifications;
+
+  /// No description provided for @enable_notifications_description.
+  ///
+  /// In en, this message translates to:
+  /// **'Turning this off disables every notification below.'**
+  String get enable_notifications_description;
 
   /// No description provided for @enables_file_attachments_through_the_desktop_remote_gateway.
   ///
@@ -1497,6 +1545,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Inbox is clear'**
   String get inbox_is_clear;
+
+  /// No description provided for @input_needed.
+  ///
+  /// In en, this message translates to:
+  /// **'Input needed'**
+  String get input_needed;
+
+  /// No description provided for @input_needed_description.
+  ///
+  /// In en, this message translates to:
+  /// **'Hermes asked a question or needs a password or secret.'**
+  String get input_needed_description;
 
   /// No description provided for @insert_a_remote_file_reference.
   ///
@@ -2026,6 +2086,18 @@ abstract class AppLocalizations {
   /// **'Nothing to migrate'**
   String get nothing_to_migrate;
 
+  /// No description provided for @notifications.
+  ///
+  /// In en, this message translates to:
+  /// **'Notifications'**
+  String get notifications;
+
+  /// No description provided for @notifications_permission_denied.
+  ///
+  /// In en, this message translates to:
+  /// **'Notifications are blocked at the OS level. Enable them for this app in Android settings.'**
+  String get notifications_permission_denied;
+
   /// No description provided for @off_no_thinking.
   ///
   /// In en, this message translates to:
@@ -2127,6 +2199,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Pin, batch and undo'**
   String get pin_batch_and_undo;
+
+  /// No description provided for @plugin_notifications.
+  ///
+  /// In en, this message translates to:
+  /// **'Plugin notifications'**
+  String get plugin_notifications;
+
+  /// No description provided for @plugin_notifications_description.
+  ///
+  /// In en, this message translates to:
+  /// **'The gateway sent a notice while the app was in the background.'**
+  String get plugin_notifications_description;
 
   /// No description provided for @port.
   ///
@@ -2426,6 +2510,18 @@ abstract class AppLocalizations {
   /// **'Response closed locally; no active gateway turn was found.'**
   String get response_closed_locally_no_active_gateway_turn_was_found;
 
+  /// No description provided for @response_complete.
+  ///
+  /// In en, this message translates to:
+  /// **'Response complete'**
+  String get response_complete;
+
+  /// No description provided for @response_complete_description.
+  ///
+  /// In en, this message translates to:
+  /// **'A turn completed while the app was in the background.'**
+  String get response_complete_description;
+
   /// No description provided for @response_ready.
   ///
   /// In en, this message translates to:
@@ -2647,6 +2743,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Send message'**
   String get send_message;
+
+  /// No description provided for @send_test_notification.
+  ///
+  /// In en, this message translates to:
+  /// **'Send test notification'**
+  String get send_test_notification;
 
   /// No description provided for @session_sources.
   ///
@@ -2894,6 +2996,30 @@ abstract class AppLocalizations {
   /// **'Terminal sessions'**
   String get terminal_sessions;
 
+  /// No description provided for @test_notification_body.
+  ///
+  /// In en, this message translates to:
+  /// **'If you can see this, native notifications are working.'**
+  String get test_notification_body;
+
+  /// No description provided for @test_notification_sent.
+  ///
+  /// In en, this message translates to:
+  /// **'Test notification sent.'**
+  String get test_notification_sent;
+
+  /// No description provided for @test_notification_title.
+  ///
+  /// In en, this message translates to:
+  /// **'Hermes notification test'**
+  String get test_notification_title;
+
+  /// No description provided for @test_notification_unsupported.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not send the notification — check that the OS allows notifications.'**
+  String get test_notification_unsupported;
+
   /// No description provided for @text_size.
   ///
   /// In en, this message translates to:
@@ -3117,6 +3243,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Turn completed'**
   String get turn_completed;
+
+  /// No description provided for @turn_failed.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn failed'**
+  String get turn_failed;
+
+  /// No description provided for @turn_failed_description.
+  ///
+  /// In en, this message translates to:
+  /// **'A background turn ended with an error.'**
+  String get turn_failed_description;
 
   /// No description provided for @turn_recovery_failed.
   ///

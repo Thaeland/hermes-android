@@ -95,6 +95,13 @@ class AppLocalizationsDe extends AppLocalizations {
   String get approval_needed => 'Genehmigung erforderlich';
 
   @override
+  String get approval_needed_description =>
+      'Ein Befehl wartet auf deine Zustimmung oder Ablehnung.';
+
+  @override
+  String get approve => 'Genehmigen';
+
+  @override
   String get archive => 'Archivieren';
 
   @override
@@ -165,6 +172,13 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get background_recovery_unavailable_legacy_transport =>
       'Hintergrund-Wiederherstellung nicht verfügbar — Legacy-Transport';
+
+  @override
+  String get background_task_completed => 'Hintergrundaufgabe abgeschlossen';
+
+  @override
+  String get background_task_completed_description =>
+      'Ein Terminal-Befehl im Hintergrund ist abgeschlossen.';
 
   @override
   String get backup_restore => 'Backup und Wiederherstellung';
@@ -486,6 +500,13 @@ class AppLocalizationsDe extends AppLocalizations {
   String get create_branch => 'Branch erstellen';
 
   @override
+  String get credit_notifications => 'Guthaben-Benachrichtigungen';
+
+  @override
+  String get credit_notifications_description =>
+      'Die Guthabennutzung wurde gestoppt oder wiederhergestellt.';
+
+  @override
   String get cron => 'Cron';
 
   @override
@@ -640,6 +661,13 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get edit_and_resend => 'Bearbeiten und erneut senden';
+
+  @override
+  String get enable_notifications => 'Benachrichtigungen aktivieren';
+
+  @override
+  String get enable_notifications_description =>
+      'Wenn du dies ausschaltest, werden alle Benachrichtigungen unten deaktiviert.';
 
   @override
   String get enables_file_attachments_through_the_desktop_remote_gateway =>
@@ -847,6 +875,13 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get inbox_is_clear => 'Posteingang ist leer';
+
+  @override
+  String get input_needed => 'Eingabe erforderlich';
+
+  @override
+  String get input_needed_description =>
+      'Hermes hat eine Frage gestellt oder braucht ein Passwort oder Geheimnis.';
 
   @override
   String get insert_a_remote_file_reference =>
@@ -1157,6 +1192,13 @@ class AppLocalizationsDe extends AppLocalizations {
   String get nothing_to_migrate => 'Nichts zu migrieren';
 
   @override
+  String get notifications => 'Benachrichtigungen';
+
+  @override
+  String get notifications_permission_denied =>
+      'Benachrichtigungen sind auf Systemebene blockiert. Aktiviere sie für diese App in den Android-Einstellungen.';
+
+  @override
   String get off_no_thinking => 'Aus (kein Reasoning)';
 
   @override
@@ -1213,6 +1255,13 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get pin_batch_and_undo =>
       'Anpinnen, Stapelverarbeitung und Rückgängig';
+
+  @override
+  String get plugin_notifications => 'Plugin-Benachrichtigungen';
+
+  @override
+  String get plugin_notifications_description =>
+      'Das Gateway hat eine Mitteilung gesendet, während die App im Hintergrund war.';
 
   @override
   String get port => 'Port';
@@ -1391,6 +1440,13 @@ class AppLocalizationsDe extends AppLocalizations {
       'Antwort lokal geschlossen; kein aktiver Gateway-Turn gefunden.';
 
   @override
+  String get response_complete => 'Antwort abgeschlossen';
+
+  @override
+  String get response_complete_description =>
+      'Ein Durchlauf wurde abgeschlossen, während die App im Hintergrund war.';
+
+  @override
   String get response_ready => 'Antwort bereit';
 
   @override
@@ -1518,6 +1574,9 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get send_message => 'Nachricht senden';
+
+  @override
+  String get send_test_notification => 'Testbenachrichtigung senden';
 
   @override
   String get session_sources => 'Sitzungsquellen';
@@ -1658,6 +1717,20 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get terminal_sessions => 'Terminal-Sitzungen';
+
+  @override
+  String get test_notification_body =>
+      'Wenn du das siehst, funktionieren die Benachrichtigungen.';
+
+  @override
+  String get test_notification_sent => 'Testbenachrichtigung gesendet.';
+
+  @override
+  String get test_notification_title => 'Hermes-Benachrichtigungstest';
+
+  @override
+  String get test_notification_unsupported =>
+      'Benachrichtigung konnte nicht gesendet werden — prüfe, ob das System Benachrichtigungen erlaubt.';
 
   @override
   String get text_size => 'Textgröße';
@@ -1801,6 +1874,13 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get turn_completed => 'Turn abgeschlossen';
+
+  @override
+  String get turn_failed => 'Durchlauf fehlgeschlagen';
+
+  @override
+  String get turn_failed_description =>
+      'Ein Durchlauf im Hintergrund endete mit einem Fehler.';
 
   @override
   String get turn_recovery_failed => 'Turn-Wiederherstellung fehlgeschlagen';

@@ -2,6 +2,7 @@
 // Uses REST endpoints: POST /api/sessions/{id}/chat and
 // GET /api/sessions/{id}/messages.
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -23,6 +24,7 @@ import '../services/gateway_turn_recovery.dart';
 import '../services/gateway_turn_ui_projection.dart';
 import '../services/remote_files_client.dart';
 import '../services/turn_notification_service.dart';
+import '../services/notification_prefs.dart';
 import '../services/voice_composer_adapter.dart';
 import '../services/ws_client.dart';
 import '../models/attachment_draft.dart';
@@ -381,7 +383,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       offset: _textController.text.length,
     );
     _turnNotifications =
-        widget.testTurnNotifications ?? TurnNotificationService();
+        widget.testTurnNotifications ?? TurnNotificationService.shared;
     unawaited(_turnNotifications.ensureInitialized());
     _client =
         widget.testApiClient ??
@@ -792,14 +794,111 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void _onTurnSettled(GatewayTurnRecoveryState state) {
     if (!mounted || !_appInBackground) return;
     final turnId = state.turnId ?? state.clientTurnId;
-    final summary = state.isTerminal && !state.isFailClosed
-        ? context.l10n.response_ready
-        : context.l10n.turn_completed;
+    final failed =
+        state.isFailClosed ||
+        state.status == GatewayRecoveryTurnStatus.failed;
+    final kind = failed
+        ? HermesNotificationKind.turnError
+        : HermesNotificationKind.turnDone;
+    if (!notificationKindEnabled(kind)) return;
+    final summary = failed
+        ? context.l10n.turn_completed
+        : context.l10n.response_ready;
     unawaited(
-      _turnNotifications.showTurnCompleted(
-        title: context.l10n.hermes_response_ready,
-        turnSummary: '${widget.session.title}: $summary',
-        turnId: turnId,
+      failed
+          ? _turnNotifications.showTurnFailed(
+              title: context.l10n.the_turn_failed,
+              turnSummary: '${widget.session.title}: $summary',
+              turnId: turnId,
+            )
+          : _turnNotifications.showTurnCompleted(
+              title: context.l10n.hermes_response_ready,
+              turnSummary: '${widget.session.title}: $summary',
+              turnId: turnId,
+            ),
+    );
+  }
+
+  /// Mirrors a blocking approval to a native notification (with approve/deny
+  /// buttons) while the app is in the background — the one prompt class that
+  /// must not wait for the user to come back on their own.
+  void _notifyApprovalRequest(
+    GatewayApprovalRequest request,
+    String? serverRequestId,
+  ) {
+    if (!_appInBackground || serverRequestId == null) return;
+    final command = request.command.trim();
+    final body = command.isEmpty
+        ? request.description.trim()
+        : (command.length > 140 ? '${command.substring(0, 140)}…' : command);
+    unawaited(
+      _turnNotifications.showKind(
+        kind: HermesNotificationKind.approval,
+        title: '${context.l10n.approval_needed} — ${widget.session.title}',
+        body: body,
+        sessionId: widget.session.id,
+        actions: [
+          TurnNotificationAction(id: 'approve', label: context.l10n.approve),
+          TurnNotificationAction(id: 'reject', label: context.l10n.deny),
+        ],
+        payload: jsonEncode({
+          'sessionId': widget.session.id,
+          'requestId': serverRequestId,
+        }),
+      ),
+    );
+  }
+
+  /// Mirrors a clarify/sudo/secret prompt to a native notification while the
+  /// app is in the background. The dialog itself stays queued for the return.
+  void _notifyInputRequest({required String body}) {
+    if (!_appInBackground) return;
+    final trimmed = body.trim();
+    unawaited(
+      _turnNotifications.showKind(
+        kind: HermesNotificationKind.input,
+        title: '${context.l10n.input_needed} — ${widget.session.title}',
+        body: trimmed.length > 140 ? '${trimmed.substring(0, 140)}…' : trimmed,
+        sessionId: widget.session.id,
+        payload: jsonEncode({'sessionId': widget.session.id}),
+      ),
+    );
+  }
+
+  /// Gateway notices mirror the desktop split: credit state changes are the
+  /// only native notice class (credits.depleted / credits.restored); every
+  /// other notice posts as a plugin notice while the app is away.
+  void _notifyGatewayNotice(GatewayNotification notification) {
+    if (!_appInBackground) return;
+    final isCredits =
+        notification.key == 'credits.depleted' ||
+        notification.key == 'credits.restored';
+    unawaited(
+      _turnNotifications.showKind(
+        kind: isCredits
+            ? HermesNotificationKind.credits
+            : HermesNotificationKind.plugin,
+        title: isCredits
+            ? context.l10n.credit_notifications
+            : context.l10n.plugin_notifications,
+        body: notification.text,
+        sessionId: widget.session.id,
+        payload: jsonEncode({'sessionId': widget.session.id}),
+      ),
+    );
+  }
+
+  /// Background task completions arrive as GatewayNotice insights; mirror the
+  /// finished work to a quiet native notification while the app is away.
+  void _notifyBackgroundNotice(GatewayNotice notice) {
+    if (!_appInBackground) return;
+    unawaited(
+      _turnNotifications.showKind(
+        kind: HermesNotificationKind.backgroundDone,
+        title: context.l10n.background_task_completed,
+        body: notice.text,
+        sessionId: widget.session.id,
+        payload: jsonEncode({'sessionId': widget.session.id}),
       ),
     );
   }
@@ -2782,6 +2881,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (event.type == 'notification.show') {
       final notification = GatewayNotification.fromEventData(event.data);
       if (notification == null) return;
+      _notifyGatewayNotice(notification);
       _notificationTimers.remove(notification.key)?.cancel();
       setState(() => _gatewayNotifications[notification.key] = notification);
       _scheduleStreamingFollow();
@@ -2818,6 +2918,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final notice = GatewayNotice.fromGatewayEvent(event.type, event.data);
     if (notice == null) return;
     if (_gatewayNotices.any((item) => item.identity == notice.identity)) return;
+    _notifyBackgroundNotice(notice);
     setState(() {
       _gatewayNotices.add(notice);
       if (_gatewayNotices.length > 20) _gatewayNotices.removeAt(0);
@@ -3004,6 +3105,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         : rawServerRequestId;
     _approvalDialogOpen = true;
     _activeApprovalServerRequestId = serverRequestId;
+    _notifyApprovalRequest(request, serverRequestId);
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final wasCancelledBeforeOpen =
@@ -3102,6 +3204,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     final pending = _sensitivePromptQueue.removeAt(0);
     _activeSensitivePrompt = pending;
+    _notifyInputRequest(
+      body: pending.request.description.isNotEmpty
+          ? pending.request.description
+          : pending.request.title,
+    );
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted ||
@@ -3282,6 +3389,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     final pending = _clarifyPromptQueue.removeAt(0);
     _activeClarifyPrompt = pending;
+    _notifyInputRequest(body: pending.request.question);
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted ||

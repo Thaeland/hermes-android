@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hermes_android/core/services/notification_prefs.dart';
 import 'package:hermes_android/core/services/turn_notification_service.dart';
 
 import 'support/recording_turn_notification_sink.dart';
@@ -15,6 +16,7 @@ void main() {
   setUp(() {
     sink = RecordingTurnNotificationSink();
     service = TurnNotificationService(sink: sink);
+    notificationPrefs.value = NotificationPrefs.defaults;
   });
 
   group('initialization', () {
@@ -228,6 +230,157 @@ void main() {
       await service.cancelAll();
 
       expect(sink.cancelAllCount, 1);
+    });
+  });
+
+  group('desktop-parity kinds', () {
+    test('approval posts on the attention channel with actions', () async {
+      await service.ensureInitialized();
+      final fired = await service.showKind(
+        kind: HermesNotificationKind.approval,
+        title: 'Approval needed — Roadmap',
+        body: 'rm -rf build',
+        sessionId: 'notif-session',
+        actions: const [
+          TurnNotificationAction(id: 'approve', label: 'Approve'),
+          TurnNotificationAction(id: 'reject', label: 'Deny'),
+        ],
+        payload: '{"sessionId":"notif-session","requestId":"req-1"}',
+      );
+
+      expect(fired, isTrue);
+      final posted = sink.shown.single;
+      expect(posted.channel.id, 'hermes_attention');
+      expect(posted.importance, TurnNotificationImportance.high);
+      expect(posted.actions.map((a) => a.id), ['approve', 'reject']);
+      expect(posted.payload, contains('req-1'));
+    });
+
+    test('each kind posts on its mapped channel', () async {
+      await service.ensureInitialized();
+      await service.showKind(
+        kind: HermesNotificationKind.turnDone,
+        title: 't',
+        body: 'b',
+        sessionId: 's1',
+      );
+      await service.showKind(
+        kind: HermesNotificationKind.backgroundDone,
+        title: 't',
+        body: 'b',
+        sessionId: 's2',
+      );
+      await service.showKind(
+        kind: HermesNotificationKind.credits,
+        title: 't',
+        body: 'b',
+        sessionId: 's3',
+      );
+
+      expect(sink.shown[0].channel.id, 'hermes_turn_notifications');
+      expect(sink.shown[1].channel.id, 'hermes_background');
+      expect(sink.shown[1].importance, TurnNotificationImportance.low);
+      expect(sink.shown[2].channel.id, 'hermes_notices');
+    });
+
+    test('a disabled kind posts nothing', () async {
+      await service.ensureInitialized();
+      notificationPrefs.value = NotificationPrefs.defaults.copyWith(
+        kind: HermesNotificationKind.plugin,
+        kindValue: false,
+      );
+
+      final fired = await service.showKind(
+        kind: HermesNotificationKind.plugin,
+        title: 't',
+        body: 'b',
+        sessionId: 's',
+      );
+
+      expect(fired, isFalse);
+      expect(sink.shown, isEmpty);
+    });
+
+    test('the master switch silences every kind', () async {
+      await service.ensureInitialized();
+      notificationPrefs.value = NotificationPrefs.defaults.copyWith(
+        enabled: false,
+      );
+
+      final fired = await service.showKind(
+        kind: HermesNotificationKind.approval,
+        title: 't',
+        body: 'b',
+        sessionId: 's',
+      );
+
+      expect(fired, isFalse);
+      expect(sink.shown, isEmpty);
+    });
+
+    test('replays for the same kind and session are throttled', () async {
+      await service.ensureInitialized();
+      await service.showKind(
+        kind: HermesNotificationKind.input,
+        title: 't',
+        body: 'first',
+        sessionId: 's',
+      );
+      final second = await service.showKind(
+        kind: HermesNotificationKind.input,
+        title: 't',
+        body: 'second',
+        sessionId: 's',
+      );
+
+      expect(second, isFalse);
+      expect(sink.shown, hasLength(1));
+    });
+
+    test('different sessions keep distinct notification ids', () async {
+      await service.ensureInitialized();
+      await service.showKind(
+        kind: HermesNotificationKind.credits,
+        title: 't',
+        body: 'a',
+        sessionId: 's',
+      );
+      await service.showKind(
+        kind: HermesNotificationKind.credits,
+        title: 't',
+        body: 'b',
+        sessionId: 'other',
+      );
+
+      expect(sink.shown.map((n) => n.id).toSet(), hasLength(2));
+    });
+
+    test('showTurnFailed posts the failure on the turns channel', () async {
+      await service.ensureInitialized();
+      await service.showTurnFailed(
+        title: 'Turn failed',
+        turnSummary: 'Roadmap: oops',
+        turnId: 'turn-9',
+      );
+
+      final posted = sink.shown.single;
+      expect(posted.channel.id, 'hermes_turn_notifications');
+      expect(posted.body, 'Roadmap: oops');
+      expect(posted.payload, 'turn-9');
+    });
+
+    test('the test notification bypasses the prefs and reports delivery', () async {
+      notificationPrefs.value = NotificationPrefs.defaults.copyWith(
+        enabled: false,
+      );
+
+      final ok = await service.sendTestNotification(
+        title: 'Test',
+        body: 'Body',
+      );
+
+      expect(ok, isTrue);
+      expect(sink.shown.single.title, 'Test');
     });
   });
 }

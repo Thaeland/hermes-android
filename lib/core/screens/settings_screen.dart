@@ -1,10 +1,14 @@
 // Settings screen for model selection, theme toggle, and app info.
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/config_backup_io.dart';
 import '../services/config_backup_service.dart';
 import '../services/connection_manager.dart';
+import '../services/notification_prefs.dart';
+import '../services/turn_notification_service.dart';
 import '../widgets/config_backup_card.dart';
 import '../widgets/text_size_settings_card.dart';
 import '../../main.dart';
@@ -342,6 +346,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
         const SizedBox(height: 8),
         _VerboseToggle(),
+        const SizedBox(height: 16),
+
+        // ---- Section: Notifications ----
+        _buildSectionHeader(context.l10n.notifications),
+        const _NotificationSettings(),
         const SizedBox(height: 16),
 
         const SizedBox(height: 16),
@@ -855,6 +864,129 @@ class _SessionSourcesFilterState extends State<_SessionSourcesFilter> {
             controlAffinity: ListTileControlAffinity.leading,
           );
         }).toList(),
+      ),
+    );
+  }
+}
+
+/// Desktop-parity notification settings: one master switch, a toggle per kind,
+/// and the same "send test" affordance so a silent OS-level block is visible
+/// instead of looking like a dead feature.
+class _NotificationSettings extends StatefulWidget {
+  const _NotificationSettings();
+
+  @override
+  State<_NotificationSettings> createState() => _NotificationSettingsState();
+}
+
+class _NotificationSettingsState extends State<_NotificationSettings> {
+  @override
+  void initState() {
+    super.initState();
+    // Resolve the Android 13+ permission state so a denied app shows the hint
+    // instead of looking silently broken.
+    unawaited(
+      TurnNotificationService.shared.ensureInitialized().then((_) {
+        if (mounted) setState(() {});
+      }),
+    );
+  }
+
+  static String _kindLabel(BuildContext context, HermesNotificationKind kind) =>
+      switch (kind) {
+        HermesNotificationKind.approval => context.l10n.approval_needed,
+        HermesNotificationKind.input => context.l10n.input_needed,
+        HermesNotificationKind.turnDone => context.l10n.response_complete,
+        HermesNotificationKind.turnError => context.l10n.turn_failed,
+        HermesNotificationKind.backgroundDone =>
+          context.l10n.background_task_completed,
+        HermesNotificationKind.credits => context.l10n.credit_notifications,
+        HermesNotificationKind.plugin => context.l10n.plugin_notifications,
+      };
+
+  static String _kindDescription(
+    BuildContext context,
+    HermesNotificationKind kind,
+  ) => switch (kind) {
+    HermesNotificationKind.approval =>
+      context.l10n.approval_needed_description,
+    HermesNotificationKind.input => context.l10n.input_needed_description,
+    HermesNotificationKind.turnDone =>
+      context.l10n.response_complete_description,
+    HermesNotificationKind.turnError => context.l10n.turn_failed_description,
+    HermesNotificationKind.backgroundDone =>
+      context.l10n.background_task_completed_description,
+    HermesNotificationKind.credits =>
+      context.l10n.credit_notifications_description,
+    HermesNotificationKind.plugin =>
+      context.l10n.plugin_notifications_description,
+  };
+
+  Future<void> _sendTest() async {
+    final ok = await TurnNotificationService.shared.sendTestNotification(
+      title: context.l10n.test_notification_title,
+      body: context.l10n.test_notification_body,
+    );
+    if (!mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            ok
+                ? context.l10n.test_notification_sent
+                : context.l10n.test_notification_unsupported,
+          ),
+        ),
+      );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<NotificationPrefs>(
+      valueListenable: notificationPrefs,
+      builder: (context, prefs, _) => Card(
+        child: Column(
+          children: [
+            SwitchListTile(
+              secondary: const Icon(Icons.notifications_outlined),
+              title: Text(context.l10n.enable_notifications),
+              subtitle: Text(context.l10n.enable_notifications_description),
+              value: prefs.enabled,
+              onChanged: (on) =>
+                  unawaited(NotificationPrefsStore.setEnabled(on)),
+            ),
+            for (final kind in HermesNotificationKind.values) ...[
+              const Divider(height: 1),
+              SwitchListTile(
+                title: Text(_kindLabel(context, kind)),
+                subtitle: Text(_kindDescription(context, kind)),
+                value: prefs.enabled && prefs.kinds[kind] == true,
+                onChanged: prefs.enabled
+                    ? (on) =>
+                          unawaited(NotificationPrefsStore.setKind(kind, on))
+                    : null,
+              ),
+            ],
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.send_outlined),
+              title: Text(context.l10n.send_test_notification),
+              onTap: () => unawaited(_sendTest()),
+            ),
+            if (!TurnNotificationService.shared.permissionGranted) ...[
+              const Divider(height: 1),
+              ListTile(
+                leading: Icon(
+                  Icons.warning_amber_outlined,
+                  color: Theme.of(context).colorScheme.error,
+                ),
+                title: Text(context.l10n.notifications_permission_denied),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }

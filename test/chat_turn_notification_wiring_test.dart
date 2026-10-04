@@ -10,6 +10,7 @@ import 'package:hermes_android/core/services/gateway_turn_application_controller
 import 'package:hermes_android/core/services/gateway_turn_coordinator.dart';
 import 'package:hermes_android/core/services/gateway_turn_recovery.dart';
 import 'package:hermes_android/core/services/turn_notification_service.dart';
+import 'package:hermes_android/core/services/ws_client.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -141,6 +142,41 @@ void main() {
 
     expect(sink.cancelAllCount, greaterThanOrEqualTo(1));
   });
+
+  testWidgets('a failed turn settling in the background posts the failure notification', (
+    WidgetTester tester,
+  ) async {
+    await pumpChat(tester);
+    background(tester);
+
+    turnSession.settle(_failedState());
+    await tester.pump();
+
+    expect(sink.shown, hasLength(1));
+    expect(sink.shown.single.channel.id, 'hermes_turn_notifications');
+    expect(sink.shown.single.title, contains('failed'));
+  });
+
+  testWidgets('an approval arriving while backgrounded posts a notification with actions', (
+    WidgetTester tester,
+  ) async {
+    await pumpChat(tester);
+    background(tester);
+
+    turnSession.emitAsync('approval.request', {
+      'server_request_id': 'req-1',
+      'command': 'rm -rf build',
+      'description': 'Remove the build folder',
+    });
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(sink.shown, hasLength(1));
+    final posted = sink.shown.single;
+    expect(posted.channel.id, 'hermes_attention');
+    expect(posted.actions.map((a) => a.id), ['approve', 'reject']);
+    expect(posted.payload, contains('req-1'));
+  });
 }
 
 GatewayTurnRecoveryState _completedState() =>
@@ -156,16 +192,42 @@ GatewayTurnRecoveryState _completedState() =>
       ),
     );
 
+GatewayTurnRecoveryState _failedState() =>
+    GatewayTurnRecoveryState.initial(
+      clientTurnId: _clientTurnId,
+    ).markSubmissionStarted().applyAck(
+      const GatewayTurnAck(
+        clientTurnId: _clientTurnId,
+        turnId: 'server-turn',
+        status: GatewayRecoveryTurnStatus.failed,
+        // lastSeq stays 0 so the ack applies instead of triggering the
+        // reconcile path, which preserves the previous (null) status.
+        lastSeq: 0,
+        created: false,
+      ),
+    );
+
 /// Turn session that keeps the settle callback ChatScreen registers, so a test
 /// can fire it the way the real gateway would.
 class _CallbackCapturingTurnSession implements GatewayTurnApplicationSession {
   GatewayTurnSettledCallback? _onTurnSettled;
+  DesktopAsyncEventCallback? _asyncListener;
+  String _asyncSessionId = '';
 
   @override
   Object setAsyncEventListener(
     String localSessionId,
     DesktopAsyncEventCallback listener,
-  ) => Object();
+  ) {
+    _asyncListener = listener;
+    _asyncSessionId = localSessionId;
+    return Object();
+  }
+
+  /// Fires an async gateway event the way the live socket would.
+  void emitAsync(String type, Map<String, dynamic> data) {
+    _asyncListener?.call(_asyncSessionId, StreamEvent(type: type, data: data));
+  }
 
   @override
   void removeAsyncEventListener(String localSessionId, Object registration) {}

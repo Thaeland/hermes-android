@@ -95,6 +95,13 @@ class AppLocalizationsFr extends AppLocalizations {
   String get approval_needed => 'Approbation requise';
 
   @override
+  String get approval_needed_description =>
+      'Une commande attend votre approbation ou votre refus.';
+
+  @override
+  String get approve => 'Approuver';
+
+  @override
   String get archive => 'Archiver';
 
   @override
@@ -165,6 +172,13 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get background_recovery_unavailable_legacy_transport =>
       'Récupération en arrière-plan indisponible — transport hérité';
+
+  @override
+  String get background_task_completed => 'Tâche en arrière-plan terminée';
+
+  @override
+  String get background_task_completed_description =>
+      'Une commande de terminal en arrière-plan est terminée.';
 
   @override
   String get backup_restore => 'Sauvegarde et restauration';
@@ -484,6 +498,13 @@ class AppLocalizationsFr extends AppLocalizations {
   String get create_branch => 'Créer une branche';
 
   @override
+  String get credit_notifications => 'Notifications de crédit';
+
+  @override
+  String get credit_notifications_description =>
+      'L’utilisation du crédit a été arrêtée ou rétablie.';
+
+  @override
   String get cron => 'Cron';
 
   @override
@@ -642,6 +663,13 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get edit_and_resend => 'Modifier et renvoyer';
+
+  @override
+  String get enable_notifications => 'Activer les notifications';
+
+  @override
+  String get enable_notifications_description =>
+      'Désactiver ceci désactive toutes les notifications ci-dessous.';
 
   @override
   String get enables_file_attachments_through_the_desktop_remote_gateway =>
@@ -845,6 +873,13 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get inbox_is_clear => 'La boîte de réception est vide';
+
+  @override
+  String get input_needed => 'Réponse requise';
+
+  @override
+  String get input_needed_description =>
+      'Hermes a posé une question ou a besoin d’un mot de passe ou d’un secret.';
 
   @override
   String get insert_a_remote_file_reference =>
@@ -1159,6 +1194,13 @@ class AppLocalizationsFr extends AppLocalizations {
   String get nothing_to_migrate => 'Rien à migrer';
 
   @override
+  String get notifications => 'Notifications';
+
+  @override
+  String get notifications_permission_denied =>
+      'Les notifications sont bloquées par le système. Activez-les pour cette application dans les réglages Android.';
+
+  @override
   String get off_no_thinking => 'Désactivé (sans raisonnement)';
 
   @override
@@ -1214,6 +1256,13 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get pin_batch_and_undo => 'Épingler, par lots et annuler';
+
+  @override
+  String get plugin_notifications => 'Notifications d’extensions';
+
+  @override
+  String get plugin_notifications_description =>
+      'La passerelle a envoyé une notification pendant que l’application était en arrière-plan.';
 
   @override
   String get port => 'Port';
@@ -1392,6 +1441,13 @@ class AppLocalizationsFr extends AppLocalizations {
       'Réponse fermée localement ; aucun tour de passerelle actif trouvé.';
 
   @override
+  String get response_complete => 'Réponse terminée';
+
+  @override
+  String get response_complete_description =>
+      'Un tour s’est terminé pendant que l’application était en arrière-plan.';
+
+  @override
   String get response_ready => 'Réponse prête';
 
   @override
@@ -1519,6 +1575,9 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get send_message => 'Envoyer le message';
+
+  @override
+  String get send_test_notification => 'Envoyer une notification de test';
 
   @override
   String get session_sources => 'Sources des sessions';
@@ -1658,6 +1717,20 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get terminal_sessions => 'Sessions de terminal';
+
+  @override
+  String get test_notification_body =>
+      'Si vous voyez ceci, les notifications fonctionnent.';
+
+  @override
+  String get test_notification_sent => 'Notification de test envoyée.';
+
+  @override
+  String get test_notification_title => 'Test des notifications Hermes';
+
+  @override
+  String get test_notification_unsupported =>
+      'Impossible d’envoyer la notification — vérifiez que le système autorise les notifications.';
 
   @override
   String get text_size => 'Taille du texte';
@@ -1800,6 +1873,13 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get turn_completed => 'Tour terminé';
+
+  @override
+  String get turn_failed => 'Échec du tour';
+
+  @override
+  String get turn_failed_description =>
+      'Un tour en arrière-plan s’est terminé par une erreur.';
 
   @override
   String get turn_recovery_failed => 'Échec de la récupération du tour';

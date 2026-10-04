@@ -1,5 +1,13 @@
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import 'notification_prefs.dart';
+
+/// Delivered to the app root when the user taps a notification body or one of
+/// its action buttons. Set once by the root widget; every service instance
+/// wires its plugin to this single handler so tap routing cannot depend on
+/// which screen happened to initialise last.
+void Function(NotificationResponse response)? notificationResponseHandler;
+
 /// The Android/iOS notification channel a [TurnNotification] belongs to.
 ///
 /// Phase 3 of the daily-driver roadmap replaces the single Hermes Turns
@@ -17,6 +25,20 @@ class TurnNotificationChannel {
   });
 }
 
+/// Visual urgency for a notification: [high] lets the OS show a heads-up card
+/// (attention kinds), [low] keeps finished background work quiet.
+enum TurnNotificationImportance { low, defaultImportance, high }
+
+/// An action button rendered on the notification itself. Pressing it brings
+/// the app forward (`showsUserInterface`) so the live app answers the request
+/// instead of a background isolate that cannot reach the gateway.
+class TurnNotificationAction {
+  final String id;
+  final String label;
+
+  const TurnNotificationAction({required this.id, required this.label});
+}
+
 /// A notification Hermes wants Android to post, described as plain data.
 class TurnNotification {
   final int id;
@@ -24,6 +46,8 @@ class TurnNotification {
   final String body;
   final String payload;
   final TurnNotificationChannel channel;
+  final List<TurnNotificationAction> actions;
+  final TurnNotificationImportance importance;
 
   const TurnNotification({
     required this.id,
@@ -31,6 +55,8 @@ class TurnNotification {
     required this.body,
     required this.payload,
     required this.channel,
+    this.actions = const [],
+    this.importance = TurnNotificationImportance.defaultImportance,
   });
 }
 
@@ -78,7 +104,12 @@ class PluginTurnNotificationSink implements TurnNotificationSink {
       iOS: iosSettings,
     );
 
-    await _plugin.initialize(settings);
+    await _plugin.initialize(
+      settings,
+      onDidReceiveNotificationResponse: (response) {
+        notificationResponseHandler?.call(response);
+      },
+    );
   }
 
   @override
@@ -105,13 +136,29 @@ class PluginTurnNotificationSink implements TurnNotificationSink {
 
   @override
   Future<void> show(TurnNotification notification) async {
+    final (importance, priority) = switch (notification.importance) {
+      TurnNotificationImportance.high => (Importance.high, Priority.high),
+      TurnNotificationImportance.low => (Importance.low, Priority.low),
+      TurnNotificationImportance.defaultImportance => (
+        Importance.defaultImportance,
+        Priority.defaultPriority,
+      ),
+    };
     final androidDetails = AndroidNotificationDetails(
       notification.channel.id,
       notification.channel.name,
       channelDescription: notification.channel.description,
-      importance: Importance.defaultImportance,
-      priority: Priority.defaultPriority,
+      importance: importance,
+      priority: priority,
       autoCancel: true,
+      actions: [
+        for (final action in notification.actions)
+          AndroidNotificationAction(
+            action.id,
+            action.label,
+            showsUserInterface: true,
+          ),
+      ],
     );
     const iosDetails = DarwinNotificationDetails(
       presentAlert: true,
@@ -151,6 +198,57 @@ class TurnNotificationService {
     name: 'Hermes Turns',
     description: 'Notifications for completed background turns',
   );
+
+  /// Attention kinds get their own high-importance channel so approvals and
+  /// input requests can surface as heads-up cards while the app is away.
+  static const attentionChannel = TurnNotificationChannel(
+    id: 'hermes_attention',
+    name: 'Hermes Attention',
+    description: 'Approvals and input requests that need you',
+  );
+
+  /// Finished background work: quiet by design.
+  static const backgroundChannel = TurnNotificationChannel(
+    id: 'hermes_background',
+    name: 'Hermes Background',
+    description: 'Background task completions',
+  );
+
+  /// Gateway notices: credits and plugin messages.
+  static const noticesChannel = TurnNotificationChannel(
+    id: 'hermes_notices',
+    name: 'Hermes Notices',
+    description: 'Credit and plugin notices',
+  );
+
+  /// The app-wide instance used outside tests, so every dispatcher shares one
+  /// plugin, one initialisation and one tap handler.
+  static TurnNotificationService? _shared;
+
+  static TurnNotificationService get shared =>
+      _shared ??= TurnNotificationService();
+
+  /// The channel a [kind] posts on.
+  static TurnNotificationChannel channelFor(HermesNotificationKind kind) =>
+      switch (kind) {
+        HermesNotificationKind.approval ||
+        HermesNotificationKind.input => attentionChannel,
+        HermesNotificationKind.turnDone ||
+        HermesNotificationKind.turnError => turnChannel,
+        HermesNotificationKind.backgroundDone => backgroundChannel,
+        HermesNotificationKind.credits ||
+        HermesNotificationKind.plugin => noticesChannel,
+      };
+
+  /// Visual urgency a [kind] posts with.
+  static TurnNotificationImportance importanceFor(
+    HermesNotificationKind kind,
+  ) => switch (kind) {
+    HermesNotificationKind.approval ||
+    HermesNotificationKind.input => TurnNotificationImportance.high,
+    HermesNotificationKind.backgroundDone => TurnNotificationImportance.low,
+    _ => TurnNotificationImportance.defaultImportance,
+  };
 
   final TurnNotificationSink _sink;
 
@@ -226,6 +324,99 @@ class TurnNotificationService {
   Future<void> cancelTurnCompleted(String turnId) async {
     if (!_initialized) return;
     await _sink.cancel(notificationIdFor(turnId));
+  }
+
+  /// Posts the failure counterpart of [showTurnCompleted] on the same channel,
+  /// so the two kinds share one Android channel but keep separate toggles.
+  Future<void> showTurnFailed({
+    required String title,
+    required String turnSummary,
+    required String turnId,
+  }) async {
+    if (!_initialized) return;
+
+    await _sink.show(
+      TurnNotification(
+        id: notificationIdFor(turnId),
+        title: title,
+        body: turnSummary,
+        payload: turnId,
+        channel: turnChannel,
+      ),
+    );
+  }
+
+  // De-dupe replayed events for the same kind+session. Self-evicting: entries
+  // older than the window are pruned on every dispatch, so the map can't grow.
+  static const _throttleWindowMs = 1000;
+  final Map<String, int> _lastFiredAt = {};
+
+  bool _throttled(String key) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    _lastFiredAt.removeWhere((_, at) => now - at >= _throttleWindowMs);
+    if (_lastFiredAt.containsKey(key)) return true;
+    _lastFiredAt[key] = now;
+    return false;
+  }
+
+  /// Posts one native notification for [kind] when the device allows it.
+  ///
+  /// Callers gate on the app being backgrounded; this method enforces the
+  /// user's per-kind preferences and the 1s replay throttle. Returns whether
+  /// the notification was handed to the platform.
+  Future<bool> showKind({
+    required HermesNotificationKind kind,
+    required String title,
+    required String body,
+    String? sessionId,
+    List<TurnNotificationAction> actions = const [],
+    String? payload,
+  }) async {
+    if (!_initialized) return false;
+    if (!notificationKindEnabled(kind)) return false;
+
+    final discriminator = sessionId ?? payload ?? title;
+    if (_throttled('${kind.name}:$discriminator')) return false;
+
+    await _sink.show(
+      TurnNotification(
+        id: notificationIdFor('${kind.name}:$discriminator'),
+        title: title,
+        body: body,
+        payload: payload ?? '',
+        channel: channelFor(kind),
+        actions: actions,
+        importance: importanceFor(kind),
+      ),
+    );
+    return true;
+  }
+
+  /// Settings "send test": bypasses gating like the desktop panel does, so a
+  /// silent OS-level permission failure can be told apart from a dead feature.
+  Future<bool> sendTestNotification({
+    required String title,
+    required String body,
+  }) async {
+    if (!_initialized) {
+      await ensureInitialized();
+      if (!_initialized) return false;
+    }
+
+    try {
+      await _sink.show(
+        TurnNotification(
+          id: notificationIdFor('hermes-notification-test'),
+          title: title,
+          body: body,
+          payload: 'test',
+          channel: turnChannel,
+        ),
+      );
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   /// Removes all Hermes turn notifications.

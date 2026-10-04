@@ -94,6 +94,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get approval_needed => '需要审批';
 
   @override
+  String get approval_needed_description =>
+      'A command is waiting for your approval or denial.';
+
+  @override
+  String get approve => 'Approve';
+
+  @override
   String get archive => '归档';
 
   @override
@@ -160,6 +167,13 @@ class AppLocalizationsZh extends AppLocalizations {
   @override
   String get background_recovery_unavailable_legacy_transport =>
       '后台恢复不可用 — 旧版传输';
+
+  @override
+  String get background_task_completed => 'Background task complete';
+
+  @override
+  String get background_task_completed_description =>
+      'A background terminal command finished.';
 
   @override
   String get backup_restore => '备份与恢复';
@@ -465,6 +479,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get create_branch => '创建分支';
 
   @override
+  String get credit_notifications => 'Credit notifications';
+
+  @override
+  String get credit_notifications_description =>
+      'Credit usage was stopped or restored.';
+
+  @override
   String get cron => 'Cron';
 
   @override
@@ -615,6 +636,13 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get edit_and_resend => '编辑并重发';
+
+  @override
+  String get enable_notifications => 'Enable notifications';
+
+  @override
+  String get enable_notifications_description =>
+      'Turning this off disables every notification below.';
 
   @override
   String get enables_file_attachments_through_the_desktop_remote_gateway =>
@@ -814,6 +842,13 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get inbox_is_clear => '收件箱为空';
+
+  @override
+  String get input_needed => 'Input needed';
+
+  @override
+  String get input_needed_description =>
+      'Hermes asked a question or needs a password or secret.';
 
   @override
   String get insert_a_remote_file_reference => '插入远程 @file 引用';
@@ -1117,6 +1152,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get nothing_to_migrate => '无需迁移';
 
   @override
+  String get notifications => 'Notifications';
+
+  @override
+  String get notifications_permission_denied =>
+      'Notifications are blocked at the OS level. Enable them for this app in Android settings.';
+
+  @override
   String get off_no_thinking => '关闭（无思考）';
 
   @override
@@ -1169,6 +1211,13 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get pin_batch_and_undo => '置顶、批量操作与撤销';
+
+  @override
+  String get plugin_notifications => 'Plugin notifications';
+
+  @override
+  String get plugin_notifications_description =>
+      'The gateway sent a notice while the app was in the background.';
 
   @override
   String get port => '端口';
@@ -1343,6 +1392,13 @@ class AppLocalizationsZh extends AppLocalizations {
       '响应已在本地关闭；未找到活动的网关轮次。';
 
   @override
+  String get response_complete => 'Response complete';
+
+  @override
+  String get response_complete_description =>
+      'A turn completed while the app was in the background.';
+
+  @override
   String get response_ready => '回复就绪';
 
   @override
@@ -1466,6 +1522,9 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get send_message => '发送消息';
+
+  @override
+  String get send_test_notification => 'Send test notification';
 
   @override
   String get session_sources => '会话来源';
@@ -1602,6 +1661,20 @@ class AppLocalizationsZh extends AppLocalizations {
   String get terminal_sessions => '终端会话';
 
   @override
+  String get test_notification_body =>
+      'If you can see this, native notifications are working.';
+
+  @override
+  String get test_notification_sent => 'Test notification sent.';
+
+  @override
+  String get test_notification_title => 'Hermes notification test';
+
+  @override
+  String get test_notification_unsupported =>
+      'Could not send the notification — check that the OS allows notifications.';
+
+  @override
   String get text_size => '文字大小';
 
   @override
@@ -1736,6 +1809,13 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get turn_completed => '本轮对话已完成';
+
+  @override
+  String get turn_failed => 'Turn failed';
+
+  @override
+  String get turn_failed_description =>
+      'A background turn ended with an error.';
 
   @override
   String get turn_recovery_failed => '对话恢复失败';
@@ -2366,6 +2446,12 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get approval_needed => '需要审批';
 
   @override
+  String get approval_needed_description => '有命令正在等待你的批准或拒绝。';
+
+  @override
+  String get approve => '批准';
+
+  @override
   String get archive => '归档';
 
   @override
@@ -2432,6 +2518,12 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   @override
   String get background_recovery_unavailable_legacy_transport =>
       '后台恢复不可用 — 旧版传输';
+
+  @override
+  String get background_task_completed => '后台任务完成';
+
+  @override
+  String get background_task_completed_description => '后台终端命令已完成。';
 
   @override
   String get backup_restore => '备份与恢复';
@@ -2737,6 +2829,12 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get create_branch => '创建分支';
 
   @override
+  String get credit_notifications => '额度通知';
+
+  @override
+  String get credit_notifications_description => '额度使用已停止或恢复。';
+
+  @override
   String get cron => 'Cron';
 
   @override
@@ -2887,6 +2985,12 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get edit_and_resend => '编辑并重发';
+
+  @override
+  String get enable_notifications => '启用通知';
+
+  @override
+  String get enable_notifications_description => '关闭后将禁用以下所有通知。';
 
   @override
   String get enables_file_attachments_through_the_desktop_remote_gateway =>
@@ -3086,6 +3190,12 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get inbox_is_clear => '收件箱为空';
+
+  @override
+  String get input_needed => '需要输入';
+
+  @override
+  String get input_needed_description => 'Hermes 提出了问题，或需要密码或密钥。';
 
   @override
   String get insert_a_remote_file_reference => '插入远程 @file 引用';
@@ -3389,6 +3499,13 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get nothing_to_migrate => '无需迁移';
 
   @override
+  String get notifications => '通知';
+
+  @override
+  String get notifications_permission_denied =>
+      '系统已阻止通知。请在 Android 设置中允许此应用发送通知。';
+
+  @override
   String get off_no_thinking => '关闭（无思考）';
 
   @override
@@ -3441,6 +3558,12 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get pin_batch_and_undo => '置顶、批量操作与撤销';
+
+  @override
+  String get plugin_notifications => '插件通知';
+
+  @override
+  String get plugin_notifications_description => '应用在后台时，网关发来了通知。';
 
   @override
   String get port => '端口';
@@ -3615,6 +3738,12 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
       '响应已在本地关闭；未找到活动的网关轮次。';
 
   @override
+  String get response_complete => '响应完成';
+
+  @override
+  String get response_complete_description => '应用在后台时，一轮对话已完成。';
+
+  @override
   String get response_ready => '回复就绪';
 
   @override
@@ -3738,6 +3867,9 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get send_message => '发送消息';
+
+  @override
+  String get send_test_notification => '发送测试通知';
 
   @override
   String get session_sources => '会话来源';
@@ -3874,6 +4006,18 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get terminal_sessions => '终端会话';
 
   @override
+  String get test_notification_body => '如果你能看到这条通知，说明通知功能正常。';
+
+  @override
+  String get test_notification_sent => '已发送测试通知。';
+
+  @override
+  String get test_notification_title => 'Hermes 通知测试';
+
+  @override
+  String get test_notification_unsupported => '无法发送通知——请检查系统是否允许通知。';
+
+  @override
   String get text_size => '文字大小';
 
   @override
@@ -4008,6 +4152,12 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get turn_completed => '本轮对话已完成';
+
+  @override
+  String get turn_failed => '对话失败';
+
+  @override
+  String get turn_failed_description => '后台对话以错误结束。';
 
   @override
   String get turn_recovery_failed => '对话恢复失败';

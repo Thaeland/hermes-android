@@ -94,6 +94,12 @@ class AppLocalizationsJa extends AppLocalizations {
   String get approval_needed => '承認が必要';
 
   @override
+  String get approval_needed_description => 'コマンドが承認または拒否を待っています。';
+
+  @override
+  String get approve => '承認';
+
+  @override
   String get archive => 'アーカイブ';
 
   @override
@@ -160,6 +166,13 @@ class AppLocalizationsJa extends AppLocalizations {
   @override
   String get background_recovery_unavailable_legacy_transport =>
       'バックグラウンド復旧は利用不可 — レガシー通信方式';
+
+  @override
+  String get background_task_completed => 'バックグラウンドタスク完了';
+
+  @override
+  String get background_task_completed_description =>
+      'バックグラウンドのターミナルコマンドが完了しました。';
 
   @override
   String get backup_restore => 'バックアップと復元';
@@ -467,6 +480,12 @@ class AppLocalizationsJa extends AppLocalizations {
   String get create_branch => 'ブランチを作成';
 
   @override
+  String get credit_notifications => 'クレジット通知';
+
+  @override
+  String get credit_notifications_description => 'クレジットの利用が停止または復旧しました。';
+
+  @override
   String get cron => 'Cron';
 
   @override
@@ -619,6 +638,12 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get edit_and_resend => '編集して再送信';
+
+  @override
+  String get enable_notifications => '通知を有効にする';
+
+  @override
+  String get enable_notifications_description => 'オフで以下の通知をすべて無効にします。';
 
   @override
   String get enables_file_attachments_through_the_desktop_remote_gateway =>
@@ -820,6 +845,12 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get inbox_is_clear => '受信トレイは空です';
+
+  @override
+  String get input_needed => '入力が必要';
+
+  @override
+  String get input_needed_description => 'Hermes が質問したか、パスワードやシークレットを必要としています。';
 
   @override
   String get insert_a_remote_file_reference => 'リモートの@file参照を挿入';
@@ -1125,6 +1156,13 @@ class AppLocalizationsJa extends AppLocalizations {
   String get nothing_to_migrate => '移行するものはありません';
 
   @override
+  String get notifications => '通知';
+
+  @override
+  String get notifications_permission_denied =>
+      '通知がOS側で許可されていません。Androidの設定からこのアプリの通知を有効にしてください。';
+
+  @override
   String get off_no_thinking => 'オフ（思考なし）';
 
   @override
@@ -1179,6 +1217,13 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get pin_batch_and_undo => 'ピン留め・一括操作・取り消し';
+
+  @override
+  String get plugin_notifications => 'プラグイン通知';
+
+  @override
+  String get plugin_notifications_description =>
+      'アプリがバックグラウンドの間に、ゲートウェイから通知が届きました。';
 
   @override
   String get port => 'ポート';
@@ -1354,6 +1399,12 @@ class AppLocalizationsJa extends AppLocalizations {
       '応答はローカルで終了しました。アクティブなゲートウェイターンは見つかりませんでした。';
 
   @override
+  String get response_complete => '応答完了';
+
+  @override
+  String get response_complete_description => 'バックグラウンド中にターンが完了しました。';
+
+  @override
   String get response_ready => '応答が完了';
 
   @override
@@ -1478,6 +1529,9 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get send_message => 'メッセージを送信';
+
+  @override
+  String get send_test_notification => 'テスト通知を送信';
 
   @override
   String get session_sources => 'セッションのソース';
@@ -1614,6 +1668,19 @@ class AppLocalizationsJa extends AppLocalizations {
   String get terminal_sessions => 'ターミナルセッション';
 
   @override
+  String get test_notification_body => 'この通知が見えていれば、通知機能は正常に動作しています。';
+
+  @override
+  String get test_notification_sent => 'テスト通知を送信しました。';
+
+  @override
+  String get test_notification_title => 'Hermes 通知テスト';
+
+  @override
+  String get test_notification_unsupported =>
+      '通知を送信できませんでした。OS側で通知が許可されているか確認してください。';
+
+  @override
   String get text_size => '文字サイズ';
 
   @override
@@ -1748,6 +1815,12 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get turn_completed => 'ターン完了';
+
+  @override
+  String get turn_failed => 'ターン失敗';
+
+  @override
+  String get turn_failed_description => 'バックグラウンドのターンがエラーで終了しました。';
 
   @override
   String get turn_recovery_failed => 'ターンの復旧に失敗しました';
