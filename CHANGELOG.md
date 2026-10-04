@@ -4,6 +4,25 @@ All notable changes to this project are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Release notes for
 versions prior to 1.0.7 are in the **What's new** sections of the [README](README.md).
 
+## [2.1.12] - 2026-10-04
+
+### Added
+
+- Android 13 and newer now expose a per-app language picker for all nine shipped
+  locales (PR #125).
+
+### Fixed
+
+- Unended sessions no longer appear permanently active when the Gateway omits
+  an authoritative liveness flag. Recent activity keeps them active for five
+  minutes, while fixed `is_active: false` placeholders in Projects responses
+  are ignored (PR #123).
+
+### Thanks
+
+- @maebahesioru for the Android locale declaration, session-liveness fix, and
+  focused regression coverage in PRs #125 and #123.
+
 ## [2.1.11] - 2026-10-04
 
 ### Added
