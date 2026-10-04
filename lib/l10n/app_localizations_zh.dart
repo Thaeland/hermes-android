@@ -1457,7 +1457,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get select_one_or_more_options_then_continue => '选择一个或多个选项，然后继续。';
 
   @override
-  String get select_text => 'Select text';
+  String get select_text => '选择文本';
 
   @override
   String get send => '发送';

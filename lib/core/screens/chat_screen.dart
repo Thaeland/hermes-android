@@ -4115,31 +4115,35 @@ class MessageBubble extends StatelessWidget {
   /// bubble; the text is selectable with the platform handles, which keeps the
   /// long-press actions on the bubble itself untouched.
   Future<void> _showSelectTextDialog(BuildContext context) async {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-    final assistantTextColor = isDark ? Colors.white : Colors.black87;
     await showDialog<void>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(context.l10n.select_text),
-        content: SingleChildScrollView(
-          child: MarkdownBody(
-            data: content,
-            selectable: true,
-            styleSheet: _messageStyleSheet(
-              theme,
-              isUser: isUser,
-              assistantTextColor: assistantTextColor,
+      builder: (dialogContext) {
+        // The dialog renders on the dialog surface, not on a bubble: use the
+        // prose colours with the dialog's own onSurface. The user-bubble
+        // foreground is hardcoded for the gold bubble and would be unreadable
+        // on the dark dialog surface in dark mode.
+        final dialogTheme = Theme.of(dialogContext);
+        return AlertDialog(
+          title: Text(context.l10n.select_text),
+          content: SingleChildScrollView(
+            child: MarkdownBody(
+              data: content,
+              selectable: true,
+              styleSheet: _messageStyleSheet(
+                dialogTheme,
+                isUser: false,
+                assistantTextColor: dialogTheme.colorScheme.onSurface,
+              ),
             ),
           ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: Text(context.l10n.close),
-          ),
-        ],
-      ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: Text(context.l10n.close),
+            ),
+          ],
+        );
+      },
     );
   }
 
