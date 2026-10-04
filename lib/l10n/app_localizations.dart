@@ -2630,6 +2630,12 @@ abstract class AppLocalizations {
   /// **'Select one or more options, then continue.'**
   String get select_one_or_more_options_then_continue;
 
+  /// No description provided for @select_text.
+  ///
+  /// In en, this message translates to:
+  /// **'Select text'**
+  String get select_text;
+
   /// No description provided for @send.
   ///
   /// In en, this message translates to:

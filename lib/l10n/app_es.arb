@@ -417,6 +417,7 @@
   "search_mode": "Modo de búsqueda",
   "select_one_option_or_enter_another_answer": "Selecciona una opción o escribe otra respuesta.",
   "select_one_or_more_options_then_continue": "Selecciona una o más opciones y continúa.",
+  "select_text": "Seleccionar texto",
   "send": "Enviar",
   "send_failed": "Error de envío: {error}",
   "send_message": "Enviar mensaje",

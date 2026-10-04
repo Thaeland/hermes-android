@@ -4110,6 +4110,39 @@ class MessageBubble extends StatelessWidget {
       );
   }
 
+  /// Opens the message in a selection-enabled dialog so a single sentence can
+  /// be copied without taking the whole message. The rendering matches the
+  /// bubble; the text is selectable with the platform handles, which keeps the
+  /// long-press actions on the bubble itself untouched.
+  Future<void> _showSelectTextDialog(BuildContext context) async {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final assistantTextColor = isDark ? Colors.white : Colors.black87;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(context.l10n.select_text),
+        content: SingleChildScrollView(
+          child: MarkdownBody(
+            data: content,
+            selectable: true,
+            styleSheet: _messageStyleSheet(
+              theme,
+              isUser: isUser,
+              assistantTextColor: assistantTextColor,
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: Text(context.l10n.close),
+          ),
+        ],
+      ),
+    );
+  }
+
   MarkdownStyleSheet _messageStyleSheet(
     ThemeData theme, {
     required bool isUser,
@@ -4203,6 +4236,16 @@ class MessageBubble extends StatelessWidget {
                 onTap: () {
                   Navigator.of(sheetContext).pop();
                   unawaited(_copyMessage(context));
+                },
+              ),
+              _actionTile(
+                sheetContext,
+                label: context.l10n.select_text,
+                tooltip: context.l10n.select_text,
+                icon: Icons.select_all,
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  unawaited(_showSelectTextDialog(context));
                 },
               ),
               if (onReadAloud != null)

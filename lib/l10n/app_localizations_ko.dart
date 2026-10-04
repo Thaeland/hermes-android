@@ -1468,6 +1468,9 @@ class AppLocalizationsKo extends AppLocalizations {
       '하나 이상의 옵션을 선택한 후 계속하세요.';
 
   @override
+  String get select_text => '텍스트 선택';
+
+  @override
   String get send => '보내기';
 
   @override

@@ -64,6 +64,36 @@ void main() {
     expect(find.text('Message copied'), findsOneWidget);
   });
 
+  testWidgets('message actions offer a selectable text dialog', (
+    WidgetTester tester,
+  ) async {
+    const message = 'First sentence. Second sentence. Third sentence.';
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: Scaffold(body: MessageBubble(content: message, isUser: false)),
+      ),
+    );
+
+    await tester.longPress(find.byKey(const Key('message-bubble')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Select text'));
+    await tester.pumpAndSettle();
+
+    // The dialog renders the message selectable so a single sentence can be
+    // copied with the platform handles, leaving the bubble's long-press
+    // actions untouched.
+    expect(find.text('Select text'), findsOneWidget);
+    expect(find.byType(SelectableText), findsWidgets);
+    expect(find.text('Close'), findsOneWidget);
+
+    await tester.tap(find.text('Close'));
+    await tester.pumpAndSettle();
+    expect(find.text('Close'), findsNothing);
+    expect(find.byType(SelectableText), findsNothing);
+  });
+
   testWidgets('assistant message exposes a read aloud action', (
     WidgetTester tester,
   ) async {

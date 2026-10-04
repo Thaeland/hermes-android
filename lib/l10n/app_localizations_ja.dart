@@ -1469,6 +1469,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get select_one_or_more_options_then_continue => '1つ以上選択して続行してください。';
 
   @override
+  String get select_text => 'テキストを選択';
+
+  @override
   String get send => '送信';
 
   @override

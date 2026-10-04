@@ -417,6 +417,7 @@
   "search_mode": "Режим поиска",
   "select_one_option_or_enter_another_answer": "Выберите один вариант или введите другой ответ.",
   "select_one_or_more_options_then_continue": "Выберите один или несколько вариантов и продолжите.",
+  "select_text": "Выделить текст",
   "send": "Отправить",
   "send_failed": "Ошибка отправки: {error}",
   "send_message": "Отправить сообщение",

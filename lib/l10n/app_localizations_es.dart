@@ -1506,6 +1506,9 @@ class AppLocalizationsEs extends AppLocalizations {
       'Selecciona una o más opciones y continúa.';
 
   @override
+  String get select_text => 'Seleccionar texto';
+
+  @override
   String get send => 'Enviar';
 
   @override
