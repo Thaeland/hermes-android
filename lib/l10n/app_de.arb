@@ -273,6 +273,7 @@
   "name": "Name",
   "name_prompt_and_schedule_are_required": "Name, Prompt und Zeitplan sind erforderlich",
   "nav_activity": "Aktivität",
+  "nav_projects": "Projekte",
   "needs_a_correction_aware_filing_contract_in_the_hermes_gateway": "Erfordert einen korrekturfähigen Ablagevertrag im Hermes-Gateway.",
   "needs_a_reachable_hermes_dashboard_check_the_host_port_and": "Erfordert ein erreichbares Hermes-Dashboard. Prüfe Host, Port und Zugangsdaten dieser Verbindung.",
   "needs_a_server_authoritative_assets_index_in_the_hermes_gateway": "Erfordert einen serverautoritativen Assets-Index im Hermes-Gateway.",

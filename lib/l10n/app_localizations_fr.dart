@@ -1003,6 +1003,9 @@ class AppLocalizationsFr extends AppLocalizations {
   String get nav_activity => 'Activité';
 
   @override
+  String get nav_projects => 'Projets';
+
+  @override
   String get needs_a_correction_aware_filing_contract_in_the_hermes_gateway =>
       'Nécessite un contrat de classement tenant compte des corrections dans la passerelle Hermes.';
 

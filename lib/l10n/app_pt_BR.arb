@@ -273,6 +273,7 @@
   "name": "Nome",
   "name_prompt_and_schedule_are_required": "Nome, prompt e agendamento são obrigatórios",
   "nav_activity": "Atividade",
+  "nav_projects": "Projetos",
   "needs_a_correction_aware_filing_contract_in_the_hermes_gateway": "Requer um contrato de arquivamento com correção no Gateway do Hermes.",
   "needs_a_reachable_hermes_dashboard_check_the_host_port_and": "Requer um painel do Hermes acessível. Verifique o host, a porta e as credenciais desta conexão.",
   "needs_a_server_authoritative_assets_index_in_the_hermes_gateway": "Requer um índice de recursos autoritativo do servidor no Gateway do Hermes.",

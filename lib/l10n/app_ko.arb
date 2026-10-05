@@ -273,6 +273,7 @@
   "name": "이름",
   "name_prompt_and_schedule_are_required": "이름, 프롬프트, 스케줄은 필수 항목입니다",
   "nav_activity": "활동",
+  "nav_projects": "프로젝트",
   "needs_a_correction_aware_filing_contract_in_the_hermes_gateway": "Hermes 게이트웨이에 수정 인식 파일링 계약이 필요합니다.",
   "needs_a_reachable_hermes_dashboard_check_the_host_port_and": "연결 가능한 Hermes 대시보드가 필요합니다. 이 연결의 호스트, 포트 및 자격 증명을 확인하세요.",
   "needs_a_server_authoritative_assets_index_in_the_hermes_gateway": "Hermes 게이트웨이에 서버 권한 자산 인덱스가 필요합니다.",

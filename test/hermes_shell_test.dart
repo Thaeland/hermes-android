@@ -242,7 +242,7 @@ void main() {
         for (final label in const [
           'ホーム',
           'チャット',
-          'プロジェクト',
+          '案件',
           '活動',
           'その他',
         ]) {
@@ -253,6 +253,41 @@ void main() {
             reason: '$label must render as a single line',
           );
         }
+      },
+    );
+
+    testWidgets(
+      'bar labels honour the app text-size preference within the built-in clamp',
+      (tester) async {
+        await _pumpShell(
+          tester,
+          size: const Size(360, 720),
+          textScale: 1.0,
+          locale: const Locale('ja'),
+        );
+        final at1x = tester.getSize(find.text('チャット')).height;
+
+        await _pumpShell(
+          tester,
+          size: const Size(360, 720),
+          textScale: 1.3,
+          locale: const Locale('ja'),
+        );
+        final at13x = tester.getSize(find.text('チャット')).height;
+
+        // The preference must actually scale the label (not be ignored)…
+        expect(at13x, greaterThan(at1x));
+        // …while the label stays a single line at the clamp.
+        expect(at13x, lessThan(20));
+
+        // Beyond the clamp the label must not grow further (still one line).
+        await _pumpShell(
+          tester,
+          size: const Size(360, 720),
+          textScale: 1.8,
+          locale: const Locale('ja'),
+        );
+        expect(tester.getSize(find.text('チャット')).height, lessThan(20));
       },
     );
 

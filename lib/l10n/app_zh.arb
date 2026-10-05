@@ -272,6 +272,8 @@
   "moved_to": "已移动到 {label}",
   "name": "名称",
   "name_prompt_and_schedule_are_required": "名称、提示词和计划均为必填项",
+  "nav_activity": "活动",
+  "nav_projects": "项目",
   "needs_a_correction_aware_filing_contract_in_the_hermes_gateway": "Hermes 网关中需要具备支持纠错感知的文件归档契约。",
   "needs_a_reachable_hermes_dashboard_check_the_host_port_and": "需要可访问的 Hermes 仪表盘。请检查此连接的主机、端口和凭据。",
   "needs_a_server_authoritative_assets_index_in_the_hermes_gateway": "Hermes 网关中需要具备服务端权威的资产索引。",

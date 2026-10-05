@@ -1000,6 +1000,9 @@ class AppLocalizationsEs extends AppLocalizations {
   String get nav_activity => 'Actividad';
 
   @override
+  String get nav_projects => 'Proyectos';
+
+  @override
   String get needs_a_correction_aware_filing_contract_in_the_hermes_gateway =>
       'Requiere un contrato de archivado con corrección de errores en el Gateway de Hermes.';
 
