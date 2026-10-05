@@ -239,8 +239,14 @@ class HermesAppState extends State<HermesApp> {
   /// every response lands the user on the session the notification was about.
   void _handleNotificationResponse(NotificationResponse response) {
     final route = NotificationRoute.fromResponse(response);
-    final connection =
-        _connectionById(route.connectionId) ?? _notificationConnection();
+    // An explicit connection id must resolve: falling back to another backend
+    // could answer an approval against the wrong gateway. Only legacy
+    // payloads without an id use the last-opened connection.
+    final hasExplicitConnection =
+        route.connectionId != null && route.connectionId!.isNotEmpty;
+    final connection = hasExplicitConnection
+        ? _connectionById(route.connectionId)
+        : _notificationConnection();
     if (connection == null) return;
 
     final choice = route.approvalChoice;

@@ -196,6 +196,46 @@ void main() {
     ]);
     expect(pendingNotificationApproval.value, isNull);
   });
+
+  testWidgets('a mounted chat answers a pending notification approval', (
+    WidgetTester tester,
+  ) async {
+    await pumpChat(tester);
+
+    // The app-level controller did not own the request, so the handler left
+    // it pending while the owning chat is already open — the mounted chat
+    // must observe the notifier, not only a freshly pushed route.
+    pendingNotificationApproval.value = const PendingNotificationApproval(
+      sessionId: 'notif-session',
+      requestId: 'req-11',
+      choice: 'deny',
+    );
+    addTearDown(() => pendingNotificationApproval.value = null);
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(turnSession.approvalResponses, [
+      ('notif-session', 'deny', 'req-11'),
+    ]);
+    expect(pendingNotificationApproval.value, isNull);
+  });
+
+  testWidgets('a pending approval for another session is left untouched', (
+    WidgetTester tester,
+  ) async {
+    await pumpChat(tester);
+
+    pendingNotificationApproval.value = const PendingNotificationApproval(
+      sessionId: 'some-other-session',
+      requestId: 'req-12',
+      choice: 'once',
+    );
+    addTearDown(() => pendingNotificationApproval.value = null);
+    await tester.pump(const Duration(milliseconds: 50));
+
+    // Only the chat that owns the request may answer it.
+    expect(turnSession.approvalResponses, isEmpty);
+    expect(pendingNotificationApproval.value, isNotNull);
+  });
 }
 
 GatewayTurnRecoveryState _completedState() =>

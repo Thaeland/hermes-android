@@ -387,10 +387,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     unawaited(_turnNotifications.ensureInitialized());
     // A notification action that could not answer directly (the request is
     // owned by this screen's gateway, not the app-level controller) lands in
-    // the shared store; answer it as soon as this chat is up.
+    // the shared store; consume it on mount and whenever it changes while
+    // this chat is open — the already-mounted owner must observe it too.
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => _consumePendingNotificationApproval(),
     );
+    pendingNotificationApproval.addListener(_consumePendingNotificationApproval);
     _client =
         widget.testApiClient ??
         ApiClient(
@@ -492,6 +494,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    pendingNotificationApproval.removeListener(
+      _consumePendingNotificationApproval,
+    );
     _clearPendingReattachResync();
     widget.testDesktopConnectionHook?.handler = null;
     widget.testDesktopAsyncEventHook?.handler = null;
@@ -808,7 +813,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         : HermesNotificationKind.turnDone;
     if (!notificationKindEnabled(kind)) return;
     final summary = failed
-        ? context.l10n.turn_completed
+        ? context.l10n.turn_failed
         : context.l10n.response_ready;
     unawaited(
       failed
@@ -905,14 +910,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  /// Background task completions arrive as GatewayNotice insights; mirror the
-  /// finished work to a quiet native notification while the app is away.
+  /// Background task completions and review summaries arrive as GatewayNotice
+  /// insights; mirror them to a native notification while the app is away —
+  /// completions as background work, reviews as gateway notices.
   void _notifyBackgroundNotice(GatewayNotice notice) {
     if (!_appInBackground) return;
+    final isBackground = notice.kind == GatewayNoticeKind.background;
     unawaited(
       _turnNotifications.showKind(
-        kind: HermesNotificationKind.backgroundDone,
-        title: context.l10n.background_task_completed,
+        kind: isBackground
+            ? HermesNotificationKind.backgroundDone
+            : HermesNotificationKind.plugin,
+        title: isBackground
+            ? context.l10n.background_task_completed
+            : context.l10n.plugin_notifications,
         body: notice.text,
         sessionId: widget.session.id,
         payload: jsonEncode({

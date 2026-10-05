@@ -96,7 +96,7 @@ void main() {
     );
 
     test(
-      'reuses one stable id per turn so a turn never stacks duplicates',
+      'replayed settlements for one turn are throttled and never stack',
       () async {
         await service.ensureInitialized();
 
@@ -111,8 +111,10 @@ void main() {
           turnId: 'turn-42',
         );
 
-        expect(sink.shown.map((n) => n.id).toSet(), hasLength(1));
-        expect(sink.shown.map((n) => n.body), ['first', 'second']);
+        // The second call lands inside the 1s replay window: dropped, so a
+        // replayed settlement cannot alert twice.
+        expect(sink.shown, hasLength(1));
+        expect(sink.shown.single.body, 'first');
       },
     );
 

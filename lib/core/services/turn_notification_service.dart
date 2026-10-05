@@ -326,6 +326,8 @@ class TurnNotificationService {
     String? connectionId,
   }) async {
     if (!_initialized) return;
+    // Replayed settlement callbacks must not alert repeatedly.
+    if (_throttled('${HermesNotificationKind.turnDone.name}:$turnId')) return;
 
     await _sink.show(
       TurnNotification(
@@ -358,6 +360,8 @@ class TurnNotificationService {
     String? connectionId,
   }) async {
     if (!_initialized) return;
+    // Replayed settlement callbacks must not alert repeatedly.
+    if (_throttled('${HermesNotificationKind.turnError.name}:$turnId')) return;
 
     await _sink.show(
       TurnNotification(
