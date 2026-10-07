@@ -385,8 +385,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     } else {
       // Restore this session's draft: leaving the chat must never lose it.
       unawaited(
-        ComposerDraftStore.read(widget.session.id).then((draft) {
+        ComposerDraftStore.read(
+          connectionIdentity: _connectionIdentity,
+          sessionId: widget.session.id,
+        ).then((draft) {
           if (!mounted || draft == null) return;
+          // The user may have started typing while the read was in flight:
+          // never clobber live input with the stored draft.
+          if (_textController.text.isNotEmpty) return;
           _textController.text = draft;
           _textController.selection = TextSelection.collapsed(
             offset: draft.length,
@@ -467,18 +473,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _scrollController.addListener(_onScroll);
   }
 
-  String get _chatModelConnectionIdentity =>
+  String get _connectionIdentity =>
       '${widget.connection.baseUrl}|'
       '${widget.connection.gatewayPrefix ?? ''}|'
       '${widget.connection.desktopGatewayUrl ?? ''}';
 
   String get _gatewayNoticeIdentity =>
-      '$_chatModelConnectionIdentity|${widget.session.id}';
+      '$_connectionIdentity|${widget.session.id}';
 
   Future<void> _restoreSessionModelOverride() async {
     final store = await _chatModelStore;
     final override = store.read(
-      connectionIdentity: _chatModelConnectionIdentity,
+      connectionIdentity: _connectionIdentity,
       sessionId: widget.session.id,
     );
     if (!mounted || override == null) return;
@@ -529,7 +535,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       );
     }
     unawaited(
-      ComposerDraftStore.save(widget.session.id, _textController.text),
+      ComposerDraftStore.save(
+        connectionIdentity: _connectionIdentity,
+        sessionId: widget.session.id,
+        text: _textController.text,
+      ),
     );
     _textController.dispose();
     _scrollController.removeListener(_onScroll);
@@ -571,7 +581,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _appInBackground = true;
       // Persist the draft on the way out: a process kill must not lose it.
       unawaited(
-        ComposerDraftStore.save(widget.session.id, _textController.text),
+        ComposerDraftStore.save(
+          connectionIdentity: _connectionIdentity,
+          sessionId: widget.session.id,
+          text: _textController.text,
+        ),
       );
       _pauseReattachRetry();
       if (_legacyTransportFallback && (_sending || _streaming)) {
@@ -2092,7 +2106,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
       final store = await _chatModelStore;
       await store.save(
-        connectionIdentity: _chatModelConnectionIdentity,
+        connectionIdentity: _connectionIdentity,
         sessionId: widget.session.id,
         provider: choice.provider,
         model: choice.model,
@@ -2196,7 +2210,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             },
           ];
 
-    _textController.text = '';
+    _clearComposerForSend();
     _awaitingVoiceReply = speakResponse && _voiceReplyEnabled;
     final responseGeneration = ++_responseGeneration;
     _activeResponseTransport = _ResponseTransport.rest;
@@ -2292,16 +2306,26 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             _gatewayTurnStatus = null;
             _activeResponseTransport = _ResponseTransport.none;
           });
+          // The request never reached the server: restore what was typed.
+          _restoreComposerAfterRejectedSend(text);
         }
       },
       onError: (error) {
         if (!mounted || responseGeneration != _responseGeneration) return;
+        // No streamed content means the request never reached the server
+        // (connection failure, non-200): restore the draft so nothing typed
+        // is lost. Content already flowing means the prompt was accepted.
+        final hadContent =
+            _messages.isNotEmpty &&
+            _messages.last['role'] == 'assistant' &&
+            (_messages.last['content']?.toString().isNotEmpty ?? false);
         // Remove the placeholder assistant message
         setState(() {
           if (_messages.isNotEmpty && _messages.last['role'] == 'assistant') {
             _messages.removeLast();
           }
         });
+        if (!hadContent) _restoreComposerAfterRejectedSend(text);
         _handleSendError(error, removePendingUserMessage: true);
       },
     );
@@ -2399,7 +2423,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             text,
             attachmentLabels,
           ].where((part) => part.trim().isNotEmpty).join('\n\n');
-          _textController.clear();
+          _clearComposerForSend();
           _scrollCoordinator.beginStreaming(isNearEnd: _isNearEnd());
           setState(() {
             _streaming = true;
@@ -2482,7 +2506,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           if (_messages.isNotEmpty && _messages.last['role'] == 'user') {
             _messages.removeLast();
           }
-          _textController.text = text;
+          _restoreComposerAfterRejectedSend(text);
           _attachmentDrafts
             ..clear()
             ..addAll(attachments);
@@ -2598,7 +2622,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       text,
       attachmentLabels,
     ].where((part) => part.trim().isNotEmpty).join('\n\n');
-    _textController.clear();
+    _clearComposerForSend();
     _scrollCoordinator.beginStreaming(isNearEnd: _isNearEnd());
     setState(() {
       _streaming = true;
@@ -2638,7 +2662,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           if (_messages.isNotEmpty && _messages.last['role'] == 'user') {
             _messages.removeLast();
           }
-          _textController.text = text;
+          _restoreComposerAfterRejectedSend(text);
           for (final draft in attachments) {
             draft
               ..status = AttachmentDraftStatus.ready
@@ -3456,6 +3480,34 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _stopResponseInFlight = false;
       unawaited(_refreshDeferredHistoryIfIdle());
     }
+  }
+
+  /// Clears the composer and its stored draft at the same boundary, so a
+  /// process kill right after sending cannot resurrect the sent prompt.
+  void _clearComposerForSend() {
+    _textController.clear();
+    unawaited(
+      ComposerDraftStore.save(
+        connectionIdentity: _connectionIdentity,
+        sessionId: widget.session.id,
+        text: '',
+      ),
+    );
+  }
+
+  /// A definite send rejection: put the text back into the composer and the
+  /// store so the user does not lose what they typed.
+  void _restoreComposerAfterRejectedSend(String text) {
+    if (text.trim().isEmpty) return;
+    _textController.text = text;
+    _textController.selection = TextSelection.collapsed(offset: text.length);
+    unawaited(
+      ComposerDraftStore.save(
+        connectionIdentity: _connectionIdentity,
+        sessionId: widget.session.id,
+        text: text,
+      ),
+    );
   }
 
   void _handleSendError(Object e, {bool removePendingUserMessage = false}) {

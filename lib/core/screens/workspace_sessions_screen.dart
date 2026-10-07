@@ -6,6 +6,7 @@ import '../models/session.dart';
 import '../theme/hermes_theme.dart';
 import '../utils/relative_time.dart';
 import '../widgets/hermes_components.dart';
+import '../widgets/hermes_shell.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
 const kWorkspaceSessionSearchKey = Key('workspace-session-search');
@@ -276,14 +277,22 @@ class WorkspaceSessionsScreen extends StatefulWidget {
       _WorkspaceSessionsScreenState();
 }
 
-class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
+class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
+    with WidgetsBindingObserver {
   WorkspaceSessionsData? _data;
   Object? _error;
   String _query = '';
   final Set<String> _promoting = {};
 
-  /// Periodic silent refresh so running/idle chips stay honest while visible.
+  /// Periodic silent refresh so running/idle chips stay honest while the
+  /// list is actually visible (not behind a pushed chat, another shell tab,
+  /// or a backgrounded app).
   Timer? _refreshTimer;
+  bool _visible = true;
+
+  /// Coalesces refresh ticks with manual pulls: a slow load must never
+  /// overlap the next tick (an older completion would win the setState).
+  bool _loadInFlight = false;
 
   /// The active chip filter in the embedded Chats browser.
   WorkspaceChatsFilter _filter = WorkspaceChatsFilter.all;
@@ -300,23 +309,55 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     unawaited(_load());
-    // Keep running/idle chips honest while the list is visible: the gateway
-    // only knows a turn is live while it runs, so a static list shows stale
-    // states until a manual pull. _load() replaces data without a loading
-    // state, so the refresh is invisible.
-    if (widget.refreshInterval case final interval?) {
-      _refreshTimer = Timer.periodic(interval, (_) => unawaited(_load()));
-    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _syncRefreshTimer();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _syncRefreshTimer();
+  }
+
+  /// True when this pane is on screen: the route is current (no chat pushed
+  /// over it), the shell tab is selected, and the app is foregrounded.
+  bool _computeVisible() {
+    if (!(ModalRoute.of(context)?.isCurrent ?? true)) return false;
+    if (!HermesPaneVisibility.of(context)) return false;
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    return lifecycle == null || lifecycle == AppLifecycleState.resumed;
+  }
+
+  /// Starts the periodic refresh only while visible: hidden panes must not
+  /// hit the gateway, and the pull-to-refresh keeps working regardless.
+  void _syncRefreshTimer() {
+    final visible = _computeVisible();
+    if (visible == _visible && _refreshTimer != null) return;
+    _visible = visible;
+    _refreshTimer?.cancel();
+    _refreshTimer = null;
+    final interval = widget.refreshInterval;
+    if (interval == null || !visible) return;
+    _refreshTimer = Timer.periodic(interval, (_) {
+      if (_visible) unawaited(_load());
+    });
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _refreshTimer?.cancel();
     super.dispose();
   }
 
   Future<void> _load() async {
+    if (_loadInFlight) return;
+    _loadInFlight = true;
     try {
       final data = await widget.load();
       if (mounted) {
@@ -328,6 +369,8 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
     } catch (error) {
       debugPrint('[workspace-sessions] load failed: $error');
       if (mounted) setState(() => _error = error);
+    } finally {
+      _loadInFlight = false;
     }
   }
 

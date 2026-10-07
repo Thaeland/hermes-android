@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/session_search_hit.dart';
 import '../services/ai_search_query_rewriter.dart';
 import '../services/chat_space_store.dart';
+import '../services/composer_draft_store.dart';
 import '../services/connection_manager.dart';
 import '../services/desktop_gateway_client.dart';
 import '../services/gateway_turn_application_controller.dart';
@@ -892,6 +893,11 @@ class _SessionListScreenState extends State<SessionListScreen> {
 
     try {
       await _client.deleteSession(session.id);
+      // A deleted session must not leave an orphaned draft behind.
+      await ComposerDraftStore.remove(
+        connectionIdentity: _searchConnectionIdentity,
+        sessionId: session.id,
+      );
       await _spaceStore?.assignSession(session.id, null);
       if (_spaceStore != null) {
         _spaceState = await _spaceStore!.load();

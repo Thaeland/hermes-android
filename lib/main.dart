@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'core/services/android_launch_intent_service.dart';
 import 'core/services/android_share_intent_service.dart';
+import 'core/services/composer_draft_store.dart';
 import 'core/services/config_backup.dart';
 import 'core/services/config_backup_io.dart';
 import 'core/services/config_backup_service.dart';
@@ -929,6 +930,13 @@ class HomeScreenState extends State<HomeScreen> {
             if (v == 'delete') {
               try {
                 await widget.connManager.deleteConnection(conn.id);
+                // Drop every draft stored for this connection: a deleted
+                // connection must not leave orphaned drafts behind.
+                await ComposerDraftStore.removeConnection(
+                  '${conn.baseUrl}|'
+                  '${conn.gatewayPrefix ?? ''}|'
+                  '${conn.desktopGatewayUrl ?? ''}',
+                );
                 if (mounted) _refresh();
               } on CredentialStorageException {
                 if (!mounted) return;
