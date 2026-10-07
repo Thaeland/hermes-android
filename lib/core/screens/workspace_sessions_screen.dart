@@ -254,6 +254,11 @@ class WorkspaceSessionsScreen extends StatefulWidget {
   /// screen uses `DateTime.now()`.
   final DateTime? now;
 
+  /// Periodic silent refresh for the running/idle chips. Null (the default,
+  /// used by tests that drive loads explicitly) disables the timer; the
+  /// production surfaces pass a modest interval.
+  final Duration? refreshInterval;
+
   const WorkspaceSessionsScreen({
     required this.title,
     required this.view,
@@ -262,6 +267,7 @@ class WorkspaceSessionsScreen extends StatefulWidget {
     this.onPromote,
     this.embedded = false,
     this.now,
+    this.refreshInterval,
     super.key,
   });
 
@@ -275,6 +281,9 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
   Object? _error;
   String _query = '';
   final Set<String> _promoting = {};
+
+  /// Periodic silent refresh so running/idle chips stay honest while visible.
+  Timer? _refreshTimer;
 
   /// The active chip filter in the embedded Chats browser.
   WorkspaceChatsFilter _filter = WorkspaceChatsFilter.all;
@@ -292,6 +301,19 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
   void initState() {
     super.initState();
     unawaited(_load());
+    // Keep running/idle chips honest while the list is visible: the gateway
+    // only knows a turn is live while it runs, so a static list shows stale
+    // states until a manual pull. _load() replaces data without a loading
+    // state, so the refresh is invisible.
+    if (widget.refreshInterval case final interval?) {
+      _refreshTimer = Timer.periodic(interval, (_) => unawaited(_load()));
+    }
+  }
+
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    super.dispose();
   }
 
   Future<void> _load() async {

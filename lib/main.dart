@@ -474,6 +474,7 @@ class HomeScreenState extends State<HomeScreen> {
           turnApplicationController: widget.turnApplicationController,
           initialSharedPayload: sharedPayload,
           initialQuickChat: initialQuickChat,
+          sessionsRefreshInterval: const Duration(seconds: 10),
         ),
       ),
     );

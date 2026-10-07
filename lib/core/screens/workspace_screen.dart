@@ -135,6 +135,10 @@ class WorkspaceScreen extends StatefulWidget {
   /// screen pushes the chat itself, so the shell is never a dead end.
   final ValueChanged<Session>? onOpenSession;
 
+  /// Periodic silent refresh for the session lists (running/idle chips).
+  /// Null (tests) disables the timer; the app passes a modest interval.
+  final Duration? sessionsRefreshInterval;
+
   /// Owns durable turn recovery above this screen's lifetime. Passed to every
   /// chat opened from Home so a turn survives leaving the chat.
   final GatewayTurnApplicationController? turnApplicationController;
@@ -204,6 +208,7 @@ class WorkspaceScreen extends StatefulWidget {
     this.initialQuickChat = false,
     this.sharedAttachmentPreparer,
     this.onOpenDashboard,
+    this.sessionsRefreshInterval,
     super.key,
   });
 
@@ -733,6 +738,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           title: context.l10n.chats,
           view: WorkspaceSessionView.all,
           embedded: true,
+          refreshInterval: widget.sessionsRefreshInterval,
           load: _loadWorkspaceSessionsData,
           onOpenSession: (session) => unawaited(
             _openSession(session, projectName: _chatProjectLabels[session.id]),
@@ -1208,6 +1214,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       WorkspaceSessionsScreen(
         title: title,
         view: view,
+        refreshInterval: widget.sessionsRefreshInterval,
         load: _loadWorkspaceSessionsData,
         onOpenSession: (session) => unawaited(_openSession(session)),
         onPromote: switch (view) {

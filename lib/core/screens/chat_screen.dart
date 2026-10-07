@@ -15,6 +15,7 @@ import 'package:share_plus/share_plus.dart';
 import '../controllers/voice_composer_controller.dart';
 import '../services/connection_manager.dart';
 import '../services/attachment_draft_service.dart';
+import '../services/composer_draft_store.dart';
 import '../services/chat_model_override_store.dart';
 import '../services/desktop_gateway_client.dart';
 import '../services/gateway_turn_application_controller.dart';
@@ -376,10 +377,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _textController.text = widget.initialComposerText ?? '';
-    _textController.selection = TextSelection.collapsed(
-      offset: _textController.text.length,
-    );
+    if (widget.initialComposerText case final shared?) {
+      _textController.text = shared;
+      _textController.selection = TextSelection.collapsed(
+        offset: shared.length,
+      );
+    } else {
+      // Restore this session's draft: leaving the chat must never lose it.
+      unawaited(
+        ComposerDraftStore.read(widget.session.id).then((draft) {
+          if (!mounted || draft == null) return;
+          _textController.text = draft;
+          _textController.selection = TextSelection.collapsed(
+            offset: draft.length,
+          );
+        }),
+      );
+    }
     _turnNotifications =
         widget.testTurnNotifications ?? TurnNotificationService();
     unawaited(_turnNotifications.ensureInitialized());
@@ -514,6 +528,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         registration,
       );
     }
+    unawaited(
+      ComposerDraftStore.save(widget.session.id, _textController.text),
+    );
     _textController.dispose();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
@@ -552,6 +569,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         state == AppLifecycleState.hidden ||
         state == AppLifecycleState.detached) {
       _appInBackground = true;
+      // Persist the draft on the way out: a process kill must not lose it.
+      unawaited(
+        ComposerDraftStore.save(widget.session.id, _textController.text),
+      );
       _pauseReattachRetry();
       if (_legacyTransportFallback && (_sending || _streaming)) {
         _legacyHistoryResyncPending = true;
