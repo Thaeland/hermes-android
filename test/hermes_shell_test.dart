@@ -1,10 +1,44 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'dart:io';
+
 import 'package:hermes_android/core/theme/hermes_theme.dart';
 import 'package:hermes_android/core/widgets/hermes_shell.dart';
 import 'support/l10n_test_utils.dart';
 import 'package:hermes_android/l10n/app_localizations.dart';
 
+/// The test environment's default font is Ahem (1em squares), which makes
+/// label measurements meaningless. Load the real Roboto so widths match
+/// devices; CJK stays on fallback boxes, which the short labels still pass.
+Future<void> _loadRoboto() async {
+  final root = Platform.environment['FLUTTER_ROOT'];
+  if (root == null) return;
+  final file = File(
+    '$root/bin/cache/artifacts/material_fonts/Roboto-Regular.ttf',
+  );
+  if (!file.existsSync()) return;
+  final bytes = file.readAsBytesSync();
+  final loader = FontLoader('Roboto')
+    ..addFont(
+      Future.value(
+        ByteData.view(bytes.buffer, bytes.offsetInBytes, bytes.lengthInBytes),
+      ),
+    );
+  await loader.load();
+}
+
+
+/// The app ships the platform font (family null); the test environment's
+/// default is Ahem (1em squares). Pin the loaded Roboto so measurements
+/// match devices. CJK keeps the fallback boxes, which the short labels pass.
+ThemeData _testTheme(Brightness brightness) {
+  final base = hermesTheme(brightness);
+  return base.copyWith(
+    textTheme: base.textTheme.apply(fontFamily: 'Roboto'),
+  );
+}
 
 Future<void> _pumpShell(
   WidgetTester tester, {
@@ -26,7 +60,7 @@ Future<void> _pumpShell(
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       locale: locale,
-      theme: hermesTheme(brightness),
+      theme: _testTheme(brightness),
       home: Builder(
         builder: (context) => MediaQuery(
           // Keep the real view metrics; only override the text scale, so the
@@ -54,6 +88,7 @@ void main() {
 
   setUpAll(() async {
     l10n = await loadTestL10n();
+    await _loadRoboto();
   });
   group('HermesDestination', () {
     test('declares the five validated top-level destinations in order', () {
@@ -226,32 +261,58 @@ void main() {
     });
 
     testWidgets(
-      'Japanese destination labels stay on one line at the narrowest width '
-      'and the app text-size preferences',
+      'every locale keeps bar labels on one line at both breakpoints',
       (tester) async {
-        // ja ships the widest bar labels. 320dp is the narrowest phone the
-        // shell supports, and 1.30x is the largest app text-size preference
-        // (on top of whatever the system scaler adds).
-        await _pumpShell(
-          tester,
-          size: const Size(320, 640),
-          textScale: 1.3,
-          locale: const Locale('ja'),
-        );
-
-        for (final label in const [
-          'ホーム',
-          'チャット',
-          '案件',
-          '活動',
-          'その他',
+        // The app's largest text-size preference (1.30x) at the narrowest
+        // supported widths: every shipped label must render one line and fit
+        // inside its destination.
+        for (final code in const [
+          'en',
+          'ja',
+          'zh',
+          'ko',
+          'es',
+          'fr',
+          'de',
+          'pt',
+          'ru',
         ]) {
-          final labelSize = tester.getSize(find.text(label));
-          expect(
-            labelSize.height,
-            lessThan(20),
-            reason: '$label must render as a single line',
-          );
+          for (final width in const [320.0, 360.0]) {
+            await _pumpShell(
+              tester,
+              size: Size(width, 720),
+              textScale: 1.3,
+              locale: Locale(code),
+            );
+            final l10n = await AppLocalizations.delegate.load(Locale(code));
+            for (final destination in HermesDestination.values) {
+              final label = destination.label(l10n);
+              // Measure the rendered paragraph, not the reserved label slot:
+              // count distinct line tops of the selection boxes (a wrapped
+              // label yields one top per line).
+              final para = tester.renderObject<RenderParagraph>(
+                find.descendant(
+                  of: find.byType(NavigationBar),
+                  matching: find.text(label),
+                ).first,
+              );
+              final boxes = para.getBoxesForSelection(
+                TextSelection(baseOffset: 0, extentOffset: label.length),
+              );
+              final lineTops = boxes.map((b) => b.top.round()).toSet();
+              expect(
+                lineTops.length,
+                1,
+                reason: '$code @${width}dp: "$label" must render one line',
+              );
+              final textWidth = boxes.last.right - boxes.first.left;
+              expect(
+                textWidth,
+                lessThanOrEqualTo(width / 5),
+                reason: '$code @${width}dp: "$label" must fit its destination',
+              );
+            }
+          }
         }
       },
     );
