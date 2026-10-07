@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hermes_android/core/models/gateway_turn_contract.dart';
 import 'package:hermes_android/core/models/attachment_draft.dart';
+import 'package:hermes_android/core/models/projects_tree_overview.dart';
 import 'package:hermes_android/core/screens/chat_screen.dart';
 import 'package:hermes_android/core/services/attachment_draft_service.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
@@ -77,6 +78,65 @@ void main() {
       isTrue,
     );
   });
+
+  test('stored session identity wins when resolving the Project header', () {
+    final overview = ProjectsTreeOverview.fromJson({
+      'projects': [
+        {
+          'id': 'project-1',
+          'label': 'Hermes Android',
+          'sessionIds': ['stored-session'],
+        },
+        {
+          'id': ProjectsTreeOverview.noProjectId,
+          'label': 'Home',
+          'isNoProject': true,
+          'sessionIds': ['mobile-draft'],
+        },
+      ],
+    });
+
+    final resolution = resolveChatProjectHeader(overview, const [
+      'stored-session',
+      'mobile-draft',
+    ]);
+
+    expect(resolution.known, isTrue);
+    expect(resolution.projectName, 'Hermes Android');
+  });
+
+  testWidgets(
+    'session binding reconciles an Unassigned header with server placement',
+    (tester) async {
+      final session = _FakeTurnSession([const <GatewayTurnRecoveryState>[]]);
+      var loads = 0;
+      await _pumpChat(
+        tester,
+        turnSession: session,
+        projectOverviewLoader: () async {
+          loads += 1;
+          return ProjectsTreeOverview.fromJson({
+            'projects': [
+              {
+                'id': 'project-1',
+                'label': 'Hermes Android',
+                'sessionIds': ['stored-session'],
+              },
+            ],
+          });
+        },
+      );
+
+      expect(find.text('Unassigned'), findsOneWidget);
+
+      session.bind('recovery-session', 'stored-session');
+      await tester.pumpAndSettle();
+
+      expect(loads, greaterThanOrEqualTo(2));
+      expect(find.text('Hermes Android'), findsOneWidget);
+      expect(find.text('Unassigned'), findsNothing);
+    },
+  );
 
   testWidgets('resume reconciles and materializes one authoritative response', (
     tester,
@@ -640,6 +700,7 @@ Future<void> _pumpChat(
   AttachmentDraftService? attachmentDraftService,
   List<AttachmentDraft> initialDrafts = const [],
   TestDesktopConnectionHook? connectionHook,
+  TestProjectOverviewLoader? projectOverviewLoader,
 }) async {
   apiClient ??= ApiClient(
     baseUrl: 'http://recovery.fixture',
@@ -675,6 +736,7 @@ Future<void> _pumpChat(
         testAttachmentDraftService: attachmentDraftService,
         testInitialAttachmentDrafts: initialDrafts,
         testDesktopConnectionHook: connectionHook,
+        testProjectOverviewLoader: projectOverviewLoader,
         testVoiceComposerAdapter: FakeVoiceComposerAdapter(),
       ),
     ),
@@ -735,6 +797,11 @@ class _FakeTurnSession implements GatewayTurnApplicationSession {
   int stageCount = 0;
   int closeCount = 0;
   final List<String> submittedTexts = [];
+  GatewayTurnSessionBoundCallback? _onSessionBound;
+
+  void bind(String localSessionId, String storedSessionId) {
+    _onSessionBound?.call(localSessionId, storedSessionId);
+  }
 
   @override
   Object setAsyncEventListener(
@@ -824,7 +891,9 @@ class _FakeTurnSession implements GatewayTurnApplicationSession {
   set onTurnSettled(GatewayTurnSettledCallback? callback) {}
 
   @override
-  set onSessionBound(GatewayTurnSessionBoundCallback? callback) {}
+  set onSessionBound(GatewayTurnSessionBoundCallback? callback) {
+    _onSessionBound = callback;
+  }
 
   @override
   Future<void> detachAttachments({
