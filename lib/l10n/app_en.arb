@@ -272,6 +272,8 @@
   "moved_to": "Moved to {label}",
   "name": "Name",
   "name_prompt_and_schedule_are_required": "Name, prompt, and schedule are required",
+  "nav_activity": "Activity",
+  "nav_projects": "Projects",
   "needs_a_correction_aware_filing_contract_in_the_hermes_gateway": "Needs a correction-aware filing contract in the Hermes Gateway.",
   "needs_a_reachable_hermes_dashboard_check_the_host_port_and": "Needs a reachable Hermes dashboard. Check the host, port, and credentials of this connection.",
   "needs_a_server_authoritative_assets_index_in_the_hermes_gateway": "Needs a server-authoritative Assets index in the Hermes Gateway.",

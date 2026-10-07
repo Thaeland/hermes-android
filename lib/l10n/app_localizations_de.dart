@@ -999,6 +999,12 @@ class AppLocalizationsDe extends AppLocalizations {
       'Name, Prompt und Zeitplan sind erforderlich';
 
   @override
+  String get nav_activity => 'Aktivität';
+
+  @override
+  String get nav_projects => 'Projekte';
+
+  @override
   String get needs_a_correction_aware_filing_contract_in_the_hermes_gateway =>
       'Erfordert einen korrekturfähigen Ablagevertrag im Hermes-Gateway.';
 

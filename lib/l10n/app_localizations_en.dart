@@ -984,6 +984,12 @@ class AppLocalizationsEn extends AppLocalizations {
       'Name, prompt, and schedule are required';
 
   @override
+  String get nav_activity => 'Activity';
+
+  @override
+  String get nav_projects => 'Projects';
+
+  @override
   String get needs_a_correction_aware_filing_contract_in_the_hermes_gateway =>
       'Needs a correction-aware filing contract in the Hermes Gateway.';
 

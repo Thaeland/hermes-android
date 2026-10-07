@@ -272,6 +272,8 @@
   "moved_to": "Déplacé vers {label}",
   "name": "Nom",
   "name_prompt_and_schedule_are_required": "Le nom, le prompt et la planification sont obligatoires",
+  "nav_activity": "Activité",
+  "nav_projects": "Projets",
   "needs_a_correction_aware_filing_contract_in_the_hermes_gateway": "Nécessite un contrat de classement tenant compte des corrections dans la passerelle Hermes.",
   "needs_a_reachable_hermes_dashboard_check_the_host_port_and": "Nécessite un tableau de bord Hermes accessible. Vérifiez l'hôte, le port et les identifiants de cette connexion.",
   "needs_a_server_authoritative_assets_index_in_the_hermes_gateway": "Nécessite un index de ressources faisant autorité côté serveur dans la passerelle Hermes.",

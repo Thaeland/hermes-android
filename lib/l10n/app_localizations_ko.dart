@@ -967,6 +967,12 @@ class AppLocalizationsKo extends AppLocalizations {
   String get name_prompt_and_schedule_are_required => '이름, 프롬프트, 스케줄은 필수 항목입니다';
 
   @override
+  String get nav_activity => '활동';
+
+  @override
+  String get nav_projects => '프로젝트';
+
+  @override
   String get needs_a_correction_aware_filing_contract_in_the_hermes_gateway =>
       'Hermes 게이트웨이에 수정 인식 파일링 계약이 필요합니다.';
 
