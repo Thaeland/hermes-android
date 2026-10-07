@@ -132,4 +132,57 @@ void main() {
       expect(sessions.map((s) => s.id), ['a', 'b']);
     });
   });
+
+  group('ApiClient.getSessionById', () {
+    test('pages until the exact id is found', () async {
+      final uris = <Uri>[];
+      final client = _RecordingJsonClient(
+        bodyFor: (uri) {
+          uris.add(uri);
+          final offset = int.parse(uri.queryParameters['offset'] ?? '0');
+          if (offset == 0) {
+            return jsonEncode({
+              'object': 'list',
+              'data': [_row('a'), _row('b')],
+              'has_more': true,
+            });
+          }
+          return jsonEncode({
+            'object': 'list',
+            'data': [_row('target')],
+            'has_more': false,
+          });
+        },
+      );
+      final api = ApiClient(
+        baseUrl: 'http://fixture.local',
+        apiKey: 'fixture-key',
+        httpClient: client,
+      );
+
+      final session = await api.getSessionById('target');
+
+      expect(session, isNotNull);
+      expect(session!.id, 'target');
+      expect(uris, hasLength(2));
+      expect(uris[1].queryParameters['offset'], '2');
+    });
+
+    test('returns null once the last page is reached without the id', () async {
+      final client = _RecordingJsonClient(
+        bodyFor: (_) => jsonEncode({
+          'object': 'list',
+          'data': [_row('a')],
+          'has_more': false,
+        }),
+      );
+      final api = ApiClient(
+        baseUrl: 'http://fixture.local',
+        apiKey: 'fixture-key',
+        httpClient: client,
+      );
+
+      expect(await api.getSessionById('missing'), isNull);
+    });
+  });
 }

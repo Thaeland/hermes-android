@@ -253,6 +253,17 @@ class HermesAppState extends State<HermesApp> {
     final sessionId = route.sessionId;
     final requestId = route.requestId;
     if (choice != null && sessionId != null && requestId != null) {
+      final approval = PendingNotificationApproval(
+        // The chat screens match on their connection identity (base URL +
+        // gateway prefix + desktop URL), not the saved-connection id.
+        connectionId:
+            '${connection.baseUrl}|'
+            '${connection.gatewayPrefix ?? ''}|'
+            '${connection.desktopGatewayUrl ?? ''}',
+        sessionId: sessionId,
+        requestId: requestId,
+        choice: choice,
+      );
       try {
         final session = _turnApplicationController.sessionFor(connection);
         unawaited(
@@ -265,19 +276,17 @@ class HermesAppState extends State<HermesApp> {
               .then((answered) {
                 // The request belongs to an open chat's route-local gateway:
                 // leave it pending so that screen answers it normally.
-                if (!answered) {
-                  pendingNotificationApproval.value =
-                      PendingNotificationApproval(
-                        sessionId: sessionId,
-                        requestId: requestId,
-                        choice: choice,
-                      );
-                }
+                if (!answered) addPendingNotificationApproval(approval);
               })
-              .catchError((_) {}),
+              .catchError((_) {
+                // A throw is unresolved, not answered: keep the tap pending
+                // so the owning chat can still answer it.
+                addPendingNotificationApproval(approval);
+              }),
         );
       } catch (_) {
-        // A closed controller cannot answer; the in-app dialog still can.
+        // A closed controller cannot answer; the owning chat still can.
+        addPendingNotificationApproval(approval);
       }
     }
 
@@ -308,8 +317,7 @@ class HermesAppState extends State<HermesApp> {
           apiKey: connection.apiKey,
           pathPrefix: connection.gatewayPrefix ?? '',
         );
-        final sessions = await client.getSessions();
-        session = sessions.where((item) => item.id == sessionId).firstOrNull;
+        session = await client.getSessionById(sessionId);
       } catch (_) {
         session = null;
       } finally {
@@ -334,7 +342,11 @@ class HermesAppState extends State<HermesApp> {
     }
     _navigatorKey.currentState?.push(
       MaterialPageRoute(
-        builder: (_) => ChatScreen(connection: connection, session: session!),
+        builder: (_) => ChatScreen(
+          connection: connection,
+          session: session!,
+          turnApplicationController: _turnApplicationController,
+        ),
       ),
     );
   }

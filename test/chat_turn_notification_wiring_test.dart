@@ -18,6 +18,19 @@ import 'support/fake_voice_composer_adapter.dart';
 import 'support/recording_turn_notification_sink.dart';
 import 'package:hermes_android/l10n/app_localizations.dart';
 
+final _fixtureConnection = SavedConnection(
+  id: 'notif-fixture',
+  label: 'Notification fixture',
+  host: 'notif.fixture',
+  port: 8642,
+  apiKey: '',
+);
+
+String get _fixtureIdentity =>
+    '${_fixtureConnection.baseUrl}|'
+    '${_fixtureConnection.gatewayPrefix ?? ''}|'
+    '${_fixtureConnection.desktopGatewayUrl ?? ''}';
+
 const _clientTurnId = '123e4567-e89b-42d3-a456-426614174000';
 
 /// Wires the notification path ChatScreen actually uses when a turn settles.
@@ -44,13 +57,7 @@ void main() {
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
         home: ChatScreen(
-          connection: SavedConnection(
-            id: 'notif-fixture',
-            label: 'Notification fixture',
-            host: 'notif.fixture',
-            port: 8642,
-            apiKey: '',
-          ),
+          connection: _fixtureConnection,
           session: const Session(
             id: 'notif-session',
             title: 'Roadmap',
@@ -181,12 +188,15 @@ void main() {
   testWidgets('a pending notification approval is answered once the chat is up', (
     WidgetTester tester,
   ) async {
-    pendingNotificationApproval.value = const PendingNotificationApproval(
-      sessionId: 'notif-session',
-      requestId: 'req-9',
-      choice: 'once',
+    addPendingNotificationApproval(
+      PendingNotificationApproval(
+        connectionId: _fixtureIdentity,
+        sessionId: 'notif-session',
+        requestId: 'req-9',
+        choice: 'once',
+      ),
     );
-    addTearDown(() => pendingNotificationApproval.value = null);
+    addTearDown(() => pendingNotificationApprovals.value = const []);
 
     await pumpChat(tester);
     await tester.pump(const Duration(milliseconds: 100));
@@ -194,7 +204,7 @@ void main() {
     expect(turnSession.approvalResponses, [
       ('notif-session', 'once', 'req-9'),
     ]);
-    expect(pendingNotificationApproval.value, isNull);
+    expect(pendingNotificationApprovals.value, isEmpty);
   });
 
   testWidgets('a mounted chat answers a pending notification approval', (
@@ -205,18 +215,52 @@ void main() {
     // The app-level controller did not own the request, so the handler left
     // it pending while the owning chat is already open — the mounted chat
     // must observe the notifier, not only a freshly pushed route.
-    pendingNotificationApproval.value = const PendingNotificationApproval(
-      sessionId: 'notif-session',
-      requestId: 'req-11',
-      choice: 'deny',
+    addPendingNotificationApproval(
+      PendingNotificationApproval(
+        connectionId: _fixtureIdentity,
+        sessionId: 'notif-session',
+        requestId: 'req-11',
+        choice: 'deny',
+      ),
     );
-    addTearDown(() => pendingNotificationApproval.value = null);
+    addTearDown(() => pendingNotificationApprovals.value = const []);
     await tester.pump(const Duration(milliseconds: 50));
 
     expect(turnSession.approvalResponses, [
       ('notif-session', 'deny', 'req-11'),
     ]);
-    expect(pendingNotificationApproval.value, isNull);
+    expect(pendingNotificationApprovals.value, isEmpty);
+  });
+
+  testWidgets('several queued approvals are all answered', (
+    WidgetTester tester,
+  ) async {
+    await pumpChat(tester);
+
+    addPendingNotificationApproval(
+      PendingNotificationApproval(
+        connectionId: _fixtureIdentity,
+        sessionId: 'notif-session',
+        requestId: 'req-a',
+        choice: 'once',
+      ),
+    );
+    addPendingNotificationApproval(
+      PendingNotificationApproval(
+        connectionId: _fixtureIdentity,
+        sessionId: 'notif-session',
+        requestId: 'req-b',
+        choice: 'deny',
+      ),
+    );
+    addTearDown(() => pendingNotificationApprovals.value = const []);
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(turnSession.approvalResponses, [
+      ('notif-session', 'once', 'req-a'),
+      ('notif-session', 'deny', 'req-b'),
+    ]);
+    expect(pendingNotificationApprovals.value, isEmpty);
   });
 
   testWidgets('a pending approval for another session is left untouched', (
@@ -224,17 +268,83 @@ void main() {
   ) async {
     await pumpChat(tester);
 
-    pendingNotificationApproval.value = const PendingNotificationApproval(
-      sessionId: 'some-other-session',
-      requestId: 'req-12',
-      choice: 'once',
+    addPendingNotificationApproval(
+      PendingNotificationApproval(
+        connectionId: _fixtureIdentity,
+        sessionId: 'some-other-session',
+        requestId: 'req-12',
+        choice: 'once',
+      ),
     );
-    addTearDown(() => pendingNotificationApproval.value = null);
+    addTearDown(() => pendingNotificationApprovals.value = const []);
     await tester.pump(const Duration(milliseconds: 50));
 
     // Only the chat that owns the request may answer it.
     expect(turnSession.approvalResponses, isEmpty);
-    expect(pendingNotificationApproval.value, isNotNull);
+    expect(pendingNotificationApprovals.value, hasLength(1));
+  });
+
+  testWidgets('a pending approval for another connection is left untouched', (
+    WidgetTester tester,
+  ) async {
+    await pumpChat(tester);
+
+    addPendingNotificationApproval(
+      PendingNotificationApproval(
+        connectionId: 'http://other.example||',
+        sessionId: 'notif-session',
+        requestId: 'req-13',
+        choice: 'once',
+      ),
+    );
+    addTearDown(() => pendingNotificationApprovals.value = const []);
+    await tester.pump(const Duration(milliseconds: 50));
+
+    // Identical session ids on a different gateway must never cross.
+    expect(turnSession.approvalResponses, isEmpty);
+    expect(pendingNotificationApprovals.value, hasLength(1));
+  });
+
+  testWidgets('a throw while answering keeps the approval pending', (
+    WidgetTester tester,
+  ) async {
+    await pumpChat(tester);
+    turnSession.approvalShouldThrow = true;
+
+    addPendingNotificationApproval(
+      PendingNotificationApproval(
+        connectionId: _fixtureIdentity,
+        sessionId: 'notif-session',
+        requestId: 'req-14',
+        choice: 'once',
+      ),
+    );
+    addTearDown(() => pendingNotificationApprovals.value = const []);
+    await tester.pump(const Duration(milliseconds: 50));
+
+    // Unresolved, not answered: the tap must survive for a later retry.
+    expect(pendingNotificationApprovals.value, hasLength(1));
+  });
+
+  testWidgets('an unanswered probe keeps the approval pending', (
+    WidgetTester tester,
+  ) async {
+    await pumpChat(tester);
+    turnSession.approvalAnswer = false;
+
+    addPendingNotificationApproval(
+      PendingNotificationApproval(
+        connectionId: _fixtureIdentity,
+        sessionId: 'notif-session',
+        requestId: 'req-15',
+        choice: 'once',
+      ),
+    );
+    addTearDown(() => pendingNotificationApprovals.value = const []);
+    await tester.pump(const Duration(milliseconds: 50));
+
+    // The route-local gateway does not own it yet: keep it for a retry.
+    expect(pendingNotificationApprovals.value, hasLength(1));
   });
 }
 
@@ -302,8 +412,15 @@ class _CallbackCapturingTurnSession implements GatewayTurnApplicationSession {
     String? requestId,
   }) async {
     approvalResponses.add((sessionId, choice, requestId));
-    return true;
+    if (approvalShouldThrow) throw StateError('gateway not ready');
+    return approvalAnswer;
   }
+
+  /// When true, [tryRespondToApproval] throws instead of answering.
+  bool approvalShouldThrow = false;
+
+  /// What [tryRespondToApproval] returns when it does not throw.
+  bool approvalAnswer = true;
 
   @override
   Future<bool> tryRespondToClarify({

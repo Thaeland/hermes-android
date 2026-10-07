@@ -549,17 +549,48 @@ class NotificationRoute {
 /// this and responds through its own gateway.
 @immutable
 class PendingNotificationApproval {
+  /// The connection the notification named, so ids can never cross gateways.
+  final String connectionId;
   final String sessionId;
   final String requestId;
   final String choice;
 
   const PendingNotificationApproval({
+    required this.connectionId,
     required this.sessionId,
     required this.requestId,
     required this.choice,
   });
 }
 
-/// The single pending approval a notification action left behind, if any.
-final ValueNotifier<PendingNotificationApproval?> pendingNotificationApproval =
-    ValueNotifier(null);
+/// Approvals notification actions left behind for open chats to answer.
+///
+/// A list, not a single slot: several taps in a row (or two sessions on one
+/// connection) must not overwrite each other. Entries stay until the owning
+/// chat confirms the answer, so a cold start or a throw never loses a tap.
+final ValueNotifier<List<PendingNotificationApproval>>
+pendingNotificationApprovals = ValueNotifier(const []);
+
+/// Queues [approval], deduplicating by connection + session + request.
+void addPendingNotificationApproval(PendingNotificationApproval approval) {
+  final existing = pendingNotificationApprovals.value;
+  final duplicate = existing.any(
+    (item) =>
+        item.connectionId == approval.connectionId &&
+        item.sessionId == approval.sessionId &&
+        item.requestId == approval.requestId,
+  );
+  if (duplicate) return;
+  pendingNotificationApprovals.value = [...existing, approval];
+}
+
+/// Removes [approval] once its owner confirmed it was answered.
+void removePendingNotificationApproval(PendingNotificationApproval approval) {
+  pendingNotificationApprovals.value = [
+    for (final item in pendingNotificationApprovals.value)
+      if (item.connectionId != approval.connectionId ||
+          item.sessionId != approval.sessionId ||
+          item.requestId != approval.requestId)
+        item,
+  ];
+}

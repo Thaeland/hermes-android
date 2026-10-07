@@ -392,7 +392,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => _consumePendingNotificationApproval(),
     );
-    pendingNotificationApproval.addListener(_consumePendingNotificationApproval);
+    pendingNotificationApprovals.addListener(
+      _consumePendingNotificationApproval,
+    );
     _client =
         widget.testApiClient ??
         ApiClient(
@@ -494,7 +496,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    pendingNotificationApproval.removeListener(
+    pendingNotificationApprovals.removeListener(
       _consumePendingNotificationApproval,
     );
     _clearPendingReattachResync();
@@ -632,6 +634,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     setState(() => _desktopConnectionState = state);
     if (connectionChanged && state == DesktopConnectionState.connected) {
       _requestImmediateReattachResync();
+      // A notification tap that landed before this route-local gateway was
+      // ready stays pending; retry it now that the connection is back.
+      _consumePendingNotificationApproval();
     }
   }
 
@@ -3062,16 +3067,47 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  /// Answers an approval that a notification action left pending for this
-  /// session — the action could not reach this screen's route-local gateway,
-  /// so the tap routes here and this chat resolves it the normal way.
+  /// Answers approvals that notification actions left pending for this
+  /// connection. Entries are removed only after the gateway confirms the
+  /// answer: a cold start (no route-local session yet) or a throw keeps the
+  /// tap pending for a later retry instead of losing it.
   void _consumePendingNotificationApproval() {
-    final pending = pendingNotificationApproval.value;
-    if (pending == null || pending.sessionId != widget.session.id) return;
-    pendingNotificationApproval.value = null;
-    unawaited(
-      _respondToGatewayApproval(pending.choice, requestId: pending.requestId),
-    );
+    final mine = [
+      for (final approval in pendingNotificationApprovals.value)
+        if (approval.connectionId == _chatModelConnectionIdentity &&
+            approval.sessionId == widget.session.id)
+          approval,
+    ];
+    for (final approval in mine) {
+      unawaited(_answerPendingNotificationApproval(approval));
+    }
+  }
+
+  /// Approvals whose answer is in flight, so a notifier change cannot
+  /// dispatch the same request twice.
+  final Set<String> _answeringPendingApprovals = {};
+
+  Future<void> _answerPendingNotificationApproval(
+    PendingNotificationApproval approval,
+  ) async {
+    final key =
+        '${approval.connectionId}|${approval.sessionId}|${approval.requestId}';
+    if (_answeringPendingApprovals.contains(key)) return;
+    _answeringPendingApprovals.add(key);
+    try {
+      // The normal approval path: route-local turn session first, then the
+      // desktop gateway. A throw means the route-local gateway is not up
+      // yet (cold start/reconnect) — keep the entry and retry later.
+      await _respondToGatewayApproval(
+        approval.choice,
+        requestId: approval.requestId,
+      );
+      removePendingNotificationApproval(approval);
+    } catch (_) {
+      // Unresolved, not answered: keep the entry for a later retry.
+    } finally {
+      _answeringPendingApprovals.remove(key);
+    }
   }
 
   Future<void> _respondToGatewayClarify({

@@ -471,4 +471,67 @@ void main() {
       expect(choiceFor(null), isNull);
     });
   });
+
+  group('pending notification approvals', () {
+    setUp(() => pendingNotificationApprovals.value = const []);
+    tearDown(() => pendingNotificationApprovals.value = const []);
+
+    test('deduplicates by connection + session + request', () {
+      const approval = PendingNotificationApproval(
+        connectionId: 'conn-a',
+        sessionId: 's1',
+        requestId: 'r1',
+        choice: 'once',
+      );
+
+      addPendingNotificationApproval(approval);
+      addPendingNotificationApproval(approval);
+
+      expect(pendingNotificationApprovals.value, hasLength(1));
+    });
+
+    test('keeps distinct requests and removes by identity', () {
+      const first = PendingNotificationApproval(
+        connectionId: 'conn-a',
+        sessionId: 's1',
+        requestId: 'r1',
+        choice: 'once',
+      );
+      const second = PendingNotificationApproval(
+        connectionId: 'conn-a',
+        sessionId: 's1',
+        requestId: 'r2',
+        choice: 'deny',
+      );
+
+      addPendingNotificationApproval(first);
+      addPendingNotificationApproval(second);
+      expect(pendingNotificationApprovals.value, hasLength(2));
+
+      removePendingNotificationApproval(first);
+      expect(pendingNotificationApprovals.value, hasLength(1));
+      expect(pendingNotificationApprovals.value.single.requestId, 'r2');
+    });
+
+    test('an identical session id on another connection is distinct', () {
+      addPendingNotificationApproval(
+        const PendingNotificationApproval(
+          connectionId: 'conn-a',
+          sessionId: 's1',
+          requestId: 'r1',
+          choice: 'once',
+        ),
+      );
+      addPendingNotificationApproval(
+        const PendingNotificationApproval(
+          connectionId: 'conn-b',
+          sessionId: 's1',
+          requestId: 'r1',
+          choice: 'once',
+        ),
+      );
+
+      expect(pendingNotificationApprovals.value, hasLength(2));
+    });
+  });
 }
