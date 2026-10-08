@@ -449,6 +449,8 @@
   "start_something_new": "Start something new",
   "start_voice_input": "Start voice input",
   "starting_hermes": "Starting Hermes…",
+  "media_card_download": "Download file",
+  "media_card_tap_to_download": "Tap to download",
   "still_loading_your_projects": "Still loading your projects.",
   "stop": "Stop",
   "stop_response": "Stop response",

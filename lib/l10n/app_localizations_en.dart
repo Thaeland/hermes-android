@@ -1598,6 +1598,12 @@ class AppLocalizationsEn extends AppLocalizations {
   String get starting_hermes => 'Starting Hermes…';
 
   @override
+  String get media_card_download => 'Download file';
+
+  @override
+  String get media_card_tap_to_download => 'Tap to download';
+
+  @override
   String get still_loading_your_projects => 'Still loading your projects.';
 
   @override
