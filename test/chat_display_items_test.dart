@@ -343,5 +343,46 @@ void main() {
     test('returns nothing for an empty conversation', () {
       expect(buildChatDisplayItems(messages: const []), isEmpty);
     });
+    test('marks persisted steer rows and strips the model-facing marker', () {
+      final items = buildChatDisplayItems(
+        messages: [
+          {'role': 'user', 'content': 'real prompt'},
+          {
+            'role': 'user',
+            'display_kind': 'steer',
+            'display_content': 'use the short version',
+            'content':
+                '[OUT-OF-BAND USER MESSAGE — a direct message from the user, '
+                'delivered once at this position]\nuse the short version\n'
+                '[/OUT-OF-BAND USER MESSAGE]',
+          },
+          {'role': 'assistant', 'content': 'done'},
+        ],
+      );
+      final bubbles = items.whereType<Map<String, dynamic>>().toList();
+      expect(bubbles, hasLength(3));
+      expect(bubbles[1]['_is_steer'], true);
+      expect(bubbles[1]['_display_content'], 'use the short version');
+      expect(bubbles[0]['_is_steer'], isNot(true));
+      // The assistant retry prompt stays the real user prompt, not the steer.
+      expect(bubbles[2]['_retry_prompt'], 'real prompt');
+    });
+
+    test('falls back to marker-stripping when display_content is absent', () {
+      final items = buildChatDisplayItems(
+        messages: [
+          {
+            'role': 'user',
+            'display_kind': 'steer',
+            'content':
+                '[OUT-OF-BAND USER MESSAGE — a direct message from the user]\n'
+                'steered words\n[/OUT-OF-BAND USER MESSAGE]',
+          },
+        ],
+      );
+      final bubble = items.single as Map<String, dynamic>;
+      expect(bubble['_is_steer'], true);
+      expect(bubble['_display_content'], 'steered words');
+    });
   });
 }
