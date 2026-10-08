@@ -4335,7 +4335,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (!mounted) return;
     if (accepted) {
       _textController.clear();
-      setState(() => _messages.add({'role': 'user', 'content': text}));
+      setState(
+        () => _messages.add({'role': 'user', 'content': text, '_is_steer': true}),
+      );
       _scrollCoordinator.beginStreaming(isNearEnd: _isNearEnd());
       _scheduleStreamingFollow();
       return;
@@ -5247,10 +5249,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 (msg['_display_content'] as String?) ??
                 stripToolResultText(messageContentToText(msg['content']));
             final isUser = role == 'user';
+            final isSteer = msg['_is_steer'] == true;
 
             return MessageBubble(
               content: content,
               isUser: isUser,
+              isSteer: isSteer,
               verbose: _verboseMode,
               density: _chatDensity,
               metadata: msg,
@@ -5318,6 +5322,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 class MessageBubble extends StatelessWidget {
   final String content;
   final bool isUser;
+  final bool isSteer;
   final bool verbose;
   final ChatDensity density;
   final Map<String, dynamic> metadata;
@@ -5336,6 +5341,7 @@ class MessageBubble extends StatelessWidget {
     super.key,
     required this.content,
     required this.isUser,
+    this.isSteer = false,
     this.verbose = false,
     this.density = ChatDensity.comfortable,
     this.metadata = const {},
@@ -5713,15 +5719,55 @@ class MessageBubble extends StatelessWidget {
             if (density.showsSenderLabel)
               Padding(
                 padding: EdgeInsets.only(bottom: density.senderLabelGap),
-                child: Text(
-                  isUser ? 'You' : 'Hermes',
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: isUser
-                        ? hermesUserMessageForeground.withValues(alpha: 0.75)
-                        : theme.colorScheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 0.4,
-                  ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      isUser ? 'You' : 'Hermes',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: isUser
+                            ? hermesUserMessageForeground.withValues(alpha: 0.75)
+                            : theme.colorScheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                    if (isSteer) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        key: const Key('message-steer-chip'),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 1,
+                        ),
+                        decoration: BoxDecoration(
+                          color: hermesUserMessageForeground.withValues(
+                            alpha: 0.18,
+                          ),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.call_made_rounded,
+                              size: 11,
+                              color: hermesUserMessageForeground,
+                            ),
+                            const SizedBox(width: 2),
+                            Text(
+                              context.l10n.steer_chip_label,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: hermesUserMessageForeground,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.3,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
             // Verbose metadata header
