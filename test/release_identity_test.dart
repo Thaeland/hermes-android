@@ -14,10 +14,10 @@ void main() {
 
       expect(match, isNotNull);
       expect(match!.group(1), '2.1.14');
-      expect(int.parse(match.group(2)!), 2154);
+      expect(int.parse(match.group(2)!), 2155);
       expect(int.parse(match.group(2)!), greaterThan(2153));
       // F-Droid ABI split: packaged arm64 code is base * 10 + ABI code.
-      expect(int.parse(match.group(2)!) * 10 + 2, 21542);
+      expect(int.parse(match.group(2)!) * 10 + 2, 21552);
     },
   );
 
@@ -42,7 +42,7 @@ void main() {
     );
     expect(gradle, contains('variant.versionCode * 10 + abiVersionCode'));
     expect(releaseWorkflow, contains("MINIMUM_INSTALLED_VERSION_CODE: '2127'"));
-    expect(releaseWorkflow, contains("REQUIRED_BASE_VERSION_CODE: '2154'"));
+    expect(releaseWorkflow, contains("REQUIRED_BASE_VERSION_CODE: '2155'"));
     expect(releaseWorkflow, contains("ARM64_ABI_CODE: '2'"));
     expect(
       releaseWorkflow,
@@ -67,6 +67,6 @@ void main() {
     );
     expect(releaseWorkflow, contains('if certs != {expected_cert}:'));
     expect(qualityWorkflow, contains("MINIMUM_INSTALLED_VERSION_CODE: '2127'"));
-    expect(qualityWorkflow, contains("REQUIRED_BASE_VERSION_CODE: '2154'"));
+    expect(qualityWorkflow, contains("REQUIRED_BASE_VERSION_CODE: '2155'"));
   });
 }
