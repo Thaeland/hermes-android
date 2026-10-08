@@ -775,7 +775,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _onVoiceComposerChanged() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    setState(() {});
+    // A steer rejected just before settle is held while dictation is active
+    // (see _maybeDrainPendingSteer); fire the drain the moment the mic stops.
+    if (!_voiceComposer.listening) {
+      _maybeDrainPendingSteer();
+    }
   }
 
   Future<void> _speakAssistantText(String text) async {
@@ -3410,6 +3416,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// the turn settles, so the words are never lost.
   Future<void> _steerComposer() async {
     if (!_streaming || _steering) return;
+    if (_voiceComposer.listening) {
+      // Finalize dictation before reading the composer: steering mid-
+      // dictation would otherwise send a partial transcript and then
+      // clear() the field under a live session, so the still-active
+      // recognizer keeps appending phantom text into the cleared composer.
+      // stop() flushes the final transcript into the controller first.
+      await _voiceComposer.stop();
+      if (!mounted) return;
+    }
     final text = _textController.text.trim();
     if (text.isEmpty) return;
     if (_activeResponseTransport != _ResponseTransport.desktop ||
@@ -3451,6 +3466,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         persist: false,
       ),
     );
+    // The turn may have settled while the steer RPC was in flight (the
+    // settle drain already ran with nothing pending). Try the drain now;
+    // it no-ops while a turn is still live and fires on the next settle.
+    _maybeDrainPendingSteer();
   }
 
   /// After a turn settles, re-send a steer the gateway rejected. If the
@@ -3460,6 +3479,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final pending = _pendingSteerText;
     if (pending == null) return;
     if (!mounted || _streaming || _sending) return;
+    if (_voiceComposer.listening) {
+      // Dictation owns the composer right now: auto-sending would silently
+      // no-op in _sendMessage's listening guard, and appending would let the
+      // recognizer's replacement range clobber the pending text on the next
+      // partial. Hold it; _onVoiceComposerChanged re-drains when the mic stops.
+      return;
+    }
     final draft = _textController.text;
     if (draft.trim().isEmpty) {
       _pendingSteerText = null;
@@ -3479,6 +3505,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     ++_responseGeneration;
     _scrollCoordinator.cancelStreaming();
     _resetRateTracking();
+    if (widget.testVoiceComposerAdapter == null) {
+      // "Stop" means stop: a spoken reply already being read aloud must
+      // die with the turn, since the toggle that silences it is hidden
+      // while the row is compacted for streaming.
+      _flutterTts.stop();
+    }
     setState(() {
       _streaming = false;
       _sending = false;
@@ -3553,6 +3585,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _stopResponseInFlight = false;
       unawaited(_refreshDeferredHistoryIfIdle());
     }
+    // The turn is over by definition now — a steer rejected earlier will
+    // never be drained by a settle event, so drain it here (no-op when
+    // nothing is pending).
+    _maybeDrainPendingSteer();
   }
 
   void _handleSendError(Object e, {bool removePendingUserMessage = false}) {
