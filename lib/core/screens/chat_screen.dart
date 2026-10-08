@@ -736,8 +736,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _startVoiceInput() async {
-    if (_streaming ||
-        _sending ||
+    if (_sending ||
         _transcriptLoadBlocksComposer ||
         _pendingReattachResync) {
       return;
@@ -3959,7 +3958,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   ),
                 ),
                 const SizedBox(width: 8),
-                if (!_voiceComposer.listening && !_streaming)
+                // Dictation stays available while streaming: dictated text
+                // lands in the composer and can steer the live turn. Attach
+                // and the voice-reply toggle are inert mid-turn, so they
+                // hide to keep the composer usable on narrow phones.
+                if (!_voiceComposer.listening)
                   VoiceComposerStartButton(
                     enabled:
                         !_transcriptLoadBlocksComposer &&

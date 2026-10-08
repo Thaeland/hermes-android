@@ -40,6 +40,8 @@ void main() {
 
         expect(find.byKey(const Key('chat-steer-button')), findsOneWidget);
         expect(find.byTooltip('Stop response'), findsOneWidget);
+        // Dictation must stay reachable mid-turn so it can feed a steer.
+        expect(find.byTooltip('Speak to Hermes'), findsOneWidget);
         // The composer keeps usable width even with all six controls shown.
         final fieldWidth = tester.getSize(find.byType(TextField)).width;
         expect(fieldWidth, greaterThan(120.0));
