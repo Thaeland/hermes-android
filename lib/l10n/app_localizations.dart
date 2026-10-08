@@ -2828,6 +2828,12 @@ abstract class AppLocalizations {
   /// **'Add to current response'**
   String get steer_turn;
 
+  /// No description provided for @steer_chip_label.
+  ///
+  /// In en, this message translates to:
+  /// **'STEER'**
+  String get steer_chip_label;
+
   /// No description provided for @steer_queued_for_next_turn.
   ///
   /// In en, this message translates to:

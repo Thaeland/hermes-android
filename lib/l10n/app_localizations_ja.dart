@@ -1577,6 +1577,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get steer_turn => 'Add to current response';
 
   @override
+  String get steer_chip_label => 'STEER';
+
+  @override
   String get steer_queued_for_next_turn =>
       'Turn is finishing — your note will be sent next';
 

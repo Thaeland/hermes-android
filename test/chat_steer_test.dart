@@ -108,6 +108,7 @@ void main() {
           find.widgetWithText(MessageBubble, 'use the short version'),
           findsOneWidget,
         );
+        expect(find.byKey(const Key('message-steer-chip')), findsOneWidget);
         final cleared = tester.widget<TextField>(find.byType(TextField));
         expect(cleared.controller!.text, isEmpty);
 
