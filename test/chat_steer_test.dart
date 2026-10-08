@@ -166,6 +166,155 @@ void main() {
         expect(submitted, ['first prompt', 'late correction']);
       },
     );
+
+    testWidgets(
+      'rejected steer held during dictation drains when the mic stops',
+      (tester) async {
+        final submitGate = Completer<void>();
+        final submitted = <String>[];
+        final voice = FakeVoiceComposerAdapter();
+        await _pumpChat(
+          tester,
+          voiceAdapter: voice,
+          remoteSubmit: ({
+            required sessionId,
+            required text,
+            required onEvent,
+            required onSent,
+          }) async {
+            submitted.add(text);
+            onSent();
+            if (submitted.length == 1) {
+              await submitGate.future;
+            }
+          },
+          steer: (sessionId, text) async => false,
+        );
+
+        await tester.enterText(find.byType(TextField), 'first prompt');
+        await tester.tap(find.byTooltip('Send'));
+        await tester.pump();
+        await tester.pump();
+
+        // Steer is rejected just before settle; text is held.
+        await tester.enterText(find.byType(TextField), 'late correction');
+        await tester.tap(find.byKey(const Key('chat-steer-button')));
+        await tester.pump();
+        expect(submitted, ['first prompt']);
+
+        // User starts dictating while the turn is still live.
+        await tester.tap(find.byKey(const Key('chat-mic-button')));
+        await tester.pump();
+        expect(find.bySemanticsLabel('Stop voice input'), findsOneWidget);
+
+        // Turn settles mid-dictation: the drain must NOT auto-send
+        // (_sendMessage would silently no-op while listening) and must not
+        // touch the composer the recognizer owns.
+        submitGate.complete();
+        await tester.pump();
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+        expect(submitted, ['first prompt']);
+
+        // Stopping the mic re-drains: the held steer goes out as a prompt.
+        await tester.tap(find.bySemanticsLabel('Stop voice input'));
+        await tester.pump();
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+        expect(submitted, ['first prompt', 'late correction']);
+      },
+    );
+
+    testWidgets(
+      'steer while dictating finalizes the transcript before sending',
+      (tester) async {
+        final submitGate = Completer<void>();
+        final steerCalls = <String>[];
+        final voice = FakeVoiceComposerAdapter(
+          finalTranscriptOnStop: 'use the short version',
+        );
+        await _pumpChat(
+          tester,
+          voiceAdapter: voice,
+          remoteSubmit: ({
+            required sessionId,
+            required text,
+            required onEvent,
+            required onSent,
+          }) async {
+            onSent();
+            await submitGate.future;
+          },
+          steer: (sessionId, text) async {
+            steerCalls.add(text);
+            return true;
+          },
+        );
+
+        await tester.enterText(find.byType(TextField), 'first prompt');
+        await tester.tap(find.byTooltip('Send'));
+        await tester.pump();
+        await tester.pump();
+
+        await tester.tap(find.byKey(const Key('chat-mic-button')));
+        await tester.pump();
+        voice.emitPartial('use the sh');
+        await tester.pump();
+
+        await tester.tap(find.byKey(const Key('chat-steer-button')));
+        await tester.pump();
+        await tester.pump();
+
+        // The live dictation session was stopped first, so the steer
+        // carried the finalized transcript, not the partial.
+        expect(voice.stopCount, 1);
+        expect(steerCalls, ['use the short version']);
+        submitGate.complete();
+      },
+    );
+
+    testWidgets(
+      'stop drains a steer the gateway rejected earlier',
+      (tester) async {
+        final submitGate = Completer<void>();
+        final submitted = <String>[];
+        await _pumpChat(
+          tester,
+          remoteSubmit: ({
+            required sessionId,
+            required text,
+            required onEvent,
+            required onSent,
+          }) async {
+            submitted.add(text);
+            onSent();
+            if (submitted.length == 1) {
+              await submitGate.future;
+            }
+          },
+          steer: (sessionId, text) async => false,
+        );
+
+        await tester.enterText(find.byType(TextField), 'first prompt');
+        await tester.tap(find.byTooltip('Send'));
+        await tester.pump();
+        await tester.pump();
+
+        await tester.enterText(find.byType(TextField), 'late correction');
+        await tester.tap(find.byKey(const Key('chat-steer-button')));
+        await tester.pump();
+        expect(submitted, ['first prompt']);
+
+        // Stop ends the turn by definition; the held steer must go out now,
+        // not wait for some future turn to settle.
+        await tester.tap(find.byTooltip('Stop response'));
+        await tester.pump();
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+        expect(submitted, ['first prompt', 'late correction']);
+        submitGate.complete();
+      },
+    );
   });
 }
 
@@ -173,6 +322,7 @@ Future<void> _pumpChat(
   WidgetTester tester, {
   required TestRemotePromptSubmit remoteSubmit,
   required Future<bool> Function(String sessionId, String text) steer,
+  FakeVoiceComposerAdapter? voiceAdapter,
 }) async {
   final apiClient = ApiClient(
     baseUrl: 'http://steer.fixture',
@@ -204,7 +354,7 @@ Future<void> _pumpChat(
         testApiClient: apiClient,
         testRemotePromptSubmit: remoteSubmit,
         testDesktopSteer: steer,
-        testVoiceComposerAdapter: FakeVoiceComposerAdapter(),
+        testVoiceComposerAdapter: voiceAdapter ?? FakeVoiceComposerAdapter(),
       ),
     ),
   );
