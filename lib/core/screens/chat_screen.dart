@@ -3897,14 +3897,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               ),
             Row(
               children: [
-                Semantics(
-                  label: context.l10n.add_attachment,
-                  button: true,
-                  enabled:
-                      !_transcriptLoadBlocksComposer &&
-                      !_streaming &&
-                      !_sending &&
-                      !_pendingReattachResync,
+                // Attach and mic are inert while a turn streams (steer is
+                // text-only), so they hide during streaming to keep the
+                // composer usable on narrow phones.
+                if (!_streaming)
+                  Semantics(
+                    label: context.l10n.add_attachment,
+                    button: true,
+                    enabled:
+                        !_transcriptLoadBlocksComposer &&
+                        !_sending &&
+                        !_pendingReattachResync,
                   excludeSemantics: true,
                   child: IconButton(
                     icon: const Icon(Icons.attach_file),
@@ -3956,40 +3959,40 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   ),
                 ),
                 const SizedBox(width: 8),
-                if (!_voiceComposer.listening)
+                if (!_voiceComposer.listening && !_streaming)
                   VoiceComposerStartButton(
                     enabled:
                         !_transcriptLoadBlocksComposer &&
-                        !_streaming &&
                         !_sending &&
                         !_pendingReattachResync,
                     onPressed: _startVoiceInput,
                   ),
-                Semantics(
-                  label: context.l10n.spoken_replies,
-                  value: _voiceReplyEnabled ? context.l10n.on : context.l10n.off,
-                  toggled: _voiceReplyEnabled,
-                  button: true,
-                  excludeSemantics: true,
-                  child: IconButton(
-                    icon: Icon(
-                      _voiceReplyEnabled ? Icons.volume_up : Icons.volume_off,
-                    ),
-                    onPressed: () {
-                      setState(() => _voiceReplyEnabled = !_voiceReplyEnabled);
-                      if (!_voiceReplyEnabled) {
-                        _flutterTts.stop();
-                      }
-                    },
-                    tooltip: _voiceReplyEnabled
-                        ? context.l10n.spoken_replies_on
-                        : context.l10n.spoken_replies_off,
-                    constraints: const BoxConstraints.tightFor(
-                      width: 48,
-                      height: 48,
+                if (!_streaming)
+                  Semantics(
+                    label: context.l10n.spoken_replies,
+                    value: _voiceReplyEnabled ? context.l10n.on : context.l10n.off,
+                    toggled: _voiceReplyEnabled,
+                    button: true,
+                    excludeSemantics: true,
+                    child: IconButton(
+                      icon: Icon(
+                        _voiceReplyEnabled ? Icons.volume_up : Icons.volume_off,
+                      ),
+                      onPressed: () {
+                        setState(() => _voiceReplyEnabled = !_voiceReplyEnabled);
+                        if (!_voiceReplyEnabled) {
+                          _flutterTts.stop();
+                        }
+                      },
+                      tooltip: _voiceReplyEnabled
+                          ? context.l10n.spoken_replies_on
+                          : context.l10n.spoken_replies_off,
+                      constraints: const BoxConstraints.tightFor(
+                        width: 48,
+                        height: 48,
+                      ),
                     ),
                   ),
-                ),
                 const SizedBox(width: 4),
                 if (_steerAvailable)
                   Semantics(
