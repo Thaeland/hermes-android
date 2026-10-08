@@ -736,9 +736,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _startVoiceInput() async {
-    if (_sending ||
-        _transcriptLoadBlocksComposer ||
-        _pendingReattachResync) {
+    // Deliberately allowed while _sending/_streaming: dictation during a
+    // live turn feeds the steer path. The submit path already captured its
+    // text, so writing the composer now cannot corrupt an in-flight send.
+    if (_transcriptLoadBlocksComposer || _pendingReattachResync) {
       return;
     }
     if (widget.testVoiceComposerAdapter == null) {
@@ -3964,9 +3965,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 // hide to keep the composer usable on narrow phones.
                 if (!_voiceComposer.listening)
                   VoiceComposerStartButton(
+                    key: const Key('chat-mic-button'),
                     enabled:
                         !_transcriptLoadBlocksComposer &&
-                        !_sending &&
                         !_pendingReattachResync,
                     onPressed: _startVoiceInput,
                   ),
