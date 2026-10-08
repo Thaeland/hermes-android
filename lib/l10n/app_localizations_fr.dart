@@ -1618,6 +1618,13 @@ class AppLocalizationsFr extends AppLocalizations {
   String get starting_hermes => 'Démarrage de Hermes…';
 
   @override
+  String get steer_turn => 'Add to current response';
+
+  @override
+  String get steer_queued_for_next_turn =>
+      'Turn is finishing — your note will be sent next';
+
+  @override
   String get still_loading_your_projects =>
       'Chargement de vos projets en cours.';
 

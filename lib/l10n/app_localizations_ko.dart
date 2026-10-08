@@ -1573,6 +1573,13 @@ class AppLocalizationsKo extends AppLocalizations {
   String get starting_hermes => 'Hermes 시작 중…';
 
   @override
+  String get steer_turn => 'Add to current response';
+
+  @override
+  String get steer_queued_for_next_turn =>
+      'Turn is finishing — your note will be sent next';
+
+  @override
   String get still_loading_your_projects => '프로젝트를 불러오는 중입니다.';
 
   @override
