@@ -1623,6 +1623,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get media_card_tap_to_download => 'Tap to download';
 
   @override
+  String get steer_turn => 'Add to current response';
+
+  @override
+  String get steer_queued_for_next_turn =>
+      'Turn is finishing — your note will be sent next';
+
+  @override
   String get still_loading_your_projects => '正在加载你的项目。';
 
   @override
