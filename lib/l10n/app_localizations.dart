@@ -2822,6 +2822,18 @@ abstract class AppLocalizations {
   /// **'Starting Hermes…'**
   String get starting_hermes;
 
+  /// No description provided for @steer_turn.
+  ///
+  /// In en, this message translates to:
+  /// **'Add to current response'**
+  String get steer_turn;
+
+  /// No description provided for @steer_queued_for_next_turn.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn is finishing — your note will be sent next'**
+  String get steer_queued_for_next_turn;
+
   /// No description provided for @still_loading_your_projects.
   ///
   /// In en, this message translates to:

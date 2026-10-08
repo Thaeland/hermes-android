@@ -449,6 +449,8 @@
   "start_something_new": "Start something new",
   "start_voice_input": "Start voice input",
   "starting_hermes": "Starting Hermes…",
+  "steer_turn": "Add to current response",
+  "steer_queued_for_next_turn": "Turn is finishing — your note will be sent next",
   "still_loading_your_projects": "Still loading your projects.",
   "stop": "Stop",
   "stop_response": "Stop response",

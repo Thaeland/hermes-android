@@ -981,6 +981,31 @@ class WsClient {
     }
   }
 
+  /// Injects [text] into the live turn via `session.steer` without
+  /// interrupting it. Returns the gateway status: `'queued'` means the
+  /// text joined the running turn; `'rejected'` means no steerable turn
+  /// exists (idle or settling) and the caller must fall back to a normal
+  /// next-turn prompt so the words are never lost.
+  Future<String> steerSession(String sessionId, String text) async {
+    final response = await send('session.steer', {
+      'session_id': sessionId,
+      'text': text,
+    });
+    final error = response['error'];
+    if (error != null) {
+      throw _gatewayResponseError(
+        'session.steer',
+        error,
+        fallbackMessage: 'Gateway steer failed',
+      );
+    }
+    final result = response['result'];
+    final status = result is Map
+        ? result['status']?.toString()
+        : null;
+    return status ?? 'rejected';
+  }
+
   /// Cooperatively interrupts the active turn for one gateway session.
   Future<void> interruptSession(String sessionId) async {
     final response = await send('session.interrupt', {'session_id': sessionId});

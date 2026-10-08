@@ -194,6 +194,11 @@ class ChatScreen extends StatefulWidget {
   @visibleForTesting
   final TestRemotePromptSubmit? testRemotePromptSubmit;
 
+  /// Test seam mirroring `DesktopGatewayClient.steerPrompt`: injects text
+  /// into the live turn and reports whether the gateway accepted it.
+  @visibleForTesting
+  final Future<bool> Function(String sessionId, String text)? testDesktopSteer;
+
   @visibleForTesting
   final Future<String?> Function()? testServerFilePicker;
 
@@ -244,6 +249,7 @@ class ChatScreen extends StatefulWidget {
     this.testApiClient,
     this.testAttachmentDraftService,
     this.testRemotePromptSubmit,
+    this.testDesktopSteer,
     this.testServerFilePicker,
     this.testRemoteAttachmentUpload,
     this.testInitialAttachmentDrafts = const [],
@@ -294,6 +300,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _changingModel = false;
   bool _sending = false;
   bool _streaming = false;
+  bool _steering = false;
+
+  /// Text of a steer the gateway rejected (turn settling/unsteerable).
+  /// Re-sent as a normal prompt when the live turn settles.
+  String? _pendingSteerText;
   GatewayTurnStatus? _gatewayTurnStatus;
   _ResponseTransport _activeResponseTransport = _ResponseTransport.none;
   String? _activeClientTurnId;
@@ -1423,6 +1434,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     } else {
       _scheduleScrollTarget(_scrollCoordinator.endStreaming());
       unawaited(_refreshDeferredHistoryIfIdle());
+      _maybeDrainPendingSteer();
     }
   }
 
@@ -2433,6 +2445,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       unawaited(_refreshDeferredHistoryIfIdle());
       unawaited(_resyncLegacyHistoryAfterResume());
       _scheduleScrollTarget(_scrollCoordinator.endStreaming());
+      _maybeDrainPendingSteer();
       if (_awaitingVoiceReply) {
         _awaitingVoiceReply = false;
         final assistantText = _messages.isNotEmpty
@@ -3353,9 +3366,84 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
   }
 
+  /// A live desktop-transport turn can be steered mid-turn (the REST/SSE
+  /// transport has no steer RPC). The composer stays editable in that
+  /// case and Enter steers instead of queueing.
+  bool get _steerAvailable =>
+      _streaming &&
+      _activeResponseTransport == _ResponseTransport.desktop &&
+      (_desktopGateway != null || widget.testDesktopSteer != null) &&
+      !_pendingReattachResync;
+
+  /// Steer the live desktop turn with the composer text. Mirrors the
+  /// desktop app's steer-on-Enter: `session.steer` injects the text into
+  /// the running turn without interrupting it. When the gateway rejects
+  /// (turn already settling, or an agent without steer support) the text
+  /// is held in [_pendingSteerText] and re-sent as a normal prompt once
+  /// the turn settles, so the words are never lost.
+  Future<void> _steerComposer() async {
+    if (!_streaming || _steering) return;
+    final text = _textController.text.trim();
+    if (text.isEmpty) return;
+    if (_activeResponseTransport != _ResponseTransport.desktop ||
+        (_desktopGateway == null && widget.testDesktopSteer == null)) {
+      return;
+    }
+    setState(() => _steering = true);
+    bool accepted = false;
+    try {
+      accepted = widget.testDesktopSteer != null
+          ? await widget.testDesktopSteer!(widget.session.id, text)
+          : await _desktopGateway!.steerPrompt(
+              sessionId: widget.session.id,
+              text: text,
+            );
+    } finally {
+      if (mounted) setState(() => _steering = false);
+    }
+    if (!mounted) return;
+    if (accepted) {
+      _textController.clear();
+      setState(() => _messages.add({'role': 'user', 'content': text}));
+      _scrollCoordinator.beginStreaming(isNearEnd: _isNearEnd());
+      _scheduleStreamingFollow();
+      return;
+    }
+    // Rejected: the turn is settling or unsteerable. Move the text out of
+    // the composer into [_pendingSteerText]; the settle drain re-sends it
+    // as a normal next-turn prompt so the words are never lost.
+    setState(() {
+      _pendingSteerText = text;
+      _textController.clear();
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(context.l10n.steer_queued_for_next_turn),
+        persist: false,
+      ),
+    );
+  }
+
+  /// After a turn settles, re-send a steer the gateway rejected. If the
+  /// user is mid-draft, the rejected text is appended to the composer
+  /// instead of auto-sent, so nothing is overwritten or lost.
+  void _maybeDrainPendingSteer() {
+    final pending = _pendingSteerText;
+    if (pending == null) return;
+    if (!mounted || _streaming || _sending) return;
+    final draft = _textController.text;
+    if (draft.trim().isEmpty) {
+      _pendingSteerText = null;
+      _textController.text = pending;
+      unawaited(_sendMessage());
+    } else {
+      _pendingSteerText = null;
+      _textController.text = '$draft\n\n$pending';
+    }
+  }
+
   Future<void> _stopResponse() async {
     if (!_streaming) return;
-
     final transport = _activeResponseTransport;
     final activeClientTurnId = _activeClientTurnId;
     _stopResponseInFlight = true;
@@ -3857,9 +3945,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                       textInputAction: TextInputAction.send,
                       enabled:
                           !_transcriptLoadBlocksComposer &&
-                          !_streaming &&
+                          (!_streaming || _steerAvailable) &&
                           !_pendingReattachResync,
-                      onSubmitted: (_) => _sendMessage(),
+                      onSubmitted: (_) => _streaming
+                          ? _steerComposer()
+                          : _sendMessage(),
                     ),
                   ),
                 ),
@@ -3899,6 +3989,34 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   ),
                 ),
                 const SizedBox(width: 4),
+                if (_steerAvailable)
+                  Semantics(
+                    label: context.l10n.steer_turn,
+                    button: true,
+                    enabled: !_steering,
+                    excludeSemantics: true,
+                    child: SizedBox.square(
+                      dimension: 48,
+                      child: IconButton(
+                        key: const Key('chat-steer-button'),
+                        icon: _steering
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(Icons.call_made_rounded, size: 20),
+                        onPressed: _steering ? null : _steerComposer,
+                        tooltip: context.l10n.steer_turn,
+                        constraints: const BoxConstraints.tightFor(
+                          width: 48,
+                          height: 48,
+                        ),
+                      ),
+                    ),
+                  ),
                 Semantics(
                   label: _streaming ? context.l10n.stop_response : context.l10n.send_message,
                   button: true,

@@ -858,6 +858,24 @@ class DesktopGatewayClient {
     return true;
   }
 
+  /// Injects [text] into the active turn of [sessionId] without stopping
+  /// it. Returns true only when the gateway accepted the steer into the
+  /// live turn; false (idle, settling, unsupported, or disconnected) tells
+  /// the caller to fall back to a normal next-turn prompt.
+  Future<bool> steerPrompt({required String sessionId, required String text}) async {
+    final gatewaySessionId = _gatewaySessionIds[sessionId];
+    final client = _ws;
+    if (gatewaySessionId == null || client == null || !client.isConnected) {
+      return false;
+    }
+    try {
+      final status = await client.steerSession(gatewaySessionId, text);
+      return status == 'queued';
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// Resolves an approval against an exact peer request when available, or
   /// falls back to the legacy session-keyed approval method.
   Future<void> respondToApproval({
