@@ -85,7 +85,7 @@ abstract interface class GatewayTurnApplicationSession {
 
   set onTurnSettled(GatewayTurnSettledCallback? callback);
 
-  /// Called when `session.open` first binds a draft session to its stored id.
+  /// Called after each authoritative durable `session.open` binding.
   set onSessionBound(GatewayTurnSessionBoundCallback? callback);
 }
 

@@ -3270,7 +3270,7 @@ void main() {
     );
 
     test(
-      'onSessionBound fires once when a fresh draft gains its stored id',
+      'onSessionBound reports every authoritative durable binding',
       () async {
         late _GatewayFixture fixture;
         var opens = 0;
@@ -3303,13 +3303,13 @@ void main() {
           // reconcile records keyed by the draft id.
           expect(bounds, [('local-a', 'stored-a')]);
 
-          // A reconnect reuses the same binding; the callback must not re-fire
-          // (the assignment it drives is idempotent but should not spam).
+          // A reconnect advances the authoritative binding version. Metadata
+          // consumers must hear about it even though the stored id is stable.
           await fixture.closeSocket();
           await fixture.waitForSocketClosed();
           await coordinator.waitForIdle();
           await coordinator.ensureOpen();
-          expect(bounds, hasLength(1));
+          expect(bounds, [('local-a', 'stored-a'), ('local-a', 'stored-a')]);
         } finally {
           await coordinator.close();
           await fixture.close();

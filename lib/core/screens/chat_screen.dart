@@ -482,6 +482,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         );
         _desktopGateway!.setAsyncEventListener(_handleDesktopAsyncEvent);
         _desktopGateway!.setConnectionListener(_onDesktopConnectionChanged);
+        _desktopGateway!.setSessionBoundListener(_onSessionBound);
         unawaited(_ensureDesktopSession());
       } on ArgumentError {
         // The regular mobile chat remains usable; selection surfaces the
@@ -591,6 +592,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _projectNameRefreshGeneration += 1;
     _clearPendingReattachResync();
     widget.testDesktopConnectionHook?.handler = null;
     widget.testDesktopAsyncEventHook?.handler = null;
@@ -613,6 +615,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       ),
     );
     _desktopGateway?.setAsyncEventListener(null);
+    _desktopGateway?.setSessionBoundListener(null);
     _desktopGateway?.close();
     final registration = _turnApplicationAsyncEventRegistration;
     if (registration != null) {
@@ -725,6 +728,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (state != DesktopConnectionState.connected) _pauseReattachRetry();
     setState(() => _desktopConnectionState = state);
     if (connectionChanged && state == DesktopConnectionState.connected) {
+      unawaited(_refreshProjectName());
       _requestImmediateReattachResync();
     }
   }
@@ -738,17 +742,21 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     final gateway = _desktopGateway;
     widget.testDesktopSessionEnsured?.call();
-    if (gateway == null) return;
+    if (gateway == null) {
+      unawaited(_refreshProjectName());
+      return;
+    }
     try {
       await gateway.ensureSession(
         widget.session.id,
         workingDirectory: widget.projectWorkingDirectory,
       );
-      await _refreshProjectName();
     } catch (_) {
       // The composer remains available. The next send retries with a fresh
       // single-use ticket and surfaces an actionable error if it still fails.
+      return;
     }
+    unawaited(_refreshProjectName());
   }
 
   void _editAndResend(String text) {

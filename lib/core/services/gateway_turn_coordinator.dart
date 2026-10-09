@@ -18,9 +18,9 @@ typedef GatewayTurnStateCallback =
 typedef GatewayTurnSettledCallback =
     void Function(GatewayTurnRecoveryState state);
 
-/// Fired when `session.open` first binds a draft (local) session id to the
-/// server's durable stored id. Lets an owning layer reconcile server-side
-/// records that were keyed by the draft id before the binding existed.
+/// Fired whenever `session.open` authoritatively binds a draft (local) session
+/// id to the server's durable stored id. Lets an owning layer reconcile
+/// server-side records after both first persistence and reconnect.
 typedef GatewayTurnSessionBoundCallback =
     void Function(String localSessionId, String storedSessionId);
 
@@ -140,9 +140,19 @@ class GatewayTurnCoordinatorRegistry {
   /// observe turn settlement without reaching into internal state.
   GatewayTurnSettledCallback? onTurnSettled;
 
-  /// Set on every newly opened coordinator so an owner can reconcile
-  /// server-side records once a draft session gains its durable stored id.
-  GatewayTurnSessionBoundCallback? onSessionBound;
+  GatewayTurnSessionBoundCallback? _onSessionBound;
+
+  /// Keeps retained coordinators wired to the current application owner.
+  ///
+  /// Coordinators outlive individual chat routes, so replacing the callback
+  /// must update instances that were opened by an earlier route as well as
+  /// future instances.
+  set onSessionBound(GatewayTurnSessionBoundCallback? callback) {
+    _onSessionBound = callback;
+    for (final coordinator in _coordinators.values) {
+      coordinator.onSessionBound = callback;
+    }
+  }
 
   /// Set on every coordinator so request/event routing can translate the live
   /// runtime session id back to the app's local session id.
@@ -191,7 +201,7 @@ class GatewayTurnCoordinatorRegistry {
                 clock: clock,
               )
               ..onTurnSettled = onTurnSettled
-              ..onSessionBound = onSessionBound
+              ..onSessionBound = _onSessionBound
               ..onRuntimeBound = onRuntimeBound,
       );
       Object? firstError;
@@ -389,7 +399,7 @@ class GatewayTurnCoordinator {
   /// whether completed successfully or fail-closed.
   GatewayTurnSettledCallback? onTurnSettled;
 
-  /// Called when `session.open` first binds this draft session to a stored id.
+  /// Called after every authoritative durable `session.open` binding.
   GatewayTurnSessionBoundCallback? onSessionBound;
 
   /// Called whenever this coordinator binds to a live runtime session id.
@@ -896,11 +906,10 @@ class GatewayTurnCoordinator {
       );
       await journal.upsertBinding(durable);
       _requireOperational();
-      if (previous == null) {
-        // First binding for this draft session: the durable id now exists,
-        // so an owner can reconcile records that were keyed by the draft id.
-        onSessionBound?.call(localSessionId, durable.storedSessionId);
-      }
+      // The binding version is authoritative even when this is a reconnect.
+      // Notify after its journal write so consumers can safely reconcile
+      // metadata against the current durable identity.
+      onSessionBound?.call(localSessionId, durable.storedSessionId);
       _invalidateStagedAttachments();
       _transportGeneration += 1;
       _client = client;

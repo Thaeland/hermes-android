@@ -138,6 +138,118 @@ void main() {
     },
   );
 
+  testWidgets(
+    'lazy stock fallback binding refreshes the draft Project header',
+    (tester) async {
+      final session = _FakeTurnSession(
+        const <Object>[],
+        recoverError: const GatewayTurnCoordinatorException(
+          GatewayTurnCoordinatorFailure.unsupportedCapability,
+          stockGateway: true,
+        ),
+      );
+      var loads = 0;
+      await _pumpChat(
+        tester,
+        turnSession: session,
+        chatSession: const Session(
+          id: 'mobile-draft',
+          title: 'Draft chat',
+          model: 'fixture-model',
+          source: 'mobile',
+          messageCount: 0,
+          isActive: true,
+          preview: '',
+          startedAt: 1,
+          isLocalDraft: true,
+        ),
+        projectOverviewLoader: () async {
+          loads += 1;
+          return loads == 1
+              ? ProjectsTreeOverview.empty
+              : _projectOverview('Hermes Android', 'stored-draft');
+        },
+        testRemotePromptSubmit:
+            ({
+              required sessionId,
+              required text,
+              required onEvent,
+              required onSent,
+            }) async {
+              session.bind('mobile-draft', 'stored-draft');
+              onSent();
+            },
+      );
+
+      expect(find.text('Unassigned'), findsOneWidget);
+      await tester.enterText(find.byType(TextField), 'Persist this draft');
+      await tester.tap(find.byTooltip('Send'));
+      await tester.pumpAndSettle();
+
+      expect(loads, greaterThanOrEqualTo(2));
+      expect(find.text('Hermes Android'), findsOneWidget);
+      expect(find.text('Unassigned'), findsNothing);
+    },
+  );
+
+  testWidgets('Project metadata retries after startup failure and reconnect', (
+    tester,
+  ) async {
+    final session = _FakeTurnSession([const <GatewayTurnRecoveryState>[]]);
+    final connectionHook = TestDesktopConnectionHook();
+    var loads = 0;
+    await _pumpChat(
+      tester,
+      turnSession: session,
+      connectionHook: connectionHook,
+      projectOverviewLoader: () async {
+        loads += 1;
+        if (loads == 1) throw StateError('offline at startup');
+        return _projectOverview('Reconnected Project', 'recovery-session');
+      },
+    );
+
+    expect(loads, 1);
+    expect(find.text('Unassigned'), findsOneWidget);
+
+    connectionHook.handler?.call(DesktopConnectionState.connected);
+    await tester.pumpAndSettle();
+
+    expect(loads, 2);
+    expect(find.text('Reconnected Project'), findsOneWidget);
+  });
+
+  testWidgets('stale Project response cannot overwrite a newer generation', (
+    tester,
+  ) async {
+    final session = _FakeTurnSession([const <GatewayTurnRecoveryState>[]]);
+    final stale = Completer<ProjectsTreeOverview>();
+    final current = Completer<ProjectsTreeOverview>();
+    var loads = 0;
+    await _pumpChat(
+      tester,
+      turnSession: session,
+      projectOverviewLoader: () {
+        loads += 1;
+        return loads == 1 ? stale.future : current.future;
+      },
+    );
+
+    expect(loads, 1);
+    session.bind('recovery-session', 'stored-session');
+    await tester.pump();
+    expect(loads, 2);
+
+    current.complete(_projectOverview('Current Project', 'stored-session'));
+    await tester.pumpAndSettle();
+    expect(find.text('Current Project'), findsOneWidget);
+
+    stale.complete(_projectOverview('Stale Project', 'recovery-session'));
+    await tester.pumpAndSettle();
+    expect(find.text('Current Project'), findsOneWidget);
+    expect(find.text('Stale Project'), findsNothing);
+  });
+
   testWidgets('resume reconciles and materializes one authoritative response', (
     tester,
   ) async {
@@ -694,6 +806,16 @@ void main() {
 Future<void> _pumpChat(
   WidgetTester tester, {
   required _FakeTurnSession turnSession,
+  Session chatSession = const Session(
+    id: 'recovery-session',
+    title: 'Recovery chat',
+    model: 'fixture-model',
+    source: 'test',
+    messageCount: 0,
+    isActive: true,
+    preview: '',
+    startedAt: 1,
+  ),
   ApiClient? apiClient,
   TestRemotePromptSubmit? testRemotePromptSubmit,
   TestRemoteAttachmentUpload? testRemoteAttachmentUpload,
@@ -719,16 +841,7 @@ Future<void> _pumpChat(
           port: 8642,
           apiKey: 'synthetic-key',
         ),
-        session: const Session(
-          id: 'recovery-session',
-          title: 'Recovery chat',
-          model: 'fixture-model',
-          source: 'test',
-          messageCount: 0,
-          isActive: true,
-          preview: '',
-          startedAt: 1,
-        ),
+        session: chatSession,
         testApiClient: apiClient,
         testTurnApplicationSession: turnSession,
         testRemotePromptSubmit: testRemotePromptSubmit,
@@ -744,6 +857,18 @@ Future<void> _pumpChat(
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 100));
   await tester.pump(const Duration(milliseconds: 100));
+}
+
+ProjectsTreeOverview _projectOverview(String label, String sessionId) {
+  return ProjectsTreeOverview.fromJson({
+    'projects': [
+      {
+        'id': 'project-${label.toLowerCase().replaceAll(' ', '-')}',
+        'label': label,
+        'sessionIds': [sessionId],
+      },
+    ],
+  });
 }
 
 GatewayTurnRecoveryState _acceptedState() =>

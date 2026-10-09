@@ -13,6 +13,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hermes_android/core/models/projects_tree_overview.dart';
 import 'package:hermes_android/core/screens/chat_screen.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
 import 'package:hermes_android/core/services/desktop_gateway_client.dart';
@@ -137,6 +138,76 @@ void main() {
       expect(history.messageRequestCount, 2);
     },
   );
+
+  testWidgets('reattach history recovery does not wait for Project metadata', (
+    tester,
+  ) async {
+    final hook = TestDesktopConnectionHook();
+    final submission = Completer<void>();
+    final metadataRelease = Completer<void>();
+    final history = _ReattachChatHttpClient();
+    var metadataLoads = 0;
+    await _pumpChat(
+      tester,
+      hook: hook,
+      apiClient: ApiClient(
+        baseUrl: 'http://reattach.fixture',
+        apiKey: 'synthetic-key',
+        httpClient: history,
+      ),
+      ensureCount: () {},
+      storedKey: 'stored_sess_latency',
+      projectOverviewLoader: () async {
+        metadataLoads += 1;
+        await metadataRelease.future;
+        return ProjectsTreeOverview.fromJson({
+          'projects': [
+            {
+              'id': 'project-latency',
+              'label': 'Metadata arrived later',
+              'sessionIds': ['stored_sess_latency'],
+            },
+          ],
+        });
+      },
+      remoteSubmit:
+          ({
+            required sessionId,
+            required text,
+            required onEvent,
+            required onSent,
+          }) {
+            onSent();
+            return submission.future;
+          },
+    );
+
+    hook.handler?.call(DesktopConnectionState.connected);
+    await tester.pump();
+    await tester.enterText(find.byType(TextField), 'Recover before metadata');
+    await tester.tap(find.byTooltip('Send'));
+    await tester.pump();
+    hook.handler?.call(DesktopConnectionState.reconnecting);
+    submission.completeError(
+      JsonRpcError('prompt.submit', 'Desktop gateway connection closed'),
+    );
+    await tester.pump();
+    await tester.pumpAndSettle();
+
+    history.includeCompletedTurn = true;
+    hook.handler?.call(DesktopConnectionState.connected);
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(metadataRelease.isCompleted, isFalse);
+    expect(metadataLoads, greaterThanOrEqualTo(2));
+    expect(find.text('Server-side final response'), findsOneWidget);
+
+    metadataRelease.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('Metadata arrived later'), findsOneWidget);
+  });
 
   testWidgets(
     'resync retries while the detached turn settles and never clears the '
@@ -955,6 +1026,7 @@ Future<void> _pumpChat(
   required VoidCallback ensureCount,
   required TestRemotePromptSubmit remoteSubmit,
   String? storedKey,
+  TestProjectOverviewLoader? projectOverviewLoader,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
@@ -984,6 +1056,7 @@ Future<void> _pumpChat(
         testDesktopAsyncEventHook: asyncHook,
         testDesktopSessionEnsured: ensureCount,
         testStoredSessionKey: storedKey == null ? null : (_) => storedKey,
+        testProjectOverviewLoader: projectOverviewLoader,
         testVoiceComposerAdapter: FakeVoiceComposerAdapter(),
       ),
     ),
