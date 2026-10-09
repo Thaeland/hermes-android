@@ -1,5 +1,7 @@
 import 'dart:typed_data';
 
+import 'package:http/http.dart' as http;
+
 import 'connection_manager.dart';
 import 'desktop_gateway_client.dart';
 
@@ -77,10 +79,16 @@ abstract class RemoteFilesDataSource {
 
 class RemoteFilesClient implements RemoteFilesDataSource {
   final DashboardClient dashboard;
+  final String? profile;
+  final String? sessionId;
 
-  RemoteFilesClient({required this.dashboard});
+  RemoteFilesClient({required this.dashboard, this.profile, this.sessionId});
 
-  factory RemoteFilesClient.fromConnection(SavedConnection connection) {
+  factory RemoteFilesClient.fromConnection(
+    SavedConnection connection, {
+    String? sessionId,
+    http.Client? httpClient,
+  }) {
     final baseUri = Uri.parse(
       DesktopGatewayClient.normalizedGatewayBaseUrl(connection),
     );
@@ -90,15 +98,33 @@ class RemoteFilesClient implements RemoteFilesDataSource {
         port: baseUri.port,
         useHttps: baseUri.scheme == 'https',
         pathPrefix: baseUri.path == '/' ? '' : baseUri.path,
+        proxied: connection.dashboardProxied,
         username: connection.dashboardUsername,
         password: connection.dashboardPassword,
+        gatewayProfile: connection.gatewayProfile,
+        httpClient: httpClient,
       ),
+      profile: connection.gatewayProfile,
+      sessionId: sessionId,
     );
   }
 
+  Map<String, String> _scopedQuery(
+    Map<String, String> parameters, {
+    bool includeSession = false,
+  }) => {
+    ...parameters,
+    if (profile?.isNotEmpty == true) 'profile': profile!,
+    if (includeSession && sessionId?.isNotEmpty == true)
+      'session_id': sessionId!,
+  };
+
   @override
   Future<RemoteDirectory> defaultDirectory() async {
-    final data = await dashboard.apiGet('fs/default-cwd');
+    final data = await dashboard.apiGet(
+      'fs/default-cwd',
+      queryParameters: _scopedQuery(const {}),
+    );
     return RemoteDirectory(
       path: data['cwd'] as String? ?? '/',
       branch: data['branch'] as String?,
@@ -109,7 +135,7 @@ class RemoteFilesClient implements RemoteFilesDataSource {
   Future<List<RemoteFileEntry>> listDirectory(String path) async {
     final data = await dashboard.apiGet(
       'fs/list',
-      queryParameters: {'path': path},
+      queryParameters: _scopedQuery({'path': path}),
     );
     final error = data['error'] as String?;
     if (error != null && error.isNotEmpty) {
@@ -133,7 +159,7 @@ class RemoteFilesClient implements RemoteFilesDataSource {
   Future<RemoteTextPreview> readText(String path) async {
     final data = await dashboard.apiGet(
       'fs/read-text',
-      queryParameters: {'path': path},
+      queryParameters: _scopedQuery({'path': path}),
     );
     return RemoteTextPreview.fromJson(data);
   }
@@ -142,7 +168,7 @@ class RemoteFilesClient implements RemoteFilesDataSource {
   Future<RemoteFileDownload> download(String path) async {
     final response = await dashboard.apiGetBytes(
       'fs/download',
-      queryParameters: {'path': path},
+      queryParameters: _scopedQuery({'path': path}, includeSession: true),
     );
     final disposition = response.headers['content-disposition'] ?? '';
     final match = RegExp(

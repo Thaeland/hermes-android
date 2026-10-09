@@ -235,6 +235,12 @@ class ChatScreen extends StatefulWidget {
   @visibleForTesting
   final String? Function(String mobileSessionId)? testStoredSessionKey;
 
+  /// Lets widget tests observe the exact stored-session scope bound to an
+  /// artifact tap without opening a real dashboard connection.
+  @visibleForTesting
+  final RemoteFilesDataSource Function(String storedSessionId)?
+  testMediaFilesClient;
+
   const ChatScreen({
     required this.connection,
     required this.session,
@@ -256,6 +262,7 @@ class ChatScreen extends StatefulWidget {
     this.testDesktopAsyncEventHook,
     this.testDesktopSessionEnsured,
     this.testStoredSessionKey,
+    this.testMediaFilesClient,
     super.key,
   });
 
@@ -463,6 +470,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   String get _gatewayNoticeIdentity =>
       '$_chatModelConnectionIdentity|${widget.session.id}';
+
+  String get _storedSessionKey =>
+      _desktopGateway?.storedSessionKeyFor(widget.session.id) ??
+      widget.testStoredSessionKey?.call(widget.session.id) ??
+      widget.session.id;
 
   Future<void> _restoreSessionModelOverride() async {
     final store = await _chatModelStore;
@@ -1025,11 +1037,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final responseGeneration = _responseGeneration;
     var retryAfterSettlement = false;
     try {
-      final sessionId =
-          _desktopGateway?.storedSessionKeyFor(widget.session.id) ??
-          widget.testStoredSessionKey?.call(widget.session.id) ??
-          widget.session.id;
-      final messages = await _getRecentMessages(sessionId);
+      final messages = await _getRecentMessages(_storedSessionKey);
       if (!mounted) return;
       if (responseGeneration != _responseGeneration ||
           _sending ||
@@ -1233,11 +1241,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     try {
       await _ensureDesktopSession();
       if (!_canRunReattachResync || generation != _reattachGeneration) return;
-      final storedSessionId =
-          _desktopGateway?.storedSessionKeyFor(widget.session.id) ??
-          widget.testStoredSessionKey?.call(widget.session.id) ??
-          widget.session.id;
-      final messages = await _getRecentMessages(storedSessionId);
+      final messages = await _getRecentMessages(_storedSessionKey);
       if (!_canRunReattachResync || generation != _reattachGeneration) return;
       _extractToolMessages(messages);
       final completed = _hasTerminalAssistantAfterWatermark(messages);
@@ -2216,7 +2220,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       );
       _messages.add({'role': 'user', 'content': localContent});
       // Insert a placeholder streaming message
-      _messages.add({'role': 'assistant', 'content': ''});
+      _messages.add({
+        'role': 'assistant',
+        'content': '',
+        '_gateway_pending_response': true,
+      });
     });
 
     _scheduleStreamingFollow();
@@ -2288,6 +2296,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           if (!mounted || responseGeneration != _responseGeneration) return;
           _scrollCoordinator.cancelStreaming();
           setState(() {
+            if (_messages.isNotEmpty && _messages.last['role'] == 'assistant') {
+              _messages.last['_gateway_pending_response'] = false;
+            }
             _streaming = false;
             _sending = false;
             _gatewayTurnStatus = null;
@@ -2415,7 +2426,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             );
             _attachmentDrafts.clear();
             _messages.add({'role': 'user', 'content': localContent});
-            _messages.add({'role': 'assistant', 'content': ''});
+            _messages.add({
+              'role': 'assistant',
+              'content': '',
+              '_gateway_pending_response': true,
+            });
             turnAdded = true;
           });
           _scheduleStreamingFollow();
@@ -2452,6 +2467,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       );
       if (!mounted || responseGeneration != _responseGeneration) return;
       setState(() {
+        final assistant = _lastAssistantMessage();
+        if (assistant != null) {
+          assistant['_gateway_pending_response'] = false;
+        }
         _streaming = false;
         _sending = false;
         _gatewayTurnStatus = null;
@@ -2754,7 +2773,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         assistant['content'] = transition.sealedText;
         if (transition.startsNewMessage) {
           assistant['_gateway_interim'] = true;
-          _messages.add({'role': 'assistant', 'content': ''});
+          assistant['_gateway_pending_response'] = false;
+          _messages.add({
+            'role': 'assistant',
+            'content': '',
+            '_gateway_pending_response': true,
+          });
         }
       });
       _scheduleStreamingFollow();
@@ -2765,15 +2789,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           event.data['rendered']?.toString() ??
           event.data['text']?.toString() ??
           '';
-      if (completeText.isNotEmpty) {
-        setState(() {
-          final assistant = _lastAssistantMessage();
-          if (assistant != null) {
+      setState(() {
+        final assistant = _lastAssistantMessage();
+        if (assistant != null) {
+          assistant['_gateway_pending_response'] = false;
+          if (completeText.isNotEmpty) {
             final current = assistant['content']?.toString() ?? '';
             if (current.isEmpty) _registerMaterializedAssistantMessage();
             assistant['content'] = completeText;
           }
-        });
+        }
+      });
+      if (completeText.isNotEmpty) {
         _scheduleStreamingFollow();
       }
       return;
@@ -3441,6 +3468,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         // state updates the message content/markers and clears the
         // pending-response flag exactly as a live terminal event would.
         _applyGatewayTurnState(interruptedTurnState);
+      } else if (interrupted) {
+        setState(() {
+          final assistant = _lastAssistantMessage();
+          if (assistant != null) {
+            assistant['_gateway_pending_response'] = false;
+          }
+        });
       }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -3909,7 +3943,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   ),
                 Semantics(
                   label: context.l10n.spoken_replies,
-                  value: _voiceReplyEnabled ? context.l10n.on : context.l10n.off,
+                  value: _voiceReplyEnabled
+                      ? context.l10n.on
+                      : context.l10n.off,
                   toggled: _voiceReplyEnabled,
                   button: true,
                   excludeSemantics: true,
@@ -4076,9 +4112,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               isUser: isUser,
               verbose: _verboseMode,
               metadata: msg,
+              mediaReferencesFinal: msg['_gateway_pending_response'] != true,
               mediaFilesClient: isUser
                   ? null
-                  : () => RemoteFilesClient.fromConnection(widget.connection),
+                  : () =>
+                        widget.testMediaFilesClient?.call(_storedSessionKey) ??
+                        RemoteFilesClient.fromConnection(
+                          widget.connection,
+                          sessionId: _storedSessionKey,
+                        ),
               onReadAloud: isUser
                   ? null
                   : () => _readAssistantText(content, announce: true),
@@ -4122,6 +4164,7 @@ class MessageBubble extends StatelessWidget {
   final Future<void> Function()? onReadAloud;
   final VoidCallback? onEdit;
   final Future<void> Function()? onRetry;
+  final bool mediaReferencesFinal;
 
   /// Gateway files client factory for `MEDIA:` artifact cards. Assistant
   /// bubbles without it render `MEDIA:` tags as prose (e.g. transcript views
@@ -4139,6 +4182,7 @@ class MessageBubble extends StatelessWidget {
     this.onEdit,
     this.onRetry,
     this.mediaFilesClient,
+    this.mediaReferencesFinal = true,
   });
 
   Future<void> _copyMessage(BuildContext context) async {
@@ -4274,66 +4318,71 @@ class MessageBubble extends StatelessWidget {
       isUser: isUser,
       assistantTextColor: assistantTextColor,
     );
+    final filesClient = !isUser ? mediaFilesClient : null;
     Widget prose(String text) => MarkdownBody(
       data: text,
       selectable: false,
       styleSheet: styleSheet,
-      onTapLink: (linkText, href, title) {
-        if (href != null && href.startsWith('media-artifact://')) {
-          final path = Uri.decodeComponent(
-            href.substring('media-artifact://'.length),
-          );
-          unawaited(
-            downloadAndShareMediaFile(
-              filesClient: mediaFilesClient!,
-              ref: MediaTagRef(path: path),
-            ).catchError((Object e) {
-              debugPrint('media link download failed: $e');
-            }),
-          );
-        }
-      },
+      onTapLink: filesClient == null
+          ? null
+          : (linkText, href, title) {
+              final path = href == null
+                  ? null
+                  : mediaPathFromArtifactHref(href);
+              if (path == null) return;
+              unawaited(
+                downloadAndShareMediaFile(
+                  filesClient: filesClient,
+                  ref: MediaTagRef(path: path),
+                ).catchError((Object e) {
+                  debugPrint('media link download failed: $e');
+                }),
+              );
+            },
     );
 
-    final parseMedia = !isUser && mediaFilesClient != null;
+    final parseMedia = filesClient != null;
     final blocks = splitMarkdownCodeBlocks(content);
+    final mediaOccurrences = <String, int>{};
 
     List<Widget> renderProse(String text) {
       if (!parseMedia) return [prose(text)];
-      // Unclosed fence (streaming mid-fence): everything from the last
-      // fence marker on is still code-in-progress — do not parse media
-      // there or a doc example of the MEDIA: contract renders a live card
-      // that vanishes when the closing fence lands.
-      var searchable = text;
-      var tail = '';
-      if ('```'.allMatches(text).length.isOdd) {
-        final lastFence = text.lastIndexOf('```');
-        searchable = text.substring(0, lastFence);
-        tail = text.substring(lastFence);
-      }
-      final segments = splitMediaTags(searchable);
+      final segments = splitMediaTags(text, isFinal: mediaReferencesFinal);
       if (!segments.any((s) => s.isMedia)) {
-        return [prose(text)];
+        return [
+          prose(inlineMediaTagsAsLinks(text, isFinal: mediaReferencesFinal)),
+        ];
       }
       final widgets = <Widget>[];
       for (final segment in segments) {
         if (segment.isMedia) {
+          final path = segment.media!.path;
+          final occurrence = mediaOccurrences.update(
+            path,
+            (value) => value + 1,
+            ifAbsent: () => 0,
+          );
           widgets.add(
-            // Keyed on the full path: unkeyed recycling would otherwise
-            // re-point a card's State (and its downloaded bytes) at a
-            // different ref when streaming deltas shift segment positions.
             MediaArtifactCard(
-              key: ValueKey(segment.media!.path),
+              // The occurrence ordinal keeps repeated paths unique while
+              // remaining stable as a streamed suffix grows.
+              key: ValueKey((path, occurrence)),
               ref: segment.media!,
-              filesClient: mediaFilesClient!,
+              filesClient: filesClient,
             ),
           );
         } else if (segment.text.trim().isNotEmpty) {
           // Inline refs (mid-line) become markdown links in place.
-          widgets.add(prose(inlineMediaTagsAsLinks(segment.text)));
+          widgets.add(
+            prose(
+              inlineMediaTagsAsLinks(
+                segment.text,
+                isFinal: mediaReferencesFinal,
+              ),
+            ),
+          );
         }
       }
-      if (tail.isNotEmpty) widgets.add(prose(tail));
       return widgets;
     }
 

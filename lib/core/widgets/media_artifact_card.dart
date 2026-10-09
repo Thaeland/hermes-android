@@ -55,6 +55,7 @@ class _MediaArtifactCardState extends State<MediaArtifactCard> {
   Uint8List? _bytes;
   Future<Uint8List?>? _inFlight;
   String? _error;
+  int _downloadGeneration = 0;
 
   @override
   void didUpdateWidget(MediaArtifactCard oldWidget) {
@@ -63,6 +64,7 @@ class _MediaArtifactCardState extends State<MediaArtifactCard> {
     // State at a different ref; stale bytes would land under the wrong
     // filename (wrong file shared, wrong image previewed).
     if (oldWidget.ref.path != widget.ref.path) {
+      _downloadGeneration += 1;
       _bytes = null;
       _inFlight = null;
       _error = null;
@@ -74,27 +76,45 @@ class _MediaArtifactCardState extends State<MediaArtifactCard> {
   Future<Uint8List?> _ensureBytes() {
     final cached = _bytes;
     if (cached != null) return Future.value(cached);
-    return _inFlight ??= _download();
+    final inFlight = _inFlight;
+    if (inFlight != null) return inFlight;
+    final generation = _downloadGeneration;
+    final path = widget.ref.path;
+    final future = _download(path, generation);
+    _inFlight = future;
+    future.whenComplete(() {
+      if (!mounted ||
+          generation != _downloadGeneration ||
+          !identical(_inFlight, future)) {
+        return;
+      }
+      setState(() => _inFlight = null);
+    }).ignore();
+    return future;
   }
 
-  Future<Uint8List?> _download() async {
+  Future<Uint8List?> _download(String path, int generation) async {
     setState(() => _error = null);
     try {
       final client = widget.filesClient();
       final Uint8List bytes;
       try {
-        bytes = (await client.download(widget.ref.path)).bytes;
+        bytes = (await client.download(path)).bytes;
       } finally {
         if (client is RemoteFilesClient) client.close();
       }
-      if (!mounted) return null;
+      if (!mounted ||
+          generation != _downloadGeneration ||
+          widget.ref.path != path) {
+        return null;
+      }
       setState(() => _bytes = bytes);
       return bytes;
     } catch (e) {
-      if (mounted) setState(() => _error = e.toString());
+      if (mounted && generation == _downloadGeneration) {
+        setState(() => _error = e.toString());
+      }
       return null;
-    } finally {
-      _inFlight = null;
     }
   }
 
