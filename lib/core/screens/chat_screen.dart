@@ -197,7 +197,14 @@ class ChatScreen extends StatefulWidget {
   /// Test seam mirroring `DesktopGatewayClient.steerPrompt`: injects text
   /// into the live turn and reports whether the gateway accepted it.
   @visibleForTesting
-  final Future<bool> Function(String sessionId, String text)? testDesktopSteer;
+  final Future<SteerOutcome> Function(String sessionId, String text)?
+      testDesktopSteer;
+
+  /// Test seam for the uncertain-steer reconciliation: returns the recent
+  /// transcript rows the screen checks to decide whether a steer whose
+  /// acknowledgement was lost actually landed on the server.
+  final Future<List<Map<String, dynamic>>> Function(String sessionId)?
+      testSteerHistoryReconcile;
 
   @visibleForTesting
   final Future<String?> Function()? testServerFilePicker;
@@ -250,6 +257,7 @@ class ChatScreen extends StatefulWidget {
     this.testAttachmentDraftService,
     this.testRemotePromptSubmit,
     this.testDesktopSteer,
+    this.testSteerHistoryReconcile,
     this.testServerFilePicker,
     this.testRemoteAttachmentUpload,
     this.testInitialAttachmentDrafts = const [],
@@ -302,9 +310,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _streaming = false;
   bool _steering = false;
 
-  /// Text of a steer the gateway rejected (turn settling/unsteerable).
-  /// Re-sent as a normal prompt when the live turn settles.
-  String? _pendingSteerText;
+  /// Text of steers the gateway rejected (turn settling/unsteerable), in
+  /// submission order. Re-sent as normal prompts when the live turn
+  /// settles; a queue, because a single slot would silently drop an
+  /// earlier note when two steers are rejected back-to-back.
+  final List<String> _pendingSteerNotes = [];
+
+  /// A steer whose delivery is uncertain (ack lost after write). Held out
+  /// of [_pendingSteerNotes] until the settle drain reconciles it against
+  /// server history; re-sending it blind could execute it twice.
+  String? _uncertainSteerText;
+  bool _steerDrainInFlight = false;
   GatewayTurnStatus? _gatewayTurnStatus;
   _ResponseTransport _activeResponseTransport = _ResponseTransport.none;
   String? _activeClientTurnId;
@@ -3385,8 +3401,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// desktop app's steer-on-Enter: `session.steer` injects the text into
   /// the running turn without interrupting it. When the gateway rejects
   /// (turn already settling, or an agent without steer support) the text
-  /// is held in [_pendingSteerText] and re-sent as a normal prompt once
-  /// the turn settles, so the words are never lost.
+  /// joins [_pendingSteerNotes] and is re-sent as a normal prompt once
+  /// the turn settles, so the words are never lost. An uncertain delivery
+  /// (ack lost after write) is held in [_uncertainSteerText] and only
+  /// re-sent after reconciliation proves it never landed server-side.
   Future<void> _steerComposer() async {
     if (!_streaming || _steering) return;
     if (_voiceComposer.listening) {
@@ -3405,9 +3423,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       return;
     }
     setState(() => _steering = true);
-    bool accepted = false;
+    SteerOutcome outcome = SteerOutcome.rejected;
     try {
-      accepted = widget.testDesktopSteer != null
+      outcome = widget.testDesktopSteer != null
           ? await widget.testDesktopSteer!(widget.session.id, text)
           : await _desktopGateway!.steerPrompt(
               sessionId: widget.session.id,
@@ -3417,8 +3435,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (mounted) setState(() => _steering = false);
     }
     if (!mounted) return;
-    if (accepted) {
-      _textController.clear();
+    if (outcome == SteerOutcome.accepted) {
+      _consumeSteeredText(text);
       setState(
         () => _messages.add({'role': 'user', 'content': text, '_is_steer': true}),
       );
@@ -3426,12 +3444,21 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _scheduleStreamingFollow();
       return;
     }
+    if (outcome == SteerOutcome.uncertain) {
+      // The frame was written but the ack never came back: the gateway may
+      // have applied the steer. Hold it out of the resend queue until the
+      // settle drain can reconcile it against server history; re-sending
+      // blind could execute the instruction twice.
+      _consumeSteeredText(text);
+      setState(() => _uncertainSteerText = text);
+      return;
+    }
     // Rejected: the turn is settling or unsteerable. Move the text out of
-    // the composer into [_pendingSteerText]; the settle drain re-sends it
+    // the composer into the pending queue; the settle drain re-sends it
     // as a normal next-turn prompt so the words are never lost.
     setState(() {
-      _pendingSteerText = text;
-      _textController.clear();
+      _pendingSteerNotes.add(text);
+      _consumeSteeredText(text);
     });
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -3445,13 +3472,32 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _maybeDrainPendingSteer();
   }
 
-  /// After a turn settles, re-send a steer the gateway rejected. If the
+  /// Remove exactly the steered [snapshot] from the composer. The composer
+  /// stays editable while the steer RPC is in flight, so by the time the
+  /// acknowledgement lands the user may have kept typing: clear the whole
+  /// controller would erase that newer draft. Consume only the submitted
+  /// snapshot — clear when it still is the whole draft, strip the prefix
+  /// when the user appended to it, and leave the composer alone when the
+  /// user replaced it (the snapshot is already gone).
+  void _consumeSteeredText(String snapshot) {
+    final current = _textController.text;
+    if (current == snapshot) {
+      _textController.clear();
+    } else if (current.startsWith(snapshot)) {
+      final rest = current.substring(snapshot.length);
+      _textController.value = TextEditingValue(
+        text: rest,
+        selection: TextSelection.collapsed(offset: rest.length),
+      );
+    }
+  }
+
+  /// After a turn settles, re-send steers the gateway rejected. If the
   /// user is mid-draft, the rejected text is appended to the composer
   /// instead of auto-sent, so nothing is overwritten or lost.
   void _maybeDrainPendingSteer() {
-    final pending = _pendingSteerText;
-    if (pending == null) return;
-    if (!mounted || _streaming || _sending) return;
+    if (_pendingSteerNotes.isEmpty && _uncertainSteerText == null) return;
+    if (!mounted || _streaming || _sending || _steerDrainInFlight) return;
     if (_voiceComposer.listening) {
       // Dictation owns the composer right now: auto-sending would silently
       // no-op in _sendMessage's listening guard, and appending would let the
@@ -3459,14 +3505,71 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       // partial. Hold it; _onVoiceComposerChanged re-drains when the mic stops.
       return;
     }
-    final draft = _textController.text;
-    if (draft.trim().isEmpty) {
-      _pendingSteerText = null;
-      _textController.text = pending;
-      unawaited(_sendMessage());
-    } else {
-      _pendingSteerText = null;
-      _textController.text = '$draft\n\n$pending';
+    unawaited(_drainPendingSteers());
+  }
+
+  Future<void> _drainPendingSteers() async {
+    _steerDrainInFlight = true;
+    try {
+      final uncertain = _uncertainSteerText;
+      if (uncertain != null) {
+        final landed = await _steerLandedInHistory(uncertain);
+        if (!mounted) return;
+        _uncertainSteerText = null;
+        if (landed) {
+          // The gateway applied the steer despite the lost ack: paint it
+          // locally (the history refresh will confirm) and do NOT resend.
+          setState(() => _messages.add({
+            'role': 'user',
+            'content': uncertain,
+            '_is_steer': true,
+          }));
+        } else {
+          _pendingSteerNotes.insert(0, uncertain);
+        }
+      }
+      if (_pendingSteerNotes.isEmpty) return;
+      if (!mounted || _streaming || _sending || _voiceComposer.listening) {
+        return;
+      }
+      final joined = _pendingSteerNotes.join('\n\n');
+      _pendingSteerNotes.clear();
+      final draft = _textController.text;
+      if (draft.trim().isEmpty) {
+        _textController.text = joined;
+        unawaited(_sendMessage());
+      } else {
+        setState(() => _textController.text = '$draft\n\n$joined');
+      }
+    } finally {
+      _steerDrainInFlight = false;
+    }
+  }
+
+  /// True when a steer whose acknowledgement was lost is already present in
+  /// the server transcript (persisted as a `display_kind: "steer"` row or
+  /// the raw marker wrapper). A failed lookup counts as "not landed":
+  /// losing an instruction is worse than a possible duplicate.
+  Future<bool> _steerLandedInHistory(String text) async {
+    try {
+      final sessionId =
+          widget.testSteerHistoryReconcile != null
+              ? widget.session.id
+              : _desktopGateway?.storedSessionKeyFor(widget.session.id) ??
+                    widget.testStoredSessionKey?.call(widget.session.id) ??
+                    widget.session.id;
+      final messages = widget.testSteerHistoryReconcile != null
+          ? await widget.testSteerHistoryReconcile!(sessionId)
+          : await _getRecentMessages(sessionId);
+      final needle = text.trim();
+      for (final msg in messages.reversed) {
+        if (msg['role'] != 'user') continue;
+        final shown = steerDisplayText(Map<String, dynamic>.from(msg));
+        if (shown != null && shown == needle) return true;
+      }
+      return false;
+    } catch (_) {
+      return false;
     }
   }
 

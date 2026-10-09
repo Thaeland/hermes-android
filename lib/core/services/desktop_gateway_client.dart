@@ -23,6 +23,21 @@ enum DesktopConnectionState {
   reconnecting,
 }
 
+/// Outcome of a `session.steer` attempt from the mobile client.
+enum SteerOutcome {
+  /// The gateway confirmed the steer joined the live turn.
+  accepted,
+
+  /// The gateway explicitly refused the steer (idle, settling, unsupported)
+  /// or the frame was never written: safe to re-send as a next-turn prompt.
+  rejected,
+
+  /// The frame was written but the acknowledgement never arrived (local
+  /// timeout or socket close mid-RPC). The gateway may have applied the
+  /// steer; the caller must reconcile before any resend.
+  uncertain,
+}
+
 /// Authenticated JSON-RPC transport for a Hermes Desktop remote gateway.
 ///
 /// The mobile OpenAI-compatible endpoint remains available for legacy
@@ -859,20 +874,37 @@ class DesktopGatewayClient {
   }
 
   /// Injects [text] into the active turn of [sessionId] without stopping
-  /// it. Returns true only when the gateway accepted the steer into the
-  /// live turn; false (idle, settling, unsupported, or disconnected) tells
-  /// the caller to fall back to a normal next-turn prompt.
-  Future<bool> steerPrompt({required String sessionId, required String text}) async {
+  /// it. The outcome is deliberately three-valued: an explicit rejection
+  /// (idle, settling, unsupported) is safe to re-send as a normal prompt,
+  /// but an *uncertain* delivery (timeout or socket loss after the frame
+  /// was written) must be reconciled against server history before any
+  /// resend, or the same instruction can execute twice.
+  Future<SteerOutcome> steerPrompt({
+    required String sessionId,
+    required String text,
+  }) async {
     final gatewaySessionId = _gatewaySessionIds[sessionId];
     final client = _ws;
     if (gatewaySessionId == null || client == null || !client.isConnected) {
-      return false;
+      // Nothing was ever written to the socket: definite non-delivery.
+      return SteerOutcome.rejected;
     }
     try {
       final status = await client.steerSession(gatewaySessionId, text);
-      return status == 'queued';
+      return status == 'queued' ? SteerOutcome.accepted : SteerOutcome.rejected;
+    } on JsonRpcError catch (error) {
+      // A gateway *error response* (4010 etc.) means the handler refused
+      // the steer — it was not applied. A local timeout or a connection
+      // close after the frame was emitted is different: the gateway may
+      // have applied the steer without ever acking.
+      if (error.message == 'Timeout' || error.reason == 'connection_closed') {
+        return SteerOutcome.uncertain;
+      }
+      return SteerOutcome.rejected;
     } catch (_) {
-      return false;
+      // Pre-write failure (socket already gone, sink error before emit):
+      // nothing reached the gateway.
+      return SteerOutcome.rejected;
     }
   }
 
