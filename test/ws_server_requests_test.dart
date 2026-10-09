@@ -145,14 +145,26 @@ void main() {
       await _waitFor(
         () => events.any((event) => event.type == 'approval.request'),
       );
+      final approvalEvent = events.lastWhere(
+        (event) => event.type == 'approval.request',
+      );
+      final approvalRequestId =
+          approvalEvent.data['server_request_id'] as String;
+      expect(approvalRequestId, endsWith(':srq-approval'));
       expect(
-        events
-            .lastWhere((event) => event.type == 'approval.request')
-            .data['server_request_id'],
-        endsWith(':srq-approval'),
+        client.ownsApprovalRequest('mobile-1', requestId: approvalRequestId),
+        isTrue,
+      );
+      expect(
+        client.ownsApprovalRequest('mobile-1', requestId: 'another-request'),
+        isFalse,
       );
       await client.respondToApproval(sessionId: 'mobile-1', choice: 'deny');
       await _waitFor(() => gateway.serverResponses.containsKey('srq-approval'));
+      expect(
+        client.ownsApprovalRequest('mobile-1', requestId: approvalRequestId),
+        isFalse,
+      );
       expect(gateway.serverResponses['srq-approval']?['result'], {
         'choice': 'deny',
       });

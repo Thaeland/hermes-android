@@ -2,6 +2,7 @@
 // Uses REST endpoints: POST /api/sessions/{id}/chat and
 // GET /api/sessions/{id}/messages.
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -23,6 +24,7 @@ import '../services/gateway_turn_recovery.dart';
 import '../services/gateway_turn_ui_projection.dart';
 import '../services/remote_files_client.dart';
 import '../services/turn_notification_service.dart';
+import '../services/notification_prefs.dart';
 import '../services/voice_composer_adapter.dart';
 import '../services/ws_client.dart';
 import '../models/attachment_draft.dart';
@@ -50,6 +52,7 @@ import '../widgets/gateway_sensitive_prompt_dialog.dart';
 import '../widgets/voice_composer_controls.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
+
 /// These colors remain identical in light and dark themes. Their 8.15:1
 /// contrast ratio keeps normal user-message text above WCAG AA.
 const hermesUserMessageBubbleBackground = Color(0xFFD4AF37);
@@ -278,6 +281,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   DesktopGatewayClient? _desktopGateway;
   GatewayTurnApplicationSession? _turnApplicationSession;
   Object? _turnApplicationAsyncEventRegistration;
+  Object? _turnApplicationSettledRegistration;
   DesktopConnectionState _desktopConnectionState =
       DesktopConnectionState.disconnected;
   bool _appInBackground = false;
@@ -381,8 +385,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       offset: _textController.text.length,
     );
     _turnNotifications =
-        widget.testTurnNotifications ?? TurnNotificationService();
+        widget.testTurnNotifications ?? TurnNotificationService.shared;
     unawaited(_turnNotifications.ensureInitialized());
+    // A notification action that could not answer directly (the request is
+    // owned by this screen's gateway, not the app-level controller) lands in
+    // the shared store; consume it on mount and whenever it changes while
+    // this chat is open — the already-mounted owner must observe it too.
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _consumePendingNotificationApproval(),
+    );
+    pendingNotificationApprovals.addListener(
+      _consumePendingNotificationApproval,
+    );
     _client =
         widget.testApiClient ??
         ApiClient(
@@ -444,8 +458,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (turnApplicationSession != null) {
       _turnApplicationAsyncEventRegistration = turnApplicationSession
           .setAsyncEventListener(widget.session.id, _handleDesktopAsyncEvent);
+      _turnApplicationSettledRegistration = turnApplicationSession
+          .setTurnSettledListener(widget.session.id, _onTurnSettled);
     }
-    _turnApplicationSession?.onTurnSettled = _onTurnSettled;
     unawaited(_initializeChat());
     _loadVerboseMode();
     _initVoice();
@@ -484,6 +499,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    pendingNotificationApprovals.removeListener(
+      _consumePendingNotificationApproval,
+    );
     _clearPendingReattachResync();
     widget.testDesktopConnectionHook?.handler = null;
     widget.testDesktopAsyncEventHook?.handler = null;
@@ -512,6 +530,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _turnApplicationSession?.removeAsyncEventListener(
         widget.session.id,
         registration,
+      );
+    }
+    final settledRegistration = _turnApplicationSettledRegistration;
+    if (settledRegistration != null) {
+      _turnApplicationSession?.removeTurnSettledListener(
+        widget.session.id,
+        settledRegistration,
       );
     }
     _textController.dispose();
@@ -608,7 +633,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              context.l10n.connection_switched_the_running_reply_continues_on_the_server_and,
+              context
+                  .l10n
+                  .connection_switched_the_running_reply_continues_on_the_server_and,
             ),
             persist: false,
           ),
@@ -619,6 +646,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     setState(() => _desktopConnectionState = state);
     if (connectionChanged && state == DesktopConnectionState.connected) {
       _requestImmediateReattachResync();
+      // A notification tap that landed before this route-local gateway was
+      // ready stays pending; retry it now that the connection is back.
+      _consumePendingNotificationApproval();
     }
   }
 
@@ -782,7 +812,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ..hideCurrentSnackBar()
         ..showSnackBar(
           SnackBar(
-            content: Text(context.l10n.read_aloud_is_unavailable_on_this_device),
+            content: Text(
+              context.l10n.read_aloud_is_unavailable_on_this_device,
+            ),
             duration: Duration(seconds: 3),
           ),
         );
@@ -792,14 +824,139 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void _onTurnSettled(GatewayTurnRecoveryState state) {
     if (!mounted || !_appInBackground) return;
     final turnId = state.turnId ?? state.clientTurnId;
-    final summary = state.isTerminal && !state.isFailClosed
+    final completed =
+        !state.isFailClosed &&
+        state.status == GatewayRecoveryTurnStatus.completed;
+    final kind = completed
+        ? HermesNotificationKind.turnDone
+        : HermesNotificationKind.turnError;
+    if (!notificationKindEnabled(kind)) return;
+    final summary = completed
         ? context.l10n.response_ready
-        : context.l10n.turn_completed;
+        : context.l10n.turn_failed;
     unawaited(
-      _turnNotifications.showTurnCompleted(
-        title: context.l10n.hermes_response_ready,
-        turnSummary: '${widget.session.title}: $summary',
-        turnId: turnId,
+      completed
+          ? _turnNotifications.showTurnCompleted(
+              title: context.l10n.hermes_response_ready,
+              turnSummary: '${widget.session.title}: $summary',
+              turnId: turnId,
+              sessionId: widget.session.id,
+              connectionId: widget.connection.id,
+            )
+          : _turnNotifications.showTurnFailed(
+              title: context.l10n.the_turn_failed,
+              turnSummary: '${widget.session.title}: $summary',
+              turnId: turnId,
+              sessionId: widget.session.id,
+              connectionId: widget.connection.id,
+            ),
+    );
+  }
+
+  /// Mirrors a blocking approval to a native notification (with approve/deny
+  /// buttons) while the app is in the background — the one prompt class that
+  /// must not wait for the user to come back on their own.
+  void _notifyApprovalRequest(
+    GatewayApprovalRequest request,
+    String? serverRequestId,
+  ) {
+    if (!_appInBackground || serverRequestId == null) return;
+    final command = request.command.trim();
+    final body = command.isEmpty
+        ? request.description.trim()
+        : (command.length > 140 ? '${command.substring(0, 140)}…' : command);
+    unawaited(
+      _turnNotifications.showKind(
+        kind: HermesNotificationKind.approval,
+        title: '${context.l10n.approval_needed} — ${widget.session.title}',
+        body: body,
+        eventId: serverRequestId,
+        sessionId: widget.session.id,
+        connectionId: widget.connection.id,
+        actions: [
+          TurnNotificationAction(id: 'approve', label: context.l10n.approve),
+          TurnNotificationAction(id: 'reject', label: context.l10n.deny),
+        ],
+        payload: jsonEncode({
+          'sessionId': widget.session.id,
+          'connectionId': widget.connection.id,
+          'requestId': serverRequestId,
+        }),
+      ),
+    );
+  }
+
+  /// Mirrors a clarify/sudo/secret prompt to a native notification while the
+  /// app is in the background. The dialog itself stays queued for the return.
+  void _notifyInputRequest({required String eventId, required String body}) {
+    if (!_appInBackground) return;
+    final trimmed = body.trim();
+    unawaited(
+      _turnNotifications.showKind(
+        kind: HermesNotificationKind.input,
+        title: '${context.l10n.input_needed} — ${widget.session.title}',
+        body: trimmed.length > 140 ? '${trimmed.substring(0, 140)}…' : trimmed,
+        eventId: eventId,
+        sessionId: widget.session.id,
+        connectionId: widget.connection.id,
+        payload: jsonEncode({
+          'sessionId': widget.session.id,
+          'connectionId': widget.connection.id,
+        }),
+      ),
+    );
+  }
+
+  /// Gateway notices mirror the desktop split: credit state changes are the
+  /// only native notice class (credits.depleted / credits.restored); every
+  /// other notice posts as a plugin notice while the app is away.
+  void _notifyGatewayNotice(GatewayNotification notification) {
+    if (!_appInBackground) return;
+    final isCredits =
+        notification.key == 'credits.depleted' ||
+        notification.key == 'credits.restored';
+    unawaited(
+      _turnNotifications.showKind(
+        kind: isCredits
+            ? HermesNotificationKind.credits
+            : HermesNotificationKind.plugin,
+        title: isCredits
+            ? context.l10n.credit_notifications
+            : context.l10n.plugin_notifications,
+        body: notification.text,
+        eventId: notification.key,
+        sessionId: widget.session.id,
+        connectionId: widget.connection.id,
+        payload: jsonEncode({
+          'sessionId': widget.session.id,
+          'connectionId': widget.connection.id,
+        }),
+      ),
+    );
+  }
+
+  /// Background task completions and review summaries arrive as GatewayNotice
+  /// insights; mirror them to a native notification while the app is away —
+  /// completions as background work, reviews as gateway notices.
+  void _notifyBackgroundNotice(GatewayNotice notice) {
+    if (!_appInBackground) return;
+    final isBackground = notice.kind == GatewayNoticeKind.background;
+    unawaited(
+      _turnNotifications.showKind(
+        kind: isBackground
+            ? HermesNotificationKind.backgroundDone
+            : HermesNotificationKind.plugin,
+        title: isBackground
+            ? context.l10n.background_task_completed
+            : context.l10n.plugin_notifications,
+        body: notice.text,
+        eventId: notice.identity,
+        sessionId: widget.session.id,
+        connectionId: widget.connection.id,
+        payload: jsonEncode({
+          'sessionId': widget.session.id,
+          'connectionId': widget.connection.id,
+        }),
       ),
     );
   }
@@ -1410,7 +1567,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _gatewayTurnStatus = projection.isFailClosed
             ? GatewayTurnStatus(
                 kind: 'recovery_failed',
-                text: context.l10n.hermes_stopped_recovery_safely_no_prompt_was_resent,
+                text: context
+                    .l10n
+                    .hermes_stopped_recovery_safely_no_prompt_was_resent,
               )
             : null;
       }
@@ -1461,7 +1620,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   String _gatewayRecoveryStatusText(GatewayRecoveryTurnStatus? status) {
     return switch (status) {
-      GatewayRecoveryTurnStatus.waitingInput => context.l10n.hermes_is_waiting_for_input,
+      GatewayRecoveryTurnStatus.waitingInput =>
+        context.l10n.hermes_is_waiting_for_input,
       GatewayRecoveryTurnStatus.running => context.l10n.hermes_is_responding,
       _ => context.l10n.recovering_hermes,
     };
@@ -1514,7 +1674,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             ListTile(
               leading: const Icon(Icons.photo_library_outlined),
               title: Text(
-                _desktopGateway == null ? context.l10n.choose_image : context.l10n.choose_images,
+                _desktopGateway == null
+                    ? context.l10n.choose_image
+                    : context.l10n.choose_images,
               ),
               onTap: () {
                 Navigator.pop(sheetContext);
@@ -1700,7 +1862,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _pickFiles() async {
     if (_desktopGateway == null) {
       _showAttachmentError(
-        context.l10n.configure_a_valid_desktop_gateway_url_before_attaching_files,
+        context
+            .l10n
+            .configure_a_valid_desktop_gateway_url_before_attaching_files,
       );
       return;
     }
@@ -1751,7 +1915,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         );
       }
     } catch (_) {
-      _showAttachmentError(context.l10n.unable_to_prepare_this_file_try_another_one);
+      _showAttachmentError(
+        context.l10n.unable_to_prepare_this_file_try_another_one,
+      );
     }
   }
 
@@ -1826,14 +1992,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              context.l10n.file_attached_document_catalog_registration_is_pending,
+              context
+                  .l10n
+                  .file_attached_document_catalog_registration_is_pending,
             ),
           ),
         );
       }
     } catch (error) {
       _showAttachmentError(
-        context.l10n.retry_failed_for_the_draft_and_prompt_were_kept(draft.name),
+        context.l10n.retry_failed_for_the_draft_and_prompt_were_kept(
+          draft.name,
+        ),
       );
     } finally {
       if (mounted) {
@@ -2012,7 +2182,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(context.l10n.could_not_load_models_for_this_profile(error)),
+          content: Text(
+            context.l10n.could_not_load_models_for_this_profile(error),
+          ),
         ),
       );
     } finally {
@@ -2096,9 +2268,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       );
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(context.l10n.model_was_not_changed(error))));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.model_was_not_changed(error))),
+      );
     } finally {
       if (mounted) setState(() => _changingModel = false);
     }
@@ -2347,8 +2519,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               final index = attachments.indexOf(draft);
               _gatewayTurnStatus = GatewayTurnStatus(
                 kind: 'upload',
-                text:
-                    context.l10n.uploading(index + 1, draft.name, attachments.length),
+                text: context.l10n.uploading(
+                  index + 1,
+                  draft.name,
+                  attachments.length,
+                ),
               );
             }
           });
@@ -2359,7 +2534,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(
-                  context.l10n.file_attached_document_catalog_registration_is_pending,
+                  context
+                      .l10n
+                      .file_attached_document_catalog_registration_is_pending,
                 ),
               ),
             );
@@ -2526,7 +2703,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             ..error = null;
           _gatewayTurnStatus = GatewayTurnStatus(
             kind: 'upload',
-            text: context.l10n.uploading(index + 1, draft.name, attachments.length),
+            text: context.l10n.uploading(
+              index + 1,
+              draft.name,
+              attachments.length,
+            ),
           );
         });
         final dataUrl = await _attachmentDraftService.readDataUrl(draft);
@@ -2569,8 +2750,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     final attachmentLabels = attachments
         .map(
-          (attachment) =>
-              '[${context.l10n.attached_file}: ${attachment.name}]',
+          (attachment) => '[${context.l10n.attached_file}: ${attachment.name}]',
         )
         .join('\n');
     final localContent = [
@@ -2782,6 +2962,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (event.type == 'notification.show') {
       final notification = GatewayNotification.fromEventData(event.data);
       if (notification == null) return;
+      _notifyGatewayNotice(notification);
       _notificationTimers.remove(notification.key)?.cancel();
       setState(() => _gatewayNotifications[notification.key] = notification);
       _scheduleStreamingFollow();
@@ -2818,6 +2999,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final notice = GatewayNotice.fromGatewayEvent(event.type, event.data);
     if (notice == null) return;
     if (_gatewayNotices.any((item) => item.identity == notice.identity)) return;
+    _notifyBackgroundNotice(notice);
     setState(() {
       _gatewayNotices.add(notice);
       if (_gatewayNotices.length > 20) _gatewayNotices.removeAt(0);
@@ -2930,6 +3112,49 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
+  /// Answers approvals that notification actions left pending for this
+  /// connection. Entries are removed only after the gateway confirms the
+  /// answer: a cold start (no route-local session yet) or a throw keeps the
+  /// tap pending for a later retry instead of losing it.
+  void _consumePendingNotificationApproval() {
+    final mine = [
+      for (final approval in pendingNotificationApprovals.value)
+        if (approval.connectionId == widget.connection.id &&
+            approval.sessionId == widget.session.id)
+          approval,
+    ];
+    for (final approval in mine) {
+      unawaited(_answerPendingNotificationApproval(approval));
+    }
+  }
+
+  /// Approvals whose answer is in flight, so a notifier change cannot
+  /// dispatch the same request twice.
+  final Set<String> _answeringPendingApprovals = {};
+
+  Future<void> _answerPendingNotificationApproval(
+    PendingNotificationApproval approval,
+  ) async {
+    final key =
+        '${approval.connectionId}|${approval.sessionId}|${approval.requestId}';
+    if (_answeringPendingApprovals.contains(key)) return;
+    _answeringPendingApprovals.add(key);
+    try {
+      // The normal approval path: route-local turn session first, then the
+      // desktop gateway. A throw means the route-local gateway is not up
+      // yet (cold start/reconnect) — keep the entry and retry later.
+      await _respondToGatewayApproval(
+        approval.choice,
+        requestId: approval.requestId,
+      );
+      removePendingNotificationApproval(approval);
+    } catch (_) {
+      // Unresolved, not answered: keep the entry for a later retry.
+    } finally {
+      _answeringPendingApprovals.remove(key);
+    }
+  }
+
   Future<void> _respondToGatewayClarify({
     required String requestId,
     required String answer,
@@ -2990,6 +3215,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     await gateway.respondToSecret(requestId: requestId, value: value);
   }
 
+  bool _ownsGatewayApproval(String requestId) {
+    final turnSession = _turnApplicationSession;
+    if (turnSession != null &&
+        turnSession.ownsApprovalRequest(
+          sessionId: widget.session.id,
+          requestId: requestId,
+        )) {
+      return true;
+    }
+    return _desktopGateway?.ownsApprovalRequest(
+          widget.session.id,
+          requestId: requestId,
+        ) ??
+        false;
+  }
+
   void _showGatewayApproval(
     Map<String, dynamic> eventData,
     int responseGeneration,
@@ -3004,6 +3245,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         : rawServerRequestId;
     _approvalDialogOpen = true;
     _activeApprovalServerRequestId = serverRequestId;
+    _notifyApprovalRequest(request, serverRequestId);
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final wasCancelledBeforeOpen =
@@ -3016,8 +3258,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _activeApprovalServerRequestId = null;
         return;
       }
-      final desktopGateway = _desktopGateway;
-      if (desktopGateway == null) {
+      if (serverRequestId != null && !_ownsGatewayApproval(serverRequestId)) {
+        _approvalDialogOpen = false;
+        _activeApprovalServerRequestId = null;
+        return;
+      }
+      if (_desktopGateway == null && _turnApplicationSession == null) {
         _approvalDialogOpen = false;
         _activeApprovalServerRequestId = null;
         return;
@@ -3102,6 +3348,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     final pending = _sensitivePromptQueue.removeAt(0);
     _activeSensitivePrompt = pending;
+    _notifyInputRequest(
+      eventId: pending.request.requestId,
+      body: pending.request.description.isNotEmpty
+          ? pending.request.description
+          : pending.request.title,
+    );
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted ||
@@ -3282,6 +3534,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     final pending = _clarifyPromptQueue.removeAt(0);
     _activeClarifyPrompt = pending;
+    _notifyInputRequest(
+      eventId: pending.request.identityKey,
+      body: pending.request.question,
+    );
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted ||
@@ -3418,7 +3674,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           content: Text(
             interrupted
                 ? context.l10n.response_stopped
-                : context.l10n.response_closed_locally_no_active_gateway_turn_was_found,
+                : context
+                      .l10n
+                      .response_closed_locally_no_active_gateway_turn_was_found,
           ),
         ),
       );
@@ -3426,7 +3684,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(context.l10n.response_closed_locally_gateway_stop_failed(error)),
+          content: Text(
+            context.l10n.response_closed_locally_gateway_stop_failed(error),
+          ),
           backgroundColor: Colors.orange,
           duration: const Duration(seconds: 6),
         ),
@@ -3875,7 +4135,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   ),
                 Semantics(
                   label: context.l10n.spoken_replies,
-                  value: _voiceReplyEnabled ? context.l10n.on : context.l10n.off,
+                  value: _voiceReplyEnabled
+                      ? context.l10n.on
+                      : context.l10n.off,
                   toggled: _voiceReplyEnabled,
                   button: true,
                   excludeSemantics: true,
@@ -3900,7 +4162,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ),
                 const SizedBox(width: 4),
                 Semantics(
-                  label: _streaming ? context.l10n.stop_response : context.l10n.send_message,
+                  label: _streaming
+                      ? context.l10n.stop_response
+                      : context.l10n.send_message,
                   button: true,
                   enabled:
                       _streaming ||

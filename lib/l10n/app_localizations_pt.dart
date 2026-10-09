@@ -95,6 +95,13 @@ class AppLocalizationsPt extends AppLocalizations {
   String get approval_needed => 'Aprovação necessária';
 
   @override
+  String get approval_needed_description =>
+      'Um comando aguarda sua aprovação ou recusa.';
+
+  @override
+  String get approve => 'Aprovar';
+
+  @override
   String get archive => 'Arquivar';
 
   @override
@@ -165,6 +172,13 @@ class AppLocalizationsPt extends AppLocalizations {
   @override
   String get background_recovery_unavailable_legacy_transport =>
       'Recuperação em segundo plano indisponível — transporte legado';
+
+  @override
+  String get background_task_completed => 'Tarefa em segundo plano concluída';
+
+  @override
+  String get background_task_completed_description =>
+      'Um comando de terminal em segundo plano foi concluído.';
 
   @override
   String get backup_restore => 'Backup e restauração';
@@ -484,6 +498,13 @@ class AppLocalizationsPt extends AppLocalizations {
   String get create_branch => 'Criar ramificação';
 
   @override
+  String get credit_notifications => 'Notificações de crédito';
+
+  @override
+  String get credit_notifications_description =>
+      'O uso de crédito foi interrompido ou restaurado.';
+
+  @override
   String get cron => 'Cron';
 
   @override
@@ -640,6 +661,13 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get edit_and_resend => 'Editar e reenviar';
+
+  @override
+  String get enable_notifications => 'Ativar notificações';
+
+  @override
+  String get enable_notifications_description =>
+      'Desativar isto desativa todas as notificações abaixo.';
 
   @override
   String get enables_file_attachments_through_the_desktop_remote_gateway =>
@@ -844,6 +872,13 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get inbox_is_clear => 'Caixa de entrada vazia';
+
+  @override
+  String get input_needed => 'Entrada necessária';
+
+  @override
+  String get input_needed_description =>
+      'O Hermes fez uma pergunta ou precisa de uma senha ou segredo.';
 
   @override
   String get insert_a_remote_file_reference =>
@@ -1162,6 +1197,13 @@ class AppLocalizationsPt extends AppLocalizations {
   String get nothing_to_migrate => 'Nada para migrar';
 
   @override
+  String get notifications => 'Notificações';
+
+  @override
+  String get notifications_permission_denied =>
+      'As notificações estão bloqueadas pelo sistema. Ative-as para este app nas configurações do Android.';
+
+  @override
   String get off_no_thinking => 'Desativado (sem raciocínio)';
 
   @override
@@ -1217,6 +1259,13 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get pin_batch_and_undo => 'Fixar, em lote e desfazer';
+
+  @override
+  String get plugin_notifications => 'Notificações de plugins';
+
+  @override
+  String get plugin_notifications_description =>
+      'O gateway enviou um aviso enquanto o app estava em segundo plano.';
 
   @override
   String get port => 'Porta';
@@ -1394,6 +1443,13 @@ class AppLocalizationsPt extends AppLocalizations {
       'Resposta fechada localmente; nenhum turno ativo do Gateway foi encontrado.';
 
   @override
+  String get response_complete => 'Resposta concluída';
+
+  @override
+  String get response_complete_description =>
+      'Um turno foi concluído enquanto o app estava em segundo plano.';
+
+  @override
   String get response_ready => 'Resposta pronta';
 
   @override
@@ -1524,6 +1580,9 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get send_message => 'Enviar mensagem';
+
+  @override
+  String get send_test_notification => 'Enviar notificação de teste';
 
   @override
   String get session_sources => 'Fontes de sessões';
@@ -1662,6 +1721,20 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get terminal_sessions => 'Sessões de terminal';
+
+  @override
+  String get test_notification_body =>
+      'Se você está vendo isto, as notificações estão funcionando.';
+
+  @override
+  String get test_notification_sent => 'Notificação de teste enviada.';
+
+  @override
+  String get test_notification_title => 'Teste de notificação do Hermes';
+
+  @override
+  String get test_notification_unsupported =>
+      'Não foi possível enviar a notificação — verifique se o sistema permite notificações.';
 
   @override
   String get text_size => 'Tamanho do texto';
@@ -1805,6 +1878,13 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get turn_completed => 'Turno concluído';
+
+  @override
+  String get turn_failed => 'Turno falhou';
+
+  @override
+  String get turn_failed_description =>
+      'Um turno em segundo plano terminou com erro.';
 
   @override
   String get turn_recovery_failed => 'Falha na recuperação do turno';
@@ -2447,6 +2527,13 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String get approval_needed => 'Aprovação necessária';
 
   @override
+  String get approval_needed_description =>
+      'Um comando aguarda sua aprovação ou recusa.';
+
+  @override
+  String get approve => 'Aprovar';
+
+  @override
   String get archive => 'Arquivar';
 
   @override
@@ -2517,6 +2604,13 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   @override
   String get background_recovery_unavailable_legacy_transport =>
       'Recuperação em segundo plano indisponível — transporte legado';
+
+  @override
+  String get background_task_completed => 'Tarefa em segundo plano concluída';
+
+  @override
+  String get background_task_completed_description =>
+      'Um comando de terminal em segundo plano foi concluído.';
 
   @override
   String get backup_restore => 'Backup e restauração';
@@ -2836,6 +2930,13 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String get create_branch => 'Criar ramificação';
 
   @override
+  String get credit_notifications => 'Notificações de crédito';
+
+  @override
+  String get credit_notifications_description =>
+      'O uso de crédito foi interrompido ou restaurado.';
+
+  @override
   String get cron => 'Cron';
 
   @override
@@ -2992,6 +3093,13 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get edit_and_resend => 'Editar e reenviar';
+
+  @override
+  String get enable_notifications => 'Ativar notificações';
+
+  @override
+  String get enable_notifications_description =>
+      'Desativar isto desativa todas as notificações abaixo.';
 
   @override
   String get enables_file_attachments_through_the_desktop_remote_gateway =>
@@ -3196,6 +3304,13 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get inbox_is_clear => 'Caixa de entrada vazia';
+
+  @override
+  String get input_needed => 'Entrada necessária';
+
+  @override
+  String get input_needed_description =>
+      'O Hermes fez uma pergunta ou precisa de uma senha ou segredo.';
 
   @override
   String get insert_a_remote_file_reference =>
@@ -3514,6 +3629,13 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String get nothing_to_migrate => 'Nada para migrar';
 
   @override
+  String get notifications => 'Notificações';
+
+  @override
+  String get notifications_permission_denied =>
+      'As notificações estão bloqueadas pelo sistema. Ative-as para este app nas configurações do Android.';
+
+  @override
   String get off_no_thinking => 'Desativado (sem raciocínio)';
 
   @override
@@ -3569,6 +3691,13 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get pin_batch_and_undo => 'Fixar, em lote e desfazer';
+
+  @override
+  String get plugin_notifications => 'Notificações de plugins';
+
+  @override
+  String get plugin_notifications_description =>
+      'O gateway enviou um aviso enquanto o app estava em segundo plano.';
 
   @override
   String get port => 'Porta';
@@ -3746,6 +3875,13 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
       'Resposta fechada localmente; nenhum turno ativo do Gateway foi encontrado.';
 
   @override
+  String get response_complete => 'Resposta concluída';
+
+  @override
+  String get response_complete_description =>
+      'Um turno foi concluído enquanto o app estava em segundo plano.';
+
+  @override
   String get response_ready => 'Resposta pronta';
 
   @override
@@ -3876,6 +4012,9 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get send_message => 'Enviar mensagem';
+
+  @override
+  String get send_test_notification => 'Enviar notificação de teste';
 
   @override
   String get session_sources => 'Fontes de sessões';
@@ -4014,6 +4153,20 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get terminal_sessions => 'Sessões de terminal';
+
+  @override
+  String get test_notification_body =>
+      'Se você está vendo isto, as notificações estão funcionando.';
+
+  @override
+  String get test_notification_sent => 'Notificação de teste enviada.';
+
+  @override
+  String get test_notification_title => 'Teste de notificação do Hermes';
+
+  @override
+  String get test_notification_unsupported =>
+      'Não foi possível enviar a notificação — verifique se o sistema permite notificações.';
 
   @override
   String get text_size => 'Tamanho do texto';
@@ -4157,6 +4310,13 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get turn_completed => 'Turno concluído';
+
+  @override
+  String get turn_failed => 'Turno falhou';
+
+  @override
+  String get turn_failed_description =>
+      'Um turno em segundo plano terminou com erro.';
 
   @override
   String get turn_recovery_failed => 'Falha na recuperação do turno';

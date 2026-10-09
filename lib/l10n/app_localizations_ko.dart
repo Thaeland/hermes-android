@@ -93,6 +93,12 @@ class AppLocalizationsKo extends AppLocalizations {
   String get approval_needed => '승인 필요';
 
   @override
+  String get approval_needed_description => '명령이 승인 또는 거부를 기다리고 있습니다.';
+
+  @override
+  String get approve => '승인';
+
+  @override
   String get archive => '보관';
 
   @override
@@ -160,6 +166,12 @@ class AppLocalizationsKo extends AppLocalizations {
   @override
   String get background_recovery_unavailable_legacy_transport =>
       '백그라운드 복구를 사용할 수 없음 — 레거시 전송';
+
+  @override
+  String get background_task_completed => '백그라운드 작업 완료';
+
+  @override
+  String get background_task_completed_description => '백그라운드 터미널 명령이 완료되었습니다.';
 
   @override
   String get backup_restore => '백업 및 복원';
@@ -466,6 +478,12 @@ class AppLocalizationsKo extends AppLocalizations {
   String get create_branch => '분기 만들기';
 
   @override
+  String get credit_notifications => '크레딧 알림';
+
+  @override
+  String get credit_notifications_description => '크레딧 사용이 중지되거나 복구되었습니다.';
+
+  @override
   String get cron => 'Cron';
 
   @override
@@ -618,6 +636,12 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get edit_and_resend => '편집 후 다시 보내기';
+
+  @override
+  String get enable_notifications => '알림 사용';
+
+  @override
+  String get enable_notifications_description => '끄면 아래의 모든 알림이 비활성화됩니다.';
 
   @override
   String get enables_file_attachments_through_the_desktop_remote_gateway =>
@@ -818,6 +842,12 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get inbox_is_clear => '받은편지함이 비어 있습니다';
+
+  @override
+  String get input_needed => '입력 필요';
+
+  @override
+  String get input_needed_description => 'Hermes가 질문했거나 비밀번호 또는 시크릿이 필요합니다.';
 
   @override
   String get insert_a_remote_file_reference => '원격 @file 참조 삽입';
@@ -1127,6 +1157,13 @@ class AppLocalizationsKo extends AppLocalizations {
   String get nothing_to_migrate => '마이그레이션할 항목이 없습니다';
 
   @override
+  String get notifications => '알림';
+
+  @override
+  String get notifications_permission_denied =>
+      'OS 수준에서 알림이 차단되어 있습니다. Android 설정에서 이 앱의 알림을 허용하세요.';
+
+  @override
   String get off_no_thinking => '끔 (추론 없음)';
 
   @override
@@ -1182,6 +1219,13 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get pin_batch_and_undo => '고정, 일괄 처리 및 실행 취소';
+
+  @override
+  String get plugin_notifications => '플러그인 알림';
+
+  @override
+  String get plugin_notifications_description =>
+      '앱이 백그라운드일 때 게이트웨이가 알림을 보냈습니다.';
 
   @override
   String get port => '포트';
@@ -1358,6 +1402,12 @@ class AppLocalizationsKo extends AppLocalizations {
       '로컬에서 응답이 종료되었습니다. 활성 게이트웨이 턴을 찾을 수 없습니다.';
 
   @override
+  String get response_complete => '응답 완료';
+
+  @override
+  String get response_complete_description => '앱이 백그라운드일 때 턴이 완료되었습니다.';
+
+  @override
   String get response_ready => '응답 준비 완료';
 
   @override
@@ -1486,6 +1536,9 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get send_message => '메시지 보내기';
+
+  @override
+  String get send_test_notification => '테스트 알림 보내기';
 
   @override
   String get session_sources => '세션 소스';
@@ -1620,6 +1673,19 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get terminal_sessions => '터미널 세션';
+
+  @override
+  String get test_notification_body => '이 알림이 보이면 알림 기능이 정상입니다.';
+
+  @override
+  String get test_notification_sent => '테스트 알림을 보냈습니다.';
+
+  @override
+  String get test_notification_title => 'Hermes 알림 테스트';
+
+  @override
+  String get test_notification_unsupported =>
+      '알림을 보낼 수 없습니다. OS에서 알림이 허용되어 있는지 확인하세요.';
 
   @override
   String get text_size => '텍스트 크기';
@@ -1759,6 +1825,12 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get turn_completed => '턴 완료';
+
+  @override
+  String get turn_failed => '턴 실패';
+
+  @override
+  String get turn_failed_description => '백그라운드 턴이 오류로 종료되었습니다.';
 
   @override
   String get turn_recovery_failed => '턴 복구 실패';

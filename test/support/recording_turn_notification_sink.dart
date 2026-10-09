@@ -1,3 +1,4 @@
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:hermes_android/core/services/turn_notification_service.dart';
 
 /// In-memory [TurnNotificationSink] used to characterize what Hermes actually
@@ -9,6 +10,13 @@ class RecordingTurnNotificationSink implements TurnNotificationSink {
   int initializeCount = 0;
   int cancelAllCount = 0;
   int permissionRequestCount = 0;
+
+  /// The cold-start response [takeInitialLaunchResponse] returns, if any.
+  NotificationResponse? initialLaunchResponse;
+
+  @override
+  Future<NotificationResponse?> takeInitialLaunchResponse() async =>
+      initialLaunchResponse;
 
   /// Result [requestPermission] returns: true granted, false denied, null when
   /// the platform has no runtime notification gate (iOS, Android < 13).

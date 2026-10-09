@@ -697,6 +697,20 @@ class ApiClient {
     return page.sessions;
   }
 
+  /// Fetches one session by exact id, paging through the list until it is
+  /// found: a notification may name a session older than the first page.
+  Future<Session?> getSessionById(String sessionId) async {
+    var offset = 0;
+    while (true) {
+      final result = await getSessionsPage(limit: 50, offset: offset);
+      for (final session in result.sessions) {
+        if (session.id == sessionId) return session;
+      }
+      if (!result.hasMore || result.sessions.isEmpty) return null;
+      offset += result.sessions.length;
+    }
+  }
+
   // ── Messages ─────────────────────────────────────────────────────────
 
   Future<List<Map<String, dynamic>>> getMessages(
