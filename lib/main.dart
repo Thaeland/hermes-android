@@ -10,11 +10,15 @@ import 'core/services/config_backup_io.dart';
 import 'core/services/config_backup_service.dart';
 import 'core/services/connection_manager.dart';
 import 'core/services/gateway_turn_application_controller.dart';
+import 'core/services/notification_prefs.dart';
 import 'core/services/text_size_preference.dart';
+import 'core/services/turn_notification_service.dart';
+import 'core/screens/chat_screen.dart';
 import 'core/screens/workspace_screen.dart';
 import 'core/theme/hermes_theme.dart';
 import 'core/utils/responsive.dart';
 import 'core/widgets/config_backup_card.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
 
@@ -196,10 +200,152 @@ class HermesApp extends StatefulWidget {
 class HermesAppState extends State<HermesApp> {
   late final GatewayTurnApplicationController _turnApplicationController;
 
+  /// Pushes from the app root (notification taps) need a navigator below the
+  /// MaterialApp this state builds.
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+
   @override
   void initState() {
     super.initState();
     _turnApplicationController = GatewayTurnApplicationController();
+    unawaited(NotificationPrefsStore.load());
+    notificationResponseHandler = _handleNotificationResponse;
+    // A notification that launched a terminated app carries its tap/action in
+    // the platform's launch details; route it once the first frame is up.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final initial = await TurnNotificationService.shared
+          .takeInitialNotificationResponse();
+      if (initial != null && mounted) _handleNotificationResponse(initial);
+    });
+  }
+
+  /// The connection a notification response should act on: the last one the
+  /// user opened, or the only configured one.
+  SavedConnection? _notificationConnection() {
+    final connections = widget.connManager.getConnections();
+    final lastId = widget.connManager.prefs.getString(
+      HomeScreenState._lastConnectionKey,
+    );
+    final preferred = connections
+        .where((connection) => connection.id == lastId)
+        .firstOrNull;
+    return preferred ?? (connections.length == 1 ? connections.single : null);
+  }
+
+  /// Routes a notification tap (or one of its action buttons) into the app.
+  ///
+  /// Approval actions answer through the turn controller when it owns the
+  /// request; otherwise the action is left pending for the chat that does, and
+  /// every response lands the user on the session the notification was about.
+  void _handleNotificationResponse(NotificationResponse response) {
+    final route = NotificationRoute.fromResponse(response);
+    // An explicit connection id must resolve: falling back to another backend
+    // could answer an approval against the wrong gateway. Only legacy
+    // payloads without an id use the last-opened connection.
+    final hasExplicitConnection =
+        route.connectionId != null && route.connectionId!.isNotEmpty;
+    final connection = hasExplicitConnection
+        ? _connectionById(route.connectionId)
+        : _notificationConnection();
+    if (connection == null) return;
+
+    final choice = route.approvalChoice;
+    final sessionId = route.sessionId;
+    final requestId = route.requestId;
+    if (choice != null && sessionId != null && requestId != null) {
+      final approval = PendingNotificationApproval(
+        // Saved connection ids remain distinct even when two profiles point
+        // at the same endpoint with different credentials or gateway profiles.
+        connectionId: connection.id,
+        sessionId: sessionId,
+        requestId: requestId,
+        choice: choice,
+      );
+      try {
+        final session = _turnApplicationController.sessionFor(connection);
+        unawaited(
+          session
+              .tryRespondToApproval(
+                sessionId: sessionId,
+                choice: choice,
+                requestId: requestId,
+              )
+              .then((answered) {
+                // The request belongs to an open chat's route-local gateway:
+                // leave it pending so that screen answers it normally.
+                if (!answered) addPendingNotificationApproval(approval);
+              })
+              .catchError((_) {
+                // A throw is unresolved, not answered: keep the tap pending
+                // so the owning chat can still answer it.
+                addPendingNotificationApproval(approval);
+              }),
+        );
+      } catch (_) {
+        // A closed controller cannot answer; the owning chat still can.
+        addPendingNotificationApproval(approval);
+      }
+    }
+
+    unawaited(_openNotificationSession(connection, sessionId));
+  }
+
+  /// The connection a payload names, or null when it no longer exists.
+  SavedConnection? _connectionById(String? id) {
+    if (id == null || id.isEmpty) return null;
+    return widget.connManager
+        .getConnections()
+        .where((connection) => connection.id == id)
+        .firstOrNull;
+  }
+
+  /// Opens the chat a notification was about; falls back to the workspace when
+  /// the session cannot be fetched (deleted, or outside the recent list).
+  Future<void> _openNotificationSession(
+    SavedConnection connection,
+    String? sessionId,
+  ) async {
+    Session? session;
+    if (sessionId != null && sessionId.isNotEmpty) {
+      ApiClient? client;
+      try {
+        client = ApiClient(
+          baseUrl: connection.baseUrl,
+          apiKey: connection.apiKey,
+          pathPrefix: connection.gatewayPrefix ?? '',
+        );
+        session = await client.getSessionById(sessionId);
+      } catch (_) {
+        session = null;
+      } finally {
+        client?.close();
+      }
+    }
+    if (!mounted) return;
+    widget.connManager.prefs.setString(
+      HomeScreenState._lastConnectionKey,
+      connection.id,
+    );
+    if (session == null) {
+      _navigatorKey.currentState?.push(
+        MaterialPageRoute(
+          builder: (_) => WorkspaceScreen(
+            connection: connection,
+            turnApplicationController: _turnApplicationController,
+          ),
+        ),
+      );
+      return;
+    }
+    _navigatorKey.currentState?.push(
+      MaterialPageRoute(
+        builder: (_) => ChatScreen(
+          connection: connection,
+          session: session!,
+          turnApplicationController: _turnApplicationController,
+        ),
+      ),
+    );
   }
 
   Future<void> setTextSizePreference(TextSizePreference preference) async {
@@ -210,6 +356,7 @@ class HermesAppState extends State<HermesApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: _navigatorKey,
       onGenerateTitle: (context) => context.l10n.hermes_agent,
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: preferredSupportedLocales(),

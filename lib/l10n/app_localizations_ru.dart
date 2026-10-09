@@ -95,6 +95,13 @@ class AppLocalizationsRu extends AppLocalizations {
   String get approval_needed => 'Требуется подтверждение';
 
   @override
+  String get approval_needed_description =>
+      'Команда ждёт вашего одобрения или отклонения.';
+
+  @override
+  String get approve => 'Одобрить';
+
+  @override
   String get archive => 'Архивировать';
 
   @override
@@ -163,6 +170,13 @@ class AppLocalizationsRu extends AppLocalizations {
   @override
   String get background_recovery_unavailable_legacy_transport =>
       'Восстановление в фоне недоступно — устаревший транспорт';
+
+  @override
+  String get background_task_completed => 'Фоновая задача завершена';
+
+  @override
+  String get background_task_completed_description =>
+      'Команда терминала в фоне завершена.';
 
   @override
   String get backup_restore => 'Резервное копирование и восстановление';
@@ -477,6 +491,13 @@ class AppLocalizationsRu extends AppLocalizations {
   String get create_branch => 'Создать ветку';
 
   @override
+  String get credit_notifications => 'Уведомления о кредитах';
+
+  @override
+  String get credit_notifications_description =>
+      'Использование кредитов остановлено или возобновлено.';
+
+  @override
   String get cron => 'Cron';
 
   @override
@@ -634,6 +655,13 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get edit_and_resend => 'Изменить и отправить снова';
+
+  @override
+  String get enable_notifications => 'Включить уведомления';
+
+  @override
+  String get enable_notifications_description =>
+      'Если выключить, все уведомления ниже отключатся.';
 
   @override
   String get enables_file_attachments_through_the_desktop_remote_gateway =>
@@ -838,6 +866,13 @@ class AppLocalizationsRu extends AppLocalizations {
   String get inbox_is_clear => 'Входящие пусты';
 
   @override
+  String get input_needed => 'Требуется ввод';
+
+  @override
+  String get input_needed_description =>
+      'Hermes задал вопрос или запрашивает пароль либо секрет.';
+
+  @override
   String get insert_a_remote_file_reference =>
       'Вставить удалённую ссылку @file';
 
@@ -987,6 +1022,12 @@ class AppLocalizationsRu extends AppLocalizations {
   @override
   String get name_prompt_and_schedule_are_required =>
       'Имя, промпт и расписание обязательны';
+
+  @override
+  String get nav_activity => 'Актив';
+
+  @override
+  String get nav_projects => 'Проект';
 
   @override
   String get needs_a_correction_aware_filing_contract_in_the_hermes_gateway =>
@@ -1148,6 +1189,13 @@ class AppLocalizationsRu extends AppLocalizations {
   String get nothing_to_migrate => 'Нечего переносить';
 
   @override
+  String get notifications => 'Уведомления';
+
+  @override
+  String get notifications_permission_denied =>
+      'Уведомления заблокированы на уровне системы. Разрешите их для этого приложения в настройках Android.';
+
+  @override
   String get off_no_thinking => 'Выключено (без рассуждений)';
 
   @override
@@ -1203,6 +1251,13 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get pin_batch_and_undo => 'Закрепление, массовые операции и отмена';
+
+  @override
+  String get plugin_notifications => 'Уведомления плагинов';
+
+  @override
+  String get plugin_notifications_description =>
+      'Шлюз отправил уведомление, пока приложение было в фоне.';
 
   @override
   String get port => 'Порт';
@@ -1380,6 +1435,13 @@ class AppLocalizationsRu extends AppLocalizations {
       'Ответ закрыт локально; активный ход шлюза не найден.';
 
   @override
+  String get response_complete => 'Ответ готов';
+
+  @override
+  String get response_complete_description =>
+      'Ход завершился, пока приложение было в фоне.';
+
+  @override
   String get response_ready => 'Ответ готов';
 
   @override
@@ -1513,6 +1575,9 @@ class AppLocalizationsRu extends AppLocalizations {
   String get send_message => 'Отправить сообщение';
 
   @override
+  String get send_test_notification => 'Отправить тестовое уведомление';
+
+  @override
   String get session_sources => 'Источники сессий';
 
   @override
@@ -1601,6 +1666,12 @@ class AppLocalizationsRu extends AppLocalizations {
   String get starting_hermes => 'Запуск Hermes…';
 
   @override
+  String get media_card_download => 'Download file';
+
+  @override
+  String get media_card_tap_to_download => 'Tap to download';
+
+  @override
   String get still_loading_your_projects => 'Ваши проекты всё ещё загружаются.';
 
   @override
@@ -1650,6 +1721,20 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get terminal_sessions => 'Сессии терминала';
+
+  @override
+  String get test_notification_body =>
+      'Если вы это видите, уведомления работают.';
+
+  @override
+  String get test_notification_sent => 'Тестовое уведомление отправлено.';
+
+  @override
+  String get test_notification_title => 'Тест уведомлений Hermes';
+
+  @override
+  String get test_notification_unsupported =>
+      'Не удалось отправить уведомление — проверьте, разрешены ли уведомления в системе.';
 
   @override
   String get text_size => 'Размер текста';
@@ -1793,6 +1878,12 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get turn_completed => 'Ход завершён';
+
+  @override
+  String get turn_failed => 'Ход не удался';
+
+  @override
+  String get turn_failed_description => 'Фоновый ход завершился с ошибкой.';
 
   @override
   String get turn_recovery_failed => 'Не удалось восстановить ход';
@@ -2270,7 +2361,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get date_earlier => 'Ранее';
 
   @override
-  String get nav_home => 'Главная';
+  String get nav_home => 'Дом';
 
   @override
   String get nav_more => 'Ещё';

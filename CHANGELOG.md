@@ -4,6 +4,20 @@ All notable changes to this project are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Release notes for
 versions prior to 1.0.7 are in the **What's new** sections of the [README](README.md).
 
+## [2.1.14] - 2026-10-08
+
+### Fixed
+
+- Bottom navigation labels now stay on one line on narrow phones at every
+  supported text size and across every shipped locale. Concise Russian bar
+  labels preserve the full pane titles (PR #126).
+
+### Thanks
+
+- @maebahesioru for the responsive navigation-label implementation,
+  localisation updates, accessibility handling, and focused regression
+  coverage in PR #126.
+
 ## [2.1.13] - 2026-10-05
 
 ### Added
