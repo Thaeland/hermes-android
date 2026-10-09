@@ -3453,12 +3453,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (outcome == SteerOutcome.uncertain) {
       // The frame was written but the ack never came back: the gateway may
       // have applied the steer. Queue it flagged for reconciliation; the
-      // settle drain only resends it after server history proves it
-      // never landed. Re-sending blind could execute it twice.
+      // drain only resends it after server history proves it never
+      // landed. Re-sending blind could execute it twice.
       _consumeSteeredText(text);
       setState(() => _pendingSteers.add(
         _PendingSteer(text, needsReconcile: true),
       ));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(context.l10n.steer_delivery_uncertain),
+          persist: false,
+        ),
+      );
+      // The turn may have settled while the RPC timed out (the settle
+      // drain already ran with nothing queued). Reconcile now; the drain
+      // no-ops while a turn is still live and fires on the next settle.
+      _maybeDrainPendingSteer();
       return;
     }
     // Rejected: the turn is settling or unsteerable. Move the text out of
@@ -3489,10 +3499,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// user replaced it (the snapshot is already gone).
   void _consumeSteeredText(String snapshot) {
     final current = _textController.text;
-    if (current == snapshot) {
+    // The snapshot was trimmed at submit; the composer may still carry
+    // leading whitespace (dictation/paste), so compare from the first
+    // non-whitespace offset or the delivered text would linger and be
+    // re-sent as a normal prompt.
+    final leading = current.length - current.trimLeft().length;
+    final trimmedCurrent = current.substring(leading);
+    if (trimmedCurrent == snapshot) {
       _textController.clear();
-    } else if (current.startsWith(snapshot)) {
-      final rest = current.substring(snapshot.length);
+    } else if (trimmedCurrent.startsWith(snapshot)) {
+      final rest = trimmedCurrent.substring(snapshot.length);
       _textController.value = TextEditingValue(
         text: rest,
         selection: TextSelection.collapsed(offset: rest.length),
@@ -3522,14 +3538,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     try {
       // Reconcile every ack-uncertain steer BEFORE resending anything: a
       // lost acknowledgement may hide a steer the gateway already applied,
-      // and a blind resend would execute it twice. Entries keep submission
-      // order throughout.
+      // and a blind resend would execute it twice. Matched history rows
+      // are consumed, so N queued entries require N distinct steer rows.
+      // Entries keep submission order throughout.
+      List<Map<String, dynamic>>? historyRows;
       for (final entry in _pendingSteers
           .where((s) => s.needsReconcile)
           .toList(growable: false)) {
-        final landed = await _steerLandedInHistory(entry.text);
+        historyRows ??= await _recentHistoryRows();
         if (!mounted) return;
-        if (landed) {
+        final matchIndex = _findLandedSteerRow(historyRows, entry.text);
+        if (matchIndex >= 0) {
+          historyRows.removeAt(matchIndex);
           _pendingSteers.remove(entry);
           // The gateway applied the steer despite the lost ack: paint it
           // locally (the deferred history refresh will confirm).
@@ -3553,20 +3573,21 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       final draft = _textController.text;
       if (draft.trim().isEmpty) {
         _textController.text = joined;
-        final lastBefore = _messages.isEmpty ? null : _messages.last;
+        // Every real submit path bumps _responseGeneration; the
+        // early-return guards do not. Infer submission from the
+        // generation, not from composer/message residue: the desktop
+        // failure paths strip the optimistic rows AND restore the
+        // composer text, which a residue check would misread as a
+        // no-op guard and requeue — duplicating the note on the next
+        // drain. A submitted-but-failed send is the user's problem to
+        // retry (the text is back in their composer), not ours to
+        // requeue.
+        final generationBefore = _responseGeneration;
         await _sendMessage();
         if (!mounted) return;
-        // Success clears the composer and appends the optimistic user row;
-        // a failure after submission also leaves the composer empty (the
-        // row stays, the turn errored). Only the early-return guards
-        // leave the text untouched with the transcript unchanged: requeue
-        // in exactly that case so the next settle retries. Steers queued
-        // while the send was in flight stay queued either way.
-        final noOpGuard =
-            _textController.text.trim().isNotEmpty &&
-            identical(_messages.isEmpty ? null : _messages.last, lastBefore);
+        final submitted = _responseGeneration != generationBefore;
         _pendingSteers.removeWhere(sentEntries.contains);
-        if (noOpGuard) {
+        if (!submitted) {
           _pendingSteers.insertAll(0, sentEntries);
         }
       } else {
@@ -3578,11 +3599,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  /// True when a steer whose acknowledgement was lost is already present in
-  /// the server transcript (persisted as a `display_kind: "steer"` row or
-  /// the raw marker wrapper). A failed lookup counts as "not landed":
-  /// losing an instruction is worse than a possible duplicate.
-  Future<bool> _steerLandedInHistory(String text) async {
+  /// Recent transcript rows for steer reconciliation, newest-last. A
+  /// failed lookup yields an empty page: every uncertain entry then reads
+  /// as not-landed and resends — losing an instruction is worse than a
+  /// possible duplicate.
+  Future<List<Map<String, dynamic>>> _recentHistoryRows() async {
     try {
       final sessionId =
           widget.testSteerHistoryReconcile != null
@@ -3590,19 +3611,25 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               : _desktopGateway?.storedSessionKeyFor(widget.session.id) ??
                     widget.testStoredSessionKey?.call(widget.session.id) ??
                     widget.session.id;
-      final messages = widget.testSteerHistoryReconcile != null
+      return widget.testSteerHistoryReconcile != null
           ? await widget.testSteerHistoryReconcile!(sessionId)
           : await _getRecentMessages(sessionId);
-      final needle = text.trim();
-      for (final msg in messages.reversed) {
-        if (msg['role'] != 'user') continue;
-        final shown = steerDisplayText(Map<String, dynamic>.from(msg));
-        if (shown != null && shown == needle) return true;
-      }
-      return false;
     } catch (_) {
-      return false;
+      return const [];
     }
+  }
+
+  /// Index (newest-last order) of the first user row whose steer display
+  /// text equals [text], or -1 when no steer row matches.
+  int _findLandedSteerRow(List<Map<String, dynamic>> rows, String text) {
+    final needle = text.trim();
+    for (var i = rows.length - 1; i >= 0; i--) {
+      final msg = rows[i];
+      if (msg['role'] != 'user') continue;
+      final shown = steerDisplayText(Map<String, dynamic>.from(msg));
+      if (shown != null && shown == needle) return i;
+    }
+    return -1;
   }
 
   Future<void> _stopResponse() async {

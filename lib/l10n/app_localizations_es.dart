@@ -1620,6 +1620,10 @@ class AppLocalizationsEs extends AppLocalizations {
   String get steer_chip_label => 'STEER';
 
   @override
+  String get steer_delivery_uncertain =>
+      'Delivery uncertain — verifying before it is sent again';
+
+  @override
   String get steer_queued_for_next_turn =>
       'Turn is finishing — your note will be sent next';
 
