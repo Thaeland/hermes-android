@@ -145,6 +145,15 @@ class TestDesktopAsyncEventHook {
   void Function(StreamEvent event)? handler;
 }
 
+/// A steer held for the next-turn resend. [needsReconcile] marks an
+/// ack-uncertain delivery: the drain must prove it never landed in server
+/// history before resending, or the instruction could execute twice.
+class _PendingSteer {
+  _PendingSteer(this.text, {this.needsReconcile = false});
+  final String text;
+  bool needsReconcile;
+}
+
 class _PendingSensitivePrompt {
   final GatewaySensitivePromptRequest request;
   final int responseGeneration;
@@ -310,17 +319,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _streaming = false;
   bool _steering = false;
 
-  /// Text of steers the gateway rejected (turn settling/unsteerable), in
-  /// submission order. Re-sent as normal prompts when the live turn
-  /// settles; a queue, because a single slot would silently drop an
-  /// earlier note when two steers are rejected back-to-back.
-  final List<String> _pendingSteerNotes = [];
-
-  /// A steer whose delivery is uncertain (ack lost after write). Held out
-  /// of [_pendingSteerNotes] until the settle drain reconciles it against
-  /// server history; re-sending it blind could execute it twice.
-  String? _uncertainSteerText;
+  /// Steers held for the next-turn resend, in submission order. A rejected
+  /// steer is ack-certain and resends directly; an uncertain one (ack lost
+  /// after write) carries `needsReconcile` and is only resent after the
+  /// drain proves it never landed server-side. A queue, not a slot: two
+  /// rejections (or two lost acks) before settle must both survive.
+  final List<_PendingSteer> _pendingSteers = [];
   bool _steerDrainInFlight = false;
+
   GatewayTurnStatus? _gatewayTurnStatus;
   _ResponseTransport _activeResponseTransport = _ResponseTransport.none;
   String? _activeClientTurnId;
@@ -3401,10 +3407,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// desktop app's steer-on-Enter: `session.steer` injects the text into
   /// the running turn without interrupting it. When the gateway rejects
   /// (turn already settling, or an agent without steer support) the text
-  /// joins [_pendingSteerNotes] and is re-sent as a normal prompt once
+  /// joins [_pendingSteers] and is re-sent as a normal prompt once
   /// the turn settles, so the words are never lost. An uncertain delivery
-  /// (ack lost after write) is held in [_uncertainSteerText] and only
-  /// re-sent after reconciliation proves it never landed server-side.
+  /// (ack lost after write) is queued flagged for reconciliation and only
+  /// re-sent after the drain proves it never landed server-side.
   Future<void> _steerComposer() async {
     if (!_streaming || _steering) return;
     if (_voiceComposer.listening) {
@@ -3446,18 +3452,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     if (outcome == SteerOutcome.uncertain) {
       // The frame was written but the ack never came back: the gateway may
-      // have applied the steer. Hold it out of the resend queue until the
-      // settle drain can reconcile it against server history; re-sending
-      // blind could execute the instruction twice.
+      // have applied the steer. Queue it flagged for reconciliation; the
+      // settle drain only resends it after server history proves it
+      // never landed. Re-sending blind could execute it twice.
       _consumeSteeredText(text);
-      setState(() => _uncertainSteerText = text);
+      setState(() => _pendingSteers.add(
+        _PendingSteer(text, needsReconcile: true),
+      ));
       return;
     }
     // Rejected: the turn is settling or unsteerable. Move the text out of
     // the composer into the pending queue; the settle drain re-sends it
     // as a normal next-turn prompt so the words are never lost.
     setState(() {
-      _pendingSteerNotes.add(text);
+      _pendingSteers.add(_PendingSteer(text));
       _consumeSteeredText(text);
     });
     ScaffoldMessenger.of(context).showSnackBar(
@@ -3492,11 +3500,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  /// After a turn settles, re-send steers the gateway rejected. If the
-  /// user is mid-draft, the rejected text is appended to the composer
-  /// instead of auto-sent, so nothing is overwritten or lost.
+  /// After a turn settles, re-send steers the gateway rejected or could
+  /// not confirm. If the user is mid-draft, the text is appended to the
+  /// composer instead of auto-sent, so nothing is overwritten or lost.
   void _maybeDrainPendingSteer() {
-    if (_pendingSteerNotes.isEmpty && _uncertainSteerText == null) return;
+    if (_pendingSteers.isEmpty) return;
     if (!mounted || _streaming || _sending || _steerDrainInFlight) return;
     if (_voiceComposer.listening) {
       // Dictation owns the composer right now: auto-sending would silently
@@ -3509,36 +3517,60 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _drainPendingSteers() async {
+    if (_steerDrainInFlight) return;
     _steerDrainInFlight = true;
     try {
-      final uncertain = _uncertainSteerText;
-      if (uncertain != null) {
-        final landed = await _steerLandedInHistory(uncertain);
+      // Reconcile every ack-uncertain steer BEFORE resending anything: a
+      // lost acknowledgement may hide a steer the gateway already applied,
+      // and a blind resend would execute it twice. Entries keep submission
+      // order throughout.
+      for (final entry in _pendingSteers
+          .where((s) => s.needsReconcile)
+          .toList(growable: false)) {
+        final landed = await _steerLandedInHistory(entry.text);
         if (!mounted) return;
-        _uncertainSteerText = null;
         if (landed) {
+          _pendingSteers.remove(entry);
           // The gateway applied the steer despite the lost ack: paint it
-          // locally (the history refresh will confirm) and do NOT resend.
+          // locally (the deferred history refresh will confirm).
           setState(() => _messages.add({
             'role': 'user',
-            'content': uncertain,
+            'content': entry.text,
             '_is_steer': true,
           }));
         } else {
-          _pendingSteerNotes.insert(0, uncertain);
+          entry.needsReconcile = false;
         }
       }
-      if (_pendingSteerNotes.isEmpty) return;
-      if (!mounted || _streaming || _sending || _voiceComposer.listening) {
-        return;
-      }
-      final joined = _pendingSteerNotes.join('\n\n');
-      _pendingSteerNotes.clear();
+      if (_pendingSteers.isEmpty) return;
+      // A new turn may have started while reconciliation was in flight (the
+      // user hit send): hold the notes for that turn's settle instead of
+      // firing into a live turn, where _sendMessage would no-op and the
+      // words would be lost.
+      if (_streaming || _sending || _voiceComposer.listening) return;
+      final joined = _pendingSteers.map((s) => s.text).join('\n\n');
+      final sentEntries = List<_PendingSteer>.from(_pendingSteers);
       final draft = _textController.text;
       if (draft.trim().isEmpty) {
         _textController.text = joined;
-        unawaited(_sendMessage());
+        final lastBefore = _messages.isEmpty ? null : _messages.last;
+        await _sendMessage();
+        if (!mounted) return;
+        // Success clears the composer and appends the optimistic user row;
+        // a failure after submission also leaves the composer empty (the
+        // row stays, the turn errored). Only the early-return guards
+        // leave the text untouched with the transcript unchanged: requeue
+        // in exactly that case so the next settle retries. Steers queued
+        // while the send was in flight stay queued either way.
+        final noOpGuard =
+            _textController.text.trim().isNotEmpty &&
+            identical(_messages.isEmpty ? null : _messages.last, lastBefore);
+        _pendingSteers.removeWhere(sentEntries.contains);
+        if (noOpGuard) {
+          _pendingSteers.insertAll(0, sentEntries);
+        }
       } else {
+        _pendingSteers.removeWhere(sentEntries.contains);
         setState(() => _textController.text = '$draft\n\n$joined');
       }
     } finally {

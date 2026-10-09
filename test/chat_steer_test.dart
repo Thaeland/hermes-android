@@ -505,6 +505,116 @@ void main() {
         expect(submitted, ['first prompt', 'lost steer']);
       },
     );
+
+    testWidgets(
+      'two uncertain steers both survive and reconcile in order',
+      (tester) async {
+        final submitGate = Completer<void>();
+        final submitted = <String>[];
+        await _pumpChat(
+          tester,
+          remoteSubmit: ({
+            required sessionId,
+            required text,
+            required onEvent,
+            required onSent,
+          }) async {
+            submitted.add(text);
+            onSent();
+            if (submitted.length == 1) {
+              await submitGate.future;
+            }
+          },
+          steer: (sessionId, text) async => SteerOutcome.uncertain,
+          steerHistory: (sessionId) async => [
+            {'role': 'user', 'content': 'first prompt'},
+          ],
+        );
+
+        await tester.enterText(find.byType(TextField), 'first prompt');
+        await tester.tap(find.byTooltip('Send'));
+        await tester.pump();
+        await tester.pump();
+
+        await tester.enterText(find.byType(TextField), 'lost one');
+        await tester.tap(find.byKey(const Key('chat-steer-button')));
+        await tester.pump();
+
+        await tester.enterText(find.byType(TextField), 'lost two');
+        await tester.tap(find.byKey(const Key('chat-steer-button')));
+        await tester.pump();
+        expect(submitted, ['first prompt']);
+
+        submitGate.complete();
+        await tester.pump();
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+
+        // Neither lost ack may be dropped: both reconcile as not-landed
+        // and go out together, in order.
+        expect(submitted, ['first prompt', 'lost one\n\nlost two']);
+      },
+    );
+
+    testWidgets(
+      'an uncertain steer and a rejected steer resend in submission order',
+      (tester) async {
+        final submitGate = Completer<void>();
+        final submitted = <String>[];
+        var steerCall = 0;
+        await _pumpChat(
+          tester,
+          remoteSubmit: ({
+            required sessionId,
+            required text,
+            required onEvent,
+            required onSent,
+          }) async {
+            submitted.add(text);
+            onSent();
+            if (submitted.length == 1) {
+              await submitGate.future;
+            }
+          },
+          steer: (sessionId, text) async {
+            steerCall += 1;
+            // First steer loses its ack (uncertain), second is rejected.
+            return steerCall == 1
+                ? SteerOutcome.uncertain
+                : SteerOutcome.rejected;
+          },
+          steerHistory: (sessionId) async => [
+            {'role': 'user', 'content': 'first prompt'},
+          ],
+        );
+
+        await tester.enterText(find.byType(TextField), 'first prompt');
+        await tester.tap(find.byTooltip('Send'));
+        await tester.pump();
+        await tester.pump();
+
+        await tester.enterText(find.byType(TextField), 'uncertain note');
+        await tester.tap(find.byKey(const Key('chat-steer-button')));
+        await tester.pump();
+
+        await tester.enterText(find.byType(TextField), 'rejected note');
+        await tester.tap(find.byKey(const Key('chat-steer-button')));
+        await tester.pump();
+        expect(submitted, ['first prompt']);
+
+        submitGate.complete();
+        await tester.pump();
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+
+        // Reconciliation must not reorder: the uncertain note was
+        // submitted first, so it leads the joined resend.
+        expect(
+          submitted,
+          ['first prompt', 'uncertain note\n\nrejected note'],
+        );
+      },
+    );
   });
 }
 

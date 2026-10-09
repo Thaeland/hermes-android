@@ -893,14 +893,15 @@ class DesktopGatewayClient {
       final status = await client.steerSession(gatewaySessionId, text);
       return status == 'queued' ? SteerOutcome.accepted : SteerOutcome.rejected;
     } on JsonRpcError catch (error) {
-      // A gateway *error response* (4010 etc.) means the handler refused
-      // the steer — it was not applied. A local timeout or a connection
-      // close after the frame was emitted is different: the gateway may
-      // have applied the steer without ever acking.
-      if (error.message == 'Timeout' || error.reason == 'connection_closed') {
-        return SteerOutcome.uncertain;
-      }
-      return SteerOutcome.rejected;
+      // A gateway *error response* always carries a JSON-RPC code (4002
+      // bad params, 4010 unsupported, ...) meaning the handler refused
+      // the steer: it was not applied, safe to re-send. A locally
+      // synthesized error (send timeout, socket close after the frame
+      // was emitted) has no code — the gateway may have applied the
+      // steer without ever acking, so the delivery is uncertain.
+      return error.code == null
+          ? SteerOutcome.uncertain
+          : SteerOutcome.rejected;
     } catch (_) {
       // Pre-write failure (socket already gone, sink error before emit):
       // nothing reached the gateway.
