@@ -132,13 +132,10 @@ class GatewayTurnCoordinatorRegistry {
   final Map<String, GatewayTurnCoordinator> _coordinators = {};
   final Expando<bool> _leasedSockets = Expando<bool>();
   final Map<String, int> _sessionGenerations = {};
+  final Map<String, _GatewayTurnSettledRegistration> _turnSettledListeners = {};
   Future<void> _tail = Future<void>.value();
   int _generation = 0;
   bool _closed = false;
-
-  /// Set on every newly opened coordinator so the application layer can
-  /// observe turn settlement without reaching into internal state.
-  GatewayTurnSettledCallback? onTurnSettled;
 
   /// Set on every newly opened coordinator so an owner can reconcile
   /// server-side records once a draft session gains its durable stored id.
@@ -160,6 +157,41 @@ class GatewayTurnCoordinatorRegistry {
     if (!_boundedIdentity(connectionId) || !_lowerHexDigest(endpointDigest)) {
       throw ArgumentError('Invalid coordinator registry identity.');
     }
+  }
+
+  /// Registers the current route owner for one local session's settlements.
+  ///
+  /// Replacing a route returns a new token. A late dispose from the previous
+  /// route cannot unregister its replacement because removal is token-checked.
+  Object setTurnSettledListener(
+    String localSessionId,
+    GatewayTurnSettledCallback listener,
+  ) {
+    if (!_boundedIdentity(localSessionId)) {
+      throw ArgumentError.value(
+        localSessionId,
+        'localSessionId',
+        'Invalid local session identity.',
+      );
+    }
+    if (_closed) {
+      throw const GatewayTurnCoordinatorException(
+        GatewayTurnCoordinatorFailure.closed,
+      );
+    }
+    final token = Object();
+    _turnSettledListeners[localSessionId] = _GatewayTurnSettledRegistration(
+      token,
+      listener,
+    );
+    return token;
+  }
+
+  /// Removes a route's listener only when [registration] still owns it.
+  void removeTurnSettledListener(String localSessionId, Object registration) {
+    final current = _turnSettledListeners[localSessionId];
+    if (current == null || !identical(current.token, registration)) return;
+    _turnSettledListeners.remove(localSessionId);
   }
 
   Future<GatewayTurnCoordinator> open(String localSessionId) {
@@ -190,7 +222,9 @@ class GatewayTurnCoordinatorRegistry {
                 uuidFactory: uuidFactory,
                 clock: clock,
               )
-              ..onTurnSettled = onTurnSettled
+              ..onTurnSettled = (state) {
+                _turnSettledListeners[localSessionId]?.listener(state);
+              }
               ..onSessionBound = onSessionBound
               ..onRuntimeBound = onRuntimeBound,
       );
@@ -292,6 +326,7 @@ class GatewayTurnCoordinatorRegistry {
   Future<void> close(String localSessionId) {
     _sessionGenerations[localSessionId] =
         (_sessionGenerations[localSessionId] ?? 0) + 1;
+    _turnSettledListeners.remove(localSessionId);
     return _serialized(() async {
       final coordinator = _coordinators[localSessionId];
       if (coordinator == null) return;
@@ -309,6 +344,7 @@ class GatewayTurnCoordinatorRegistry {
     if (_closed) return _tail;
     _closed = true;
     _generation += 1;
+    _turnSettledListeners.clear();
     return _serialized(() async {
       final coordinators = _coordinators.values.toList(growable: false);
       Object? firstError;
@@ -356,6 +392,13 @@ class GatewayTurnCoordinatorRegistry {
     _tail = run.then<void>((_) {}, onError: (_, _) {});
     return run;
   }
+}
+
+class _GatewayTurnSettledRegistration {
+  final Object token;
+  final GatewayTurnSettledCallback listener;
+
+  const _GatewayTurnSettledRegistration(this.token, this.listener);
 }
 
 /// Serializes one local chat's open/submit/event/reconcile lifecycle.

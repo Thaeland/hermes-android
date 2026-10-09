@@ -326,12 +326,19 @@ class TurnNotificationService {
     String? connectionId,
   }) async {
     if (!_initialized) return;
+    final identity = _turnIdentity(
+      turnId: turnId,
+      sessionId: sessionId,
+      connectionId: connectionId,
+    );
     // Replayed settlement callbacks must not alert repeatedly.
-    if (_throttled('${HermesNotificationKind.turnDone.name}:$turnId')) return;
+    if (_throttled('${HermesNotificationKind.turnDone.name}:$identity')) {
+      return;
+    }
 
     await _sink.show(
       TurnNotification(
-        id: notificationIdFor(turnId),
+        id: notificationIdFor(identity),
         title: title,
         body: turnSummary,
         payload: _turnPayload(
@@ -345,9 +352,21 @@ class TurnNotificationService {
   }
 
   /// Cancels a specific turn notification.
-  Future<void> cancelTurnCompleted(String turnId) async {
+  Future<void> cancelTurnCompleted(
+    String turnId, {
+    String? sessionId,
+    String? connectionId,
+  }) async {
     if (!_initialized) return;
-    await _sink.cancel(notificationIdFor(turnId));
+    await _sink.cancel(
+      notificationIdFor(
+        _turnIdentity(
+          turnId: turnId,
+          sessionId: sessionId,
+          connectionId: connectionId,
+        ),
+      ),
+    );
   }
 
   /// Posts the failure counterpart of [showTurnCompleted] on the same channel,
@@ -360,12 +379,19 @@ class TurnNotificationService {
     String? connectionId,
   }) async {
     if (!_initialized) return;
+    final identity = _turnIdentity(
+      turnId: turnId,
+      sessionId: sessionId,
+      connectionId: connectionId,
+    );
     // Replayed settlement callbacks must not alert repeatedly.
-    if (_throttled('${HermesNotificationKind.turnError.name}:$turnId')) return;
+    if (_throttled('${HermesNotificationKind.turnError.name}:$identity')) {
+      return;
+    }
 
     await _sink.show(
       TurnNotification(
-        id: notificationIdFor(turnId),
+        id: notificationIdFor(identity),
         title: title,
         body: turnSummary,
         payload: _turnPayload(
@@ -391,8 +417,15 @@ class TurnNotificationService {
       'connectionId': connectionId,
   });
 
-  // De-dupe replayed events for the same kind+session. Self-evicting: entries
-  // older than the window are pruned on every dispatch, so the map can't grow.
+  static String _turnIdentity({
+    required String turnId,
+    String? sessionId,
+    String? connectionId,
+  }) => jsonEncode([connectionId ?? '', sessionId ?? '', turnId]);
+
+  // De-dupe replayed events for the same full event identity. Self-evicting:
+  // entries older than the window are pruned on every dispatch, so the map
+  // can't grow.
   static const _throttleWindowMs = 1000;
   final Map<String, int> _lastFiredAt = {};
 
@@ -413,19 +446,26 @@ class TurnNotificationService {
     required HermesNotificationKind kind,
     required String title,
     required String body,
+    required String eventId,
     String? sessionId,
+    String? connectionId,
     List<TurnNotificationAction> actions = const [],
     String? payload,
   }) async {
     if (!_initialized) return false;
     if (!notificationKindEnabled(kind)) return false;
 
-    final discriminator = sessionId ?? payload ?? title;
-    if (_throttled('${kind.name}:$discriminator')) return false;
+    final identity = jsonEncode([
+      kind.name,
+      connectionId ?? '',
+      sessionId ?? '',
+      eventId,
+    ]);
+    if (_throttled(identity)) return false;
 
     await _sink.show(
       TurnNotification(
-        id: notificationIdFor('${kind.name}:$discriminator'),
+        id: notificationIdFor(identity),
         title: title,
         body: body,
         payload: payload ?? '',

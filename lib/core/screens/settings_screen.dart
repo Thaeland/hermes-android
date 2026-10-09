@@ -15,6 +15,7 @@ import '../../main.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
+
 class SettingsScreen extends StatefulWidget {
   final SavedConnection connection;
   const SettingsScreen({required this.connection, super.key});
@@ -137,8 +138,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await _client.setModel('main', _selectedProvider, _selectedModel);
       if (!mounted) return;
       setState(() {
-        _successMsg =
-            context.l10n.profile_default_set_to_chats_with_their_own_model_keep(_selectedModel);
+        _successMsg = context.l10n
+            .profile_default_set_to_chats_with_their_own_model_keep(
+              _selectedModel,
+            );
       });
     } catch (e) {
       if (!mounted) return;
@@ -190,7 +193,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 24),
-              ElevatedButton(onPressed: _loadData, child: Text(context.l10n.retry)),
+              ElevatedButton(
+                onPressed: _loadData,
+                child: Text(context.l10n.retry),
+              ),
             ],
           ),
         ),
@@ -203,7 +209,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         // ---- Section: Model ----
         _buildSectionHeader(context.l10n.profile_default_model),
         Text(
-          context.l10n.changes_the_default_for_use_the_selector_in_a_chat(widget.connection.label),
+          context.l10n.changes_the_default_for_use_the_selector_in_a_chat(
+            widget.connection.label,
+          ),
           style: Theme.of(context).textTheme.bodySmall,
         ),
         const SizedBox(height: 8),
@@ -240,7 +248,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     Padding(
                       padding: const EdgeInsets.only(top: 4),
                       child: Text(
-                        context.l10n.context_tokens(_modelInfo!['effective_context_length']),
+                        context.l10n.context_tokens(
+                          _modelInfo!['effective_context_length'],
+                        ),
                         style: Theme.of(
                           context,
                         ).textTheme.bodySmall?.copyWith(color: Colors.grey),
@@ -530,13 +540,13 @@ class _AboutCardState extends State<_AboutCard> {
             ),
             const SizedBox(height: 4),
             Text(
-              context.l10n.version_label(
-                _version.isNotEmpty ? _version : '…',
-              ),
+              context.l10n.version_label(_version.isNotEmpty ? _version : '…'),
             ),
             const SizedBox(height: 8),
             Text(
-              context.l10n.browse_and_manage_your_hermes_agent_sessions_from_your_phone,
+              context
+                  .l10n
+                  .browse_and_manage_your_hermes_agent_sessions_from_your_phone,
               style: TextStyle(color: Colors.grey),
             ),
           ],
@@ -577,7 +587,9 @@ class _VerboseToggleState extends State<_VerboseToggle> {
     return Card(
       child: SwitchListTile(
         title: Text(context.l10n.verbose_mode),
-        subtitle: Text(context.l10n.show_tool_calls_thinking_and_message_metadata),
+        subtitle: Text(
+          context.l10n.show_tool_calls_thinking_and_message_metadata,
+        ),
         secondary: const Icon(Icons.terminal),
         value: _verbose,
         onChanged: _set,
@@ -755,7 +767,10 @@ class _VoicePickerState extends State<_VoicePicker> {
     }
 
     final items = <DropdownMenuItem<Map<String, String>?>>[
-      DropdownMenuItem(value: null, child: Text(context.l10n.auto_device_default)),
+      DropdownMenuItem(
+        value: null,
+        child: Text(context.l10n.auto_device_default),
+      ),
       ..._voices.map(
         (v) => DropdownMenuItem(
           value: v,
@@ -908,8 +923,7 @@ class _NotificationSettingsState extends State<_NotificationSettings> {
     BuildContext context,
     HermesNotificationKind kind,
   ) => switch (kind) {
-    HermesNotificationKind.approval =>
-      context.l10n.approval_needed_description,
+    HermesNotificationKind.approval => context.l10n.approval_needed_description,
     HermesNotificationKind.input => context.l10n.input_needed_description,
     HermesNotificationKind.turnDone =>
       context.l10n.response_complete_description,

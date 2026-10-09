@@ -168,6 +168,45 @@ void main() {
       expect(uris[1].queryParameters['offset'], '2');
     });
 
+    test(
+      'continues past 500 rows while the server reports more pages',
+      () async {
+        final uris = <Uri>[];
+        final client = _RecordingJsonClient(
+          bodyFor: (uri) {
+            uris.add(uri);
+            final offset = int.parse(uri.queryParameters['offset'] ?? '0');
+            if (offset < 500) {
+              return jsonEncode({
+                'object': 'list',
+                'data': [
+                  for (var index = 0; index < 50; index++)
+                    _row('${offset + index}'),
+                ],
+                'has_more': true,
+              });
+            }
+            return jsonEncode({
+              'object': 'list',
+              'data': [_row('target-after-500')],
+              'has_more': false,
+            });
+          },
+        );
+        final api = ApiClient(
+          baseUrl: 'http://fixture.local',
+          apiKey: '',
+          httpClient: client,
+        );
+
+        final session = await api.getSessionById('target-after-500');
+
+        expect(session?.id, 'target-after-500');
+        expect(uris, hasLength(11));
+        expect(uris.last.queryParameters['offset'], '500');
+      },
+    );
+
     test('returns null once the last page is reached without the id', () async {
       final client = _RecordingJsonClient(
         bodyFor: (_) => jsonEncode({

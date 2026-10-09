@@ -20,6 +20,7 @@ import 'core/widgets/config_backup_card.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final prefs = await SharedPreferences.getInstance();
@@ -91,16 +92,14 @@ class _StartupRecoveryApp extends StatelessWidget {
                   Text(
                     context.l10n.hermes_could_not_load_your_saved_connections,
                     textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    context.l10n.the_local_connection_store_looks_damaged_you_can_reset_the(
-                      error.runtimeType,
-                    ),
+                    context.l10n
+                        .the_local_connection_store_looks_damaged_you_can_reset_the(
+                          error.runtimeType,
+                        ),
                     textAlign: TextAlign.center,
                     style: const TextStyle(fontSize: 13),
                   ),
@@ -254,12 +253,9 @@ class HermesAppState extends State<HermesApp> {
     final requestId = route.requestId;
     if (choice != null && sessionId != null && requestId != null) {
       final approval = PendingNotificationApproval(
-        // The chat screens match on their connection identity (base URL +
-        // gateway prefix + desktop URL), not the saved-connection id.
-        connectionId:
-            '${connection.baseUrl}|'
-            '${connection.gatewayPrefix ?? ''}|'
-            '${connection.desktopGatewayUrl ?? ''}',
+        // Saved connection ids remain distinct even when two profiles point
+        // at the same endpoint with different credentials or gateway profiles.
+        connectionId: connection.id,
         sessionId: sessionId,
         requestId: requestId,
         choice: choice,
@@ -791,13 +787,18 @@ class HomeScreenState extends State<HomeScreen> {
                       } on CredentialStorageException {
                         if (!ctx.mounted) return;
                         setDialogState(() {
-                          error = context.l10n.the_api_key_could_not_be_stored_securely;
+                          error = context
+                              .l10n
+                              .the_api_key_could_not_be_stored_securely;
                           validating = false;
                         });
                       } catch (_) {
                         if (!ctx.mounted) return;
                         setDialogState(() {
-                          error = context.l10n.cannot_reach(conn.host, conn.port);
+                          error = context.l10n.cannot_reach(
+                            conn.host,
+                            conn.port,
+                          );
                           validating = false;
                         });
                       }
@@ -847,7 +848,9 @@ class HomeScreenState extends State<HomeScreen> {
                 Padding(
                   padding: const EdgeInsets.only(bottom: 12),
                   child: Text(
-                    context.l10n.used_for_hosted_path_prefixes_and_for_the_settings_memory,
+                    context
+                        .l10n
+                        .used_for_hosted_path_prefixes_and_for_the_settings_memory,
                     style: TextStyle(color: Colors.grey[600], fontSize: 12),
                   ),
                 ),
@@ -959,7 +962,9 @@ class HomeScreenState extends State<HomeScreen> {
                           ? null
                           : int.tryParse(portText);
                       if (portText.isNotEmpty && (port == null || port <= 0)) {
-                        setDialogState(() => error = context.l10n.invalid_port_number);
+                        setDialogState(
+                          () => error = context.l10n.invalid_port_number,
+                        );
                         return;
                       }
                       final user = userCtrl.text.trim();
@@ -1020,16 +1025,17 @@ class HomeScreenState extends State<HomeScreen> {
                         client.close();
                         if (!ctx.mounted) return;
                         setDialogState(() {
-                          error =
-                              context.l10n.the_dashboard_credentials_could_not_be_stored_securely;
+                          error = context
+                              .l10n
+                              .the_dashboard_credentials_could_not_be_stored_securely;
                           validating = false;
                         });
                       } catch (_) {
                         client.close();
                         if (!ctx.mounted) return;
                         setDialogState(() {
-                          error =
-                              context.l10n.could_not_reach_authenticate_the_dashboard_at_check_the_port(
+                          error = context.l10n
+                              .could_not_reach_authenticate_the_dashboard_at_check_the_port(
                                 port ?? conn.dashboardPort,
                                 conn.host,
                               );
@@ -1098,15 +1104,24 @@ class HomeScreenState extends State<HomeScreen> {
             }
           },
           itemBuilder: (_) => [
-            PopupMenuItem(value: 'edit', child: Text(context.l10n.edit_connection)),
-            PopupMenuItem(value: 'apikey', child: Text(context.l10n.update_api_key)),
+            PopupMenuItem(
+              value: 'edit',
+              child: Text(context.l10n.edit_connection),
+            ),
+            PopupMenuItem(
+              value: 'apikey',
+              child: Text(context.l10n.update_api_key),
+            ),
             PopupMenuItem(
               value: 'dashboard',
               child: Text(context.l10n.dashboard_proxy_settings),
             ),
             PopupMenuItem(
               value: 'delete',
-              child: Text(context.l10n.delete, style: TextStyle(color: Colors.red)),
+              child: Text(
+                context.l10n.delete,
+                style: TextStyle(color: Colors.red),
+              ),
             ),
           ],
         ),
@@ -1152,7 +1167,9 @@ class HomeScreenState extends State<HomeScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    context.l10n.tap_to_add_a_remote_hermes_gateway_api_server_port,
+                    context
+                        .l10n
+                        .tap_to_add_a_remote_hermes_gateway_api_server_port,
                     style: Theme.of(
                       context,
                     ).textTheme.bodyMedium?.copyWith(color: Colors.grey[600]),
@@ -1376,8 +1393,9 @@ class _AddDialogState extends State<_AddDialog> {
           dashClient.close();
           if (!mounted) return;
           setState(() {
-            _error =
-                context.l10n.gateway_connected_but_the_dashboard_could_not_be_reached_or;
+            _error = context
+                .l10n
+                .gateway_connected_but_the_dashboard_could_not_be_reached_or;
             _validating = false;
             _showDashboard = true;
           });
@@ -1424,7 +1442,9 @@ class _AddDialogState extends State<_AddDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text(
-        _isEditing ? context.l10n.edit_gateway_connection : context.l10n.add_gateway_connection,
+        _isEditing
+            ? context.l10n.edit_gateway_connection
+            : context.l10n.add_gateway_connection,
       ),
       content: SingleChildScrollView(
         child: Column(
@@ -1478,7 +1498,8 @@ class _AddDialogState extends State<_AddDialog> {
               controller: _port,
               decoration: InputDecoration(
                 labelText: context.l10n.port,
-                hintText: context.l10n.leave_blank_for_default_8642_443_with_https,
+                hintText:
+                    context.l10n.leave_blank_for_default_8642_443_with_https,
               ),
               keyboardType: TextInputType.number,
             ),
@@ -1546,7 +1567,9 @@ class _AddDialogState extends State<_AddDialog> {
               Padding(
                 padding: const EdgeInsets.only(bottom: 4),
                 child: Text(
-                  context.l10n.optional_for_the_memory_cron_skills_settings_tabs_leave_blank,
+                  context
+                      .l10n
+                      .optional_for_the_memory_cron_skills_settings_tabs_leave_blank,
                   style: TextStyle(color: Colors.grey[600], fontSize: 12),
                 ),
               ),
@@ -1580,8 +1603,9 @@ class _AddDialogState extends State<_AddDialog> {
                 decoration: InputDecoration(
                   labelText: context.l10n.desktop_gateway_url_optional,
                   hintText: 'https://hermes-desktop.example.lan',
-                  helperText:
-                      context.l10n.enables_file_attachments_through_the_desktop_remote_gateway,
+                  helperText: context
+                      .l10n
+                      .enables_file_attachments_through_the_desktop_remote_gateway,
                 ),
                 keyboardType: TextInputType.url,
                 autocorrect: false,
@@ -1592,8 +1616,9 @@ class _AddDialogState extends State<_AddDialog> {
                 decoration: InputDecoration(
                   labelText: context.l10n.hermes_profile_optional,
                   hintText: context.l10n.e_g_sol,
-                  helperText:
-                      context.l10n.profile_this_connection_chats_as_when_the_dashboard_serves_several,
+                  helperText: context
+                      .l10n
+                      .profile_this_connection_chats_as_when_the_dashboard_serves_several,
                   helperMaxLines: 3,
                 ),
                 autocorrect: false,
@@ -1618,7 +1643,9 @@ class _AddDialogState extends State<_AddDialog> {
                     color: Colors.white,
                   ),
                 )
-              : Text(_isEditing ? context.l10n.save_changes : context.l10n.connect),
+              : Text(
+                  _isEditing ? context.l10n.save_changes : context.l10n.connect,
+                ),
         ),
       ],
     );

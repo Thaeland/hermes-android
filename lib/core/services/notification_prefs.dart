@@ -54,7 +54,10 @@ class NotificationPrefs {
     if (kind != null && kindValue != null) {
       nextKinds[kind] = kindValue;
     }
-    return NotificationPrefs(enabled: enabled ?? this.enabled, kinds: nextKinds);
+    return NotificationPrefs(
+      enabled: enabled ?? this.enabled,
+      kinds: nextKinds,
+    );
   }
 
   factory NotificationPrefs.fromJson(Map<String, dynamic> json) {

@@ -841,10 +841,15 @@ class DesktopGatewayClient {
       _serverRequests[requestId]?.method == method;
 
   /// Whether this client owns the active approval for [sessionId].
-  bool ownsApprovalRequest(String sessionId) {
-    final requestId = _serverApprovalByMobileSession[sessionId];
-    return requestId != null &&
-        _serverRequests[requestId]?.method == 'approval';
+  ///
+  /// When [requestId] is supplied, both identities must match. This lets a
+  /// queued UI callback prove the request was not answered by another route
+  /// before it opens a stale approval dialog.
+  bool ownsApprovalRequest(String sessionId, {String? requestId}) {
+    final activeRequestId = _serverApprovalByMobileSession[sessionId];
+    return activeRequestId != null &&
+        (requestId == null || activeRequestId == requestId) &&
+        _serverRequests[activeRequestId]?.method == 'approval';
   }
 
   /// Interrupts the active turn in the Desktop gateway runtime.

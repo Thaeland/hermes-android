@@ -76,6 +76,21 @@ class _FakeApplicationSession implements GatewayTurnApplicationSession {
   void removeAsyncEventListener(String localSessionId, Object registration) {}
 
   @override
+  Object setTurnSettledListener(
+    String localSessionId,
+    GatewayTurnSettledCallback listener,
+  ) => Object();
+
+  @override
+  void removeTurnSettledListener(String localSessionId, Object registration) {}
+
+  @override
+  bool ownsApprovalRequest({
+    required String sessionId,
+    required String requestId,
+  }) => false;
+
+  @override
   Future<bool> tryRespondToApproval({
     required String sessionId,
     required String choice,
@@ -103,9 +118,6 @@ class _FakeApplicationSession implements GatewayTurnApplicationSession {
 
   @override
   Future<void> close() async => closeCount++;
-
-  @override
-  set onTurnSettled(GatewayTurnSettledCallback? callback) {}
 
   @override
   set onSessionBound(GatewayTurnSessionBoundCallback? callback) {}

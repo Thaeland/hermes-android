@@ -40,7 +40,11 @@ void main() {
 
         // Initialization must not rethrow: the app has to keep running on a
         // device where notifications are unavailable.
-        await service.showTurnCompleted(title: 'Ready', turnSummary: 'Done', turnId: 't-1');
+        await service.showTurnCompleted(
+          title: 'Ready',
+          turnSummary: 'Done',
+          turnId: 't-1',
+        );
         expect(sink.shown, isEmpty);
       },
     );
@@ -54,7 +58,11 @@ void main() {
       await service.ensureInitialized();
 
       expect(sink.initializeCount, 2);
-      await service.showTurnCompleted(title: 'Ready', turnSummary: 'Done', turnId: 't-1');
+      await service.showTurnCompleted(
+        title: 'Ready',
+        turnSummary: 'Done',
+        turnId: 't-1',
+      );
       expect(sink.shown, hasLength(1));
     });
   });
@@ -63,7 +71,11 @@ void main() {
     test(
       'drops the notification when the service was never initialized',
       () async {
-        await service.showTurnCompleted(title: 'Ready', turnSummary: 'Done', turnId: 't-1');
+        await service.showTurnCompleted(
+          title: 'Ready',
+          turnSummary: 'Done',
+          turnId: 't-1',
+        );
 
         expect(sink.shown, isEmpty);
       },
@@ -121,10 +133,40 @@ void main() {
     test('gives distinct turns distinct ids', () async {
       await service.ensureInitialized();
 
-      await service.showTurnCompleted(title: 'Ready', turnSummary: 'a', turnId: 'turn-1');
-      await service.showTurnCompleted(title: 'Ready', turnSummary: 'b', turnId: 'turn-2');
+      await service.showTurnCompleted(
+        title: 'Ready',
+        turnSummary: 'a',
+        turnId: 'turn-1',
+      );
+      await service.showTurnCompleted(
+        title: 'Ready',
+        turnSummary: 'b',
+        turnId: 'turn-2',
+      );
 
       expect(sink.shown.map((n) => n.id).toSet(), hasLength(2));
+    });
+
+    test('same turn ids on different connections remain distinct', () async {
+      await service.ensureInitialized();
+
+      await service.showTurnCompleted(
+        title: 'Ready',
+        turnSummary: 'first profile',
+        turnId: 'turn-1',
+        sessionId: 'shared-session',
+        connectionId: 'connection-a',
+      );
+      await service.showTurnCompleted(
+        title: 'Ready',
+        turnSummary: 'second profile',
+        turnId: 'turn-1',
+        sessionId: 'shared-session',
+        connectionId: 'connection-b',
+      );
+
+      expect(sink.shown, hasLength(2));
+      expect(sink.shown.map((notice) => notice.id).toSet(), hasLength(2));
     });
 
     test('always produces a non-negative Android notification id', () async {
@@ -136,7 +178,11 @@ void main() {
         'a very long server issued turn identifier 0123456789',
         '',
       ]) {
-        await service.showTurnCompleted(title: 'Ready', turnSummary: 's', turnId: turnId);
+        await service.showTurnCompleted(
+          title: 'Ready',
+          turnSummary: 's',
+          turnId: turnId,
+        );
       }
 
       expect(sink.shown.map((n) => n.id), everyElement(isNonNegative));
@@ -178,7 +224,11 @@ void main() {
       sink.permissionResult = true;
 
       await service.ensureInitialized();
-      await service.showTurnCompleted(title: 'Ready', turnSummary: 'done', turnId: 'turn-1');
+      await service.showTurnCompleted(
+        title: 'Ready',
+        turnSummary: 'done',
+        turnId: 'turn-1',
+      );
 
       expect(service.permissionGranted, isTrue);
       expect(sink.shown, hasLength(1));
@@ -189,7 +239,11 @@ void main() {
       sink.permissionResult = null;
 
       await service.ensureInitialized();
-      await service.showTurnCompleted(title: 'Ready', turnSummary: 'done', turnId: 'turn-1');
+      await service.showTurnCompleted(
+        title: 'Ready',
+        turnSummary: 'done',
+        turnId: 'turn-1',
+      );
 
       expect(service.permissionGranted, isTrue);
       expect(sink.shown, hasLength(1));
@@ -203,7 +257,11 @@ void main() {
         await service.ensureInitialized();
 
         // The app must keep running; notifications degrade, they never crash.
-        await service.showTurnCompleted(title: 'Ready', turnSummary: 'done', turnId: 'turn-1');
+        await service.showTurnCompleted(
+          title: 'Ready',
+          turnSummary: 'done',
+          turnId: 'turn-1',
+        );
         expect(sink.shown, hasLength(1));
       },
     );
@@ -212,7 +270,11 @@ void main() {
   group('cancellation', () {
     test('cancels the exact id that was shown for that turn', () async {
       await service.ensureInitialized();
-      await service.showTurnCompleted(title: 'Ready', turnSummary: 'done', turnId: 'turn-42');
+      await service.showTurnCompleted(
+        title: 'Ready',
+        turnSummary: 'done',
+        turnId: 'turn-42',
+      );
 
       await service.cancelTurnCompleted('turn-42');
 
@@ -229,8 +291,16 @@ void main() {
 
     test('cancelAll clears every Hermes turn notification', () async {
       await service.ensureInitialized();
-      await service.showTurnCompleted(title: 'Ready', turnSummary: 'a', turnId: 'turn-1');
-      await service.showTurnCompleted(title: 'Ready', turnSummary: 'b', turnId: 'turn-2');
+      await service.showTurnCompleted(
+        title: 'Ready',
+        turnSummary: 'a',
+        turnId: 'turn-1',
+      );
+      await service.showTurnCompleted(
+        title: 'Ready',
+        turnSummary: 'b',
+        turnId: 'turn-2',
+      );
 
       await service.cancelAll();
 
@@ -245,6 +315,7 @@ void main() {
         kind: HermesNotificationKind.approval,
         title: 'Approval needed — Roadmap',
         body: 'rm -rf build',
+        eventId: 'req-1',
         sessionId: 'notif-session',
         actions: const [
           TurnNotificationAction(id: 'approve', label: 'Approve'),
@@ -267,18 +338,21 @@ void main() {
         kind: HermesNotificationKind.turnDone,
         title: 't',
         body: 'b',
+        eventId: 'turn-1',
         sessionId: 's1',
       );
       await service.showKind(
         kind: HermesNotificationKind.backgroundDone,
         title: 't',
         body: 'b',
+        eventId: 'task-1',
         sessionId: 's2',
       );
       await service.showKind(
         kind: HermesNotificationKind.credits,
         title: 't',
         body: 'b',
+        eventId: 'credits-1',
         sessionId: 's3',
       );
 
@@ -299,6 +373,7 @@ void main() {
         kind: HermesNotificationKind.plugin,
         title: 't',
         body: 'b',
+        eventId: 'plugin-1',
         sessionId: 's',
       );
 
@@ -316,6 +391,7 @@ void main() {
         kind: HermesNotificationKind.approval,
         title: 't',
         body: 'b',
+        eventId: 'req-1',
         sessionId: 's',
       );
 
@@ -323,23 +399,51 @@ void main() {
       expect(sink.shown, isEmpty);
     });
 
-    test('replays for the same kind and session are throttled', () async {
+    test('replays of the same event are throttled', () async {
       await service.ensureInitialized();
       await service.showKind(
         kind: HermesNotificationKind.input,
         title: 't',
         body: 'first',
+        eventId: 'request-1',
         sessionId: 's',
       );
       final second = await service.showKind(
         kind: HermesNotificationKind.input,
         title: 't',
         body: 'second',
+        eventId: 'request-1',
         sessionId: 's',
       );
 
       expect(second, isFalse);
       expect(sink.shown, hasLength(1));
+    });
+
+    test('distinct same-session events both post with distinct ids', () async {
+      await service.ensureInitialized();
+
+      final first = await service.showKind(
+        kind: HermesNotificationKind.approval,
+        title: 'Approval',
+        body: 'first',
+        eventId: 'request-1',
+        sessionId: 's',
+        connectionId: 'connection-a',
+      );
+      final second = await service.showKind(
+        kind: HermesNotificationKind.approval,
+        title: 'Approval',
+        body: 'second',
+        eventId: 'request-2',
+        sessionId: 's',
+        connectionId: 'connection-a',
+      );
+
+      expect(first, isTrue);
+      expect(second, isTrue);
+      expect(sink.shown, hasLength(2));
+      expect(sink.shown.map((notice) => notice.id).toSet(), hasLength(2));
     });
 
     test('different sessions keep distinct notification ids', () async {
@@ -348,12 +452,14 @@ void main() {
         kind: HermesNotificationKind.credits,
         title: 't',
         body: 'a',
+        eventId: 'credits',
         sessionId: 's',
       );
       await service.showKind(
         kind: HermesNotificationKind.credits,
         title: 't',
         body: 'b',
+        eventId: 'credits',
         sessionId: 'other',
       );
 
@@ -374,40 +480,46 @@ void main() {
       expect(posted.payload, contains('turn-9'));
     });
 
-    test('the test notification bypasses the prefs and reports delivery', () async {
-      notificationPrefs.value = NotificationPrefs.defaults.copyWith(
-        enabled: false,
-      );
+    test(
+      'the test notification bypasses the prefs and reports delivery',
+      () async {
+        notificationPrefs.value = NotificationPrefs.defaults.copyWith(
+          enabled: false,
+        );
 
-      final ok = await service.sendTestNotification(
-        title: 'Test',
-        body: 'Body',
-      );
+        final ok = await service.sendTestNotification(
+          title: 'Test',
+          body: 'Body',
+        );
 
-      expect(ok, isTrue);
-      expect(sink.shown.single.title, 'Test');
-    });
+        expect(ok, isTrue);
+        expect(sink.shown.single.title, 'Test');
+      },
+    );
   });
 
   group('routing', () {
-    test('turn payloads carry session and connection for tap routing', () async {
-      await service.ensureInitialized();
-      await service.showTurnCompleted(
-        title: 'Ready',
-        turnSummary: 'Roadmap: done',
-        turnId: 'turn-7',
-        sessionId: 'notif-session',
-        connectionId: 'conn-1',
-      );
+    test(
+      'turn payloads carry session and connection for tap routing',
+      () async {
+        await service.ensureInitialized();
+        await service.showTurnCompleted(
+          title: 'Ready',
+          turnSummary: 'Roadmap: done',
+          turnId: 'turn-7',
+          sessionId: 'notif-session',
+          connectionId: 'conn-1',
+        );
 
-      final payload =
-          jsonDecode(sink.shown.single.payload) as Map<String, dynamic>;
-      expect(payload, {
-        'turnId': 'turn-7',
-        'sessionId': 'notif-session',
-        'connectionId': 'conn-1',
-      });
-    });
+        final payload =
+            jsonDecode(sink.shown.single.payload) as Map<String, dynamic>;
+        expect(payload, {
+          'turnId': 'turn-7',
+          'sessionId': 'notif-session',
+          'connectionId': 'conn-1',
+        });
+      },
+    );
 
     test('a cold-start launch response is consumed exactly once', () async {
       sink.initialLaunchResponse = const NotificationResponse(
@@ -427,11 +539,12 @@ void main() {
     test('routes parse JSON payloads into routing fields', () {
       final route = NotificationRoute.fromResponse(
         const NotificationResponse(
-        id: 1,
+          id: 1,
           actionId: 'reject',
           payload: '{"sessionId":"s1","connectionId":"c1","requestId":"r1"}',
-        notificationResponseType: NotificationResponseType.selectedNotification,
-      ),
+          notificationResponseType:
+              NotificationResponseType.selectedNotification,
+        ),
       );
 
       expect(route.sessionId, 's1');
@@ -446,7 +559,8 @@ void main() {
         const NotificationResponse(
           id: 1,
           payload: 'turn-42',
-          notificationResponseType: NotificationResponseType.selectedNotification,
+          notificationResponseType:
+              NotificationResponseType.selectedNotification,
         ),
       );
 
@@ -461,7 +575,8 @@ void main() {
         NotificationResponse(
           id: 1,
           actionId: actionId,
-          notificationResponseType: NotificationResponseType.selectedNotification,
+          notificationResponseType:
+              NotificationResponseType.selectedNotification,
         ),
       ).approvalChoice;
 
