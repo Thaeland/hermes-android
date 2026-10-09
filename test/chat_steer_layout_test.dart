@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hermes_android/core/screens/chat_screen.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
+import 'package:hermes_android/core/services/desktop_gateway_client.dart';
 import 'package:hermes_android/l10n/app_localizations.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -111,7 +112,7 @@ Future<void> _pumpStreamingChat(
           onSent();
           await gate.future;
         },
-        testDesktopSteer: (sessionId, text) async => true,
+        testDesktopSteer: (sessionId, text) async => SteerOutcome.accepted,
           testVoiceComposerAdapter: FakeVoiceComposerAdapter(),
           ),
         ),

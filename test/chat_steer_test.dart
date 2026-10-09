@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hermes_android/core/screens/chat_screen.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
+import 'package:hermes_android/core/services/desktop_gateway_client.dart';
 import 'package:hermes_android/core/services/ws_client.dart';
 import 'package:hermes_android/l10n/app_localizations.dart';
 import 'package:http/http.dart' as http;
@@ -83,7 +84,7 @@ void main() {
           },
           steer: (sessionId, text) async {
             steerCalls.add('$sessionId:$text');
-            return true;
+            return SteerOutcome.accepted;
           },
         );
 
@@ -138,7 +139,7 @@ void main() {
               await submitGate.future;
             }
           },
-          steer: (sessionId, text) async => false,
+          steer: (sessionId, text) async => SteerOutcome.rejected,
         );
 
         await tester.enterText(find.byType(TextField), 'first prompt');
@@ -188,7 +189,7 @@ void main() {
               await submitGate.future;
             }
           },
-          steer: (sessionId, text) async => false,
+          steer: (sessionId, text) async => SteerOutcome.rejected,
         );
 
         await tester.enterText(find.byType(TextField), 'first prompt');
@@ -247,7 +248,7 @@ void main() {
           },
           steer: (sessionId, text) async {
             steerCalls.add(text);
-            return true;
+            return SteerOutcome.accepted;
           },
         );
 
@@ -292,7 +293,7 @@ void main() {
               await submitGate.future;
             }
           },
-          steer: (sessionId, text) async => false,
+          steer: (sessionId, text) async => SteerOutcome.rejected,
         );
 
         await tester.enterText(find.byType(TextField), 'first prompt');
@@ -315,14 +316,204 @@ void main() {
         submitGate.complete();
       },
     );
+    testWidgets(
+      'a delayed steer acknowledgement does not erase a newer draft',
+      (tester) async {
+        final submitGate = Completer<void>();
+        final steerGate = Completer<SteerOutcome>();
+        await _pumpChat(
+          tester,
+          remoteSubmit: ({
+            required sessionId,
+            required text,
+            required onEvent,
+            required onSent,
+          }) async {
+            onSent();
+            await submitGate.future;
+          },
+          steer: (sessionId, text) => steerGate.future,
+        );
+
+        await tester.enterText(find.byType(TextField), 'first prompt');
+        await tester.tap(find.byTooltip('Send'));
+        await tester.pump();
+        await tester.pump();
+
+        await tester.enterText(find.byType(TextField), 'steer note');
+        await tester.tap(find.byKey(const Key('chat-steer-button')));
+        await tester.pump();
+
+        // The ack is still in flight; the user starts a brand-new draft.
+        await tester.enterText(find.byType(TextField), 'fresh draft');
+        await tester.pump();
+
+        steerGate.complete(SteerOutcome.accepted);
+        await tester.pump();
+        await tester.pump();
+
+        // The late ack consumed only its own snapshot: the newer draft
+        // survives untouched (the snapshot is no longer in the field).
+        final composer = tester.widget<TextField>(find.byType(TextField));
+        expect(composer.controller!.text, 'fresh draft');
+        expect(
+          find.widgetWithText(MessageBubble, 'steer note'),
+          findsOneWidget,
+        );
+        submitGate.complete();
+      },
+    );
+
+    testWidgets(
+      'two rejected steers both re-send at settle (first is not lost)',
+      (tester) async {
+        final submitGate = Completer<void>();
+        final submitted = <String>[];
+        await _pumpChat(
+          tester,
+          remoteSubmit: ({
+            required sessionId,
+            required text,
+            required onEvent,
+            required onSent,
+          }) async {
+            submitted.add(text);
+            onSent();
+            if (submitted.length == 1) {
+              await submitGate.future;
+            }
+          },
+          steer: (sessionId, text) async => SteerOutcome.rejected,
+        );
+
+        await tester.enterText(find.byType(TextField), 'first prompt');
+        await tester.tap(find.byTooltip('Send'));
+        await tester.pump();
+        await tester.pump();
+
+        await tester.enterText(find.byType(TextField), 'first rejected');
+        await tester.tap(find.byKey(const Key('chat-steer-button')));
+        await tester.pump();
+
+        await tester.enterText(find.byType(TextField), 'second rejected');
+        await tester.tap(find.byKey(const Key('chat-steer-button')));
+        await tester.pump();
+        expect(submitted, ['first prompt']);
+
+        submitGate.complete();
+        await tester.pump();
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+
+        // Both held notes go out, in order, as one next-turn prompt.
+        expect(submitted, ['first prompt', 'first rejected\n\nsecond rejected']);
+      },
+    );
+
+    testWidgets(
+      'an uncertain steer already present in server history is not re-sent',
+      (tester) async {
+        final submitGate = Completer<void>();
+        final submitted = <String>[];
+        await _pumpChat(
+          tester,
+          remoteSubmit: ({
+            required sessionId,
+            required text,
+            required onEvent,
+            required onSent,
+          }) async {
+            submitted.add(text);
+            onSent();
+            if (submitted.length == 1) {
+              await submitGate.future;
+            }
+          },
+          steer: (sessionId, text) async => SteerOutcome.uncertain,
+          steerHistory: (sessionId) async => [
+            {'role': 'user', 'content': 'first prompt'},
+            {
+              'role': 'user',
+              'display_kind': 'steer',
+              'display_content': 'ghost steer',
+            },
+          ],
+        );
+
+        await tester.enterText(find.byType(TextField), 'first prompt');
+        await tester.tap(find.byTooltip('Send'));
+        await tester.pump();
+        await tester.pump();
+
+        await tester.enterText(find.byType(TextField), 'ghost steer');
+        await tester.tap(find.byKey(const Key('chat-steer-button')));
+        await tester.pump();
+        expect(submitted, ['first prompt']);
+
+        submitGate.complete();
+        await tester.pump();
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+
+        // Reconciliation found the steer in server history: it landed, so
+        // the settle drain must NOT re-send it as a duplicate prompt.
+        expect(submitted, ['first prompt']);
+      },
+    );
+
+    testWidgets(
+      'an uncertain steer missing from server history re-sends once',
+      (tester) async {
+        final submitGate = Completer<void>();
+        final submitted = <String>[];
+        await _pumpChat(
+          tester,
+          remoteSubmit: ({
+            required sessionId,
+            required text,
+            required onEvent,
+            required onSent,
+          }) async {
+            submitted.add(text);
+            onSent();
+            if (submitted.length == 1) {
+              await submitGate.future;
+            }
+          },
+          steer: (sessionId, text) async => SteerOutcome.uncertain,
+          steerHistory: (sessionId) async => [
+            {'role': 'user', 'content': 'first prompt'},
+          ],
+        );
+
+        await tester.enterText(find.byType(TextField), 'first prompt');
+        await tester.tap(find.byTooltip('Send'));
+        await tester.pump();
+        await tester.pump();
+
+        await tester.enterText(find.byType(TextField), 'lost steer');
+        await tester.tap(find.byKey(const Key('chat-steer-button')));
+        await tester.pump();
+        expect(submitted, ['first prompt']);
+
+        submitGate.complete();
+        await tester.pump();
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+
+        // Reconciliation proved it never landed: exactly one resend.
+        expect(submitted, ['first prompt', 'lost steer']);
+      },
+    );
   });
 }
 
 Future<void> _pumpChat(
   WidgetTester tester, {
   required TestRemotePromptSubmit remoteSubmit,
-  required Future<bool> Function(String sessionId, String text) steer,
+  required Future<SteerOutcome> Function(String sessionId, String text) steer,
   FakeVoiceComposerAdapter? voiceAdapter,
+  Future<List<Map<String, dynamic>>> Function(String sessionId)? steerHistory,
 }) async {
   final apiClient = ApiClient(
     baseUrl: 'http://steer.fixture',
@@ -354,6 +545,7 @@ Future<void> _pumpChat(
         testApiClient: apiClient,
         testRemotePromptSubmit: remoteSubmit,
         testDesktopSteer: steer,
+        testSteerHistoryReconcile: steerHistory,
         testVoiceComposerAdapter: voiceAdapter ?? FakeVoiceComposerAdapter(),
       ),
     ),
@@ -387,6 +579,10 @@ class SteerGatewayFixture {
   final HttpServer _server;
   String steerStatus;
   final int? errorCode;
+
+  /// When true, a `session.steer` frame is recorded and then the socket is
+  /// closed without ever answering — the lost-acknowledgement scenario.
+  bool dropSteerAck = false;
   final List<Map<String, dynamic>> steerParamsList = [];
 
   int get port => _server.port;
@@ -471,6 +667,12 @@ class SteerGatewayFixture {
         steerParamsList.add(
           Map<String, dynamic>.from(frame['params'] as Map),
         );
+        if (dropSteerAck) {
+          // Frame received, acknowledgement never sent: the socket dies
+          // with the request pending, exactly like a mid-flight outage.
+          unawaited(socket.close());
+          return;
+        }
         if (errorCode != null) {
           socket.add(
             jsonEncode({
