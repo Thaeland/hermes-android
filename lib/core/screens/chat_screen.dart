@@ -149,9 +149,14 @@ class TestDesktopAsyncEventHook {
 /// ack-uncertain delivery: the drain must prove it never landed in server
 /// history before resending, or the instruction could execute twice.
 class _PendingSteer {
-  _PendingSteer(this.text, {this.needsReconcile = false});
+  _PendingSteer(
+    this.text, {
+    this.needsReconcile = false,
+    this.historyRowIdFloor = 0,
+  });
   final String text;
   bool needsReconcile;
+  final int historyRowIdFloor;
 }
 
 class _PendingSensitivePrompt {
@@ -326,6 +331,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// rejections (or two lost acks) before settle must both survive.
   final List<_PendingSteer> _pendingSteers = [];
   bool _steerDrainInFlight = false;
+  Timer? _steerReconcileRetryTimer;
+  int _steerReconcileRetryAttempt = 0;
+  static const _steerReconcileRetryBaseDelay = Duration(milliseconds: 500);
+  static const _steerReconcileRetryMaxDelay = Duration(seconds: 30);
 
   GatewayTurnStatus? _gatewayTurnStatus;
   _ResponseTransport _activeResponseTransport = _ResponseTransport.none;
@@ -518,6 +527,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _clearPendingReattachResync();
+    _steerReconcileRetryTimer?.cancel();
     widget.testDesktopConnectionHook?.handler = null;
     widget.testDesktopAsyncEventHook?.handler = null;
     _savedGatewayNotices[_gatewayNoticeIdentity] = List.unmodifiable(
@@ -607,6 +617,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       } else if (_turnApplicationSession != null) {
         unawaited(_recoverPendingTurn());
       }
+      _maybeDrainPendingSteer();
     }
   }
 
@@ -757,13 +768,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  bool get _voiceInputAvailable =>
+      !_transcriptLoadBlocksComposer &&
+      !_pendingReattachResync &&
+      (!_sending || _streaming);
+
   Future<void> _startVoiceInput() async {
-    // Deliberately allowed while _sending/_streaming: dictation during a
-    // live turn feeds the steer path. The submit path already captured its
-    // text, so writing the composer now cannot corrupt an in-flight send.
-    if (_transcriptLoadBlocksComposer || _pendingReattachResync) {
-      return;
-    }
+    // Dictation is allowed once a live turn is streaming so it can feed the
+    // steer path, but not during upload/session setup: those paths have not
+    // captured and cleared the composer yet.
+    if (!_voiceInputAvailable) return;
     if (widget.testVoiceComposerAdapter == null) {
       await _flutterTts.stop();
     }
@@ -1280,7 +1294,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _error = null;
       });
       _scheduleInitialEndAlignment();
-      if (completed) _clearPendingReattachResync();
+      if (completed) {
+        _clearPendingReattachResync();
+        _maybeDrainPendingSteer();
+      }
     } catch (_) {
       // A temporary 404 or transport failure is not an empty transcript and
       // not terminal turn evidence. Keep the current UI and retry later.
@@ -2903,6 +2920,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _streaming = false;
         _gatewayTurnStatus = null;
       });
+      _maybeDrainPendingSteer();
       final messenger = ScaffoldMessenger.of(context);
       messenger
         ..removeCurrentSnackBar()
@@ -3428,6 +3446,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         (_desktopGateway == null && widget.testDesktopSteer == null)) {
       return;
     }
+    final historyRowIdFloor = _highestMessageRowId(_messages);
+    // Claim this snapshot before the RPC await. The field is now a clean
+    // draft for later typing, so a delayed acknowledgement never has to guess
+    // whether same-prefix text was appended to or replaced the old snapshot.
+    _textController.clear();
     setState(() => _steering = true);
     SteerOutcome outcome = SteerOutcome.rejected;
     try {
@@ -3437,12 +3460,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               sessionId: widget.session.id,
               text: text,
             );
+    } catch (_) {
+      // Production maps transport failures to a delivery outcome. Preserve the
+      // text as an ack-certain pending note if a test seam or local adapter
+      // still throws unexpectedly.
+      outcome = SteerOutcome.rejected;
     } finally {
       if (mounted) setState(() => _steering = false);
     }
     if (!mounted) return;
     if (outcome == SteerOutcome.accepted) {
-      _consumeSteeredText(text);
       setState(
         () => _messages.add({'role': 'user', 'content': text, '_is_steer': true}),
       );
@@ -3455,9 +3482,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       // have applied the steer. Queue it flagged for reconciliation; the
       // drain only resends it after server history proves it never
       // landed. Re-sending blind could execute it twice.
-      _consumeSteeredText(text);
       setState(() => _pendingSteers.add(
-        _PendingSteer(text, needsReconcile: true),
+        _PendingSteer(
+          text,
+          needsReconcile: true,
+          historyRowIdFloor: historyRowIdFloor,
+        ),
       ));
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -3471,13 +3501,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _maybeDrainPendingSteer();
       return;
     }
-    // Rejected: the turn is settling or unsteerable. Move the text out of
-    // the composer into the pending queue; the settle drain re-sends it
-    // as a normal next-turn prompt so the words are never lost.
-    setState(() {
-      _pendingSteers.add(_PendingSteer(text));
-      _consumeSteeredText(text);
-    });
+    // Rejected: the turn is settling or unsteerable. The settle drain
+    // re-sends it as a normal next-turn prompt so the words are never lost.
+    setState(() => _pendingSteers.add(_PendingSteer(text)));
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text(context.l10n.steer_queued_for_next_turn),
@@ -3490,38 +3516,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _maybeDrainPendingSteer();
   }
 
-  /// Remove exactly the steered [snapshot] from the composer. The composer
-  /// stays editable while the steer RPC is in flight, so by the time the
-  /// acknowledgement lands the user may have kept typing: clear the whole
-  /// controller would erase that newer draft. Consume only the submitted
-  /// snapshot — clear when it still is the whole draft, strip the prefix
-  /// when the user appended to it, and leave the composer alone when the
-  /// user replaced it (the snapshot is already gone).
-  void _consumeSteeredText(String snapshot) {
-    final current = _textController.text;
-    // The snapshot was trimmed at submit; the composer may still carry
-    // leading whitespace (dictation/paste), so compare from the first
-    // non-whitespace offset or the delivered text would linger and be
-    // re-sent as a normal prompt.
-    final leading = current.length - current.trimLeft().length;
-    final trimmedCurrent = current.substring(leading);
-    if (trimmedCurrent == snapshot) {
-      _textController.clear();
-    } else if (trimmedCurrent.startsWith(snapshot)) {
-      final rest = trimmedCurrent.substring(snapshot.length);
-      _textController.value = TextEditingValue(
-        text: rest,
-        selection: TextSelection.collapsed(offset: rest.length),
-      );
-    }
-  }
-
   /// After a turn settles, re-send steers the gateway rejected or could
   /// not confirm. If the user is mid-draft, the text is appended to the
   /// composer instead of auto-sent, so nothing is overwritten or lost.
   void _maybeDrainPendingSteer() {
     if (_pendingSteers.isEmpty) return;
-    if (!mounted || _streaming || _sending || _steerDrainInFlight) return;
+    if (!mounted ||
+        _appInBackground ||
+        _pendingReattachResync ||
+        _streaming ||
+        _sending ||
+        _steerDrainInFlight) {
+      return;
+    }
     if (_voiceComposer.listening) {
       // Dictation owns the composer right now: auto-sending would silently
       // no-op in _sendMessage's listening guard, and appending would let the
@@ -3535,41 +3542,75 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _drainPendingSteers() async {
     if (_steerDrainInFlight) return;
     _steerDrainInFlight = true;
+    _steerReconcileRetryTimer?.cancel();
+    _steerReconcileRetryTimer = null;
+    var reconciliationFailed = false;
     try {
-      // Reconcile every ack-uncertain steer BEFORE resending anything: a
-      // lost acknowledgement may hide a steer the gateway already applied,
-      // and a blind resend would execute it twice. Matched history rows
-      // are consumed, so N queued entries require N distinct steer rows.
-      // Entries keep submission order throughout.
-      List<Map<String, dynamic>>? historyRows;
-      for (final entry in _pendingSteers
-          .where((s) => s.needsReconcile)
-          .toList(growable: false)) {
-        historyRows ??= await _recentHistoryRows();
+      // Snapshot the entries this read is allowed to classify. A steer can
+      // finish its own RPC while history is in flight; that later entry must
+      // keep needsReconcile=true and get a separate read before any resend.
+      final uncertainEntries = _pendingSteers
+          .where((entry) => entry.needsReconcile)
+          .toList(growable: false);
+      if (uncertainEntries.isNotEmpty) {
+        final responseGeneration = _responseGeneration;
+        final oldestFloor = uncertainEntries
+            .map((entry) => entry.historyRowIdFloor)
+            .reduce((left, right) => left < right ? left : right);
+        final historyRows = await _recentHistoryRows(oldestFloor);
         if (!mounted) return;
-        final matchIndex = _findLandedSteerRow(historyRows, entry.text);
-        if (matchIndex >= 0) {
-          historyRows.removeAt(matchIndex);
-          _pendingSteers.remove(entry);
-          // The gateway applied the steer despite the lost ack: paint it
-          // locally (the deferred history refresh will confirm).
-          setState(() => _messages.add({
-            'role': 'user',
-            'content': entry.text,
-            '_is_steer': true,
-          }));
-        } else {
-          entry.needsReconcile = false;
+        if (historyRows == null) {
+          // A failed read proves nothing. Keep every entry uncertain and retry
+          // later instead of converting transport failure into a duplicate.
+          reconciliationFailed = true;
+          return;
+        }
+        // A newer turn starting while the read was suspended invalidates the
+        // absence result. Leave the entries untouched and retry after it
+        // settles; otherwise an old empty page can authorize a duplicate.
+        if (responseGeneration != _responseGeneration ||
+            _streaming ||
+            _sending ||
+            _voiceComposer.listening ||
+            _pendingReattachResync) {
+          return;
+        }
+        _resetSteerReconcileRetry();
+        for (final entry in uncertainEntries) {
+          final matchIndex = _findLandedSteerRow(
+            historyRows,
+            entry.text,
+            afterRowId: entry.historyRowIdFloor,
+          );
+          if (matchIndex >= 0) {
+            historyRows.removeAt(matchIndex);
+            _pendingSteers.remove(entry);
+            // The gateway applied the steer despite the lost ack: paint it
+            // locally (the deferred history refresh will confirm).
+            setState(() => _messages.add({
+              'role': 'user',
+              'content': entry.text,
+              '_is_steer': true,
+            }));
+          } else {
+            entry.needsReconcile = false;
+          }
         }
       }
-      if (_pendingSteers.isEmpty) return;
-      // A new turn may have started while reconciliation was in flight (the
-      // user hit send): hold the notes for that turn's settle instead of
-      // firing into a live turn, where _sendMessage would no-op and the
-      // words would be lost.
-      if (_streaming || _sending || _voiceComposer.listening) return;
-      final joined = _pendingSteers.map((s) => s.text).join('\n\n');
-      final sentEntries = List<_PendingSteer>.from(_pendingSteers);
+
+      // Send only entries whose delivery is known. An uncertain steer added
+      // during the await above remains queued for the follow-up drain.
+      final sentEntries = _pendingSteers
+          .where((entry) => !entry.needsReconcile)
+          .toList(growable: false);
+      if (sentEntries.isEmpty) return;
+      if (_streaming ||
+          _sending ||
+          _voiceComposer.listening ||
+          _pendingReattachResync) {
+        return;
+      }
+      final joined = sentEntries.map((entry) => entry.text).join('\n\n');
       final draft = _textController.text;
       if (draft.trim().isEmpty) {
         _textController.text = joined;
@@ -3596,14 +3637,57 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
     } finally {
       _steerDrainInFlight = false;
+      if (reconciliationFailed) {
+        _scheduleSteerReconcileRetry();
+      } else {
+        // Hand entries added while this single-flight was suspended to a new
+        // drain. Busy/lifecycle guards defer that handoff to the next settle.
+        _maybeDrainPendingSteer();
+      }
     }
   }
 
-  /// Recent transcript rows for steer reconciliation, newest-last. A
-  /// failed lookup yields an empty page: every uncertain entry then reads
-  /// as not-landed and resends — losing an instruction is worse than a
-  /// possible duplicate.
-  Future<List<Map<String, dynamic>>> _recentHistoryRows() async {
+  Duration _nextSteerReconcileRetryDelay() {
+    var milliseconds = _steerReconcileRetryBaseDelay.inMilliseconds;
+    for (var i = 0; i < _steerReconcileRetryAttempt; i += 1) {
+      milliseconds *= 2;
+      if (milliseconds >= _steerReconcileRetryMaxDelay.inMilliseconds) {
+        milliseconds = _steerReconcileRetryMaxDelay.inMilliseconds;
+        break;
+      }
+    }
+    _steerReconcileRetryAttempt += 1;
+    return Duration(milliseconds: milliseconds);
+  }
+
+  void _scheduleSteerReconcileRetry() {
+    if (!mounted ||
+        _appInBackground ||
+        _steerReconcileRetryTimer != null ||
+        !_pendingSteers.any((entry) => entry.needsReconcile)) {
+      return;
+    }
+    _steerReconcileRetryTimer = Timer(
+      _nextSteerReconcileRetryDelay(),
+      () {
+        _steerReconcileRetryTimer = null;
+        _maybeDrainPendingSteer();
+      },
+    );
+  }
+
+  void _resetSteerReconcileRetry() {
+    _steerReconcileRetryTimer?.cancel();
+    _steerReconcileRetryTimer = null;
+    _steerReconcileRetryAttempt = 0;
+  }
+
+  /// Loads enough newest-first pages to reach the oldest row that could be
+  /// relevant to this reconciliation, then returns them chronologically. A
+  /// null result is a failed lookup, never evidence that a steer is absent.
+  Future<List<Map<String, dynamic>>?> _recentHistoryRows(
+    int oldestRowIdFloor,
+  ) async {
     try {
       final sessionId =
           widget.testSteerHistoryReconcile != null
@@ -3611,21 +3695,51 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               : _desktopGateway?.storedSessionKeyFor(widget.session.id) ??
                     widget.testStoredSessionKey?.call(widget.session.id) ??
                     widget.session.id;
-      return widget.testSteerHistoryReconcile != null
-          ? await widget.testSteerHistoryReconcile!(sessionId)
-          : await _getRecentMessages(sessionId);
+      if (widget.testSteerHistoryReconcile != null) {
+        return await widget.testSteerHistoryReconcile!(sessionId);
+      }
+
+      final rows = <Map<String, dynamic>>[];
+      var offset = 0;
+      while (true) {
+        final page = await _client.getMessages(
+          sessionId,
+          limit: _historyPageSize,
+          offset: offset,
+          latest: true,
+        );
+        if (page.isEmpty) break;
+        rows.insertAll(0, page);
+        final reachedFloor =
+            oldestRowIdFloor > 0 &&
+            page.any((message) {
+              final rowId = _messageRowId(message);
+              return rowId != null && rowId <= oldestRowIdFloor;
+            });
+        if (reachedFloor || page.length < _historyPageSize) break;
+        offset += page.length;
+      }
+      return rows;
     } catch (_) {
-      return const [];
+      return null;
     }
   }
 
-  /// Index (newest-last order) of the first user row whose steer display
-  /// text equals [text], or -1 when no steer row matches.
-  int _findLandedSteerRow(List<Map<String, dynamic>> rows, String text) {
+  /// Index (newest-last order) of the first user steer row matching [text]
+  /// that was written after [afterRowId].
+  int _findLandedSteerRow(
+    List<Map<String, dynamic>> rows,
+    String text, {
+    required int afterRowId,
+  }) {
     final needle = text.trim();
     for (var i = rows.length - 1; i >= 0; i--) {
       final msg = rows[i];
       if (msg['role'] != 'user') continue;
+      if (afterRowId > 0) {
+        final rowId = _messageRowId(msg);
+        if (rowId == null || rowId <= afterRowId) continue;
+      }
       final shown = steerDisplayText(Map<String, dynamic>.from(msg));
       if (shown != null && shown == needle) return i;
     }
@@ -3749,6 +3863,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ),
       );
     }
+    _maybeDrainPendingSteer();
   }
 
   void _upsertToolProgress(
@@ -4164,9 +4279,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 if (!_voiceComposer.listening)
                   VoiceComposerStartButton(
                     key: const Key('chat-mic-button'),
-                    enabled:
-                        !_transcriptLoadBlocksComposer &&
-                        !_pendingReattachResync,
+                    enabled: _voiceInputAvailable,
                     onPressed: _startVoiceInput,
                   ),
                 if (!_streaming)
