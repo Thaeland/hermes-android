@@ -51,6 +51,7 @@ import '../widgets/gateway_sensitive_prompt_dialog.dart';
 import '../widgets/voice_composer_controls.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
+
 /// These colors remain identical in light and dark themes. Their 8.15:1
 /// contrast ratio keeps normal user-message text above WCAG AA.
 const hermesUserMessageBubbleBackground = Color(0xFFD4AF37);
@@ -130,6 +131,13 @@ typedef TestRemoteAttachmentUpload =
       required String dataUrl,
     });
 
+@visibleForTesting
+typedef TestComposerDraftReader =
+    Future<String?> Function({
+      required String connectionId,
+      required String sessionId,
+    });
+
 /// Mutable holder that lets a test reach the ChatScreen's Desktop
 /// connection-state handler when no real gateway is configured. The screen
 /// fills [handler] in `initState`; the test then calls it with the state
@@ -205,6 +213,9 @@ class ChatScreen extends StatefulWidget {
   final List<AttachmentDraft> testInitialAttachmentDrafts;
 
   @visibleForTesting
+  final TestComposerDraftReader? testComposerDraftReader;
+
+  @visibleForTesting
   final VoiceComposerAdapter? testVoiceComposerAdapter;
 
   /// Lets a test observe what the chat posts to Android when a turn settles,
@@ -248,6 +259,7 @@ class ChatScreen extends StatefulWidget {
     this.testServerFilePicker,
     this.testRemoteAttachmentUpload,
     this.testInitialAttachmentDrafts = const [],
+    this.testComposerDraftReader,
     this.testVoiceComposerAdapter,
     this.testTurnNotifications,
     this.testDesktopConnectionHook,
@@ -285,6 +297,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   // Chat sending state
   final _textController = TextEditingController();
+  int _composerRevision = 0;
   final _imagePicker = ImagePicker();
   final List<AttachmentDraft> _attachmentDrafts = [];
   String? _sessionModel;
@@ -377,6 +390,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _textController.addListener(_onComposerChanged);
     if (widget.initialComposerText case final shared?) {
       _textController.text = shared;
       _textController.selection = TextSelection.collapsed(
@@ -384,15 +398,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       );
     } else {
       // Restore this session's draft: leaving the chat must never lose it.
+      final composerRevision = _composerRevision;
+      final readDraft =
+          widget.testComposerDraftReader ?? ComposerDraftStore.read;
       unawaited(
-        ComposerDraftStore.read(
-          connectionIdentity: _connectionIdentity,
+        readDraft(
+          connectionId: widget.connection.id,
           sessionId: widget.session.id,
         ).then((draft) {
           if (!mounted || draft == null) return;
           // The user may have started typing while the read was in flight:
-          // never clobber live input with the stored draft.
-          if (_textController.text.isNotEmpty) return;
+          // even if they cleared or sent that newer text, never resurrect the
+          // older stored value just because the composer is empty again.
+          if (_composerRevision != composerRevision ||
+              _textController.text.isNotEmpty) {
+            return;
+          }
           _textController.text = draft;
           _textController.selection = TextSelection.collapsed(
             offset: draft.length,
@@ -481,6 +502,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   String get _gatewayNoticeIdentity =>
       '$_connectionIdentity|${widget.session.id}';
 
+  void _onComposerChanged() => _composerRevision += 1;
+
   Future<void> _restoreSessionModelOverride() async {
     final store = await _chatModelStore;
     final override = store.read(
@@ -536,7 +559,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     unawaited(
       ComposerDraftStore.save(
-        connectionIdentity: _connectionIdentity,
+        connectionId: widget.connection.id,
         sessionId: widget.session.id,
         text: _textController.text,
       ),
@@ -582,7 +605,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       // Persist the draft on the way out: a process kill must not lose it.
       unawaited(
         ComposerDraftStore.save(
-          connectionIdentity: _connectionIdentity,
+          connectionId: widget.connection.id,
           sessionId: widget.session.id,
           text: _textController.text,
         ),
@@ -643,7 +666,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              context.l10n.connection_switched_the_running_reply_continues_on_the_server_and,
+              context
+                  .l10n
+                  .connection_switched_the_running_reply_continues_on_the_server_and,
             ),
             persist: false,
           ),
@@ -817,7 +842,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ..hideCurrentSnackBar()
         ..showSnackBar(
           SnackBar(
-            content: Text(context.l10n.read_aloud_is_unavailable_on_this_device),
+            content: Text(
+              context.l10n.read_aloud_is_unavailable_on_this_device,
+            ),
             duration: Duration(seconds: 3),
           ),
         );
@@ -1445,7 +1472,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _gatewayTurnStatus = projection.isFailClosed
             ? GatewayTurnStatus(
                 kind: 'recovery_failed',
-                text: context.l10n.hermes_stopped_recovery_safely_no_prompt_was_resent,
+                text: context
+                    .l10n
+                    .hermes_stopped_recovery_safely_no_prompt_was_resent,
               )
             : null;
       }
@@ -1496,7 +1525,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   String _gatewayRecoveryStatusText(GatewayRecoveryTurnStatus? status) {
     return switch (status) {
-      GatewayRecoveryTurnStatus.waitingInput => context.l10n.hermes_is_waiting_for_input,
+      GatewayRecoveryTurnStatus.waitingInput =>
+        context.l10n.hermes_is_waiting_for_input,
       GatewayRecoveryTurnStatus.running => context.l10n.hermes_is_responding,
       _ => context.l10n.recovering_hermes,
     };
@@ -1549,7 +1579,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             ListTile(
               leading: const Icon(Icons.photo_library_outlined),
               title: Text(
-                _desktopGateway == null ? context.l10n.choose_image : context.l10n.choose_images,
+                _desktopGateway == null
+                    ? context.l10n.choose_image
+                    : context.l10n.choose_images,
               ),
               onTap: () {
                 Navigator.pop(sheetContext);
@@ -1735,7 +1767,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _pickFiles() async {
     if (_desktopGateway == null) {
       _showAttachmentError(
-        context.l10n.configure_a_valid_desktop_gateway_url_before_attaching_files,
+        context
+            .l10n
+            .configure_a_valid_desktop_gateway_url_before_attaching_files,
       );
       return;
     }
@@ -1786,7 +1820,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         );
       }
     } catch (_) {
-      _showAttachmentError(context.l10n.unable_to_prepare_this_file_try_another_one);
+      _showAttachmentError(
+        context.l10n.unable_to_prepare_this_file_try_another_one,
+      );
     }
   }
 
@@ -1861,14 +1897,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              context.l10n.file_attached_document_catalog_registration_is_pending,
+              context
+                  .l10n
+                  .file_attached_document_catalog_registration_is_pending,
             ),
           ),
         );
       }
     } catch (error) {
       _showAttachmentError(
-        context.l10n.retry_failed_for_the_draft_and_prompt_were_kept(draft.name),
+        context.l10n.retry_failed_for_the_draft_and_prompt_were_kept(
+          draft.name,
+        ),
       );
     } finally {
       if (mounted) {
@@ -2047,7 +2087,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(context.l10n.could_not_load_models_for_this_profile(error)),
+          content: Text(
+            context.l10n.could_not_load_models_for_this_profile(error),
+          ),
         ),
       );
     } finally {
@@ -2131,9 +2173,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       );
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(context.l10n.model_was_not_changed(error))));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.model_was_not_changed(error))),
+      );
     } finally {
       if (mounted) setState(() => _changingModel = false);
     }
@@ -2297,7 +2339,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               await _speakAssistantText(assistantText);
             }
           }
-        } catch (e) {
+        } catch (_) {
           if (!mounted || responseGeneration != _responseGeneration) return;
           _scrollCoordinator.cancelStreaming();
           setState(() {
@@ -2306,8 +2348,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             _gatewayTurnStatus = null;
             _activeResponseTransport = _ResponseTransport.none;
           });
-          // The request never reached the server: restore what was typed.
-          _restoreComposerAfterRejectedSend(text);
+          // The SSE response completed, so the server accepted the prompt.
+          // A follow-up history read failing must not resurrect it as a draft.
+          _deferHistoryRefresh();
         }
       },
       onError: (error) {
@@ -2359,6 +2402,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final historyAtSend = _historyGeneration;
     _activeResponseTransport = _ResponseTransport.desktop;
     var turnAdded = false;
+    var promptSubmitted = false;
 
     setState(() {
       _sending = true;
@@ -2392,8 +2436,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               final index = attachments.indexOf(draft);
               _gatewayTurnStatus = GatewayTurnStatus(
                 kind: 'upload',
-                text:
-                    context.l10n.uploading(index + 1, draft.name, attachments.length),
+                text: context.l10n.uploading(
+                  index + 1,
+                  draft.name,
+                  attachments.length,
+                ),
               );
             }
           });
@@ -2404,7 +2451,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(
-                  context.l10n.file_attached_document_catalog_registration_is_pending,
+                  context
+                      .l10n
+                      .file_attached_document_catalog_registration_is_pending,
                 ),
               ),
             );
@@ -2442,6 +2491,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           }
 
           void markPromptSent() {
+            promptSubmitted = true;
             if (mounted && responseGeneration == _responseGeneration) {
               _legacyDesktopPromptSubmitted = true;
             }
@@ -2496,7 +2546,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       // reply). Restoring the composer and stripping the local turn would
       // clobber it, so skip the restore and just surface the error state.
       final resyncLanded = _historyGeneration != historyAtSend;
-      if (turnAdded && !resyncLanded) {
+      if (turnAdded && !resyncLanded && !promptSubmitted) {
         setState(() {
           if (_messages.isNotEmpty &&
               _messages.last['role'] == 'assistant' &&
@@ -2571,7 +2621,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             ..error = null;
           _gatewayTurnStatus = GatewayTurnStatus(
             kind: 'upload',
-            text: context.l10n.uploading(index + 1, draft.name, attachments.length),
+            text: context.l10n.uploading(
+              index + 1,
+              draft.name,
+              attachments.length,
+            ),
           );
         });
         final dataUrl = await _attachmentDraftService.readDataUrl(draft);
@@ -2614,8 +2668,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     final attachmentLabels = attachments
         .map(
-          (attachment) =>
-              '[${context.l10n.attached_file}: ${attachment.name}]',
+          (attachment) => '[${context.l10n.attached_file}: ${attachment.name}]',
         )
         .join('\n');
     final localContent = [
@@ -3463,7 +3516,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           content: Text(
             interrupted
                 ? context.l10n.response_stopped
-                : context.l10n.response_closed_locally_no_active_gateway_turn_was_found,
+                : context
+                      .l10n
+                      .response_closed_locally_no_active_gateway_turn_was_found,
           ),
         ),
       );
@@ -3471,7 +3526,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(context.l10n.response_closed_locally_gateway_stop_failed(error)),
+          content: Text(
+            context.l10n.response_closed_locally_gateway_stop_failed(error),
+          ),
           backgroundColor: Colors.orange,
           duration: const Duration(seconds: 6),
         ),
@@ -3488,7 +3545,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _textController.clear();
     unawaited(
       ComposerDraftStore.save(
-        connectionIdentity: _connectionIdentity,
+        connectionId: widget.connection.id,
         sessionId: widget.session.id,
         text: '',
       ),
@@ -3503,7 +3560,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _textController.selection = TextSelection.collapsed(offset: text.length);
     unawaited(
       ComposerDraftStore.save(
-        connectionIdentity: _connectionIdentity,
+        connectionId: widget.connection.id,
         sessionId: widget.session.id,
         text: text,
       ),
@@ -3948,7 +4005,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   ),
                 Semantics(
                   label: context.l10n.spoken_replies,
-                  value: _voiceReplyEnabled ? context.l10n.on : context.l10n.off,
+                  value: _voiceReplyEnabled
+                      ? context.l10n.on
+                      : context.l10n.off,
                   toggled: _voiceReplyEnabled,
                   button: true,
                   excludeSemantics: true,
@@ -3973,7 +4032,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ),
                 const SizedBox(width: 4),
                 Semantics(
-                  label: _streaming ? context.l10n.stop_response : context.l10n.send_message,
+                  label: _streaming
+                      ? context.l10n.stop_response
+                      : context.l10n.send_message,
                   button: true,
                   enabled:
                       _streaming ||

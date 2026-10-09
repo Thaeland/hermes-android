@@ -52,6 +52,7 @@ import '../widgets/share_text_review_sheet.dart';
 import 'workspace_sessions_screen.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
+
 /// Builds the Projects repository for a connection. Injectable for tests.
 typedef ProjectsRepositoryFactory =
     ProjectsRepository Function(SavedConnection connection);
@@ -758,8 +759,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         if (repository == null) {
           return ErrorState.unsupported(
             title: context.l10n.projects_unavailable,
-            message:
-                context.l10n.projects_need_a_desktop_gateway_connection_add_the_desktop_gateway,
+            message: context
+                .l10n
+                .projects_need_a_desktop_gateway_connection_add_the_desktop_gateway,
           );
         }
         return ProjectsPane(
@@ -890,7 +892,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         .firstOrNull;
 
     final project =
-        known ?? HermesProject(id: projectId, slug: projectId, name: context.l10n.project);
+        known ??
+        HermesProject(
+          id: projectId,
+          slug: projectId,
+          name: context.l10n.project,
+        );
 
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -1017,7 +1024,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     final mode = await showModalBottomSheet<NewChatMode>(
       context: context,
       builder: (_) =>
-            NewChatSheet(options: buildNewChatOptionsFor(context.l10n, view)),
+          NewChatSheet(options: buildNewChatOptionsFor(context.l10n, view)),
     );
     if (mode == null || !mounted) return;
 

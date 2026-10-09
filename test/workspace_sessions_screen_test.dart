@@ -10,7 +10,6 @@ import 'package:hermes_android/core/widgets/hermes_shell.dart';
 import 'support/l10n_test_utils.dart';
 import 'package:hermes_android/l10n/app_localizations.dart';
 
-
 Session _session(
   String id,
   String title, {
@@ -245,8 +244,8 @@ void main() {
   ) async {
     await tester.pumpWidget(
       MaterialApp(
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
-      supportedLocales: AppLocalizations.supportedLocales,
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         theme: hermesTheme(Brightness.dark),
         home: WorkspaceSessionsScreen(
           title: 'Chats',
@@ -276,8 +275,8 @@ void main() {
     Future<void> pumpChats(WidgetTester tester) async {
       await tester.pumpWidget(
         MaterialApp(
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
-      supportedLocales: AppLocalizations.supportedLocales,
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
           theme: hermesTheme(Brightness.dark),
           home: WorkspaceSessionsScreen(
             title: 'Chats',
@@ -302,7 +301,10 @@ void main() {
       await pumpChats(tester);
 
       for (final filter in WorkspaceChatsFilter.values) {
-        expect(find.widgetWithText(ChoiceChip, filter.label(l10n)), findsOneWidget);
+        expect(
+          find.widgetWithText(ChoiceChip, filter.label(l10n)),
+          findsOneWidget,
+        );
       }
     });
 
@@ -352,8 +354,8 @@ void main() {
       );
       await tester.pumpWidget(
         MaterialApp(
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
-      supportedLocales: AppLocalizations.supportedLocales,
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
           theme: hermesTheme(Brightness.dark),
           home: WorkspaceSessionsScreen(
             title: 'Chats',
@@ -398,8 +400,8 @@ void main() {
     }) async {
       await tester.pumpWidget(
         MaterialApp(
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
-      supportedLocales: AppLocalizations.supportedLocales,
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
           theme: hermesTheme(Brightness.dark),
           home: WorkspaceSessionsScreen(
             title: 'Chats',
@@ -468,8 +470,8 @@ void main() {
     final promoted = <String>[];
     await tester.pumpWidget(
       MaterialApp(
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
-      supportedLocales: AppLocalizations.supportedLocales,
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         theme: hermesTheme(Brightness.dark),
         home: WorkspaceSessionsScreen(
           title: 'Archived Quick chats',
@@ -506,8 +508,8 @@ void main() {
     final moved = <String>[];
     await tester.pumpWidget(
       MaterialApp(
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
-      supportedLocales: AppLocalizations.supportedLocales,
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         theme: hermesTheme(Brightness.dark),
         home: WorkspaceSessionsScreen(
           title: 'Unassigned chats',
@@ -544,8 +546,8 @@ void main() {
   ) async {
     await tester.pumpWidget(
       MaterialApp(
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
-      supportedLocales: AppLocalizations.supportedLocales,
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         theme: hermesTheme(Brightness.dark),
         home: Scaffold(
           body: WorkspaceSessionsScreen(
@@ -594,42 +596,43 @@ void main() {
     expect(find.text('Archived chat'), findsOneWidget);
   });
 
-  testWidgets('refreshes the list on the injected interval and stops on dispose', (
-    tester,
-  ) async {
-    var loads = 0;
-    await tester.pumpWidget(
-      MaterialApp(
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
-        supportedLocales: AppLocalizations.supportedLocales,
-        theme: hermesTheme(Brightness.dark),
-        home: WorkspaceSessionsScreen(
-          title: 'Chats',
-          view: WorkspaceSessionView.all,
-          refreshInterval: const Duration(seconds: 10),
-          load: () async {
-            loads++;
-            return WorkspaceSessionsData(
-              sessions: [_session('s1', 'Daily driver')],
-            );
-          },
-          onOpenSession: (_) {},
+  testWidgets(
+    'refreshes the list on the injected interval and stops on dispose',
+    (tester) async {
+      var loads = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          theme: hermesTheme(Brightness.dark),
+          home: WorkspaceSessionsScreen(
+            title: 'Chats',
+            view: WorkspaceSessionView.all,
+            refreshInterval: const Duration(seconds: 10),
+            load: () async {
+              loads++;
+              return WorkspaceSessionsData(
+                sessions: [_session('s1', 'Daily driver')],
+              );
+            },
+            onOpenSession: (_) {},
+          ),
         ),
-      ),
-    );
-    await tester.pump();
-    expect(loads, 1);
+      );
+      await tester.pump();
+      expect(loads, 1);
 
-    // The silent refresh keeps running/idle chips honest while visible…
-    await tester.pump(const Duration(seconds: 10));
-    await tester.pump();
-    expect(loads, 2);
+      // The silent refresh keeps running/idle chips honest while visible…
+      await tester.pump(const Duration(seconds: 10));
+      await tester.pump();
+      expect(loads, 2);
 
-    // …and stops with the screen (no pending timer after dispose).
-    await tester.pumpWidget(const SizedBox());
-    await tester.pump(const Duration(seconds: 10));
-    expect(loads, 2);
-  });
+      // …and stops with the screen (no pending timer after dispose).
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 10));
+      expect(loads, 2);
+    },
+  );
 
   testWidgets('does not refresh while hidden behind another shell pane', (
     tester,

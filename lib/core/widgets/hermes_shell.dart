@@ -91,7 +91,9 @@ class HermesPaneVisibility extends InheritedWidget {
 
   /// True when the calling pane is the selected destination.
   static bool of(BuildContext context) =>
-      context.dependOnInheritedWidgetOfExactType<HermesPaneVisibility>()?.active ??
+      context
+          .dependOnInheritedWidgetOfExactType<HermesPaneVisibility>()
+          ?.active ??
       true;
 
   @override

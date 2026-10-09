@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -35,6 +36,35 @@ class _FailingSendChatHttpClient extends http.BaseClient {
   }
 }
 
+/// Accepts the REST stream, then fails only the post-stream history refresh.
+class _AcceptedSendHistoryFailureHttpClient extends http.BaseClient {
+  var _messageReads = 0;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    if (request.method == 'GET') {
+      _messageReads += 1;
+      if (_messageReads == 1) {
+        return http.StreamedResponse(
+          Stream.value(utf8.encode('{"data": []}')),
+          200,
+        );
+      }
+      throw http.ClientException('history refresh failed');
+    }
+    return http.StreamedResponse(
+      Stream.value(
+        utf8.encode(
+          'data: {"choices":[{"delta":{"content":"accepted reply"}}]}\n\n'
+          'data: [DONE]\n\n',
+        ),
+      ),
+      200,
+      headers: {'content-type': 'text/event-stream'},
+    );
+  }
+}
+
 final _fixtureConnection = SavedConnection(
   id: 'draft-fixture',
   label: 'Draft fixture',
@@ -43,10 +73,7 @@ final _fixtureConnection = SavedConnection(
   apiKey: '',
 );
 
-String get _fixtureIdentity =>
-    '${_fixtureConnection.baseUrl}|'
-    '${_fixtureConnection.gatewayPrefix ?? ''}|'
-    '${_fixtureConnection.desktopGatewayUrl ?? ''}';
+String get _fixtureConnectionId => _fixtureConnection.id;
 
 const _fixtureSession = Session(
   id: 'draft-session',
@@ -62,16 +89,21 @@ const _fixtureSession = Session(
 Future<void> _pumpChat(
   WidgetTester tester, {
   http.Client? client,
+  SavedConnection? connection,
   String? initialComposerText,
+  TestComposerDraftReader? draftReader,
+  TestRemotePromptSubmit? remoteSubmit,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       home: ChatScreen(
-        connection: _fixtureConnection,
+        connection: connection ?? _fixtureConnection,
         session: _fixtureSession,
         initialComposerText: initialComposerText,
+        testComposerDraftReader: draftReader,
+        testRemotePromptSubmit: remoteSubmit,
         testApiClient: ApiClient(
           baseUrl: 'http://draft.fixture',
           apiKey: '',
@@ -107,7 +139,7 @@ void main() {
 
   testWidgets('a share-sheet prefill wins over a stored draft', (tester) async {
     await ComposerDraftStore.save(
-      connectionIdentity: _fixtureIdentity,
+      connectionId: _fixtureConnectionId,
       sessionId: 'draft-session',
       text: 'stale draft',
     );
@@ -133,10 +165,110 @@ void main() {
     // …and the stored draft was restored, not left cleared.
     expect(
       await ComposerDraftStore.read(
-        connectionIdentity: _fixtureIdentity,
+        connectionId: _fixtureConnectionId,
         sessionId: 'draft-session',
       ),
       'resend me',
+    );
+  });
+
+  testWidgets('draft follows a stable connection id after endpoint edits', (
+    tester,
+  ) async {
+    await ComposerDraftStore.save(
+      connectionId: _fixtureConnectionId,
+      sessionId: _fixtureSession.id,
+      text: 'survives endpoint edit',
+    );
+    final editedConnection = SavedConnection(
+      id: _fixtureConnection.id,
+      label: _fixtureConnection.label,
+      host: 'edited-draft.fixture',
+      port: 9443,
+      apiKey: '',
+      useHttps: true,
+      gatewayPrefix: '/new-prefix',
+    );
+
+    await _pumpChat(tester, connection: editedConnection);
+
+    expect(find.text('survives endpoint edit'), findsOneWidget);
+  });
+
+  testWidgets('delayed restore cannot overwrite a newer cleared edit', (
+    tester,
+  ) async {
+    final restore = Completer<String?>();
+    await _pumpChat(
+      tester,
+      draftReader: ({required connectionId, required sessionId}) =>
+          restore.future,
+    );
+    final composer = find.byType(TextField).first;
+
+    await tester.enterText(composer, 'new local edit');
+    await tester.enterText(composer, '');
+    restore.complete('stale stored draft');
+    await tester.pump();
+
+    expect(tester.widget<TextField>(composer).controller!.text, isEmpty);
+    expect(find.text('stale stored draft'), findsNothing);
+  });
+
+  testWidgets('delayed restore cannot resurrect a prompt cleared for send', (
+    tester,
+  ) async {
+    final restore = Completer<String?>();
+    final submitGate = Completer<void>();
+    await _pumpChat(
+      tester,
+      draftReader: ({required connectionId, required sessionId}) =>
+          restore.future,
+      remoteSubmit:
+          ({
+            required sessionId,
+            required text,
+            required onEvent,
+            required onSent,
+          }) async {
+            onSent();
+            await submitGate.future;
+          },
+    );
+    final composer = find.byType(TextField).first;
+
+    await tester.enterText(composer, 'send once');
+    await tester.tap(find.byTooltip('Send'));
+    await tester.pump();
+    restore.complete('stale stored draft');
+    await tester.pump();
+
+    expect(tester.widget<TextField>(composer).controller!.text, isEmpty);
+    expect(find.text('stale stored draft'), findsNothing);
+
+    submitGate.complete();
+    await tester.pump();
+  });
+
+  testWidgets('accepted REST prompt stays cleared when history refresh fails', (
+    tester,
+  ) async {
+    await _pumpChat(tester, client: _AcceptedSendHistoryFailureHttpClient());
+    final composer = find.byType(TextField).first;
+
+    await tester.enterText(composer, 'accepted prompt');
+    await tester.tap(find.byTooltip('Send'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(tester.widget<TextField>(composer).controller!.text, isEmpty);
+    expect(find.text('accepted prompt'), findsOneWidget);
+    expect(
+      await ComposerDraftStore.read(
+        connectionId: _fixtureConnectionId,
+        sessionId: _fixtureSession.id,
+      ),
+      isNull,
     );
   });
 }

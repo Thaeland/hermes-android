@@ -9,6 +9,7 @@ import '../widgets/hermes_components.dart';
 import '../widgets/hermes_shell.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
+
 const kWorkspaceSessionSearchKey = Key('workspace-session-search');
 
 enum WorkspaceSessionView { all, unassigned, archivedQuick, search }
@@ -524,7 +525,9 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
           if (sessions.isEmpty)
             EmptyState(
               icon: _emptyIcon,
-              title: _query.isEmpty ? context.l10n.nothing_here : context.l10n.no_matches,
+              title: _query.isEmpty
+                  ? context.l10n.nothing_here
+                  : context.l10n.no_matches,
               message: _emptyMessage,
             )
           else
@@ -602,7 +605,9 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  session.title.isEmpty ? context.l10n.untitled_chat : session.title,
+                  session.title.isEmpty
+                      ? context.l10n.untitled_chat
+                      : session.title,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -685,10 +690,12 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
       return switch (_filter) {
         WorkspaceChatsFilter.unassigned =>
           context.l10n.every_conversation_is_already_assigned_to_a_project,
-        WorkspaceChatsFilter.archived => context.l10n.archived_conversations_appear_here,
+        WorkspaceChatsFilter.archived =>
+          context.l10n.archived_conversations_appear_here,
         WorkspaceChatsFilter.recent =>
           context.l10n.nothing_changed_in_the_last_seven_days,
-        WorkspaceChatsFilter.all => context.l10n.no_conversation_matches_this_view,
+        WorkspaceChatsFilter.all =>
+          context.l10n.no_conversation_matches_this_view,
       };
     }
     return switch (widget.view) {
@@ -696,8 +703,8 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
         context.l10n.every_conversation_is_already_assigned_to_a_project,
       WorkspaceSessionView.archivedQuick =>
         context.l10n.quick_chats_appear_here_after_their_retention_period,
-      WorkspaceSessionView.all ||
-      WorkspaceSessionView.search => context.l10n.no_conversation_matches_this_view,
+      WorkspaceSessionView.all || WorkspaceSessionView.search =>
+        context.l10n.no_conversation_matches_this_view,
     };
   }
 
