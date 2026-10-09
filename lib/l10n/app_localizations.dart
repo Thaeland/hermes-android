@@ -2954,6 +2954,12 @@ abstract class AppLocalizations {
   /// **'STEER'**
   String get steer_chip_label;
 
+  /// No description provided for @steer_delivery_uncertain.
+  ///
+  /// In en, this message translates to:
+  /// **'Delivery uncertain — verifying before it is sent again'**
+  String get steer_delivery_uncertain;
+
   /// No description provided for @steer_queued_for_next_turn.
   ///
   /// In en, this message translates to:

@@ -615,6 +615,183 @@ void main() {
         );
       },
     );
+
+    testWidgets(
+      'a failed drain send does not requeue and duplicate on the next drain',
+      (tester) async {
+        final submitGate = Completer<void>();
+        final submitted = <String>[];
+        final voice = FakeVoiceComposerAdapter();
+        await _pumpChat(
+          tester,
+          voiceAdapter: voice,
+          remoteSubmit: ({
+            required sessionId,
+            required text,
+            required onEvent,
+            required onSent,
+          }) async {
+            submitted.add(text);
+            if (submitted.length == 1) {
+              onSent();
+              await submitGate.future;
+              return;
+            }
+            // Drain send: the turn was added, then the submit failed —
+            // the desktop catch strips the optimistic rows and restores
+            // the composer text.
+            onSent();
+            throw Exception('gateway rejected submission');
+          },
+          steer: (sessionId, text) async => SteerOutcome.rejected,
+        );
+
+        await tester.enterText(find.byType(TextField), 'first prompt');
+        await tester.tap(find.byTooltip('Send'));
+        await tester.pump();
+        await tester.pump();
+
+        await tester.enterText(find.byType(TextField), 'held note');
+        await tester.tap(find.byKey(const Key('chat-steer-button')));
+        await tester.pump();
+
+        submitGate.complete();
+        await tester.pump();
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+
+        // The drain sent once and the failure path restored the text to
+        // the composer for the user to retry.
+        expect(submitted, ['first prompt', 'held note']);
+        final composer = tester.widget<TextField>(find.byType(TextField));
+        expect(composer.controller!.text, 'held note');
+
+        // Any later drain trigger (mic cycle) must NOT re-send or append
+        // the note again: a submitted-but-failed send is the user's to
+        // retry from the composer, not the queue's to duplicate.
+        // (Dismiss the queued snackbars; they overlay the mic button.)
+        ScaffoldMessenger.of(tester.element(find.byType(Scaffold).first))
+            .clearSnackBars();
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('chat-mic-button')));
+        await tester.pump();
+        await tester.tap(find.bySemanticsLabel('Stop voice input'));
+        await tester.pump();
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+        expect(submitted, ['first prompt', 'held note']);
+        final after = tester.widget<TextField>(find.byType(TextField));
+        expect(after.controller!.text, 'held note');
+      },
+    );
+
+    testWidgets(
+      'an uncertain steer whose turn settled mid-RPC drains immediately',
+      (tester) async {
+        final submitGate = Completer<void>();
+        final steerGate = Completer<SteerOutcome>();
+        final submitted = <String>[];
+        await _pumpChat(
+          tester,
+          remoteSubmit: ({
+            required sessionId,
+            required text,
+            required onEvent,
+            required onSent,
+          }) async {
+            submitted.add(text);
+            onSent();
+            if (submitted.length == 1) {
+              await submitGate.future;
+            }
+          },
+          steer: (sessionId, text) => steerGate.future,
+          steerHistory: (sessionId) async => [
+            {'role': 'user', 'content': 'first prompt'},
+          ],
+        );
+
+        await tester.enterText(find.byType(TextField), 'first prompt');
+        await tester.tap(find.byTooltip('Send'));
+        await tester.pump();
+        await tester.pump();
+
+        await tester.enterText(find.byType(TextField), 'slow lost ack');
+        await tester.tap(find.byKey(const Key('chat-steer-button')));
+        await tester.pump();
+
+        // The turn settles while the steer RPC is still in flight (the
+        // ack times out later): the settle drain runs with nothing
+        // queued, so the uncertain result must trigger its own drain.
+        submitGate.complete();
+        await tester.pump();
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+        expect(submitted, ['first prompt']);
+
+        steerGate.complete(SteerOutcome.uncertain);
+        await tester.pump();
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+
+        // Reconciled as not-landed and resent without any further turn
+        // event — no indefinite stall.
+        expect(submitted, ['first prompt', 'slow lost ack']);
+      },
+    );
+
+    testWidgets(
+      'two identical uncertain steers need two landed rows to both clear',
+      (tester) async {
+        final submitGate = Completer<void>();
+        final submitted = <String>[];
+        await _pumpChat(
+          tester,
+          remoteSubmit: ({
+            required sessionId,
+            required text,
+            required onEvent,
+            required onSent,
+          }) async {
+            submitted.add(text);
+            onSent();
+            if (submitted.length == 1) {
+              await submitGate.future;
+            }
+          },
+          steer: (sessionId, text) async => SteerOutcome.uncertain,
+          steerHistory: (sessionId) async => [
+            {'role': 'user', 'content': 'first prompt'},
+            {
+              'role': 'user',
+              'display_kind': 'steer',
+              'display_content': 'continue',
+            },
+          ],
+        );
+
+        await tester.enterText(find.byType(TextField), 'first prompt');
+        await tester.tap(find.byTooltip('Send'));
+        await tester.pump();
+        await tester.pump();
+
+        for (final _ in [1, 2]) {
+          await tester.enterText(find.byType(TextField), 'continue');
+          await tester.tap(find.byKey(const Key('chat-steer-button')));
+          await tester.pump();
+        }
+
+        submitGate.complete();
+        await tester.pump();
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+
+        // Only one 'continue' landed server-side, so exactly one of the
+        // two queued entries may be considered landed: the other must
+        // still be resent as a prompt.
+        expect(submitted, ['first prompt', 'continue']);
+      },
+    );
   });
 }
 
@@ -684,11 +861,17 @@ class _EmptyChatHttpClient extends http.BaseClient {
 /// Minimal newline-delimited JSON-RPC gateway fixture that answers
 /// `session.create` and records/answers `session.steer` requests.
 class SteerGatewayFixture {
-  SteerGatewayFixture(this._server, this.steerStatus, this.errorCode);
+  SteerGatewayFixture(
+    this._server,
+    this.steerStatus,
+    this.errorCode, [
+    this.steerErrorMessage = 'agent does not support steer',
+  ]);
 
   final HttpServer _server;
   String steerStatus;
   final int? errorCode;
+  String steerErrorMessage;
 
   /// When true, a `session.steer` frame is recorded and then the socket is
   /// closed without ever answering — the lost-acknowledgement scenario.
@@ -700,9 +883,11 @@ class SteerGatewayFixture {
   static Future<SteerGatewayFixture> start({
     String steerStatus = 'queued',
     int? errorCode,
+    String steerErrorMessage = 'agent does not support steer',
   }) async {
     final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-    final gateway = SteerGatewayFixture(server, steerStatus, errorCode);
+    final gateway =
+        SteerGatewayFixture(server, steerStatus, errorCode, steerErrorMessage);
     server.listen(gateway._handle);
     return gateway;
   }
@@ -788,7 +973,7 @@ class SteerGatewayFixture {
             jsonEncode({
               'jsonrpc': '2.0',
               'id': id,
-              'error': {'code': errorCode, 'message': 'agent does not support steer'},
+              'error': {'code': errorCode, 'message': steerErrorMessage},
             }),
           );
           return;

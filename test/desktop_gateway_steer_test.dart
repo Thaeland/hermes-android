@@ -68,6 +68,38 @@ void main() {
       );
     });
 
+    test('a coded gateway error is rejected even when its message reads Timeout',
+        () async {
+      // Classification must key on the JSON-RPC code, not message text:
+      // a real gateway rejection whose message happens to say 'Timeout'
+      // is still a definite, applied-nowhere refusal, not a lost ack.
+      final gateway = await SteerGatewayFixture.start(
+        errorCode: 4002,
+        steerErrorMessage: 'Timeout',
+      );
+      addTearDown(gateway.stop);
+      final client = DesktopGatewayClient.fromConnection(
+        SavedConnection(
+          id: 'steer-test',
+          label: 'Steer fixture',
+          host: 'localhost',
+          port: gateway.port,
+          apiKey: 'fixture-key',
+          useHttps: false,
+          desktopGatewayUrl: 'http://127.0.0.1:${gateway.port}',
+          dashboardUsername: 'user',
+          dashboardPassword: 'pass',
+        ),
+      );
+      addTearDown(client.close);
+      await client.ensureSession('mobile-1');
+
+      expect(
+        await client.steerPrompt(sessionId: 'mobile-1', text: 'go'),
+        SteerOutcome.rejected,
+      );
+    });
+
     test('a lost acknowledgement after write is uncertain, not rejected',
         () async {
       final gateway = await SteerGatewayFixture.start();
