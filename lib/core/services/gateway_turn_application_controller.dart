@@ -26,6 +26,21 @@ abstract interface class GatewayTurnApplicationSession {
 
   void removeAsyncEventListener(String localSessionId, Object registration);
 
+  /// Registers the mounted owner of one local session's terminal callbacks.
+  Object setTurnSettledListener(
+    String localSessionId,
+    GatewayTurnSettledCallback listener,
+  );
+
+  /// Removes [registration] without disturbing a replacement route owner.
+  void removeTurnSettledListener(String localSessionId, Object registration);
+
+  /// Whether the exact approval is still unresolved on this session's socket.
+  bool ownsApprovalRequest({
+    required String sessionId,
+    required String requestId,
+  });
+
   /// Responds only when this recovery session owns the request.
   Future<bool> tryRespondToApproval({
     required String sessionId,
@@ -83,10 +98,14 @@ abstract interface class GatewayTurnApplicationSession {
 
   Future<void> close();
 
-  set onTurnSettled(GatewayTurnSettledCallback? callback);
+  /// Registers the mounted owner of one session's durable binding callbacks.
+  Object setSessionBoundListener(
+    String localSessionId,
+    GatewayTurnSessionBoundCallback listener,
+  );
 
-  /// Called after each authoritative durable `session.open` binding.
-  set onSessionBound(GatewayTurnSessionBoundCallback? callback);
+  /// Removes [registration] without disturbing a replacement route owner.
+  void removeSessionBoundListener(String localSessionId, Object registration);
 }
 
 /// Owns recovery registries above screen and Navigator lifetimes.
@@ -197,6 +216,30 @@ class _CoordinatorGatewayTurnApplicationSession
     _asyncEventListeners.remove(localSessionId);
     _client.rejectServerRequestsForSession(localSessionId);
     _syncAsyncEventDispatcher();
+  }
+
+  @override
+  Object setTurnSettledListener(
+    String localSessionId,
+    GatewayTurnSettledCallback listener,
+  ) {
+    _requireOpen();
+    return _registry.setTurnSettledListener(localSessionId, listener);
+  }
+
+  @override
+  void removeTurnSettledListener(String localSessionId, Object registration) {
+    if (_closed) return;
+    _registry.removeTurnSettledListener(localSessionId, registration);
+  }
+
+  @override
+  bool ownsApprovalRequest({
+    required String sessionId,
+    required String requestId,
+  }) {
+    _requireOpen();
+    return _client.ownsApprovalRequest(sessionId, requestId: requestId);
   }
 
   @override
@@ -341,13 +384,18 @@ class _CoordinatorGatewayTurnApplicationSession
   }
 
   @override
-  set onTurnSettled(GatewayTurnSettledCallback? callback) {
-    _registry.onTurnSettled = callback;
+  Object setSessionBoundListener(
+    String localSessionId,
+    GatewayTurnSessionBoundCallback listener,
+  ) {
+    _requireOpen();
+    return _registry.setSessionBoundListener(localSessionId, listener);
   }
 
   @override
-  set onSessionBound(GatewayTurnSessionBoundCallback? callback) {
-    _registry.onSessionBound = callback;
+  void removeSessionBoundListener(String localSessionId, Object registration) {
+    if (_closed) return;
+    _registry.removeSessionBoundListener(localSessionId, registration);
   }
 }
 

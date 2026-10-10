@@ -32,7 +32,6 @@ import 'support/inert_turn_application_session.dart';
 import 'support/l10n_test_utils.dart';
 import 'package:hermes_android/l10n/app_localizations.dart';
 
-
 Session _session({required String id, required String title}) {
   return Session(
     id: id,
@@ -235,14 +234,28 @@ Finder _sectionHeader(HomeSectionKind kind, AppLocalizations l10n) =>
     );
 
 /// A turn session a widget test can drive: captures the workspace's
-/// onSessionBound handler and fires it on demand, like the real coordinator
+/// session-bound handler and fires it on demand, like the real coordinator
 /// does when `session.open` first binds a draft id to a stored id.
 class _ControllableTurnSession extends InertTurnApplicationSession {
   GatewayTurnSessionBoundCallback? boundCallback;
+  Object? boundRegistration;
 
   @override
-  set onSessionBound(GatewayTurnSessionBoundCallback? callback) {
-    boundCallback = callback;
+  Object setSessionBoundListener(
+    String localSessionId,
+    GatewayTurnSessionBoundCallback listener,
+  ) {
+    final token = Object();
+    boundRegistration = token;
+    boundCallback = listener;
+    return token;
+  }
+
+  @override
+  void removeSessionBoundListener(String localSessionId, Object registration) {
+    if (!identical(boundRegistration, registration)) return;
+    boundRegistration = null;
+    boundCallback = null;
   }
 
   void fireSessionBound(String localSessionId, String storedSessionId) {
@@ -614,7 +627,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(HomePane), findsOneWidget);
-    expect(find.text(HomeSectionKind.continueWorking.title(l10n)), findsOneWidget);
+    expect(
+      find.text(HomeSectionKind.continueWorking.title(l10n)),
+      findsOneWidget,
+    );
     expect(find.text('Roadmap slice'), findsOneWidget);
     // The placeholder it replaces must be gone, not merely pushed down.
     expect(find.textContaining('Home — Coming next'), findsNothing);
@@ -806,8 +822,8 @@ void main() {
     final repository = await _repository([]);
     await tester.pumpWidget(
       MaterialApp(
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
-      supportedLocales: AppLocalizations.supportedLocales,
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         theme: hermesTheme(Brightness.dark),
         home: WorkspaceScreen(
           connection: _connection(desktopGatewayUrl: 'https://host:8642'),
@@ -881,8 +897,8 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
-      supportedLocales: AppLocalizations.supportedLocales,
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
         theme: hermesTheme(Brightness.dark),
         home: WorkspaceScreen(
           connection: _connection(desktopGatewayUrl: 'https://host:8642'),
@@ -1164,9 +1180,13 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.pumpWidget(MaterialApp(
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
-      supportedLocales: AppLocalizations.supportedLocales,home: SizedBox.shrink()));
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: SizedBox.shrink(),
+      ),
+    );
     await tester.pumpAndSettle();
 
     // A screen that owns an injected repository must not close it: the host
@@ -1193,7 +1213,10 @@ void main() {
 
       expect(_sectionHeader(HomeSectionKind.needsYou, l10n), findsOneWidget);
       expect(find.text('Waiting for your input'), findsOneWidget);
-      expect(_sectionHeader(HomeSectionKind.continueWorking, l10n), findsNothing);
+      expect(
+        _sectionHeader(HomeSectionKind.continueWorking, l10n),
+        findsNothing,
+      );
     });
 
     testWidgets('a running turn ranks its chat under Running now', (
@@ -1210,7 +1233,10 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(_sectionHeader(HomeSectionKind.running, l10n), findsOneWidget);
-      expect(_sectionHeader(HomeSectionKind.continueWorking, l10n), findsNothing);
+      expect(
+        _sectionHeader(HomeSectionKind.continueWorking, l10n),
+        findsNothing,
+      );
     });
 
     testWidgets('blocked work raises the Home badge', (tester) async {
@@ -1248,7 +1274,10 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Roadmap slice'), findsOneWidget);
-      expect(_sectionHeader(HomeSectionKind.continueWorking, l10n), findsOneWidget);
+      expect(
+        _sectionHeader(HomeSectionKind.continueWorking, l10n),
+        findsOneWidget,
+      );
       expect(tester.takeException(), isNull);
     });
 
@@ -1292,7 +1321,10 @@ void main() {
 
       expect(reads, greaterThan(1));
       expect(_sectionHeader(HomeSectionKind.needsYou, l10n), findsNothing);
-      expect(_sectionHeader(HomeSectionKind.continueWorking, l10n), findsOneWidget);
+      expect(
+        _sectionHeader(HomeSectionKind.continueWorking, l10n),
+        findsOneWidget,
+      );
     });
 
     testWidgets('a legacy connection with no gateway reads no signals', (

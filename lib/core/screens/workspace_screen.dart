@@ -52,6 +52,7 @@ import '../widgets/share_text_review_sheet.dart';
 import 'workspace_sessions_screen.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
+
 /// Builds the Projects repository for a connection. Injectable for tests.
 typedef ProjectsRepositoryFactory =
     ProjectsRepository Function(SavedConnection connection);
@@ -135,6 +136,10 @@ class WorkspaceScreen extends StatefulWidget {
   /// screen pushes the chat itself, so the shell is never a dead end.
   final ValueChanged<Session>? onOpenSession;
 
+  /// Periodic silent refresh for the session lists (running/idle chips).
+  /// Null (tests) disables the timer; the app passes a modest interval.
+  final Duration? sessionsRefreshInterval;
+
   /// Owns durable turn recovery above this screen's lifetime. Passed to every
   /// chat opened from Home so a turn survives leaving the chat.
   final GatewayTurnApplicationController? turnApplicationController;
@@ -204,6 +209,7 @@ class WorkspaceScreen extends StatefulWidget {
     this.initialQuickChat = false,
     this.sharedAttachmentPreparer,
     this.onOpenDashboard,
+    this.sessionsRefreshInterval,
     super.key,
   });
 
@@ -733,6 +739,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           title: context.l10n.chats,
           view: WorkspaceSessionView.all,
           embedded: true,
+          refreshInterval: widget.sessionsRefreshInterval,
           load: _loadWorkspaceSessionsData,
           onOpenSession: (session) => unawaited(
             _openSession(session, projectName: _chatProjectLabels[session.id]),
@@ -752,8 +759,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         if (repository == null) {
           return ErrorState.unsupported(
             title: context.l10n.projects_unavailable,
-            message:
-                context.l10n.projects_need_a_desktop_gateway_connection_add_the_desktop_gateway,
+            message: context
+                .l10n
+                .projects_need_a_desktop_gateway_connection_add_the_desktop_gateway,
           );
         }
         return ProjectsPane(
@@ -884,7 +892,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         .firstOrNull;
 
     final project =
-        known ?? HermesProject(id: projectId, slug: projectId, name: context.l10n.project);
+        known ??
+        HermesProject(
+          id: projectId,
+          slug: projectId,
+          name: context.l10n.project,
+        );
 
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
@@ -1011,7 +1024,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     final mode = await showModalBottomSheet<NewChatMode>(
       context: context,
       builder: (_) =>
-            NewChatSheet(options: buildNewChatOptionsFor(context.l10n, view)),
+          NewChatSheet(options: buildNewChatOptionsFor(context.l10n, view)),
     );
     if (mode == null || !mounted) return;
 
@@ -1208,6 +1221,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       WorkspaceSessionsScreen(
         title: title,
         view: view,
+        refreshInterval: widget.sessionsRefreshInterval,
         load: _loadWorkspaceSessionsData,
         onOpenSession: (session) => unawaited(_openSession(session)),
         onPromote: switch (view) {

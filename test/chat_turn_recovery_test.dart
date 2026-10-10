@@ -138,6 +138,29 @@ void main() {
     },
   );
 
+  testWidgets('disposed chat releases its Project binding listener', (
+    tester,
+  ) async {
+    final session = _FakeTurnSession([const <GatewayTurnRecoveryState>[]]);
+    var loads = 0;
+    await _pumpChat(
+      tester,
+      turnSession: session,
+      projectOverviewLoader: () async {
+        loads += 1;
+        return ProjectsTreeOverview.empty;
+      },
+    );
+    expect(loads, 1);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+    session.bind('recovery-session', 'stored-session');
+    await tester.pump();
+
+    expect(loads, 1);
+  });
+
   testWidgets(
     'lazy stock fallback binding refreshes the draft Project header',
     (tester) async {
@@ -923,6 +946,7 @@ class _FakeTurnSession implements GatewayTurnApplicationSession {
   int closeCount = 0;
   final List<String> submittedTexts = [];
   GatewayTurnSessionBoundCallback? _onSessionBound;
+  Object? _sessionBoundRegistration;
 
   void bind(String localSessionId, String storedSessionId) {
     _onSessionBound?.call(localSessionId, storedSessionId);
@@ -936,6 +960,21 @@ class _FakeTurnSession implements GatewayTurnApplicationSession {
 
   @override
   void removeAsyncEventListener(String localSessionId, Object registration) {}
+
+  @override
+  Object setTurnSettledListener(
+    String localSessionId,
+    GatewayTurnSettledCallback listener,
+  ) => Object();
+
+  @override
+  void removeTurnSettledListener(String localSessionId, Object registration) {}
+
+  @override
+  bool ownsApprovalRequest({
+    required String sessionId,
+    required String requestId,
+  }) => false;
 
   @override
   Future<bool> tryRespondToApproval({
@@ -1013,11 +1052,21 @@ class _FakeTurnSession implements GatewayTurnApplicationSession {
   Future<void> close() async => closeCount++;
 
   @override
-  set onTurnSettled(GatewayTurnSettledCallback? callback) {}
+  Object setSessionBoundListener(
+    String localSessionId,
+    GatewayTurnSessionBoundCallback listener,
+  ) {
+    final token = Object();
+    _sessionBoundRegistration = token;
+    _onSessionBound = listener;
+    return token;
+  }
 
   @override
-  set onSessionBound(GatewayTurnSessionBoundCallback? callback) {
-    _onSessionBound = callback;
+  void removeSessionBoundListener(String localSessionId, Object registration) {
+    if (!identical(_sessionBoundRegistration, registration)) return;
+    _sessionBoundRegistration = null;
+    _onSessionBound = null;
   }
 
   @override

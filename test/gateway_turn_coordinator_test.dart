@@ -637,6 +637,140 @@ Future<void> _waitFor(
 
 void main() {
   test(
+    'registry binding listeners are session-scoped and token-owned',
+    () async {
+      final fixture = await _GatewayFixture.start();
+      final registry = GatewayTurnCoordinatorRegistry(
+        connectionId: 'connection-a',
+        endpointDigest: _digest,
+        journal: GatewayTurnJournal(store: _MemoryJournalStore()),
+        freshSocketFactory: () async => WsClient(fixture.baseUrl),
+      );
+      final delivered = <(String, String, String)>[];
+      final oldA = registry.setSessionBoundListener(
+        'local-a',
+        (local, stored) => delivered.add(('stale-a', local, stored)),
+      );
+      final currentA = registry.setSessionBoundListener(
+        'local-a',
+        (local, stored) => delivered.add(('current-a', local, stored)),
+      );
+      // A late dispose from the replaced route must not remove its successor.
+      registry.removeSessionBoundListener('local-a', oldA);
+      registry.setSessionBoundListener(
+        'local-b',
+        (local, stored) => delivered.add(('session-b', local, stored)),
+      );
+
+      try {
+        await registry.open('local-a');
+        await registry.open('local-b');
+
+        expect(delivered, [
+          ('current-a', 'local-a', 'stored-1'),
+          ('session-b', 'local-b', 'stored-2'),
+        ]);
+
+        registry.setSessionBoundListener(
+          'local-a',
+          (local, stored) => delivered.add(('replacement-a', local, stored)),
+        );
+        registry.removeSessionBoundListener('local-a', currentA);
+        expect(delivered.last, ('replacement-a', 'local-a', 'stored-1'));
+      } finally {
+        await registry.closeAll();
+        await fixture.close();
+      }
+    },
+  );
+
+  test(
+    'registry settlement listeners are session-scoped and token-owned',
+    () async {
+      final fixture = await _GatewayFixture.start();
+      var uuidIndex = 0;
+      final registry = GatewayTurnCoordinatorRegistry(
+        connectionId: 'connection-a',
+        endpointDigest: _digest,
+        journal: GatewayTurnJournal(store: _MemoryJournalStore()),
+        freshSocketFactory: () async => WsClient(fixture.baseUrl),
+        uuidFactory: () => _uuidFor(++uuidIndex),
+      );
+      final delivered = <String>[];
+      final oldA = registry.setTurnSettledListener(
+        'local-a',
+        (_) => delivered.add('stale-a'),
+      );
+      registry.setTurnSettledListener(
+        'local-a',
+        (_) => delivered.add('current-a'),
+      );
+      // A late dispose from the replaced route must not remove its successor.
+      registry.removeTurnSettledListener('local-a', oldA);
+      final sessionB = registry.setTurnSettledListener(
+        'local-b',
+        (_) => delivered.add('session-b'),
+      );
+
+      try {
+        final stateA = await registry.submit(
+          localSessionId: 'local-a',
+          text: 'alpha',
+        );
+        final stateB = await registry.submit(
+          localSessionId: 'local-b',
+          text: 'beta',
+        );
+        registry.removeTurnSettledListener('local-b', sessionB);
+
+        fixture.sendEvent(
+          _liveEventParams(
+            type: 'message.start',
+            turnId: stateA.turnId!,
+            seq: 1,
+            payload: <String, dynamic>{},
+          ),
+        );
+        fixture.sendEvent(
+          _liveEventParams(
+            type: 'turn.status',
+            turnId: stateA.turnId!,
+            seq: 2,
+            payload: <String, dynamic>{'status': 'completed'},
+          ),
+        );
+        fixture.sendEvent(
+          _liveEventParams(
+            type: 'message.start',
+            turnId: stateB.turnId!,
+            seq: 1,
+            payload: <String, dynamic>{},
+            sessionId: 'runtime-2',
+          ),
+          socketIndex: 1,
+        );
+        fixture.sendEvent(
+          _liveEventParams(
+            type: 'turn.status',
+            turnId: stateB.turnId!,
+            seq: 2,
+            payload: <String, dynamic>{'status': 'completed'},
+            sessionId: 'runtime-2',
+          ),
+          socketIndex: 1,
+        );
+
+        await _waitFor(() => delivered.isNotEmpty);
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        expect(delivered, ['current-a']);
+      } finally {
+        await registry.closeAll();
+        await fixture.close();
+      }
+    },
+  );
+
+  test(
     'coordinator reports runtime binding and preserves inherited events',
     () async {
       final fixture = await _GatewayFixture.start();

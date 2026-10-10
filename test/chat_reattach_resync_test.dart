@@ -1,8 +1,9 @@
 // Review blocker #3: a mid-turn socket drop must actually reattach, with
 // the REAL production close ordering. WsClient._handleClosedConnection
 // rejects every pending RPC the instant the socket closes — so the submit
-// catch fires BEFORE the reconnect (composer restore, optimistic turn
-// stripped), and the resync runs later, on the fresh socket, while the
+// catch fires BEFORE the reconnect. Once onSent has confirmed wire acceptance,
+// that uncertain close must keep the composer cleared and the optimistic turn;
+// the resync runs later, on the fresh socket, while the
 // detached server turn may still be settling. The resync must therefore:
 // - fetch by the gateway's STORED session key (a newly created stock
 //   session's DB row is not addressable by the mobile session id),
@@ -87,8 +88,9 @@ void main() {
       expect(history.messageRequestCount, 1);
 
       // PRODUCTION ORDERING: WsClient rejects the pending prompt.submit AT
-      // CLOSE, before any reconnect. The catch restores the composer and
-      // strips the optimistic turn — this happens BEFORE the resync runs.
+      // CLOSE, before any reconnect. onSent already confirmed wire acceptance,
+      // so the catch keeps the composer cleared and the optimistic turn while
+      // the later resync reconciles the uncertain acknowledgement.
       history.includeCompletedTurn = true;
       submission.completeError(
         JsonRpcError('prompt.submit', 'Desktop gateway connection closed'),
@@ -97,9 +99,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         tester.widget<TextField>(find.byType(TextField)).controller!.text,
-        'Long running task',
-        reason:
-            'the catch-at-close path restores the composer before reconnect',
+        isEmpty,
+        reason: 'an accepted prompt must not be restored and submitted twice',
       );
       expect(
         history.messageRequestCount,
@@ -248,7 +249,8 @@ void main() {
       await tester.pump();
       await tester.pump();
 
-      // Close-ordering: submit fails at close, composer restored.
+      // Close-ordering: submit fails at close after wire acceptance, so the
+      // composer stays cleared while reattachment reconciles the turn.
       hook.handler?.call(DesktopConnectionState.reconnecting);
       await tester.pump();
       submission.completeError(
@@ -268,8 +270,8 @@ void main() {
       expect(afterFirstResync, 2, reason: 'first resync fetch attempted');
       expect(
         tester.widget<TextField>(find.byType(TextField)).controller!.text,
-        'Slow settling turn',
-        reason: 'a failed resync must not touch the composer either',
+        isEmpty,
+        reason: 'a failed resync must not resurrect an accepted prompt',
       );
 
       // The row becomes readable: the next retry must land the reply.

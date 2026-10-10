@@ -4,18 +4,24 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'core/services/android_launch_intent_service.dart';
 import 'core/services/android_share_intent_service.dart';
+import 'core/services/composer_draft_store.dart';
 import 'core/services/config_backup.dart';
 import 'core/services/config_backup_io.dart';
 import 'core/services/config_backup_service.dart';
 import 'core/services/connection_manager.dart';
 import 'core/services/gateway_turn_application_controller.dart';
+import 'core/services/notification_prefs.dart';
 import 'core/services/text_size_preference.dart';
+import 'core/services/turn_notification_service.dart';
+import 'core/screens/chat_screen.dart';
 import 'core/screens/workspace_screen.dart';
 import 'core/theme/hermes_theme.dart';
 import 'core/utils/responsive.dart';
 import 'core/widgets/config_backup_card.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final prefs = await SharedPreferences.getInstance();
@@ -87,16 +93,14 @@ class _StartupRecoveryApp extends StatelessWidget {
                   Text(
                     context.l10n.hermes_could_not_load_your_saved_connections,
                     textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    context.l10n.the_local_connection_store_looks_damaged_you_can_reset_the(
-                      error.runtimeType,
-                    ),
+                    context.l10n
+                        .the_local_connection_store_looks_damaged_you_can_reset_the(
+                          error.runtimeType,
+                        ),
                     textAlign: TextAlign.center,
                     style: const TextStyle(fontSize: 13),
                   ),
@@ -196,10 +200,152 @@ class HermesApp extends StatefulWidget {
 class HermesAppState extends State<HermesApp> {
   late final GatewayTurnApplicationController _turnApplicationController;
 
+  /// Pushes from the app root (notification taps) need a navigator below the
+  /// MaterialApp this state builds.
+  final GlobalKey<NavigatorState> _navigatorKey = GlobalKey<NavigatorState>();
+
   @override
   void initState() {
     super.initState();
     _turnApplicationController = GatewayTurnApplicationController();
+    unawaited(NotificationPrefsStore.load());
+    notificationResponseHandler = _handleNotificationResponse;
+    // A notification that launched a terminated app carries its tap/action in
+    // the platform's launch details; route it once the first frame is up.
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      final initial = await TurnNotificationService.shared
+          .takeInitialNotificationResponse();
+      if (initial != null && mounted) _handleNotificationResponse(initial);
+    });
+  }
+
+  /// The connection a notification response should act on: the last one the
+  /// user opened, or the only configured one.
+  SavedConnection? _notificationConnection() {
+    final connections = widget.connManager.getConnections();
+    final lastId = widget.connManager.prefs.getString(
+      HomeScreenState._lastConnectionKey,
+    );
+    final preferred = connections
+        .where((connection) => connection.id == lastId)
+        .firstOrNull;
+    return preferred ?? (connections.length == 1 ? connections.single : null);
+  }
+
+  /// Routes a notification tap (or one of its action buttons) into the app.
+  ///
+  /// Approval actions answer through the turn controller when it owns the
+  /// request; otherwise the action is left pending for the chat that does, and
+  /// every response lands the user on the session the notification was about.
+  void _handleNotificationResponse(NotificationResponse response) {
+    final route = NotificationRoute.fromResponse(response);
+    // An explicit connection id must resolve: falling back to another backend
+    // could answer an approval against the wrong gateway. Only legacy
+    // payloads without an id use the last-opened connection.
+    final hasExplicitConnection =
+        route.connectionId != null && route.connectionId!.isNotEmpty;
+    final connection = hasExplicitConnection
+        ? _connectionById(route.connectionId)
+        : _notificationConnection();
+    if (connection == null) return;
+
+    final choice = route.approvalChoice;
+    final sessionId = route.sessionId;
+    final requestId = route.requestId;
+    if (choice != null && sessionId != null && requestId != null) {
+      final approval = PendingNotificationApproval(
+        // Saved connection ids remain distinct even when two profiles point
+        // at the same endpoint with different credentials or gateway profiles.
+        connectionId: connection.id,
+        sessionId: sessionId,
+        requestId: requestId,
+        choice: choice,
+      );
+      try {
+        final session = _turnApplicationController.sessionFor(connection);
+        unawaited(
+          session
+              .tryRespondToApproval(
+                sessionId: sessionId,
+                choice: choice,
+                requestId: requestId,
+              )
+              .then((answered) {
+                // The request belongs to an open chat's route-local gateway:
+                // leave it pending so that screen answers it normally.
+                if (!answered) addPendingNotificationApproval(approval);
+              })
+              .catchError((_) {
+                // A throw is unresolved, not answered: keep the tap pending
+                // so the owning chat can still answer it.
+                addPendingNotificationApproval(approval);
+              }),
+        );
+      } catch (_) {
+        // A closed controller cannot answer; the owning chat still can.
+        addPendingNotificationApproval(approval);
+      }
+    }
+
+    unawaited(_openNotificationSession(connection, sessionId));
+  }
+
+  /// The connection a payload names, or null when it no longer exists.
+  SavedConnection? _connectionById(String? id) {
+    if (id == null || id.isEmpty) return null;
+    return widget.connManager
+        .getConnections()
+        .where((connection) => connection.id == id)
+        .firstOrNull;
+  }
+
+  /// Opens the chat a notification was about; falls back to the workspace when
+  /// the session cannot be fetched (deleted, or outside the recent list).
+  Future<void> _openNotificationSession(
+    SavedConnection connection,
+    String? sessionId,
+  ) async {
+    Session? session;
+    if (sessionId != null && sessionId.isNotEmpty) {
+      ApiClient? client;
+      try {
+        client = ApiClient(
+          baseUrl: connection.baseUrl,
+          apiKey: connection.apiKey,
+          pathPrefix: connection.gatewayPrefix ?? '',
+        );
+        session = await client.getSessionById(sessionId);
+      } catch (_) {
+        session = null;
+      } finally {
+        client?.close();
+      }
+    }
+    if (!mounted) return;
+    widget.connManager.prefs.setString(
+      HomeScreenState._lastConnectionKey,
+      connection.id,
+    );
+    if (session == null) {
+      _navigatorKey.currentState?.push(
+        MaterialPageRoute(
+          builder: (_) => WorkspaceScreen(
+            connection: connection,
+            turnApplicationController: _turnApplicationController,
+          ),
+        ),
+      );
+      return;
+    }
+    _navigatorKey.currentState?.push(
+      MaterialPageRoute(
+        builder: (_) => ChatScreen(
+          connection: connection,
+          session: session!,
+          turnApplicationController: _turnApplicationController,
+        ),
+      ),
+    );
   }
 
   Future<void> setTextSizePreference(TextSizePreference preference) async {
@@ -210,6 +356,7 @@ class HermesAppState extends State<HermesApp> {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      navigatorKey: _navigatorKey,
       onGenerateTitle: (context) => context.l10n.hermes_agent,
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: preferredSupportedLocales(),
@@ -474,6 +621,7 @@ class HomeScreenState extends State<HomeScreen> {
           turnApplicationController: widget.turnApplicationController,
           initialSharedPayload: sharedPayload,
           initialQuickChat: initialQuickChat,
+          sessionsRefreshInterval: const Duration(seconds: 10),
         ),
       ),
     );
@@ -641,13 +789,18 @@ class HomeScreenState extends State<HomeScreen> {
                       } on CredentialStorageException {
                         if (!ctx.mounted) return;
                         setDialogState(() {
-                          error = context.l10n.the_api_key_could_not_be_stored_securely;
+                          error = context
+                              .l10n
+                              .the_api_key_could_not_be_stored_securely;
                           validating = false;
                         });
                       } catch (_) {
                         if (!ctx.mounted) return;
                         setDialogState(() {
-                          error = context.l10n.cannot_reach(conn.host, conn.port);
+                          error = context.l10n.cannot_reach(
+                            conn.host,
+                            conn.port,
+                          );
                           validating = false;
                         });
                       }
@@ -697,7 +850,9 @@ class HomeScreenState extends State<HomeScreen> {
                 Padding(
                   padding: const EdgeInsets.only(bottom: 12),
                   child: Text(
-                    context.l10n.used_for_hosted_path_prefixes_and_for_the_settings_memory,
+                    context
+                        .l10n
+                        .used_for_hosted_path_prefixes_and_for_the_settings_memory,
                     style: TextStyle(color: Colors.grey[600], fontSize: 12),
                   ),
                 ),
@@ -809,7 +964,9 @@ class HomeScreenState extends State<HomeScreen> {
                           ? null
                           : int.tryParse(portText);
                       if (portText.isNotEmpty && (port == null || port <= 0)) {
-                        setDialogState(() => error = context.l10n.invalid_port_number);
+                        setDialogState(
+                          () => error = context.l10n.invalid_port_number,
+                        );
                         return;
                       }
                       final user = userCtrl.text.trim();
@@ -870,16 +1027,17 @@ class HomeScreenState extends State<HomeScreen> {
                         client.close();
                         if (!ctx.mounted) return;
                         setDialogState(() {
-                          error =
-                              context.l10n.the_dashboard_credentials_could_not_be_stored_securely;
+                          error = context
+                              .l10n
+                              .the_dashboard_credentials_could_not_be_stored_securely;
                           validating = false;
                         });
                       } catch (_) {
                         client.close();
                         if (!ctx.mounted) return;
                         setDialogState(() {
-                          error =
-                              context.l10n.could_not_reach_authenticate_the_dashboard_at_check_the_port(
+                          error = context.l10n
+                              .could_not_reach_authenticate_the_dashboard_at_check_the_port(
                                 port ?? conn.dashboardPort,
                                 conn.host,
                               );
@@ -928,6 +1086,9 @@ class HomeScreenState extends State<HomeScreen> {
             if (v == 'delete') {
               try {
                 await widget.connManager.deleteConnection(conn.id);
+                // Drop every draft stored for this connection: a deleted
+                // connection must not leave orphaned drafts behind.
+                await ComposerDraftStore.removeConnection(conn.id);
                 if (mounted) _refresh();
               } on CredentialStorageException {
                 if (!mounted) return;
@@ -948,15 +1109,24 @@ class HomeScreenState extends State<HomeScreen> {
             }
           },
           itemBuilder: (_) => [
-            PopupMenuItem(value: 'edit', child: Text(context.l10n.edit_connection)),
-            PopupMenuItem(value: 'apikey', child: Text(context.l10n.update_api_key)),
+            PopupMenuItem(
+              value: 'edit',
+              child: Text(context.l10n.edit_connection),
+            ),
+            PopupMenuItem(
+              value: 'apikey',
+              child: Text(context.l10n.update_api_key),
+            ),
             PopupMenuItem(
               value: 'dashboard',
               child: Text(context.l10n.dashboard_proxy_settings),
             ),
             PopupMenuItem(
               value: 'delete',
-              child: Text(context.l10n.delete, style: TextStyle(color: Colors.red)),
+              child: Text(
+                context.l10n.delete,
+                style: TextStyle(color: Colors.red),
+              ),
             ),
           ],
         ),
@@ -1002,7 +1172,9 @@ class HomeScreenState extends State<HomeScreen> {
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    context.l10n.tap_to_add_a_remote_hermes_gateway_api_server_port,
+                    context
+                        .l10n
+                        .tap_to_add_a_remote_hermes_gateway_api_server_port,
                     style: Theme.of(
                       context,
                     ).textTheme.bodyMedium?.copyWith(color: Colors.grey[600]),
@@ -1226,8 +1398,9 @@ class _AddDialogState extends State<_AddDialog> {
           dashClient.close();
           if (!mounted) return;
           setState(() {
-            _error =
-                context.l10n.gateway_connected_but_the_dashboard_could_not_be_reached_or;
+            _error = context
+                .l10n
+                .gateway_connected_but_the_dashboard_could_not_be_reached_or;
             _validating = false;
             _showDashboard = true;
           });
@@ -1274,7 +1447,9 @@ class _AddDialogState extends State<_AddDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: Text(
-        _isEditing ? context.l10n.edit_gateway_connection : context.l10n.add_gateway_connection,
+        _isEditing
+            ? context.l10n.edit_gateway_connection
+            : context.l10n.add_gateway_connection,
       ),
       content: SingleChildScrollView(
         child: Column(
@@ -1328,7 +1503,8 @@ class _AddDialogState extends State<_AddDialog> {
               controller: _port,
               decoration: InputDecoration(
                 labelText: context.l10n.port,
-                hintText: context.l10n.leave_blank_for_default_8642_443_with_https,
+                hintText:
+                    context.l10n.leave_blank_for_default_8642_443_with_https,
               ),
               keyboardType: TextInputType.number,
             ),
@@ -1396,7 +1572,9 @@ class _AddDialogState extends State<_AddDialog> {
               Padding(
                 padding: const EdgeInsets.only(bottom: 4),
                 child: Text(
-                  context.l10n.optional_for_the_memory_cron_skills_settings_tabs_leave_blank,
+                  context
+                      .l10n
+                      .optional_for_the_memory_cron_skills_settings_tabs_leave_blank,
                   style: TextStyle(color: Colors.grey[600], fontSize: 12),
                 ),
               ),
@@ -1430,8 +1608,9 @@ class _AddDialogState extends State<_AddDialog> {
                 decoration: InputDecoration(
                   labelText: context.l10n.desktop_gateway_url_optional,
                   hintText: 'https://hermes-desktop.example.lan',
-                  helperText:
-                      context.l10n.enables_file_attachments_through_the_desktop_remote_gateway,
+                  helperText: context
+                      .l10n
+                      .enables_file_attachments_through_the_desktop_remote_gateway,
                 ),
                 keyboardType: TextInputType.url,
                 autocorrect: false,
@@ -1442,8 +1621,9 @@ class _AddDialogState extends State<_AddDialog> {
                 decoration: InputDecoration(
                   labelText: context.l10n.hermes_profile_optional,
                   hintText: context.l10n.e_g_sol,
-                  helperText:
-                      context.l10n.profile_this_connection_chats_as_when_the_dashboard_serves_several,
+                  helperText: context
+                      .l10n
+                      .profile_this_connection_chats_as_when_the_dashboard_serves_several,
                   helperMaxLines: 3,
                 ),
                 autocorrect: false,
@@ -1468,7 +1648,9 @@ class _AddDialogState extends State<_AddDialog> {
                     color: Colors.white,
                   ),
                 )
-              : Text(_isEditing ? context.l10n.save_changes : context.l10n.connect),
+              : Text(
+                  _isEditing ? context.l10n.save_changes : context.l10n.connect,
+                ),
         ),
       ],
     );

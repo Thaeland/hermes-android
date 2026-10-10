@@ -2,6 +2,7 @@
 // Uses REST endpoints: POST /api/sessions/{id}/chat and
 // GET /api/sessions/{id}/messages.
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -15,6 +16,7 @@ import 'package:share_plus/share_plus.dart';
 import '../controllers/voice_composer_controller.dart';
 import '../services/connection_manager.dart';
 import '../services/attachment_draft_service.dart';
+import '../services/composer_draft_store.dart';
 import '../services/chat_model_override_store.dart';
 import '../services/desktop_gateway_client.dart';
 import '../services/gateway_turn_application_controller.dart';
@@ -23,8 +25,10 @@ import '../services/gateway_turn_recovery.dart';
 import '../services/gateway_turn_ui_projection.dart';
 import '../services/remote_files_client.dart';
 import '../services/turn_notification_service.dart';
+import '../services/notification_prefs.dart';
 import '../services/voice_composer_adapter.dart';
 import '../services/ws_client.dart';
+import '../utils/media_tags.dart';
 import '../models/attachment_draft.dart';
 import '../models/gateway_activity.dart';
 import '../models/gateway_approval.dart';
@@ -48,9 +52,11 @@ import '../widgets/gateway_approval_dialog.dart';
 import '../widgets/gateway_clarify_dialog.dart';
 import '../widgets/gateway_insight_card.dart';
 import '../widgets/gateway_sensitive_prompt_dialog.dart';
+import '../widgets/media_artifact_card.dart';
 import '../widgets/voice_composer_controls.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
+
 /// These colors remain identical in light and dark themes. Their 8.15:1
 /// contrast ratio keeps normal user-message text above WCAG AA.
 const hermesUserMessageBubbleBackground = Color(0xFFD4AF37);
@@ -181,6 +187,13 @@ ChatProjectHeaderResolution resolveChatProjectHeader(
   return ChatProjectHeaderResolution.unknown;
 }
 
+@visibleForTesting
+typedef TestComposerDraftReader =
+    Future<String?> Function({
+      required String connectionId,
+      required String sessionId,
+    });
+
 /// Mutable holder that lets a test reach the ChatScreen's Desktop
 /// connection-state handler when no real gateway is configured. The screen
 /// fills [handler] in `initState`; the test then calls it with the state
@@ -256,6 +269,9 @@ class ChatScreen extends StatefulWidget {
   final List<AttachmentDraft> testInitialAttachmentDrafts;
 
   @visibleForTesting
+  final TestComposerDraftReader? testComposerDraftReader;
+
+  @visibleForTesting
   final VoiceComposerAdapter? testVoiceComposerAdapter;
 
   /// Lets a test observe what the chat posts to Android when a turn settles,
@@ -288,6 +304,12 @@ class ChatScreen extends StatefulWidget {
   @visibleForTesting
   final String? Function(String mobileSessionId)? testStoredSessionKey;
 
+  /// Lets widget tests observe the exact stored-session scope bound to an
+  /// artifact tap without opening a real dashboard connection.
+  @visibleForTesting
+  final RemoteFilesDataSource Function(String storedSessionId)?
+  testMediaFilesClient;
+
   const ChatScreen({
     required this.connection,
     required this.session,
@@ -303,6 +325,7 @@ class ChatScreen extends StatefulWidget {
     this.testServerFilePicker,
     this.testRemoteAttachmentUpload,
     this.testInitialAttachmentDrafts = const [],
+    this.testComposerDraftReader,
     this.testVoiceComposerAdapter,
     this.testTurnNotifications,
     this.testDesktopConnectionHook,
@@ -310,6 +333,7 @@ class ChatScreen extends StatefulWidget {
     this.testProjectOverviewLoader,
     this.testDesktopSessionEnsured,
     this.testStoredSessionKey,
+    this.testMediaFilesClient,
     super.key,
   });
 
@@ -335,12 +359,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   DesktopGatewayClient? _desktopGateway;
   GatewayTurnApplicationSession? _turnApplicationSession;
   Object? _turnApplicationAsyncEventRegistration;
+  Object? _turnApplicationSettledRegistration;
+  Object? _turnApplicationBoundRegistration;
   DesktopConnectionState _desktopConnectionState =
       DesktopConnectionState.disconnected;
   bool _appInBackground = false;
 
   // Chat sending state
   final _textController = TextEditingController();
+  int _composerRevision = 0;
   final _imagePicker = ImagePicker();
   final List<AttachmentDraft> _attachmentDrafts = [];
   String? _sessionModel;
@@ -437,13 +464,50 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _projectName = _normalisedProjectName(widget.projectName);
-    _textController.text = widget.initialComposerText ?? '';
-    _textController.selection = TextSelection.collapsed(
-      offset: _textController.text.length,
-    );
+    _textController.addListener(_onComposerChanged);
+    if (widget.initialComposerText case final shared?) {
+      _textController.text = shared;
+      _textController.selection = TextSelection.collapsed(
+        offset: shared.length,
+      );
+    } else {
+      // Restore this session's draft: leaving the chat must never lose it.
+      final composerRevision = _composerRevision;
+      final readDraft =
+          widget.testComposerDraftReader ?? ComposerDraftStore.read;
+      unawaited(
+        readDraft(
+          connectionId: widget.connection.id,
+          sessionId: widget.session.id,
+        ).then((draft) {
+          if (!mounted || draft == null) return;
+          // The user may have started typing while the read was in flight:
+          // even if they cleared or sent that newer text, never resurrect the
+          // older stored value just because the composer is empty again.
+          if (_composerRevision != composerRevision ||
+              _textController.text.isNotEmpty) {
+            return;
+          }
+          _textController.text = draft;
+          _textController.selection = TextSelection.collapsed(
+            offset: draft.length,
+          );
+        }),
+      );
+    }
     _turnNotifications =
-        widget.testTurnNotifications ?? TurnNotificationService();
+        widget.testTurnNotifications ?? TurnNotificationService.shared;
     unawaited(_turnNotifications.ensureInitialized());
+    // A notification action that could not answer directly (the request is
+    // owned by this screen's gateway, not the app-level controller) lands in
+    // the shared store; consume it on mount and whenever it changes while
+    // this chat is open — the already-mounted owner must observe it too.
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _consumePendingNotificationApproval(),
+    );
+    pendingNotificationApprovals.addListener(
+      _consumePendingNotificationApproval,
+    );
     _client =
         widget.testApiClient ??
         ApiClient(
@@ -506,9 +570,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (turnApplicationSession != null) {
       _turnApplicationAsyncEventRegistration = turnApplicationSession
           .setAsyncEventListener(widget.session.id, _handleDesktopAsyncEvent);
+      _turnApplicationSettledRegistration = turnApplicationSession
+          .setTurnSettledListener(widget.session.id, _onTurnSettled);
+      _turnApplicationBoundRegistration = turnApplicationSession
+          .setSessionBoundListener(widget.session.id, _onSessionBound);
     }
-    _turnApplicationSession?.onTurnSettled = _onTurnSettled;
-    _turnApplicationSession?.onSessionBound = _onSessionBound;
     unawaited(_refreshProjectName());
     unawaited(_initializeChat());
     _loadVerboseMode();
@@ -517,13 +583,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _scrollController.addListener(_onScroll);
   }
 
-  String get _chatModelConnectionIdentity =>
+  String get _connectionIdentity =>
       '${widget.connection.baseUrl}|'
       '${widget.connection.gatewayPrefix ?? ''}|'
       '${widget.connection.desktopGatewayUrl ?? ''}';
 
   String get _gatewayNoticeIdentity =>
-      '$_chatModelConnectionIdentity|${widget.session.id}';
+      '$_connectionIdentity|${widget.session.id}';
+
+  void _onComposerChanged() => _composerRevision += 1;
+
+  String get _storedSessionKey =>
+      _desktopGateway?.storedSessionKeyFor(widget.session.id) ??
+      widget.testStoredSessionKey?.call(widget.session.id) ??
+      widget.session.id;
 
   static String? _normalisedProjectName(String? value) {
     final trimmed = value?.trim() ?? '';
@@ -572,7 +645,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _restoreSessionModelOverride() async {
     final store = await _chatModelStore;
     final override = store.read(
-      connectionIdentity: _chatModelConnectionIdentity,
+      connectionIdentity: _connectionIdentity,
       sessionId: widget.session.id,
     );
     if (!mounted || override == null) return;
@@ -593,6 +666,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _projectNameRefreshGeneration += 1;
+    pendingNotificationApprovals.removeListener(
+      _consumePendingNotificationApproval,
+    );
     _clearPendingReattachResync();
     widget.testDesktopConnectionHook?.handler = null;
     widget.testDesktopAsyncEventHook?.handler = null;
@@ -624,6 +700,27 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         registration,
       );
     }
+    final settledRegistration = _turnApplicationSettledRegistration;
+    if (settledRegistration != null) {
+      _turnApplicationSession?.removeTurnSettledListener(
+        widget.session.id,
+        settledRegistration,
+      );
+    }
+    final boundRegistration = _turnApplicationBoundRegistration;
+    if (boundRegistration != null) {
+      _turnApplicationSession?.removeSessionBoundListener(
+        widget.session.id,
+        boundRegistration,
+      );
+    }
+    unawaited(
+      ComposerDraftStore.save(
+        connectionId: widget.connection.id,
+        sessionId: widget.session.id,
+        text: _textController.text,
+      ),
+    );
     _textController.dispose();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
@@ -662,6 +759,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         state == AppLifecycleState.hidden ||
         state == AppLifecycleState.detached) {
       _appInBackground = true;
+      // Persist the draft on the way out: a process kill must not lose it.
+      unawaited(
+        ComposerDraftStore.save(
+          connectionId: widget.connection.id,
+          sessionId: widget.session.id,
+          text: _textController.text,
+        ),
+      );
       _pauseReattachRetry();
       if (_legacyTransportFallback && (_sending || _streaming)) {
         _legacyHistoryResyncPending = true;
@@ -718,7 +823,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              context.l10n.connection_switched_the_running_reply_continues_on_the_server_and,
+              context
+                  .l10n
+                  .connection_switched_the_running_reply_continues_on_the_server_and,
             ),
             persist: false,
           ),
@@ -730,6 +837,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (connectionChanged && state == DesktopConnectionState.connected) {
       unawaited(_refreshProjectName());
       _requestImmediateReattachResync();
+      // A notification tap that landed before this route-local gateway was
+      // ready stays pending; retry it now that the connection is back.
+      _consumePendingNotificationApproval();
     }
   }
 
@@ -898,7 +1008,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ..hideCurrentSnackBar()
         ..showSnackBar(
           SnackBar(
-            content: Text(context.l10n.read_aloud_is_unavailable_on_this_device),
+            content: Text(
+              context.l10n.read_aloud_is_unavailable_on_this_device,
+            ),
             duration: Duration(seconds: 3),
           ),
         );
@@ -908,14 +1020,139 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void _onTurnSettled(GatewayTurnRecoveryState state) {
     if (!mounted || !_appInBackground) return;
     final turnId = state.turnId ?? state.clientTurnId;
-    final summary = state.isTerminal && !state.isFailClosed
+    final completed =
+        !state.isFailClosed &&
+        state.status == GatewayRecoveryTurnStatus.completed;
+    final kind = completed
+        ? HermesNotificationKind.turnDone
+        : HermesNotificationKind.turnError;
+    if (!notificationKindEnabled(kind)) return;
+    final summary = completed
         ? context.l10n.response_ready
-        : context.l10n.turn_completed;
+        : context.l10n.turn_failed;
     unawaited(
-      _turnNotifications.showTurnCompleted(
-        title: context.l10n.hermes_response_ready,
-        turnSummary: '${widget.session.title}: $summary',
-        turnId: turnId,
+      completed
+          ? _turnNotifications.showTurnCompleted(
+              title: context.l10n.hermes_response_ready,
+              turnSummary: '${widget.session.title}: $summary',
+              turnId: turnId,
+              sessionId: widget.session.id,
+              connectionId: widget.connection.id,
+            )
+          : _turnNotifications.showTurnFailed(
+              title: context.l10n.the_turn_failed,
+              turnSummary: '${widget.session.title}: $summary',
+              turnId: turnId,
+              sessionId: widget.session.id,
+              connectionId: widget.connection.id,
+            ),
+    );
+  }
+
+  /// Mirrors a blocking approval to a native notification (with approve/deny
+  /// buttons) while the app is in the background — the one prompt class that
+  /// must not wait for the user to come back on their own.
+  void _notifyApprovalRequest(
+    GatewayApprovalRequest request,
+    String? serverRequestId,
+  ) {
+    if (!_appInBackground || serverRequestId == null) return;
+    final command = request.command.trim();
+    final body = command.isEmpty
+        ? request.description.trim()
+        : (command.length > 140 ? '${command.substring(0, 140)}…' : command);
+    unawaited(
+      _turnNotifications.showKind(
+        kind: HermesNotificationKind.approval,
+        title: '${context.l10n.approval_needed} — ${widget.session.title}',
+        body: body,
+        eventId: serverRequestId,
+        sessionId: widget.session.id,
+        connectionId: widget.connection.id,
+        actions: [
+          TurnNotificationAction(id: 'approve', label: context.l10n.approve),
+          TurnNotificationAction(id: 'reject', label: context.l10n.deny),
+        ],
+        payload: jsonEncode({
+          'sessionId': widget.session.id,
+          'connectionId': widget.connection.id,
+          'requestId': serverRequestId,
+        }),
+      ),
+    );
+  }
+
+  /// Mirrors a clarify/sudo/secret prompt to a native notification while the
+  /// app is in the background. The dialog itself stays queued for the return.
+  void _notifyInputRequest({required String eventId, required String body}) {
+    if (!_appInBackground) return;
+    final trimmed = body.trim();
+    unawaited(
+      _turnNotifications.showKind(
+        kind: HermesNotificationKind.input,
+        title: '${context.l10n.input_needed} — ${widget.session.title}',
+        body: trimmed.length > 140 ? '${trimmed.substring(0, 140)}…' : trimmed,
+        eventId: eventId,
+        sessionId: widget.session.id,
+        connectionId: widget.connection.id,
+        payload: jsonEncode({
+          'sessionId': widget.session.id,
+          'connectionId': widget.connection.id,
+        }),
+      ),
+    );
+  }
+
+  /// Gateway notices mirror the desktop split: credit state changes are the
+  /// only native notice class (credits.depleted / credits.restored); every
+  /// other notice posts as a plugin notice while the app is away.
+  void _notifyGatewayNotice(GatewayNotification notification) {
+    if (!_appInBackground) return;
+    final isCredits =
+        notification.key == 'credits.depleted' ||
+        notification.key == 'credits.restored';
+    unawaited(
+      _turnNotifications.showKind(
+        kind: isCredits
+            ? HermesNotificationKind.credits
+            : HermesNotificationKind.plugin,
+        title: isCredits
+            ? context.l10n.credit_notifications
+            : context.l10n.plugin_notifications,
+        body: notification.text,
+        eventId: notification.key,
+        sessionId: widget.session.id,
+        connectionId: widget.connection.id,
+        payload: jsonEncode({
+          'sessionId': widget.session.id,
+          'connectionId': widget.connection.id,
+        }),
+      ),
+    );
+  }
+
+  /// Background task completions and review summaries arrive as GatewayNotice
+  /// insights; mirror them to a native notification while the app is away —
+  /// completions as background work, reviews as gateway notices.
+  void _notifyBackgroundNotice(GatewayNotice notice) {
+    if (!_appInBackground) return;
+    final isBackground = notice.kind == GatewayNoticeKind.background;
+    unawaited(
+      _turnNotifications.showKind(
+        kind: isBackground
+            ? HermesNotificationKind.backgroundDone
+            : HermesNotificationKind.plugin,
+        title: isBackground
+            ? context.l10n.background_task_completed
+            : context.l10n.plugin_notifications,
+        body: notice.text,
+        eventId: notice.identity,
+        sessionId: widget.session.id,
+        connectionId: widget.connection.id,
+        payload: jsonEncode({
+          'sessionId': widget.session.id,
+          'connectionId': widget.connection.id,
+        }),
       ),
     );
   }
@@ -1134,11 +1371,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final responseGeneration = _responseGeneration;
     var retryAfterSettlement = false;
     try {
-      final sessionId =
-          _desktopGateway?.storedSessionKeyFor(widget.session.id) ??
-          widget.testStoredSessionKey?.call(widget.session.id) ??
-          widget.session.id;
-      final messages = await _getRecentMessages(sessionId);
+      final messages = await _getRecentMessages(_storedSessionKey);
       if (!mounted) return;
       if (responseGeneration != _responseGeneration ||
           _sending ||
@@ -1342,11 +1575,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     try {
       await _ensureDesktopSession();
       if (!_canRunReattachResync || generation != _reattachGeneration) return;
-      final storedSessionId =
-          _desktopGateway?.storedSessionKeyFor(widget.session.id) ??
-          widget.testStoredSessionKey?.call(widget.session.id) ??
-          widget.session.id;
-      final messages = await _getRecentMessages(storedSessionId);
+      final messages = await _getRecentMessages(_storedSessionKey);
       if (!_canRunReattachResync || generation != _reattachGeneration) return;
       _extractToolMessages(messages);
       final completed = _hasTerminalAssistantAfterWatermark(messages);
@@ -1526,7 +1755,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _gatewayTurnStatus = projection.isFailClosed
             ? GatewayTurnStatus(
                 kind: 'recovery_failed',
-                text: context.l10n.hermes_stopped_recovery_safely_no_prompt_was_resent,
+                text: context
+                    .l10n
+                    .hermes_stopped_recovery_safely_no_prompt_was_resent,
               )
             : null;
       }
@@ -1577,7 +1808,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   String _gatewayRecoveryStatusText(GatewayRecoveryTurnStatus? status) {
     return switch (status) {
-      GatewayRecoveryTurnStatus.waitingInput => context.l10n.hermes_is_waiting_for_input,
+      GatewayRecoveryTurnStatus.waitingInput =>
+        context.l10n.hermes_is_waiting_for_input,
       GatewayRecoveryTurnStatus.running => context.l10n.hermes_is_responding,
       _ => context.l10n.recovering_hermes,
     };
@@ -1630,7 +1862,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             ListTile(
               leading: const Icon(Icons.photo_library_outlined),
               title: Text(
-                _desktopGateway == null ? context.l10n.choose_image : context.l10n.choose_images,
+                _desktopGateway == null
+                    ? context.l10n.choose_image
+                    : context.l10n.choose_images,
               ),
               onTap: () {
                 Navigator.pop(sheetContext);
@@ -1816,7 +2050,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _pickFiles() async {
     if (_desktopGateway == null) {
       _showAttachmentError(
-        context.l10n.configure_a_valid_desktop_gateway_url_before_attaching_files,
+        context
+            .l10n
+            .configure_a_valid_desktop_gateway_url_before_attaching_files,
       );
       return;
     }
@@ -1867,7 +2103,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         );
       }
     } catch (_) {
-      _showAttachmentError(context.l10n.unable_to_prepare_this_file_try_another_one);
+      _showAttachmentError(
+        context.l10n.unable_to_prepare_this_file_try_another_one,
+      );
     }
   }
 
@@ -1942,14 +2180,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              context.l10n.file_attached_document_catalog_registration_is_pending,
+              context
+                  .l10n
+                  .file_attached_document_catalog_registration_is_pending,
             ),
           ),
         );
       }
     } catch (error) {
       _showAttachmentError(
-        context.l10n.retry_failed_for_the_draft_and_prompt_were_kept(draft.name),
+        context.l10n.retry_failed_for_the_draft_and_prompt_were_kept(
+          draft.name,
+        ),
       );
     } finally {
       if (mounted) {
@@ -2128,7 +2370,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(context.l10n.could_not_load_models_for_this_profile(error)),
+          content: Text(
+            context.l10n.could_not_load_models_for_this_profile(error),
+          ),
         ),
       );
     } finally {
@@ -2187,7 +2431,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
       final store = await _chatModelStore;
       await store.save(
-        connectionIdentity: _chatModelConnectionIdentity,
+        connectionIdentity: _connectionIdentity,
         sessionId: widget.session.id,
         provider: choice.provider,
         model: choice.model,
@@ -2212,9 +2456,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       );
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(context.l10n.model_was_not_changed(error))));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.model_was_not_changed(error))),
+      );
     } finally {
       if (mounted) setState(() => _changingModel = false);
     }
@@ -2291,7 +2535,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             },
           ];
 
-    _textController.text = '';
+    _clearComposerForSend();
     _awaitingVoiceReply = speakResponse && _voiceReplyEnabled;
     final responseGeneration = ++_responseGeneration;
     _activeResponseTransport = _ResponseTransport.rest;
@@ -2310,7 +2554,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       );
       _messages.add({'role': 'user', 'content': localContent});
       // Insert a placeholder streaming message
-      _messages.add({'role': 'assistant', 'content': ''});
+      _messages.add({
+        'role': 'assistant',
+        'content': '',
+        '_gateway_pending_response': true,
+      });
     });
 
     _scheduleStreamingFollow();
@@ -2378,25 +2626,39 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               await _speakAssistantText(assistantText);
             }
           }
-        } catch (e) {
+        } catch (_) {
           if (!mounted || responseGeneration != _responseGeneration) return;
           _scrollCoordinator.cancelStreaming();
           setState(() {
+            if (_messages.isNotEmpty && _messages.last['role'] == 'assistant') {
+              _messages.last['_gateway_pending_response'] = false;
+            }
             _streaming = false;
             _sending = false;
             _gatewayTurnStatus = null;
             _activeResponseTransport = _ResponseTransport.none;
           });
+          // The SSE response completed, so the server accepted the prompt.
+          // A follow-up history read failing must not resurrect it as a draft.
+          _deferHistoryRefresh();
         }
       },
       onError: (error) {
         if (!mounted || responseGeneration != _responseGeneration) return;
+        // No streamed content means the request never reached the server
+        // (connection failure, non-200): restore the draft so nothing typed
+        // is lost. Content already flowing means the prompt was accepted.
+        final hadContent =
+            _messages.isNotEmpty &&
+            _messages.last['role'] == 'assistant' &&
+            (_messages.last['content']?.toString().isNotEmpty ?? false);
         // Remove the placeholder assistant message
         setState(() {
           if (_messages.isNotEmpty && _messages.last['role'] == 'assistant') {
             _messages.removeLast();
           }
         });
+        if (!hadContent) _restoreComposerAfterRejectedSend(text);
         _handleSendError(error, removePendingUserMessage: true);
       },
     );
@@ -2430,6 +2692,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final historyAtSend = _historyGeneration;
     _activeResponseTransport = _ResponseTransport.desktop;
     var turnAdded = false;
+    var promptSubmitted = false;
 
     setState(() {
       _sending = true;
@@ -2463,8 +2726,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               final index = attachments.indexOf(draft);
               _gatewayTurnStatus = GatewayTurnStatus(
                 kind: 'upload',
-                text:
-                    context.l10n.uploading(index + 1, draft.name, attachments.length),
+                text: context.l10n.uploading(
+                  index + 1,
+                  draft.name,
+                  attachments.length,
+                ),
               );
             }
           });
@@ -2475,7 +2741,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
                 content: Text(
-                  context.l10n.file_attached_document_catalog_registration_is_pending,
+                  context
+                      .l10n
+                      .file_attached_document_catalog_registration_is_pending,
                 ),
               ),
             );
@@ -2494,7 +2762,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             text,
             attachmentLabels,
           ].where((part) => part.trim().isNotEmpty).join('\n\n');
-          _textController.clear();
+          _clearComposerForSend();
           _scrollCoordinator.beginStreaming(isNearEnd: _isNearEnd());
           setState(() {
             _streaming = true;
@@ -2504,7 +2772,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             );
             _attachmentDrafts.clear();
             _messages.add({'role': 'user', 'content': localContent});
-            _messages.add({'role': 'assistant', 'content': ''});
+            _messages.add({
+              'role': 'assistant',
+              'content': '',
+              '_gateway_pending_response': true,
+            });
             turnAdded = true;
           });
           _scheduleStreamingFollow();
@@ -2513,6 +2785,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           }
 
           void markPromptSent() {
+            promptSubmitted = true;
             if (mounted && responseGeneration == _responseGeneration) {
               _legacyDesktopPromptSubmitted = true;
             }
@@ -2541,6 +2814,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       );
       if (!mounted || responseGeneration != _responseGeneration) return;
       setState(() {
+        final assistant = _lastAssistantMessage();
+        if (assistant != null) {
+          assistant['_gateway_pending_response'] = false;
+        }
         _streaming = false;
         _sending = false;
         _gatewayTurnStatus = null;
@@ -2567,7 +2844,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       // reply). Restoring the composer and stripping the local turn would
       // clobber it, so skip the restore and just surface the error state.
       final resyncLanded = _historyGeneration != historyAtSend;
-      if (turnAdded && !resyncLanded) {
+      if (turnAdded && !resyncLanded && !promptSubmitted) {
         setState(() {
           if (_messages.isNotEmpty &&
               _messages.last['role'] == 'assistant' &&
@@ -2577,7 +2854,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           if (_messages.isNotEmpty && _messages.last['role'] == 'user') {
             _messages.removeLast();
           }
-          _textController.text = text;
+          _restoreComposerAfterRejectedSend(text);
           _attachmentDrafts
             ..clear()
             ..addAll(attachments);
@@ -2642,7 +2919,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             ..error = null;
           _gatewayTurnStatus = GatewayTurnStatus(
             kind: 'upload',
-            text: context.l10n.uploading(index + 1, draft.name, attachments.length),
+            text: context.l10n.uploading(
+              index + 1,
+              draft.name,
+              attachments.length,
+            ),
           );
         });
         final dataUrl = await _attachmentDraftService.readDataUrl(draft);
@@ -2685,15 +2966,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     final attachmentLabels = attachments
         .map(
-          (attachment) =>
-              '[${context.l10n.attached_file}: ${attachment.name}]',
+          (attachment) => '[${context.l10n.attached_file}: ${attachment.name}]',
         )
         .join('\n');
     final localContent = [
       text,
       attachmentLabels,
     ].where((part) => part.trim().isNotEmpty).join('\n\n');
-    _textController.clear();
+    _clearComposerForSend();
     _scrollCoordinator.beginStreaming(isNearEnd: _isNearEnd());
     setState(() {
       _streaming = true;
@@ -2733,7 +3013,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           if (_messages.isNotEmpty && _messages.last['role'] == 'user') {
             _messages.removeLast();
           }
-          _textController.text = text;
+          _restoreComposerAfterRejectedSend(text);
           for (final draft in attachments) {
             draft
               ..status = AttachmentDraftStatus.ready
@@ -2840,7 +3120,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         assistant['content'] = transition.sealedText;
         if (transition.startsNewMessage) {
           assistant['_gateway_interim'] = true;
-          _messages.add({'role': 'assistant', 'content': ''});
+          assistant['_gateway_pending_response'] = false;
+          _messages.add({
+            'role': 'assistant',
+            'content': '',
+            '_gateway_pending_response': true,
+          });
         }
       });
       _scheduleStreamingFollow();
@@ -2851,15 +3136,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           event.data['rendered']?.toString() ??
           event.data['text']?.toString() ??
           '';
-      if (completeText.isNotEmpty) {
-        setState(() {
-          final assistant = _lastAssistantMessage();
-          if (assistant != null) {
+      setState(() {
+        final assistant = _lastAssistantMessage();
+        if (assistant != null) {
+          assistant['_gateway_pending_response'] = false;
+          if (completeText.isNotEmpty) {
             final current = assistant['content']?.toString() ?? '';
             if (current.isEmpty) _registerMaterializedAssistantMessage();
             assistant['content'] = completeText;
           }
-        });
+        }
+      });
+      if (completeText.isNotEmpty) {
         _scheduleStreamingFollow();
       }
       return;
@@ -2898,6 +3186,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (event.type == 'notification.show') {
       final notification = GatewayNotification.fromEventData(event.data);
       if (notification == null) return;
+      _notifyGatewayNotice(notification);
       _notificationTimers.remove(notification.key)?.cancel();
       setState(() => _gatewayNotifications[notification.key] = notification);
       _scheduleStreamingFollow();
@@ -2934,6 +3223,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final notice = GatewayNotice.fromGatewayEvent(event.type, event.data);
     if (notice == null) return;
     if (_gatewayNotices.any((item) => item.identity == notice.identity)) return;
+    _notifyBackgroundNotice(notice);
     setState(() {
       _gatewayNotices.add(notice);
       if (_gatewayNotices.length > 20) _gatewayNotices.removeAt(0);
@@ -3046,6 +3336,49 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
+  /// Answers approvals that notification actions left pending for this
+  /// connection. Entries are removed only after the gateway confirms the
+  /// answer: a cold start (no route-local session yet) or a throw keeps the
+  /// tap pending for a later retry instead of losing it.
+  void _consumePendingNotificationApproval() {
+    final mine = [
+      for (final approval in pendingNotificationApprovals.value)
+        if (approval.connectionId == widget.connection.id &&
+            approval.sessionId == widget.session.id)
+          approval,
+    ];
+    for (final approval in mine) {
+      unawaited(_answerPendingNotificationApproval(approval));
+    }
+  }
+
+  /// Approvals whose answer is in flight, so a notifier change cannot
+  /// dispatch the same request twice.
+  final Set<String> _answeringPendingApprovals = {};
+
+  Future<void> _answerPendingNotificationApproval(
+    PendingNotificationApproval approval,
+  ) async {
+    final key =
+        '${approval.connectionId}|${approval.sessionId}|${approval.requestId}';
+    if (_answeringPendingApprovals.contains(key)) return;
+    _answeringPendingApprovals.add(key);
+    try {
+      // The normal approval path: route-local turn session first, then the
+      // desktop gateway. A throw means the route-local gateway is not up
+      // yet (cold start/reconnect) — keep the entry and retry later.
+      await _respondToGatewayApproval(
+        approval.choice,
+        requestId: approval.requestId,
+      );
+      removePendingNotificationApproval(approval);
+    } catch (_) {
+      // Unresolved, not answered: keep the entry for a later retry.
+    } finally {
+      _answeringPendingApprovals.remove(key);
+    }
+  }
+
   Future<void> _respondToGatewayClarify({
     required String requestId,
     required String answer,
@@ -3106,6 +3439,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     await gateway.respondToSecret(requestId: requestId, value: value);
   }
 
+  bool _ownsGatewayApproval(String requestId) {
+    final turnSession = _turnApplicationSession;
+    if (turnSession != null &&
+        turnSession.ownsApprovalRequest(
+          sessionId: widget.session.id,
+          requestId: requestId,
+        )) {
+      return true;
+    }
+    return _desktopGateway?.ownsApprovalRequest(
+          widget.session.id,
+          requestId: requestId,
+        ) ??
+        false;
+  }
+
   void _showGatewayApproval(
     Map<String, dynamic> eventData,
     int responseGeneration,
@@ -3120,6 +3469,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         : rawServerRequestId;
     _approvalDialogOpen = true;
     _activeApprovalServerRequestId = serverRequestId;
+    _notifyApprovalRequest(request, serverRequestId);
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       final wasCancelledBeforeOpen =
@@ -3132,8 +3482,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _activeApprovalServerRequestId = null;
         return;
       }
-      final desktopGateway = _desktopGateway;
-      if (desktopGateway == null) {
+      if (serverRequestId != null && !_ownsGatewayApproval(serverRequestId)) {
+        _approvalDialogOpen = false;
+        _activeApprovalServerRequestId = null;
+        return;
+      }
+      if (_desktopGateway == null && _turnApplicationSession == null) {
         _approvalDialogOpen = false;
         _activeApprovalServerRequestId = null;
         return;
@@ -3218,6 +3572,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     final pending = _sensitivePromptQueue.removeAt(0);
     _activeSensitivePrompt = pending;
+    _notifyInputRequest(
+      eventId: pending.request.requestId,
+      body: pending.request.description.isNotEmpty
+          ? pending.request.description
+          : pending.request.title,
+    );
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted ||
@@ -3398,6 +3758,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     final pending = _clarifyPromptQueue.removeAt(0);
     _activeClarifyPrompt = pending;
+    _notifyInputRequest(
+      eventId: pending.request.identityKey,
+      body: pending.request.question,
+    );
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted ||
@@ -3527,6 +3891,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         // state updates the message content/markers and clears the
         // pending-response flag exactly as a live terminal event would.
         _applyGatewayTurnState(interruptedTurnState);
+      } else if (interrupted) {
+        setState(() {
+          final assistant = _lastAssistantMessage();
+          if (assistant != null) {
+            assistant['_gateway_pending_response'] = false;
+          }
+        });
       }
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -3534,7 +3905,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           content: Text(
             interrupted
                 ? context.l10n.response_stopped
-                : context.l10n.response_closed_locally_no_active_gateway_turn_was_found,
+                : context
+                      .l10n
+                      .response_closed_locally_no_active_gateway_turn_was_found,
           ),
         ),
       );
@@ -3542,7 +3915,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(context.l10n.response_closed_locally_gateway_stop_failed(error)),
+          content: Text(
+            context.l10n.response_closed_locally_gateway_stop_failed(error),
+          ),
           backgroundColor: Colors.orange,
           duration: const Duration(seconds: 6),
         ),
@@ -3551,6 +3926,34 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _stopResponseInFlight = false;
       unawaited(_refreshDeferredHistoryIfIdle());
     }
+  }
+
+  /// Clears the composer and its stored draft at the same boundary, so a
+  /// process kill right after sending cannot resurrect the sent prompt.
+  void _clearComposerForSend() {
+    _textController.clear();
+    unawaited(
+      ComposerDraftStore.save(
+        connectionId: widget.connection.id,
+        sessionId: widget.session.id,
+        text: '',
+      ),
+    );
+  }
+
+  /// A definite send rejection: put the text back into the composer and the
+  /// store so the user does not lose what they typed.
+  void _restoreComposerAfterRejectedSend(String text) {
+    if (text.trim().isEmpty) return;
+    _textController.text = text;
+    _textController.selection = TextSelection.collapsed(offset: text.length);
+    unawaited(
+      ComposerDraftStore.save(
+        connectionId: widget.connection.id,
+        sessionId: widget.session.id,
+        text: text,
+      ),
+    );
   }
 
   void _handleSendError(Object e, {bool removePendingUserMessage = false}) {
@@ -3991,7 +4394,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   ),
                 Semantics(
                   label: context.l10n.spoken_replies,
-                  value: _voiceReplyEnabled ? context.l10n.on : context.l10n.off,
+                  value: _voiceReplyEnabled
+                      ? context.l10n.on
+                      : context.l10n.off,
                   toggled: _voiceReplyEnabled,
                   button: true,
                   excludeSemantics: true,
@@ -4016,7 +4421,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ),
                 const SizedBox(width: 4),
                 Semantics(
-                  label: _streaming ? context.l10n.stop_response : context.l10n.send_message,
+                  label: _streaming
+                      ? context.l10n.stop_response
+                      : context.l10n.send_message,
                   button: true,
                   enabled:
                       _streaming ||
@@ -4156,6 +4563,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               isUser: isUser,
               verbose: _verboseMode,
               metadata: msg,
+              mediaReferencesFinal: msg['_gateway_pending_response'] != true,
+              mediaFilesClient: isUser
+                  ? null
+                  : () =>
+                        widget.testMediaFilesClient?.call(_storedSessionKey) ??
+                        RemoteFilesClient.fromConnection(
+                          widget.connection,
+                          sessionId: _storedSessionKey,
+                        ),
               onReadAloud: isUser
                   ? null
                   : () => _readAssistantText(content, announce: true),
@@ -4199,6 +4615,13 @@ class MessageBubble extends StatelessWidget {
   final Future<void> Function()? onReadAloud;
   final VoidCallback? onEdit;
   final Future<void> Function()? onRetry;
+  final bool mediaReferencesFinal;
+
+  /// Gateway files client factory for `MEDIA:` artifact cards. Assistant
+  /// bubbles without it render `MEDIA:` tags as prose (e.g. transcript views
+  /// with no session to resolve paths against — a same-path local file on
+  /// the phone would be worse than a dead link).
+  final RemoteFilesDataSource Function()? mediaFilesClient;
 
   const MessageBubble({
     super.key,
@@ -4209,6 +4632,8 @@ class MessageBubble extends StatelessWidget {
     this.onReadAloud,
     this.onEdit,
     this.onRetry,
+    this.mediaFilesClient,
+    this.mediaReferencesFinal = true,
   });
 
   Future<void> _copyMessage(BuildContext context) async {
@@ -4326,6 +4751,99 @@ class MessageBubble extends StatelessWidget {
             )
           : theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
     );
+  }
+
+  /// Splits assistant text on `MEDIA:` refs (when a files client is
+  /// available) and renders each piece: prose through the markdown/code-block
+  /// pipeline, standalone-line refs as download cards. Code fences are split
+  /// out FIRST and stay verbatim — a `MEDIA:` example inside a code block is
+  /// documentation, not a delivery. Mid-line refs stay in the prose as
+  /// markdown links so they never fragment a list item or table row.
+  List<Widget> _renderContent(
+    ThemeData theme,
+    bool isUser,
+    Color assistantTextColor,
+  ) {
+    final styleSheet = _messageStyleSheet(
+      theme,
+      isUser: isUser,
+      assistantTextColor: assistantTextColor,
+    );
+    final filesClient = !isUser ? mediaFilesClient : null;
+    Widget prose(String text) => MarkdownBody(
+      data: text,
+      selectable: false,
+      styleSheet: styleSheet,
+      onTapLink: filesClient == null
+          ? null
+          : (linkText, href, title) {
+              final path = href == null
+                  ? null
+                  : mediaPathFromArtifactHref(href);
+              if (path == null) return;
+              unawaited(
+                downloadAndShareMediaFile(
+                  filesClient: filesClient,
+                  ref: MediaTagRef(path: path),
+                ).catchError((Object e) {
+                  debugPrint('media link download failed: $e');
+                }),
+              );
+            },
+    );
+
+    final parseMedia = filesClient != null;
+    final blocks = splitMarkdownCodeBlocks(content);
+    final mediaOccurrences = <String, int>{};
+
+    List<Widget> renderProse(String text) {
+      if (!parseMedia) return [prose(text)];
+      final segments = splitMediaTags(text, isFinal: mediaReferencesFinal);
+      if (!segments.any((s) => s.isMedia)) {
+        return [
+          prose(inlineMediaTagsAsLinks(text, isFinal: mediaReferencesFinal)),
+        ];
+      }
+      final widgets = <Widget>[];
+      for (final segment in segments) {
+        if (segment.isMedia) {
+          final path = segment.media!.path;
+          final occurrence = mediaOccurrences.update(
+            path,
+            (value) => value + 1,
+            ifAbsent: () => 0,
+          );
+          widgets.add(
+            MediaArtifactCard(
+              // The occurrence ordinal keeps repeated paths unique while
+              // remaining stable as a streamed suffix grows.
+              key: ValueKey((path, occurrence)),
+              ref: segment.media!,
+              filesClient: filesClient,
+            ),
+          );
+        } else if (segment.text.trim().isNotEmpty) {
+          // Inline refs (mid-line) become markdown links in place.
+          widgets.add(
+            prose(
+              inlineMediaTagsAsLinks(
+                segment.text,
+                isFinal: mediaReferencesFinal,
+              ),
+            ),
+          );
+        }
+      }
+      return widgets;
+    }
+
+    return [
+      for (final block in blocks)
+        if (block is MarkdownCodeBlock)
+          block
+        else
+          ...renderProse(block as String),
+    ];
   }
 
   Future<void> _showActions(BuildContext context) async {
@@ -4526,21 +5044,12 @@ class MessageBubble extends StatelessWidget {
                 ),
               ),
             ],
-            // Message content: prose renders as markdown; fenced code
-            // blocks render with language, copy, and wrap controls.
-            ...splitMarkdownCodeBlocks(content).map(
-              (segment) => segment is MarkdownCodeBlock
-                  ? segment
-                  : MarkdownBody(
-                      data: segment as String,
-                      selectable: false,
-                      styleSheet: _messageStyleSheet(
-                        theme,
-                        isUser: isUser,
-                        assistantTextColor: assistantTextColor,
-                      ),
-                    ),
-            ),
+            // Message content: assistant `MEDIA:` refs become file cards;
+            // prose renders as markdown and fenced code blocks render with
+            // language, copy, and wrap controls. User bubbles never parse
+            // MEDIA: — the contract is assistant-side delivery, and quoted
+            // tags in a prompt must stay verbatim.
+            ..._renderContent(theme, isUser, assistantTextColor),
             const SizedBox(height: 4),
           ],
         ),
