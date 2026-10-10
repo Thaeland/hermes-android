@@ -74,6 +74,33 @@ enum HermesDestination {
 typedef HermesPaneBuilder =
     Widget Function(BuildContext context, HermesDestination destination);
 
+/// Exposes whether the pane it wraps is the visible destination.
+///
+/// Panes live in an [IndexedStack] and stay mounted when another tab is
+/// selected, so widgets that poll (e.g. the session-list refresh) need this
+/// to stop while hidden. Standalone hosts without a shell see `true`.
+class HermesPaneVisibility extends InheritedWidget {
+  const HermesPaneVisibility({
+    required this.active,
+    required super.child,
+    super.key,
+  });
+
+  /// Whether this pane is the selected destination.
+  final bool active;
+
+  /// True when the calling pane is the selected destination.
+  static bool of(BuildContext context) =>
+      context
+          .dependOnInheritedWidgetOfExactType<HermesPaneVisibility>()
+          ?.active ??
+      true;
+
+  @override
+  bool updateShouldNotify(HermesPaneVisibility oldWidget) =>
+      oldWidget.active != active;
+}
+
 /// The adaptive navigation shell.
 ///
 /// [badges] drives attention counts (for example pending approvals on
@@ -160,7 +187,10 @@ class _HermesShellState extends State<HermesShell> {
           if (_visitedDestinations.contains(destination))
             KeyedSubtree(
               key: ValueKey(destination),
-              child: widget.builder(context, destination),
+              child: HermesPaneVisibility(
+                active: destination == _current,
+                child: widget.builder(context, destination),
+              ),
             )
           else
             const SizedBox.shrink(),

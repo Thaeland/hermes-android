@@ -16,6 +16,7 @@ import 'package:share_plus/share_plus.dart';
 import '../controllers/voice_composer_controller.dart';
 import '../services/connection_manager.dart';
 import '../services/attachment_draft_service.dart';
+import '../services/composer_draft_store.dart';
 import '../services/chat_model_override_store.dart';
 import '../services/desktop_gateway_client.dart';
 import '../services/gateway_turn_application_controller.dart';
@@ -134,6 +135,13 @@ typedef TestRemoteAttachmentUpload =
       required String dataUrl,
     });
 
+@visibleForTesting
+typedef TestComposerDraftReader =
+    Future<String?> Function({
+      required String connectionId,
+      required String sessionId,
+    });
+
 /// Mutable holder that lets a test reach the ChatScreen's Desktop
 /// connection-state handler when no real gateway is configured. The screen
 /// fills [handler] in `initState`; the test then calls it with the state
@@ -209,6 +217,9 @@ class ChatScreen extends StatefulWidget {
   final List<AttachmentDraft> testInitialAttachmentDrafts;
 
   @visibleForTesting
+  final TestComposerDraftReader? testComposerDraftReader;
+
+  @visibleForTesting
   final VoiceComposerAdapter? testVoiceComposerAdapter;
 
   /// Lets a test observe what the chat posts to Android when a turn settles,
@@ -258,6 +269,7 @@ class ChatScreen extends StatefulWidget {
     this.testServerFilePicker,
     this.testRemoteAttachmentUpload,
     this.testInitialAttachmentDrafts = const [],
+    this.testComposerDraftReader,
     this.testVoiceComposerAdapter,
     this.testTurnNotifications,
     this.testDesktopConnectionHook,
@@ -297,6 +309,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   // Chat sending state
   final _textController = TextEditingController();
+  int _composerRevision = 0;
   final _imagePicker = ImagePicker();
   final List<AttachmentDraft> _attachmentDrafts = [];
   String? _sessionModel;
@@ -389,10 +402,37 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _textController.text = widget.initialComposerText ?? '';
-    _textController.selection = TextSelection.collapsed(
-      offset: _textController.text.length,
-    );
+    _textController.addListener(_onComposerChanged);
+    if (widget.initialComposerText case final shared?) {
+      _textController.text = shared;
+      _textController.selection = TextSelection.collapsed(
+        offset: shared.length,
+      );
+    } else {
+      // Restore this session's draft: leaving the chat must never lose it.
+      final composerRevision = _composerRevision;
+      final readDraft =
+          widget.testComposerDraftReader ?? ComposerDraftStore.read;
+      unawaited(
+        readDraft(
+          connectionId: widget.connection.id,
+          sessionId: widget.session.id,
+        ).then((draft) {
+          if (!mounted || draft == null) return;
+          // The user may have started typing while the read was in flight:
+          // even if they cleared or sent that newer text, never resurrect the
+          // older stored value just because the composer is empty again.
+          if (_composerRevision != composerRevision ||
+              _textController.text.isNotEmpty) {
+            return;
+          }
+          _textController.text = draft;
+          _textController.selection = TextSelection.collapsed(
+            offset: draft.length,
+          );
+        }),
+      );
+    }
     _turnNotifications =
         widget.testTurnNotifications ?? TurnNotificationService.shared;
     unawaited(_turnNotifications.ensureInitialized());
@@ -477,13 +517,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _scrollController.addListener(_onScroll);
   }
 
-  String get _chatModelConnectionIdentity =>
+  String get _connectionIdentity =>
       '${widget.connection.baseUrl}|'
       '${widget.connection.gatewayPrefix ?? ''}|'
       '${widget.connection.desktopGatewayUrl ?? ''}';
 
   String get _gatewayNoticeIdentity =>
-      '$_chatModelConnectionIdentity|${widget.session.id}';
+      '$_connectionIdentity|${widget.session.id}';
+
+  void _onComposerChanged() => _composerRevision += 1;
 
   String get _storedSessionKey =>
       _desktopGateway?.storedSessionKeyFor(widget.session.id) ??
@@ -493,7 +535,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _restoreSessionModelOverride() async {
     final store = await _chatModelStore;
     final override = store.read(
-      connectionIdentity: _chatModelConnectionIdentity,
+      connectionIdentity: _connectionIdentity,
       sessionId: widget.session.id,
     );
     if (!mounted || override == null) return;
@@ -553,6 +595,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         settledRegistration,
       );
     }
+    unawaited(
+      ComposerDraftStore.save(
+        connectionId: widget.connection.id,
+        sessionId: widget.session.id,
+        text: _textController.text,
+      ),
+    );
     _textController.dispose();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
@@ -591,6 +640,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         state == AppLifecycleState.hidden ||
         state == AppLifecycleState.detached) {
       _appInBackground = true;
+      // Persist the draft on the way out: a process kill must not lose it.
+      unawaited(
+        ComposerDraftStore.save(
+          connectionId: widget.connection.id,
+          sessionId: widget.session.id,
+          text: _textController.text,
+        ),
+      );
       _pauseReattachRetry();
       if (_legacyTransportFallback && (_sending || _streaming)) {
         _legacyHistoryResyncPending = true;
@@ -2249,7 +2306,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
       final store = await _chatModelStore;
       await store.save(
-        connectionIdentity: _chatModelConnectionIdentity,
+        connectionIdentity: _connectionIdentity,
         sessionId: widget.session.id,
         provider: choice.provider,
         model: choice.model,
@@ -2353,7 +2410,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             },
           ];
 
-    _textController.text = '';
+    _clearComposerForSend();
     _awaitingVoiceReply = speakResponse && _voiceReplyEnabled;
     final responseGeneration = ++_responseGeneration;
     _activeResponseTransport = _ResponseTransport.rest;
@@ -2444,7 +2501,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               await _speakAssistantText(assistantText);
             }
           }
-        } catch (e) {
+        } catch (_) {
           if (!mounted || responseGeneration != _responseGeneration) return;
           _scrollCoordinator.cancelStreaming();
           setState(() {
@@ -2456,16 +2513,27 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             _gatewayTurnStatus = null;
             _activeResponseTransport = _ResponseTransport.none;
           });
+          // The SSE response completed, so the server accepted the prompt.
+          // A follow-up history read failing must not resurrect it as a draft.
+          _deferHistoryRefresh();
         }
       },
       onError: (error) {
         if (!mounted || responseGeneration != _responseGeneration) return;
+        // No streamed content means the request never reached the server
+        // (connection failure, non-200): restore the draft so nothing typed
+        // is lost. Content already flowing means the prompt was accepted.
+        final hadContent =
+            _messages.isNotEmpty &&
+            _messages.last['role'] == 'assistant' &&
+            (_messages.last['content']?.toString().isNotEmpty ?? false);
         // Remove the placeholder assistant message
         setState(() {
           if (_messages.isNotEmpty && _messages.last['role'] == 'assistant') {
             _messages.removeLast();
           }
         });
+        if (!hadContent) _restoreComposerAfterRejectedSend(text);
         _handleSendError(error, removePendingUserMessage: true);
       },
     );
@@ -2499,6 +2567,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final historyAtSend = _historyGeneration;
     _activeResponseTransport = _ResponseTransport.desktop;
     var turnAdded = false;
+    var promptSubmitted = false;
 
     setState(() {
       _sending = true;
@@ -2568,7 +2637,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             text,
             attachmentLabels,
           ].where((part) => part.trim().isNotEmpty).join('\n\n');
-          _textController.clear();
+          _clearComposerForSend();
           _scrollCoordinator.beginStreaming(isNearEnd: _isNearEnd());
           setState(() {
             _streaming = true;
@@ -2591,6 +2660,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           }
 
           void markPromptSent() {
+            promptSubmitted = true;
             if (mounted && responseGeneration == _responseGeneration) {
               _legacyDesktopPromptSubmitted = true;
             }
@@ -2649,7 +2719,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       // reply). Restoring the composer and stripping the local turn would
       // clobber it, so skip the restore and just surface the error state.
       final resyncLanded = _historyGeneration != historyAtSend;
-      if (turnAdded && !resyncLanded) {
+      if (turnAdded && !resyncLanded && !promptSubmitted) {
         setState(() {
           if (_messages.isNotEmpty &&
               _messages.last['role'] == 'assistant' &&
@@ -2659,7 +2729,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           if (_messages.isNotEmpty && _messages.last['role'] == 'user') {
             _messages.removeLast();
           }
-          _textController.text = text;
+          _restoreComposerAfterRejectedSend(text);
           _attachmentDrafts
             ..clear()
             ..addAll(attachments);
@@ -2778,7 +2848,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       text,
       attachmentLabels,
     ].where((part) => part.trim().isNotEmpty).join('\n\n');
-    _textController.clear();
+    _clearComposerForSend();
     _scrollCoordinator.beginStreaming(isNearEnd: _isNearEnd());
     setState(() {
       _streaming = true;
@@ -2818,7 +2888,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           if (_messages.isNotEmpty && _messages.last['role'] == 'user') {
             _messages.removeLast();
           }
-          _textController.text = text;
+          _restoreComposerAfterRejectedSend(text);
           for (final draft in attachments) {
             draft
               ..status = AttachmentDraftStatus.ready
@@ -3731,6 +3801,34 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _stopResponseInFlight = false;
       unawaited(_refreshDeferredHistoryIfIdle());
     }
+  }
+
+  /// Clears the composer and its stored draft at the same boundary, so a
+  /// process kill right after sending cannot resurrect the sent prompt.
+  void _clearComposerForSend() {
+    _textController.clear();
+    unawaited(
+      ComposerDraftStore.save(
+        connectionId: widget.connection.id,
+        sessionId: widget.session.id,
+        text: '',
+      ),
+    );
+  }
+
+  /// A definite send rejection: put the text back into the composer and the
+  /// store so the user does not lose what they typed.
+  void _restoreComposerAfterRejectedSend(String text) {
+    if (text.trim().isEmpty) return;
+    _textController.text = text;
+    _textController.selection = TextSelection.collapsed(offset: text.length);
+    unawaited(
+      ComposerDraftStore.save(
+        connectionId: widget.connection.id,
+        sessionId: widget.session.id,
+        text: text,
+      ),
+    );
   }
 
   void _handleSendError(Object e, {bool removePendingUserMessage = false}) {

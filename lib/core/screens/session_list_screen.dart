@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/session_search_hit.dart';
 import '../services/ai_search_query_rewriter.dart';
 import '../services/chat_space_store.dart';
+import '../services/composer_draft_store.dart';
 import '../services/connection_manager.dart';
 import '../services/desktop_gateway_client.dart';
 import '../services/gateway_turn_application_controller.dart';
@@ -21,6 +22,7 @@ import 'skills_screen.dart';
 import 'workspace_screen.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
+
 Future<String?> showSessionNameDialog({
   required BuildContext context,
   required String title,
@@ -353,7 +355,9 @@ class _SessionListScreenState extends State<SessionListScreen> {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        context.l10n.the_model_only_rewrites_your_question_into_a_short_full,
+                        context
+                            .l10n
+                            .the_model_only_rewrites_your_question_into_a_short_full,
                       ),
                     ],
                   ),
@@ -406,7 +410,9 @@ class _SessionListScreenState extends State<SessionListScreen> {
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(context.l10n.could_not_load_ai_search_models(error))),
+          SnackBar(
+            content: Text(context.l10n.could_not_load_ai_search_models(error)),
+          ),
         );
       }
       return null;
@@ -522,7 +528,10 @@ class _SessionListScreenState extends State<SessionListScreen> {
       itemBuilder: (context) => [
         PopupMenuItem<String>(
           enabled: false,
-          child: Text(context.l10n.profile, style: TextStyle(fontWeight: FontWeight.w700)),
+          child: Text(
+            context.l10n.profile,
+            style: TextStyle(fontWeight: FontWeight.w700),
+          ),
         ),
         ..._profiles.map(
           (profile) => PopupMenuItem<String>(
@@ -590,9 +599,9 @@ class _SessionListScreenState extends State<SessionListScreen> {
       await _fetchSessions();
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(context.l10n.could_not_rename_chat(error))));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.could_not_rename_chat(error))),
+      );
     }
   }
 
@@ -630,7 +639,9 @@ class _SessionListScreenState extends State<SessionListScreen> {
         return;
       }
       final message = error is JsonRpcError && error.code == 4008
-          ? context.l10n.this_chat_has_no_messages_available_in_the_desktop_session
+          ? context
+                .l10n
+                .this_chat_has_no_messages_available_in_the_desktop_session
           : context.l10n.could_not_branch_chat(error);
       ScaffoldMessenger.of(
         context,
@@ -839,9 +850,9 @@ class _SessionListScreenState extends State<SessionListScreen> {
       // Keep the loaded pages; surface the failure and allow a retry on the
       // next scroll instead of losing the list.
       setState(() => _loadingMoreSessions = false);
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(context.l10n.could_not_load_more_chats(e))));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.could_not_load_more_chats(e))),
+      );
     }
   }
 
@@ -863,7 +874,10 @@ class _SessionListScreenState extends State<SessionListScreen> {
       builder: (dialogContext) => AlertDialog(
         title: Text(context.l10n.delete_session),
         content: Text(
-          context.l10n.delete_from_the_remote_hermes_history_this_cannot_be_undone(title),
+          context.l10n
+              .delete_from_the_remote_hermes_history_this_cannot_be_undone(
+                title,
+              ),
         ),
         actions: [
           TextButton(
@@ -892,6 +906,11 @@ class _SessionListScreenState extends State<SessionListScreen> {
 
     try {
       await _client.deleteSession(session.id);
+      // A deleted session must not leave an orphaned draft behind.
+      await ComposerDraftStore.remove(
+        connectionId: widget.connection.id,
+        sessionId: session.id,
+      );
       await _spaceStore?.assignSession(session.id, null);
       if (_spaceStore != null) {
         _spaceState = await _spaceStore!.load();
@@ -902,14 +921,16 @@ class _SessionListScreenState extends State<SessionListScreen> {
         _deletingSessionIds.remove(session.id);
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(context.l10n.session_deleted_from_remote_hermes)),
+        SnackBar(
+          content: Text(context.l10n.session_deleted_from_remote_hermes),
+        ),
       );
     } catch (e) {
       if (!mounted) return;
       setState(() => _deletingSessionIds.remove(session.id));
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(context.l10n.could_not_delete_session(e))));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.could_not_delete_session(e))),
+      );
     }
   }
 
@@ -1133,12 +1154,17 @@ class _SessionListScreenState extends State<SessionListScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              context.l10n.make_sure_the_gateway_api_server_is_running_hermes_gateway,
+              context
+                  .l10n
+                  .make_sure_the_gateway_api_server_is_running_hermes_gateway,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 24),
-            ElevatedButton(onPressed: _checkHealth, child: Text(context.l10n.retry)),
+            ElevatedButton(
+              onPressed: _checkHealth,
+              child: Text(context.l10n.retry),
+            ),
           ],
         ),
       );
@@ -1337,7 +1363,9 @@ class _SessionListScreenState extends State<SessionListScreen> {
                                 contentPadding: EdgeInsets.zero,
                                 leading: Icon(Icons.phone_android),
                                 title: Text(context.l10n.on_device),
-                                subtitle: Text(context.l10n.titles_previews_and_models),
+                                subtitle: Text(
+                                  context.l10n.titles_previews_and_models,
+                                ),
                               ),
                             ),
                             CheckedPopupMenuItem(
@@ -1348,7 +1376,9 @@ class _SessionListScreenState extends State<SessionListScreen> {
                                 contentPadding: EdgeInsets.zero,
                                 leading: Icon(Icons.manage_search),
                                 title: Text(context.l10n.full_text),
-                                subtitle: Text(context.l10n.all_stored_message_content),
+                                subtitle: Text(
+                                  context.l10n.all_stored_message_content,
+                                ),
                               ),
                             ),
                             CheckedPopupMenuItem(
@@ -1361,7 +1391,9 @@ class _SessionListScreenState extends State<SessionListScreen> {
                                 title: Text(context.l10n.ai_full_text),
                                 subtitle: Text(
                                   _aiSearchModel == null
-                                      ? context.l10n.choose_a_small_model_to_rewrite_queries
+                                      ? context
+                                            .l10n
+                                            .choose_a_small_model_to_rewrite_queries
                                       : '${_aiSearchModel!.provider} • ${_aiSearchModel!.model}',
                                 ),
                               ),
@@ -1438,7 +1470,9 @@ class _SessionListScreenState extends State<SessionListScreen> {
                       Center(
                         child: Text(
                           _spaceScope.kind == ChatSpaceScopeKind.space
-                              ? context.l10n.no_chats_in_this_space_yet_tap_to_start_one
+                              ? context
+                                    .l10n
+                                    .no_chats_in_this_space_yet_tap_to_start_one
                               : context.l10n.no_unassigned_chats,
                           textAlign: TextAlign.center,
                         ),
@@ -1451,7 +1485,9 @@ class _SessionListScreenState extends State<SessionListScreen> {
                         serverHitsCurrent != null &&
                         serverHitsCurrent.isEmpty) ...[
                       const SizedBox(height: 16),
-                      Center(child: Text(context.l10n.no_message_content_matches)),
+                      Center(
+                        child: Text(context.l10n.no_message_content_matches),
+                      ),
                     ],
                   ],
                 ),

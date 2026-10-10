@@ -161,7 +161,6 @@ void main() {
                   required onEvent,
                   required onSent,
                 }) async {
-                  onSent();
                   await failSubmit.future;
                   throw StateError('submit rejected');
                 },

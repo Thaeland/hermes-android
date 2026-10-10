@@ -6,8 +6,10 @@ import '../models/session.dart';
 import '../theme/hermes_theme.dart';
 import '../utils/relative_time.dart';
 import '../widgets/hermes_components.dart';
+import '../widgets/hermes_shell.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
+
 const kWorkspaceSessionSearchKey = Key('workspace-session-search');
 
 enum WorkspaceSessionView { all, unassigned, archivedQuick, search }
@@ -254,6 +256,11 @@ class WorkspaceSessionsScreen extends StatefulWidget {
   /// screen uses `DateTime.now()`.
   final DateTime? now;
 
+  /// Periodic silent refresh for the running/idle chips. Null (the default,
+  /// used by tests that drive loads explicitly) disables the timer; the
+  /// production surfaces pass a modest interval.
+  final Duration? refreshInterval;
+
   const WorkspaceSessionsScreen({
     required this.title,
     required this.view,
@@ -262,6 +269,7 @@ class WorkspaceSessionsScreen extends StatefulWidget {
     this.onPromote,
     this.embedded = false,
     this.now,
+    this.refreshInterval,
     super.key,
   });
 
@@ -270,11 +278,22 @@ class WorkspaceSessionsScreen extends StatefulWidget {
       _WorkspaceSessionsScreenState();
 }
 
-class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
+class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
+    with WidgetsBindingObserver {
   WorkspaceSessionsData? _data;
   Object? _error;
   String _query = '';
   final Set<String> _promoting = {};
+
+  /// Periodic silent refresh so running/idle chips stay honest while the
+  /// list is actually visible (not behind a pushed chat, another shell tab,
+  /// or a backgrounded app).
+  Timer? _refreshTimer;
+  bool _visible = true;
+
+  /// Coalesces refresh ticks with manual pulls: a slow load must never
+  /// overlap the next tick (an older completion would win the setState).
+  bool _loadInFlight = false;
 
   /// The active chip filter in the embedded Chats browser.
   WorkspaceChatsFilter _filter = WorkspaceChatsFilter.all;
@@ -291,10 +310,55 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     unawaited(_load());
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _syncRefreshTimer();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _syncRefreshTimer();
+  }
+
+  /// True when this pane is on screen: the route is current (no chat pushed
+  /// over it), the shell tab is selected, and the app is foregrounded.
+  bool _computeVisible() {
+    if (!(ModalRoute.of(context)?.isCurrent ?? true)) return false;
+    if (!HermesPaneVisibility.of(context)) return false;
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    return lifecycle == null || lifecycle == AppLifecycleState.resumed;
+  }
+
+  /// Starts the periodic refresh only while visible: hidden panes must not
+  /// hit the gateway, and the pull-to-refresh keeps working regardless.
+  void _syncRefreshTimer() {
+    final visible = _computeVisible();
+    if (visible == _visible && _refreshTimer != null) return;
+    _visible = visible;
+    _refreshTimer?.cancel();
+    _refreshTimer = null;
+    final interval = widget.refreshInterval;
+    if (interval == null || !visible) return;
+    _refreshTimer = Timer.periodic(interval, (_) {
+      if (_visible) unawaited(_load());
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _refreshTimer?.cancel();
+    super.dispose();
+  }
+
   Future<void> _load() async {
+    if (_loadInFlight) return;
+    _loadInFlight = true;
     try {
       final data = await widget.load();
       if (mounted) {
@@ -306,6 +370,8 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
     } catch (error) {
       debugPrint('[workspace-sessions] load failed: $error');
       if (mounted) setState(() => _error = error);
+    } finally {
+      _loadInFlight = false;
     }
   }
 
@@ -459,7 +525,9 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
           if (sessions.isEmpty)
             EmptyState(
               icon: _emptyIcon,
-              title: _query.isEmpty ? context.l10n.nothing_here : context.l10n.no_matches,
+              title: _query.isEmpty
+                  ? context.l10n.nothing_here
+                  : context.l10n.no_matches,
               message: _emptyMessage,
             )
           else
@@ -537,7 +605,9 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  session.title.isEmpty ? context.l10n.untitled_chat : session.title,
+                  session.title.isEmpty
+                      ? context.l10n.untitled_chat
+                      : session.title,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -620,10 +690,12 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
       return switch (_filter) {
         WorkspaceChatsFilter.unassigned =>
           context.l10n.every_conversation_is_already_assigned_to_a_project,
-        WorkspaceChatsFilter.archived => context.l10n.archived_conversations_appear_here,
+        WorkspaceChatsFilter.archived =>
+          context.l10n.archived_conversations_appear_here,
         WorkspaceChatsFilter.recent =>
           context.l10n.nothing_changed_in_the_last_seven_days,
-        WorkspaceChatsFilter.all => context.l10n.no_conversation_matches_this_view,
+        WorkspaceChatsFilter.all =>
+          context.l10n.no_conversation_matches_this_view,
       };
     }
     return switch (widget.view) {
@@ -631,8 +703,8 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen> {
         context.l10n.every_conversation_is_already_assigned_to_a_project,
       WorkspaceSessionView.archivedQuick =>
         context.l10n.quick_chats_appear_here_after_their_retention_period,
-      WorkspaceSessionView.all ||
-      WorkspaceSessionView.search => context.l10n.no_conversation_matches_this_view,
+      WorkspaceSessionView.all || WorkspaceSessionView.search =>
+        context.l10n.no_conversation_matches_this_view,
     };
   }
 
