@@ -4,6 +4,34 @@ All notable changes to this project are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Release notes for
 versions prior to 1.0.7 are in the **What's new** sections of the [README](README.md).
 
+## [2.1.15] - 2026-10-10
+
+### Added
+
+- Android notifications now match the Desktop experience for completed and
+  failed turns, approvals, clarifications, plugin events, credit changes, and
+  other background activity, with per-kind controls and safe routing back to
+  the owning chat (PR #128).
+- `MEDIA:` deliveries now render as authenticated, tappable file cards with
+  safe streaming detection, complete gateway file-type support, and coalesced
+  downloads (PR #137).
+- Composer drafts now persist per saved connection and session, survive route
+  changes and process restarts, and are removed when their chat or connection
+  is deleted (PR #131).
+
+### Changed
+
+- Session status chips refresh while their pane is visible without overlapping
+  requests or continuing to poll under another route (PR #131).
+
+### Thanks
+
+- @maebahesioru for the desktop-parity notification system, durable composer
+  drafts, live session refresh, and extensive lifecycle regression coverage in
+  PRs #128 and #131.
+- @Thaeland for the secure inline `MEDIA:` delivery cards, complete extension
+  contract, and streaming/download race coverage in PR #137.
+
 ## [2.1.14] - 2026-10-08
 
 ### Fixed
