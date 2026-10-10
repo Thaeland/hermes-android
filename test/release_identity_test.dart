@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   test(
-    'Build 2.1.15 has the exact release identity and an upgrade-safe code',
+    'Build 2.1.16 has the exact release identity and an upgrade-safe code',
     () {
       final pubspec = File('pubspec.yaml').readAsStringSync();
       final match = RegExp(
@@ -13,11 +13,11 @@ void main() {
       ).firstMatch(pubspec);
 
       expect(match, isNotNull);
-      expect(match!.group(1), '2.1.15');
-      expect(int.parse(match.group(2)!), 2155);
-      expect(int.parse(match.group(2)!), greaterThan(2154));
+      expect(match!.group(1), '2.1.16');
+      expect(int.parse(match.group(2)!), 2156);
+      expect(int.parse(match.group(2)!), greaterThan(2155));
       // F-Droid ABI split: packaged arm64 code is base * 10 + ABI code.
-      expect(int.parse(match.group(2)!) * 10 + 2, 21552);
+      expect(int.parse(match.group(2)!) * 10 + 2, 21562);
     },
   );
 
@@ -42,7 +42,7 @@ void main() {
     );
     expect(gradle, contains('variant.versionCode * 10 + abiVersionCode'));
     expect(releaseWorkflow, contains("MINIMUM_INSTALLED_VERSION_CODE: '2127'"));
-    expect(releaseWorkflow, contains("REQUIRED_BASE_VERSION_CODE: '2155'"));
+    expect(releaseWorkflow, contains("REQUIRED_BASE_VERSION_CODE: '2156'"));
     expect(releaseWorkflow, contains("ARM64_ABI_CODE: '2'"));
     expect(
       releaseWorkflow,
@@ -67,6 +67,6 @@ void main() {
     );
     expect(releaseWorkflow, contains('if certs != {expected_cert}:'));
     expect(qualityWorkflow, contains("MINIMUM_INSTALLED_VERSION_CODE: '2127'"));
-    expect(qualityWorkflow, contains("REQUIRED_BASE_VERSION_CODE: '2155'"));
+    expect(qualityWorkflow, contains("REQUIRED_BASE_VERSION_CODE: '2156'"));
   });
 }

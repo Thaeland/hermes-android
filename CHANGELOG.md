@@ -4,6 +4,20 @@ All notable changes to this project are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Release notes for
 versions prior to 1.0.7 are in the **What's new** sections of the [README](README.md).
 
+## [2.1.16] - 2026-10-10
+
+### Fixed
+
+- Chat headers now resolve the authoritative server-side Project instead of
+  remaining **Unassigned** when navigation context is missing. Project metadata
+  refreshes after durable-session binding and reconnect without blocking turn
+  recovery, and stale or disposed routes cannot overwrite a newer label (#132,
+  PR #133).
+
+### Thanks
+
+- No external contributors in this patch.
+
 ## [2.1.15] - 2026-10-10
 
 ### Added
