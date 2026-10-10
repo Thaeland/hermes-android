@@ -3122,6 +3122,39 @@ void main() {
         expect(createCalls[1]['params'], isNot(contains('session_id')));
       });
 
+      test('a lazy stock-gateway submit publishes its durable binding before '
+          'the prompt completes', () async {
+        final client = buildClient();
+        addTearDown(client.close);
+        final bindings = <(String, String)>[];
+        client.setSessionBoundListener((localSessionId, storedSessionId) {
+          bindings.add((localSessionId, storedSessionId));
+        });
+
+        await client
+            .submitPrompt(
+              sessionId: 'mobile-draft',
+              text: 'Create the durable chat lazily',
+              onEvent: (_) {},
+              onSent: () {},
+            )
+            .then<void>((_) {}, onError: (_) {});
+
+        expect(bindings, [('mobile-draft', 'stored-project')]);
+        expect(client.storedSessionKeyFor('mobile-draft'), 'stored-project');
+        final methods = fixture.requests
+            .map((request) => request['method'])
+            .toList();
+        expect(
+          methods,
+          containsAllInOrder([
+            'session.resume',
+            'session.create',
+            'prompt.submit',
+          ]),
+        );
+      });
+
       test(
         'a reconnect after disconnect resumes the stored identity instead of '
         'creating a second session',

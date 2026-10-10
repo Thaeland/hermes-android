@@ -98,8 +98,14 @@ abstract interface class GatewayTurnApplicationSession {
 
   Future<void> close();
 
-  /// Called when `session.open` first binds a draft session to its stored id.
-  set onSessionBound(GatewayTurnSessionBoundCallback? callback);
+  /// Registers the mounted owner of one session's durable binding callbacks.
+  Object setSessionBoundListener(
+    String localSessionId,
+    GatewayTurnSessionBoundCallback listener,
+  );
+
+  /// Removes [registration] without disturbing a replacement route owner.
+  void removeSessionBoundListener(String localSessionId, Object registration);
 }
 
 /// Owns recovery registries above screen and Navigator lifetimes.
@@ -378,8 +384,18 @@ class _CoordinatorGatewayTurnApplicationSession
   }
 
   @override
-  set onSessionBound(GatewayTurnSessionBoundCallback? callback) {
-    _registry.onSessionBound = callback;
+  Object setSessionBoundListener(
+    String localSessionId,
+    GatewayTurnSessionBoundCallback listener,
+  ) {
+    _requireOpen();
+    return _registry.setSessionBoundListener(localSessionId, listener);
+  }
+
+  @override
+  void removeSessionBoundListener(String localSessionId, Object registration) {
+    if (_closed) return;
+    _registry.removeSessionBoundListener(localSessionId, registration);
   }
 }
 

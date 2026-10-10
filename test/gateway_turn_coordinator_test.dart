@@ -637,6 +637,54 @@ Future<void> _waitFor(
 
 void main() {
   test(
+    'registry binding listeners are session-scoped and token-owned',
+    () async {
+      final fixture = await _GatewayFixture.start();
+      final registry = GatewayTurnCoordinatorRegistry(
+        connectionId: 'connection-a',
+        endpointDigest: _digest,
+        journal: GatewayTurnJournal(store: _MemoryJournalStore()),
+        freshSocketFactory: () async => WsClient(fixture.baseUrl),
+      );
+      final delivered = <(String, String, String)>[];
+      final oldA = registry.setSessionBoundListener(
+        'local-a',
+        (local, stored) => delivered.add(('stale-a', local, stored)),
+      );
+      final currentA = registry.setSessionBoundListener(
+        'local-a',
+        (local, stored) => delivered.add(('current-a', local, stored)),
+      );
+      // A late dispose from the replaced route must not remove its successor.
+      registry.removeSessionBoundListener('local-a', oldA);
+      registry.setSessionBoundListener(
+        'local-b',
+        (local, stored) => delivered.add(('session-b', local, stored)),
+      );
+
+      try {
+        await registry.open('local-a');
+        await registry.open('local-b');
+
+        expect(delivered, [
+          ('current-a', 'local-a', 'stored-1'),
+          ('session-b', 'local-b', 'stored-2'),
+        ]);
+
+        registry.setSessionBoundListener(
+          'local-a',
+          (local, stored) => delivered.add(('replacement-a', local, stored)),
+        );
+        registry.removeSessionBoundListener('local-a', currentA);
+        expect(delivered.last, ('replacement-a', 'local-a', 'stored-1'));
+      } finally {
+        await registry.closeAll();
+        await fixture.close();
+      }
+    },
+  );
+
+  test(
     'registry settlement listeners are session-scoped and token-owned',
     () async {
       final fixture = await _GatewayFixture.start();
@@ -3356,7 +3404,7 @@ void main() {
     );
 
     test(
-      'onSessionBound fires once when a fresh draft gains its stored id',
+      'onSessionBound reports every authoritative durable binding',
       () async {
         late _GatewayFixture fixture;
         var opens = 0;
@@ -3389,13 +3437,13 @@ void main() {
           // reconcile records keyed by the draft id.
           expect(bounds, [('local-a', 'stored-a')]);
 
-          // A reconnect reuses the same binding; the callback must not re-fire
-          // (the assignment it drives is idempotent but should not spam).
+          // A reconnect advances the authoritative binding version. Metadata
+          // consumers must hear about it even though the stored id is stable.
           await fixture.closeSocket();
           await fixture.waitForSocketClosed();
           await coordinator.waitForIdle();
           await coordinator.ensureOpen();
-          expect(bounds, hasLength(1));
+          expect(bounds, [('local-a', 'stored-a'), ('local-a', 'stored-a')]);
         } finally {
           await coordinator.close();
           await fixture.close();

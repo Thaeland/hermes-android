@@ -634,7 +634,13 @@ class _CallbackCapturingTurnSession implements GatewayTurnApplicationSession {
   }) => _settledListeners[sessionId]?.$2(state);
 
   @override
-  set onSessionBound(GatewayTurnSessionBoundCallback? callback) {}
+  Object setSessionBoundListener(
+    String localSessionId,
+    GatewayTurnSessionBoundCallback listener,
+  ) => Object();
+
+  @override
+  void removeSessionBoundListener(String localSessionId, Object registration) {}
 
   @override
   Future<List<GatewayTurnRecoveryState>> recoverPending(

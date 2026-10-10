@@ -36,6 +36,7 @@ import '../models/gateway_clarify.dart';
 import '../models/gateway_insight.dart';
 import '../models/gateway_sensitive_prompt.dart';
 import '../models/gateway_turn_contract.dart';
+import '../models/projects_tree_overview.dart';
 import '../utils/chat_display_items.dart';
 import '../utils/chat_history_scroll.dart';
 import '../utils/message_content.dart';
@@ -134,6 +135,57 @@ typedef TestRemoteAttachmentUpload =
       required AttachmentDraft draft,
       required String dataUrl,
     });
+
+/// Loads the gateway's authoritative chat-to-Project placement in tests.
+@visibleForTesting
+typedef TestProjectOverviewLoader = Future<ProjectsTreeOverview> Function();
+
+/// The result of looking up a chat in an authoritative Projects tree.
+///
+/// [known] distinguishes a chat explicitly filed under Home (known, with no
+/// Project name) from a chat absent from a response that may have raced its
+/// first server-side persistence (unknown). The latter must not erase a valid
+/// navigation-time Project label.
+@visibleForTesting
+class ChatProjectHeaderResolution {
+  final bool known;
+  final String? projectName;
+
+  const ChatProjectHeaderResolution._({
+    required this.known,
+    required this.projectName,
+  });
+
+  static const unknown = ChatProjectHeaderResolution._(
+    known: false,
+    projectName: null,
+  );
+
+  const ChatProjectHeaderResolution.known(this.projectName) : known = true;
+}
+
+/// Resolves the first canonical session id present in [overview].
+///
+/// Callers pass the gateway's stored id before any draft/mobile id. This makes
+/// the durable record authoritative after `session.open` reconciliation while
+/// still supporting existing sessions whose app id is already the stored id.
+@visibleForTesting
+ChatProjectHeaderResolution resolveChatProjectHeader(
+  ProjectsTreeOverview overview,
+  Iterable<String> sessionIds,
+) {
+  for (final rawId in sessionIds) {
+    final id = rawId.trim();
+    if (id.isEmpty) continue;
+    final ownerId = overview.sessionProjects[id];
+    if (ownerId == null) continue;
+    if (ownerId == ProjectsTreeOverview.noProjectId) {
+      return const ChatProjectHeaderResolution.known(null);
+    }
+    return ChatProjectHeaderResolution.known(overview.ownerLabelOf(id));
+  }
+  return ChatProjectHeaderResolution.unknown;
+}
 
 @visibleForTesting
 typedef TestComposerDraftReader =
@@ -237,6 +289,10 @@ class ChatScreen extends StatefulWidget {
   @visibleForTesting
   final TestDesktopAsyncEventHook? testDesktopAsyncEventHook;
 
+  /// Supplies an authoritative Projects tree without a real gateway.
+  @visibleForTesting
+  final TestProjectOverviewLoader? testProjectOverviewLoader;
+
   /// Invoked on every `_ensureDesktopSession()` call so a test can assert
   /// the reattach resync actually re-bound the session.
   @visibleForTesting
@@ -274,6 +330,7 @@ class ChatScreen extends StatefulWidget {
     this.testTurnNotifications,
     this.testDesktopConnectionHook,
     this.testDesktopAsyncEventHook,
+    this.testProjectOverviewLoader,
     this.testDesktopSessionEnsured,
     this.testStoredSessionKey,
     this.testMediaFilesClient,
@@ -303,6 +360,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   GatewayTurnApplicationSession? _turnApplicationSession;
   Object? _turnApplicationAsyncEventRegistration;
   Object? _turnApplicationSettledRegistration;
+  Object? _turnApplicationBoundRegistration;
   DesktopConnectionState _desktopConnectionState =
       DesktopConnectionState.disconnected;
   bool _appInBackground = false;
@@ -315,6 +373,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   String? _sessionModel;
   String? _sessionProvider;
   String? _sessionReasoningEffort;
+  String? _projectName;
+  String? _storedSessionId;
+  int _projectNameRefreshGeneration = 0;
   bool _sessionModelOverride = false;
   bool _loadingModelOptions = false;
   bool _changingModel = false;
@@ -402,6 +463,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _projectName = _normalisedProjectName(widget.projectName);
     _textController.addListener(_onComposerChanged);
     if (widget.initialComposerText case final shared?) {
       _textController.text = shared;
@@ -484,6 +546,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         );
         _desktopGateway!.setAsyncEventListener(_handleDesktopAsyncEvent);
         _desktopGateway!.setConnectionListener(_onDesktopConnectionChanged);
+        _desktopGateway!.setSessionBoundListener(_onSessionBound);
         unawaited(_ensureDesktopSession());
       } on ArgumentError {
         // The regular mobile chat remains usable; selection surfaces the
@@ -509,7 +572,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           .setAsyncEventListener(widget.session.id, _handleDesktopAsyncEvent);
       _turnApplicationSettledRegistration = turnApplicationSession
           .setTurnSettledListener(widget.session.id, _onTurnSettled);
+      _turnApplicationBoundRegistration = turnApplicationSession
+          .setSessionBoundListener(widget.session.id, _onSessionBound);
     }
+    unawaited(_refreshProjectName());
     unawaited(_initializeChat());
     _loadVerboseMode();
     _initVoice();
@@ -531,6 +597,50 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _desktopGateway?.storedSessionKeyFor(widget.session.id) ??
       widget.testStoredSessionKey?.call(widget.session.id) ??
       widget.session.id;
+
+  static String? _normalisedProjectName(String? value) {
+    final trimmed = value?.trim() ?? '';
+    return trimmed.isEmpty ? null : trimmed;
+  }
+
+  /// Refreshes the sticky header from the same server Projects tree used by
+  /// the workspace. A response that does not yet contain a newly persisted
+  /// chat is inconclusive and therefore keeps the navigation-time label.
+  Future<void> _refreshProjectName() async {
+    final loader = widget.testProjectOverviewLoader;
+    final gateway = _desktopGateway;
+    if (loader == null && gateway == null) return;
+
+    final generation = ++_projectNameRefreshGeneration;
+    try {
+      final overview = await (loader?.call() ?? gateway!.projects.tree());
+      if (!mounted || generation != _projectNameRefreshGeneration) return;
+      final candidates = <String>[];
+      void addCandidate(String? value) {
+        final id = value?.trim() ?? '';
+        if (id.isNotEmpty && !candidates.contains(id)) candidates.add(id);
+      }
+
+      // The stored id is the canonical identity once a draft has been bound.
+      addCandidate(_storedSessionId);
+      addCandidate(gateway?.storedSessionKeyFor(widget.session.id));
+      addCandidate(widget.testStoredSessionKey?.call(widget.session.id));
+      addCandidate(widget.session.id);
+
+      final resolution = resolveChatProjectHeader(overview, candidates);
+      if (!resolution.known || resolution.projectName == _projectName) return;
+      setState(() => _projectName = resolution.projectName);
+    } catch (_) {
+      // Project metadata is additive. Chat and recovery remain usable when an
+      // older gateway lacks projects.tree or the control socket is offline.
+    }
+  }
+
+  void _onSessionBound(String localSessionId, String storedSessionId) {
+    if (localSessionId != widget.session.id) return;
+    _storedSessionId = storedSessionId;
+    unawaited(_refreshProjectName());
+  }
 
   Future<void> _restoreSessionModelOverride() async {
     final store = await _chatModelStore;
@@ -555,6 +665,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _projectNameRefreshGeneration += 1;
     pendingNotificationApprovals.removeListener(
       _consumePendingNotificationApproval,
     );
@@ -580,6 +691,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       ),
     );
     _desktopGateway?.setAsyncEventListener(null);
+    _desktopGateway?.setSessionBoundListener(null);
     _desktopGateway?.close();
     final registration = _turnApplicationAsyncEventRegistration;
     if (registration != null) {
@@ -593,6 +705,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _turnApplicationSession?.removeTurnSettledListener(
         widget.session.id,
         settledRegistration,
+      );
+    }
+    final boundRegistration = _turnApplicationBoundRegistration;
+    if (boundRegistration != null) {
+      _turnApplicationSession?.removeSessionBoundListener(
+        widget.session.id,
+        boundRegistration,
       );
     }
     unawaited(
@@ -716,6 +835,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (state != DesktopConnectionState.connected) _pauseReattachRetry();
     setState(() => _desktopConnectionState = state);
     if (connectionChanged && state == DesktopConnectionState.connected) {
+      unawaited(_refreshProjectName());
       _requestImmediateReattachResync();
       // A notification tap that landed before this route-local gateway was
       // ready stays pending; retry it now that the connection is back.
@@ -732,7 +852,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     final gateway = _desktopGateway;
     widget.testDesktopSessionEnsured?.call();
-    if (gateway == null) return;
+    if (gateway == null) {
+      unawaited(_refreshProjectName());
+      return;
+    }
     try {
       await gateway.ensureSession(
         widget.session.id,
@@ -741,7 +864,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     } catch (_) {
       // The composer remains available. The next send retries with a fresh
       // single-use ticket and surfaces an actionable error if it still fails.
+      return;
     }
+    unawaited(_refreshProjectName());
   }
 
   void _editAndResend(String text) {
@@ -3929,7 +4054,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(48),
           child: ChatContextHeader(
-            projectName: widget.projectName,
+            projectName: _projectName,
             model: _sessionModel ?? widget.session.model,
             reasoningEffort: _sessionReasoningEffort ?? 'default',
             connectionLabel: widget.connection.label,
