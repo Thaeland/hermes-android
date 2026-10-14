@@ -38,6 +38,7 @@ import '../services/remote_files_client.dart';
 import '../services/shared_attachment_preparer.dart';
 import '../theme/hermes_theme.dart';
 import '../utils/activity_feed.dart';
+import '../utils/probe_once.dart';
 import '../utils/home_turn_signals.dart';
 import '../utils/new_chat_options.dart';
 import '../widgets/activity_pane.dart';
@@ -1661,7 +1662,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     Future<bool> Function(DesktopGatewayClient gateway) probe,
     void Function(bool available) apply,
   ) {
-    Future<void> run() async {
+    return rememberProbe(_capabilityProbes, family, (forget) async {
       var gateway = _ownedGateway;
       var ownsProbeOnly = false;
       if (gateway == null) {
@@ -1669,14 +1670,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         if (gatewayUrl.isEmpty) {
           // No URL yet: do not pin a verdict — a later call may re-probe
           // once the connection is configured.
-          _capabilityProbes.remove(family);
+          forget();
           return;
         }
         try {
           gateway = DesktopGatewayClient.fromConnection(widget.connection);
           ownsProbeOnly = true;
         } catch (_) {
-          _capabilityProbes.remove(family);
+          forget();
           return;
         }
       }
@@ -1694,13 +1695,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         // re-probe must never form a settle loop.
         final failures = (_probeTransientFailures[family] ?? 0) + 1;
         _probeTransientFailures[family] = failures;
-        if (failures < _maxProbeRetries) _capabilityProbes.remove(family);
+        if (failures < _maxProbeRetries) forget();
       } finally {
         if (ownsProbeOnly) gateway.close();
       }
-    }
-
-    return _capabilityProbes.putIfAbsent(family, run);
+    });
   }
 
   /// Probes `filing.status` once so the More pane can gate AI-assisted
