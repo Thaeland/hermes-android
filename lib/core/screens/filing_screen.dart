@@ -13,6 +13,7 @@
 
 import 'package:flutter/material.dart';
 
+import '../l10n/l10n.dart';
 import '../services/connection_manager.dart';
 import '../services/desktop_gateway_client.dart';
 import '../services/filing_gateway_client.dart';
@@ -108,8 +109,10 @@ class _FilingScreenState extends State<FilingScreen> {
     if (client == null || _busySessions.contains(s.sessionId)) return;
     if (s.cwd.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Suggestion has no folder path — cannot apply.'),
+        SnackBar(
+          content: Text(
+            context.l10n.suggestion_has_no_folder_path_cannot_apply,
+          ),
         ),
       );
       return;
@@ -122,8 +125,8 @@ class _FilingScreenState extends State<FilingScreen> {
       await _load();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Could not apply: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.l10n.could_not_apply('$e'))));
     } finally {
       if (mounted) setState(() => _busySessions.remove(s.sessionId));
     }
@@ -134,8 +137,10 @@ class _FilingScreenState extends State<FilingScreen> {
     if (client == null || _busySessions.contains(s.sessionId)) return;
     if (s.cwd.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Suggestion has no folder path — cannot record.'),
+        SnackBar(
+          content: Text(
+            context.l10n.suggestion_has_no_folder_path_cannot_record,
+          ),
         ),
       );
       return;
@@ -148,8 +153,8 @@ class _FilingScreenState extends State<FilingScreen> {
       await _load();
     } catch (e) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Could not record: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.l10n.could_not_record('$e'))));
     } finally {
       if (mounted) setState(() => _busySessions.remove(s.sessionId));
     }
@@ -161,11 +166,11 @@ class _FilingScreenState extends State<FilingScreen> {
     return Scaffold(
       backgroundColor: tokens.surface,
       appBar: AppBar(
-        title: const Text('AI-assisted filing'),
+        title: Text(context.l10n.ai_assisted_filing),
         centerTitle: false,
         actions: [
           IconButton(
-            tooltip: 'Refresh',
+            tooltip: context.l10n.refresh,
             onPressed: _loading ? null : _load,
             icon: const Icon(Icons.refresh),
           ),
@@ -181,18 +186,15 @@ class _FilingScreenState extends State<FilingScreen> {
     }
     if (_error != null) {
       return ErrorState(
-        title: 'Filing check failed',
+        title: context.l10n.filing_check_failed,
         message: _error!,
         onRetry: _load,
       );
     }
     if (_unsupported || _status?.available != true) {
-      return const ErrorState.unsupported(
-        title: 'Filing not available on this server',
-        message:
-            'This Hermes gateway has no correction-aware filing contract '
-            'installed. Set up the filing contract library and the '
-            'project-filing gateway hook to enable AI-assisted filing.',
+      return ErrorState.unsupported(
+        title: context.l10n.filing_not_available_on_this_server,
+        message: context.l10n.filing_not_available_message,
       );
     }
     final status = _status!;
@@ -202,18 +204,16 @@ class _FilingScreenState extends State<FilingScreen> {
         padding: const EdgeInsets.only(bottom: HermesSpacing.xl),
         children: [
           _statusBanner(tokens, status),
-          const SectionHeader(title: 'Suggestions'),
+          SectionHeader(title: context.l10n.suggestions),
           if (_suggestions.isEmpty)
-            const EmptyState(
+            EmptyState(
               icon: Icons.auto_fix_high_outlined,
-              title: 'Nothing to file',
-              message:
-                  'Every recent session already matches a Project by its '
-                  'working directory or a standing rule.',
+              title: context.l10n.nothing_to_file,
+              message: context.l10n.nothing_to_file_message,
             )
           else
             for (final s in _suggestions) _suggestionCard(tokens, s),
-          const SectionHeader(title: 'Contract'),
+          SectionHeader(title: context.l10n.contract),
           _policySection(tokens),
         ],
       ),
@@ -238,13 +238,9 @@ class _FilingScreenState extends State<FilingScreen> {
             Expanded(
               child: Text(
                 status.hookInstalled
-                    ? 'Filing contract live — ${status.rules} rules, '
-                        '${status.exclusions} exclusions. Corrections you '
-                        'make here and in chat ("never file X under Y") '
-                        'teach the organizer.'
-                    : 'Filing contract installed, but the correction hook '
-                        'is not active — natural-language corrections '
-                        'won\u2019t be recorded until it is.',
+                    ? context.l10n.filing_contract_live(
+                        status.exclusions, status.rules)
+                    : context.l10n.filing_hook_inactive,
                 style: tokens.typography.body.copyWith(color: tokens.onSurface),
               ),
             ),
@@ -281,9 +277,9 @@ class _FilingScreenState extends State<FilingScreen> {
             const SizedBox(height: HermesSpacing.sm),
             Text(
               s.isUserRule
-                  ? 'Your standing rule \u2192 ${s.projectName}'
-                  : 'Working directory matches ${s.projectName} '
-                      '(${(s.confidence * 100).round()}%)',
+                  ? context.l10n.your_standing_rule(s.projectName)
+                  : context.l10n.working_directory_matches(
+                      (s.confidence * 100).round(), s.projectName),
               style: tokens.typography.body.copyWith(color: tokens.accent),
             ),
             const SizedBox(height: HermesSpacing.md),
@@ -299,12 +295,12 @@ class _FilingScreenState extends State<FilingScreen> {
                 else ...[
                   TextButton(
                     onPressed: () => _reject(s),
-                    child: const Text('Never here'),
+                    child: Text(context.l10n.never_here),
                   ),
                   const SizedBox(width: HermesSpacing.sm),
                   FilledButton.tonal(
                     onPressed: () => _accept(s),
-                    child: const Text('File it'),
+                    child: Text(context.l10n.file_it),
                   ),
                 ],
               ],
@@ -324,12 +320,10 @@ class _FilingScreenState extends State<FilingScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           if (policy.rules.isEmpty && policy.exclusions.isEmpty)
-            const EmptyState(
+            EmptyState(
               icon: Icons.rule_outlined,
-              title: 'No standing rules yet',
-              message:
-                  'Accepting a suggestion or saying "never file X under Y" '
-                  'in chat creates one.',
+              title: context.l10n.no_standing_rules_yet,
+              message: context.l10n.no_standing_rules_message,
             ),
           for (final rule in policy.rules)
             _policyRow(
@@ -341,12 +335,14 @@ class _FilingScreenState extends State<FilingScreen> {
             _policyRow(
               tokens,
               icon: Icons.block_outlined,
-              text: 'never file ${ex['path']}'
-                  '${ex['project'] != null ? ' under ${ex['project']}' : ''}',
+              text: ex['project'] != null
+                  ? context.l10n.never_file_path_under(
+                      ex['path'], ex['project'])
+                  : context.l10n.never_file_path(ex['path']),
             ),
           if (policy.audit.isNotEmpty) ...[
             const SizedBox(height: HermesSpacing.md),
-            Text('Recent audit',
+            Text(context.l10n.recent_audit,
                 style:
                     tokens.typography.label.copyWith(color: tokens.muted)),
             const SizedBox(height: HermesSpacing.xs),

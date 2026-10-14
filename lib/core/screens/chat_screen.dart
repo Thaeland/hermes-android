@@ -4622,7 +4622,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(
-                                _gatewayTurnStatus?.text ?? 'Hermes is responding…',
+                                _gatewayTurnStatus?.text ??
+                                    context.l10n.hermes_is_responding,
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
                                 style: Theme.of(context).textTheme.bodySmall,

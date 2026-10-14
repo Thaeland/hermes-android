@@ -569,22 +569,36 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
         _batchBusy = false;
         _selected.clear();
       });
-      final verb = switch (action) {
-        WorkspaceBatchAction.pin => 'Pinned',
-        WorkspaceBatchAction.unpin => 'Unpinned',
-        WorkspaceBatchAction.archive => 'Archived',
+      final l10n = context.l10n;
+      final message = switch (action) {
+        WorkspaceBatchAction.pin => outcome.partial
+            ? l10n.pinned_chats_partial(
+                outcome.applied,
+                outcome.failed,
+                outcome.requested,
+              )
+            : l10n.pinned_n_chats(outcome.applied),
+        WorkspaceBatchAction.unpin => outcome.partial
+            ? l10n.unpinned_chats_partial(
+                outcome.applied,
+                outcome.failed,
+                outcome.requested,
+              )
+            : l10n.unpinned_n_chats(outcome.applied),
+        WorkspaceBatchAction.archive => outcome.partial
+            ? l10n.archived_chats_partial(
+                outcome.applied,
+                outcome.failed,
+                outcome.requested,
+              )
+            : l10n.archived_n_chats(outcome.applied),
       };
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            outcome.partial
-                ? '$verb ${outcome.applied} of ${outcome.requested} chat(s)'
-                    ' — ${outcome.failed} failed'
-                : '$verb ${outcome.applied} chat(s)',
-          ),
+          content: Text(message),
           action: outcome.undoable
               ? SnackBarAction(
-                  label: 'Undo',
+                  label: l10n.undo,
                   onPressed: () => unawaited(_undoBatch(outcome.batchId)),
                 )
               : null,
@@ -595,7 +609,7 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
       if (!mounted) return;
       setState(() => _batchBusy = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Batch failed: $error')),
+        SnackBar(content: Text(context.l10n.batch_failed('$error'))),
       );
     }
   }
@@ -612,7 +626,7 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
       if (!mounted) return;
       setState(() => _batchBusy = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Batch undone')),
+        SnackBar(content: Text(context.l10n.batch_undone)),
       );
       await _load();
     } catch (error) {
@@ -620,7 +634,7 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
       _undoneBatches.remove(batchId);
       setState(() => _batchBusy = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Undo failed: $error')),
+        SnackBar(content: Text(context.l10n.undo_failed('$error'))),
       );
     }
   }
@@ -836,7 +850,9 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
         child: Row(
           children: [
             IconButton(
-              tooltip: allSelected ? 'Deselect all' : 'Select all',
+              tooltip: allSelected
+                  ? context.l10n.deselect_all
+                  : context.l10n.select_all,
               onPressed: _batchBusy
                   ? null
                   : () => setState(() {
@@ -856,7 +872,7 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
             ),
             Expanded(
               child: Text(
-                '$count selected',
+                context.l10n.n_selected(count),
                 style: tokens.typography.label.copyWith(
                   color: tokens.onSurface,
                 ),
@@ -869,26 +885,26 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
               )
             else ...[
               IconButton(
-                tooltip: 'Pin',
+                tooltip: context.l10n.pin,
                 onPressed: () =>
                     unawaited(_runBatchAction(WorkspaceBatchAction.pin)),
                 icon: const Icon(Icons.push_pin_outlined),
               ),
               IconButton(
-                tooltip: 'Unpin',
+                tooltip: context.l10n.unpin,
                 onPressed: () =>
                     unawaited(_runBatchAction(WorkspaceBatchAction.unpin)),
                 icon: const Icon(Icons.push_pin),
               ),
               IconButton(
-                tooltip: 'Archive',
+                tooltip: context.l10n.archive,
                 onPressed: () =>
                     unawaited(_runBatchAction(WorkspaceBatchAction.archive)),
                 icon: const Icon(Icons.archive_outlined),
               ),
             ],
             IconButton(
-              tooltip: 'Cancel selection',
+              tooltip: context.l10n.cancel_selection,
               onPressed: _batchBusy ? null : _exitSelection,
               icon: const Icon(Icons.close),
             ),

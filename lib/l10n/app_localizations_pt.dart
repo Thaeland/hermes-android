@@ -2520,6 +2520,207 @@ class AppLocalizationsPt extends AppLocalizations {
   String
   get compact_removes_the_you_and_hermes_labels_and_trims_bubble_padding_spacing_and_side_margins =>
       'O modo compacto remove os rótulos You e Hermes e reduz as margens internas, o espaçamento e as margens laterais dos balões.';
+
+  @override
+  String get pin => 'Pin';
+
+  @override
+  String get unpin => 'Unpin';
+
+  @override
+  String get undo => 'Undo';
+
+  @override
+  String get select_all => 'Select all';
+
+  @override
+  String get deselect_all => 'Deselect all';
+
+  @override
+  String get cancel_selection => 'Cancel selection';
+
+  @override
+  String n_selected(Object count) {
+    return '$count selected';
+  }
+
+  @override
+  String pinned_n_chats(Object count) {
+    return 'Pinned $count chat(s)';
+  }
+
+  @override
+  String unpinned_n_chats(Object count) {
+    return 'Unpinned $count chat(s)';
+  }
+
+  @override
+  String archived_n_chats(Object count) {
+    return 'Archived $count chat(s)';
+  }
+
+  @override
+  String pinned_chats_partial(Object applied, Object failed, Object requested) {
+    return 'Pinned $applied of $requested chat(s) — $failed failed';
+  }
+
+  @override
+  String unpinned_chats_partial(
+    Object applied,
+    Object failed,
+    Object requested,
+  ) {
+    return 'Unpinned $applied of $requested chat(s) — $failed failed';
+  }
+
+  @override
+  String archived_chats_partial(
+    Object applied,
+    Object failed,
+    Object requested,
+  ) {
+    return 'Archived $applied of $requested chat(s) — $failed failed';
+  }
+
+  @override
+  String batch_failed(Object error) {
+    return 'Batch failed: $error';
+  }
+
+  @override
+  String get batch_undone => 'Batch undone';
+
+  @override
+  String undo_failed(Object error) {
+    return 'Undo failed: $error';
+  }
+
+  @override
+  String get filing_check_failed => 'Filing check failed';
+
+  @override
+  String get filing_not_available_on_this_server =>
+      'Filing not available on this server';
+
+  @override
+  String get filing_not_available_message =>
+      'This Hermes gateway has no correction-aware filing contract installed. Set up the filing contract library and the project-filing gateway hook to enable AI-assisted filing.';
+
+  @override
+  String get suggestion_has_no_folder_path_cannot_apply =>
+      'Suggestion has no folder path — cannot apply.';
+
+  @override
+  String get suggestion_has_no_folder_path_cannot_record =>
+      'Suggestion has no folder path — cannot record.';
+
+  @override
+  String could_not_apply(Object error) {
+    return 'Could not apply: $error';
+  }
+
+  @override
+  String could_not_record(Object error) {
+    return 'Could not record: $error';
+  }
+
+  @override
+  String get suggestions => 'Suggestions';
+
+  @override
+  String get nothing_to_file => 'Nothing to file';
+
+  @override
+  String get nothing_to_file_message =>
+      'Every recent session already matches a Project by its working directory or a standing rule.';
+
+  @override
+  String get contract => 'Contract';
+
+  @override
+  String filing_contract_live(Object exclusions, Object rules) {
+    return 'Filing contract live — $rules rules, $exclusions exclusions. Corrections you make here and in chat (\"never file X under Y\") teach the organizer.';
+  }
+
+  @override
+  String get filing_hook_inactive =>
+      'Filing contract installed, but the correction hook is not active — natural-language corrections won\'t be recorded until it is.';
+
+  @override
+  String your_standing_rule(Object project) {
+    return 'Your standing rule → $project';
+  }
+
+  @override
+  String working_directory_matches(Object percent, Object project) {
+    return 'Working directory matches $project ($percent%)';
+  }
+
+  @override
+  String get never_here => 'Never here';
+
+  @override
+  String get file_it => 'File it';
+
+  @override
+  String get no_standing_rules_yet => 'No standing rules yet';
+
+  @override
+  String get no_standing_rules_message =>
+      'Accepting a suggestion or saying \"never file X under Y\" in chat creates one.';
+
+  @override
+  String never_file_path(Object path) {
+    return 'never file $path';
+  }
+
+  @override
+  String never_file_path_under(Object path, Object project) {
+    return 'never file $path under $project';
+  }
+
+  @override
+  String get recent_audit => 'Recent audit';
+
+  @override
+  String path_copied(Object name) {
+    return 'Path copied: $name';
+  }
+
+  @override
+  String get assets_check_failed => 'Assets check failed';
+
+  @override
+  String get assets_not_available_on_this_server =>
+      'Assets not available on this server';
+
+  @override
+  String get assets_not_available_message =>
+      'This Hermes gateway has no server-authoritative assets index. Update the gateway (assets.* RPC) to browse artifacts and attachments here.';
+
+  @override
+  String assets_project_title(Object project) {
+    return 'Assets · $project';
+  }
+
+  @override
+  String get no_assets_yet => 'No assets yet';
+
+  @override
+  String get no_assets_yet_message =>
+      'Files delivered in chats (MEDIA), uploads, and generated artifacts show up here, newest first.';
+
+  @override
+  String get artifacts => 'Artifacts';
+
+  @override
+  String get attachments => 'Attachments';
+
+  @override
+  String get media => 'Media';
+
+  @override
+  String get unknown_time => 'unknown time';
 }
 
 /// The translations for Portuguese, as used in Brazil (`pt_BR`).

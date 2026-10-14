@@ -4263,6 +4263,308 @@ abstract class AppLocalizations {
   /// **'Compact removes the You and Hermes labels and trims bubble padding, spacing, and side margins.'**
   String
   get compact_removes_the_you_and_hermes_labels_and_trims_bubble_padding_spacing_and_side_margins;
+
+  /// No description provided for @pin.
+  ///
+  /// In en, this message translates to:
+  /// **'Pin'**
+  String get pin;
+
+  /// No description provided for @unpin.
+  ///
+  /// In en, this message translates to:
+  /// **'Unpin'**
+  String get unpin;
+
+  /// No description provided for @undo.
+  ///
+  /// In en, this message translates to:
+  /// **'Undo'**
+  String get undo;
+
+  /// No description provided for @select_all.
+  ///
+  /// In en, this message translates to:
+  /// **'Select all'**
+  String get select_all;
+
+  /// No description provided for @deselect_all.
+  ///
+  /// In en, this message translates to:
+  /// **'Deselect all'**
+  String get deselect_all;
+
+  /// No description provided for @cancel_selection.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancel selection'**
+  String get cancel_selection;
+
+  /// No description provided for @n_selected.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} selected'**
+  String n_selected(Object count);
+
+  /// No description provided for @pinned_n_chats.
+  ///
+  /// In en, this message translates to:
+  /// **'Pinned {count} chat(s)'**
+  String pinned_n_chats(Object count);
+
+  /// No description provided for @unpinned_n_chats.
+  ///
+  /// In en, this message translates to:
+  /// **'Unpinned {count} chat(s)'**
+  String unpinned_n_chats(Object count);
+
+  /// No description provided for @archived_n_chats.
+  ///
+  /// In en, this message translates to:
+  /// **'Archived {count} chat(s)'**
+  String archived_n_chats(Object count);
+
+  /// No description provided for @pinned_chats_partial.
+  ///
+  /// In en, this message translates to:
+  /// **'Pinned {applied} of {requested} chat(s) — {failed} failed'**
+  String pinned_chats_partial(Object applied, Object failed, Object requested);
+
+  /// No description provided for @unpinned_chats_partial.
+  ///
+  /// In en, this message translates to:
+  /// **'Unpinned {applied} of {requested} chat(s) — {failed} failed'**
+  String unpinned_chats_partial(
+    Object applied,
+    Object failed,
+    Object requested,
+  );
+
+  /// No description provided for @archived_chats_partial.
+  ///
+  /// In en, this message translates to:
+  /// **'Archived {applied} of {requested} chat(s) — {failed} failed'**
+  String archived_chats_partial(
+    Object applied,
+    Object failed,
+    Object requested,
+  );
+
+  /// No description provided for @batch_failed.
+  ///
+  /// In en, this message translates to:
+  /// **'Batch failed: {error}'**
+  String batch_failed(Object error);
+
+  /// No description provided for @batch_undone.
+  ///
+  /// In en, this message translates to:
+  /// **'Batch undone'**
+  String get batch_undone;
+
+  /// No description provided for @undo_failed.
+  ///
+  /// In en, this message translates to:
+  /// **'Undo failed: {error}'**
+  String undo_failed(Object error);
+
+  /// No description provided for @filing_check_failed.
+  ///
+  /// In en, this message translates to:
+  /// **'Filing check failed'**
+  String get filing_check_failed;
+
+  /// No description provided for @filing_not_available_on_this_server.
+  ///
+  /// In en, this message translates to:
+  /// **'Filing not available on this server'**
+  String get filing_not_available_on_this_server;
+
+  /// No description provided for @filing_not_available_message.
+  ///
+  /// In en, this message translates to:
+  /// **'This Hermes gateway has no correction-aware filing contract installed. Set up the filing contract library and the project-filing gateway hook to enable AI-assisted filing.'**
+  String get filing_not_available_message;
+
+  /// No description provided for @suggestion_has_no_folder_path_cannot_apply.
+  ///
+  /// In en, this message translates to:
+  /// **'Suggestion has no folder path — cannot apply.'**
+  String get suggestion_has_no_folder_path_cannot_apply;
+
+  /// No description provided for @suggestion_has_no_folder_path_cannot_record.
+  ///
+  /// In en, this message translates to:
+  /// **'Suggestion has no folder path — cannot record.'**
+  String get suggestion_has_no_folder_path_cannot_record;
+
+  /// No description provided for @could_not_apply.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not apply: {error}'**
+  String could_not_apply(Object error);
+
+  /// No description provided for @could_not_record.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not record: {error}'**
+  String could_not_record(Object error);
+
+  /// No description provided for @suggestions.
+  ///
+  /// In en, this message translates to:
+  /// **'Suggestions'**
+  String get suggestions;
+
+  /// No description provided for @nothing_to_file.
+  ///
+  /// In en, this message translates to:
+  /// **'Nothing to file'**
+  String get nothing_to_file;
+
+  /// No description provided for @nothing_to_file_message.
+  ///
+  /// In en, this message translates to:
+  /// **'Every recent session already matches a Project by its working directory or a standing rule.'**
+  String get nothing_to_file_message;
+
+  /// No description provided for @contract.
+  ///
+  /// In en, this message translates to:
+  /// **'Contract'**
+  String get contract;
+
+  /// No description provided for @filing_contract_live.
+  ///
+  /// In en, this message translates to:
+  /// **'Filing contract live — {rules} rules, {exclusions} exclusions. Corrections you make here and in chat (\"never file X under Y\") teach the organizer.'**
+  String filing_contract_live(Object exclusions, Object rules);
+
+  /// No description provided for @filing_hook_inactive.
+  ///
+  /// In en, this message translates to:
+  /// **'Filing contract installed, but the correction hook is not active — natural-language corrections won\'t be recorded until it is.'**
+  String get filing_hook_inactive;
+
+  /// No description provided for @your_standing_rule.
+  ///
+  /// In en, this message translates to:
+  /// **'Your standing rule → {project}'**
+  String your_standing_rule(Object project);
+
+  /// No description provided for @working_directory_matches.
+  ///
+  /// In en, this message translates to:
+  /// **'Working directory matches {project} ({percent}%)'**
+  String working_directory_matches(Object percent, Object project);
+
+  /// No description provided for @never_here.
+  ///
+  /// In en, this message translates to:
+  /// **'Never here'**
+  String get never_here;
+
+  /// No description provided for @file_it.
+  ///
+  /// In en, this message translates to:
+  /// **'File it'**
+  String get file_it;
+
+  /// No description provided for @no_standing_rules_yet.
+  ///
+  /// In en, this message translates to:
+  /// **'No standing rules yet'**
+  String get no_standing_rules_yet;
+
+  /// No description provided for @no_standing_rules_message.
+  ///
+  /// In en, this message translates to:
+  /// **'Accepting a suggestion or saying \"never file X under Y\" in chat creates one.'**
+  String get no_standing_rules_message;
+
+  /// No description provided for @never_file_path.
+  ///
+  /// In en, this message translates to:
+  /// **'never file {path}'**
+  String never_file_path(Object path);
+
+  /// No description provided for @never_file_path_under.
+  ///
+  /// In en, this message translates to:
+  /// **'never file {path} under {project}'**
+  String never_file_path_under(Object path, Object project);
+
+  /// No description provided for @recent_audit.
+  ///
+  /// In en, this message translates to:
+  /// **'Recent audit'**
+  String get recent_audit;
+
+  /// No description provided for @path_copied.
+  ///
+  /// In en, this message translates to:
+  /// **'Path copied: {name}'**
+  String path_copied(Object name);
+
+  /// No description provided for @assets_check_failed.
+  ///
+  /// In en, this message translates to:
+  /// **'Assets check failed'**
+  String get assets_check_failed;
+
+  /// No description provided for @assets_not_available_on_this_server.
+  ///
+  /// In en, this message translates to:
+  /// **'Assets not available on this server'**
+  String get assets_not_available_on_this_server;
+
+  /// No description provided for @assets_not_available_message.
+  ///
+  /// In en, this message translates to:
+  /// **'This Hermes gateway has no server-authoritative assets index. Update the gateway (assets.* RPC) to browse artifacts and attachments here.'**
+  String get assets_not_available_message;
+
+  /// No description provided for @assets_project_title.
+  ///
+  /// In en, this message translates to:
+  /// **'Assets · {project}'**
+  String assets_project_title(Object project);
+
+  /// No description provided for @no_assets_yet.
+  ///
+  /// In en, this message translates to:
+  /// **'No assets yet'**
+  String get no_assets_yet;
+
+  /// No description provided for @no_assets_yet_message.
+  ///
+  /// In en, this message translates to:
+  /// **'Files delivered in chats (MEDIA), uploads, and generated artifacts show up here, newest first.'**
+  String get no_assets_yet_message;
+
+  /// No description provided for @artifacts.
+  ///
+  /// In en, this message translates to:
+  /// **'Artifacts'**
+  String get artifacts;
+
+  /// No description provided for @attachments.
+  ///
+  /// In en, this message translates to:
+  /// **'Attachments'**
+  String get attachments;
+
+  /// No description provided for @media.
+  ///
+  /// In en, this message translates to:
+  /// **'Media'**
+  String get media;
+
+  /// No description provided for @unknown_time.
+  ///
+  /// In en, this message translates to:
+  /// **'unknown time'**
+  String get unknown_time;
 }
 
 class _AppLocalizationsDelegate

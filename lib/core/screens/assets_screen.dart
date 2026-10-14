@@ -13,6 +13,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../l10n/l10n.dart';
 import '../services/assets_gateway_client.dart';
 import '../services/connection_manager.dart';
 import '../services/desktop_gateway_client.dart';
@@ -21,14 +22,20 @@ import '../widgets/hermes_components.dart';
 
 /// Kind filter for the gallery. `all` sends no kind param.
 enum AssetFilter {
-  all('All', null),
-  artifact('Artifacts', 'artifact'),
-  attachment('Attachments', 'attachment'),
-  media('Media', 'media');
+  all(null),
+  artifact('artifact'),
+  attachment('attachment'),
+  media('media');
 
-  const AssetFilter(this.label, this.kind);
-  final String label;
+  const AssetFilter(this.kind);
   final String? kind;
+
+  String label(AppLocalizations l10n) => switch (this) {
+        AssetFilter.all => l10n.filter_all,
+        AssetFilter.artifact => l10n.artifacts,
+        AssetFilter.attachment => l10n.attachments,
+        AssetFilter.media => l10n.media,
+      };
 }
 
 class AssetsScreen extends StatefulWidget {
@@ -140,7 +147,7 @@ class _AssetsScreenState extends State<AssetsScreen> {
   void _copyPath(HermesAsset asset) {
     Clipboard.setData(ClipboardData(text: asset.path));
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Path copied: ${asset.name}')),
+      SnackBar(content: Text(context.l10n.path_copied(asset.name))),
     );
   }
 
@@ -156,12 +163,12 @@ class _AssetsScreenState extends State<AssetsScreen> {
       backgroundColor: tokens.surface,
       appBar: AppBar(
         title: Text(widget.projectName == null
-            ? 'Assets'
-            : 'Assets · ${widget.projectName}'),
+            ? context.l10n.assets
+            : context.l10n.assets_project_title(widget.projectName!)),
         centerTitle: false,
         actions: [
           IconButton(
-            tooltip: 'Refresh',
+            tooltip: context.l10n.refresh,
             onPressed: _loading ? null : _load,
             icon: const Icon(Icons.refresh),
           ),
@@ -177,18 +184,15 @@ class _AssetsScreenState extends State<AssetsScreen> {
     }
     if (_error != null) {
       return ErrorState(
-        title: 'Assets check failed',
+        title: context.l10n.assets_check_failed,
         message: _error!,
         onRetry: _load,
       );
     }
     if (_unsupported) {
-      return const ErrorState.unsupported(
-        title: 'Assets not available on this server',
-        message:
-            'This Hermes gateway has no server-authoritative assets index. '
-            'Update the gateway (assets.* RPC) to browse artifacts and '
-            'attachments here.',
+      return ErrorState.unsupported(
+        title: context.l10n.assets_not_available_on_this_server,
+        message: context.l10n.assets_not_available_message,
       );
     }
     return RefreshIndicator(
@@ -205,7 +209,7 @@ class _AssetsScreenState extends State<AssetsScreen> {
               children: [
                 for (final f in AssetFilter.values)
                   ChoiceChip(
-                    label: Text(f.label),
+                    label: Text(f.label(context.l10n)),
                     selected: _filter == f,
                     onSelected: (_) => _setFilter(f),
                   ),
@@ -214,12 +218,10 @@ class _AssetsScreenState extends State<AssetsScreen> {
           ),
           const SizedBox(height: HermesSpacing.md),
           if (_assets.isEmpty)
-            const EmptyState(
+            EmptyState(
               icon: Icons.image_outlined,
-              title: 'No assets yet',
-              message:
-                  'Files delivered in chats (MEDIA), uploads, and generated '
-                  'artifacts show up here, newest first.',
+              title: context.l10n.no_assets_yet,
+              message: context.l10n.no_assets_yet_message,
             )
           else
             for (final a in _assets) _assetCard(tokens, a),
@@ -296,12 +298,14 @@ class _AssetsScreenState extends State<AssetsScreen> {
   String _subtitleFor(HermesAsset asset) {
     final source = asset.projectName != null && asset.projectName!.isNotEmpty
         ? asset.projectName!
-        : (asset.sessionTitle.isNotEmpty ? asset.sessionTitle : 'Unassigned');
+        : (asset.sessionTitle.isNotEmpty
+            ? asset.sessionTitle
+            : context.l10n.unassigned);
     final when = asset.modifiedAt > 0
         ? DateTime.fromMillisecondsSinceEpoch((asset.modifiedAt * 1000).round())
               .toString()
               .substring(0, 16)
-        : 'unknown time';
+        : context.l10n.unknown_time;
     return '$source · $when';
   }
 
