@@ -140,5 +140,34 @@ void main() {
       expect(entries.single.id, 'b1');
       expect(entries.single.label, 'Pinned');
     });
+
+    test('mutationsAvailable is false when pin is unknown', () async {
+      final rpc = _RecordingRpc([
+        _error(-32601, 'unknown method: organization.pin'),
+      ]);
+      final client = OrganizationGatewayClient(rpc.call);
+
+      expect(await client.mutationsAvailable(), isFalse);
+      expect(rpc.calls.single.method, 'organization.pin');
+    });
+
+    test('mutationsAvailable is true when pin exists', () async {
+      final rpc = _RecordingRpc([
+        _ok({'batch_id': '', 'applied': [], 'failed': []}),
+      ]);
+      final client = OrganizationGatewayClient(rpc.call);
+
+      expect(await client.mutationsAvailable(), isTrue);
+    });
+
+    test('mutationsAvailable treats a pin RPC error as the method existing',
+        () async {
+      final rpc = _RecordingRpc([
+        _error(-32602, 'session_ids must not be empty'),
+      ]);
+      final client = OrganizationGatewayClient(rpc.call);
+
+      expect(await client.mutationsAvailable(), isTrue);
+    });
   });
 }

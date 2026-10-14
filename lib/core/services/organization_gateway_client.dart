@@ -157,6 +157,19 @@ class OrganizationGatewayClient {
     return OrganizationBatchResult.fromJson(result);
   }
 
+  /// Whether `organization.pin` exists. History-only gateways must not
+  /// enable the batch bar; an empty pin is a no-op probe.
+  Future<bool> mutationsAvailable() async {
+    try {
+      await pin(const [], pinned: true);
+      return true;
+    } on OrganizationUnsupportedException {
+      return false;
+    } on JsonRpcError {
+      return true;
+    }
+  }
+
   Future<Map<String, dynamic>> _request(
     String method,
     Map<String, dynamic> params,

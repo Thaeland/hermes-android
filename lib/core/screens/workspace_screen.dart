@@ -1716,18 +1716,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         (available) => _filingAvailable = available,
       );
 
-  /// Probes `organization.history` once so batch selection can be enabled
-  /// on the gateway's real answer.
+  /// Probes `organization.pin` once so batch selection is enabled only when
+  /// the mutation surface exists (history alone is not enough).
   Future<void> _probeOrganization() => _probeCapability(
         'organization',
-        (gateway) async {
-          try {
-            await gateway.organization.history();
-          } on OrganizationUnsupportedException {
-            return false;
-          }
-          return true;
-        },
+        (gateway) => gateway.organization.mutationsAvailable(),
         (available) => _orgAvailable = available,
       );
 

@@ -85,7 +85,7 @@ class MoreSection {
 /// the entry stays disabled with its reason, never hidden.
 ///
 /// [organizationAvailable] is the proven answer for the `organization.*`
-/// batch pin/archive/undo contract (probed once via `organization.history`).
+/// batch pin/archive/undo contract (probed once via `organization.pin`).
 ///
 /// [assetsAvailable] is the proven answer for the `assets.*`
 /// server-authoritative index (probed once via `assets.status`).
