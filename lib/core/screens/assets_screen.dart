@@ -17,6 +17,7 @@ import '../l10n/l10n.dart';
 import '../services/assets_gateway_client.dart';
 import '../services/connection_manager.dart';
 import '../services/desktop_gateway_client.dart';
+import '../services/projects_gateway_client.dart' show GatewayRpcCall;
 import '../theme/hermes_theme.dart';
 import '../widgets/hermes_components.dart';
 
@@ -51,11 +52,15 @@ class AssetsScreen extends StatefulWidget {
   /// button did for the standalone route.
   final bool embedded;
 
+  /// Test-only RPC override (see FilingScreen.testRpc).
+  final GatewayRpcCall? testRpc;
+
   const AssetsScreen({
     required this.connection,
     this.projectId,
     this.projectName,
     this.embedded = false,
+    this.testRpc,
     super.key,
   });
 
@@ -65,6 +70,7 @@ class AssetsScreen extends StatefulWidget {
 
 class _AssetsScreenState extends State<AssetsScreen> {
   DesktopGatewayClient? _gateway;
+  AssetsGatewayClient? _testClient;
   int _loadGeneration = 0;
   List<HermesAsset> _assets = const [];
   AssetFilter _filter = AssetFilter.all;
@@ -79,6 +85,11 @@ class _AssetsScreenState extends State<AssetsScreen> {
   }
 
   void _open() {
+    if (widget.testRpc != null) {
+      _testClient = AssetsGatewayClient(widget.testRpc!);
+      _load();
+      return;
+    }
     try {
       _gateway = DesktopGatewayClient.fromConnection(widget.connection);
     } catch (e) {
@@ -98,7 +109,7 @@ class _AssetsScreenState extends State<AssetsScreen> {
   }
 
   Future<void> _load() async {
-    final client = _gateway?.assets;
+    final client = _testClient ?? _gateway?.assets;
     if (client == null) return;
     final generation = ++_loadGeneration;
     setState(() {
@@ -304,11 +315,24 @@ class _AssetsScreenState extends State<AssetsScreen> {
             ? asset.sessionTitle
             : context.l10n.unassigned);
     final when = asset.modifiedAt > 0
-        ? DateTime.fromMillisecondsSinceEpoch((asset.modifiedAt * 1000).round())
+        ? '${DateTime.fromMillisecondsSinceEpoch((asset.modifiedAt * 1000).round())
               .toString()
-              .substring(0, 16)
+              .substring(0, 16)} ${_zoneLabel()}'
         : context.l10n.unknown_time;
     return '$source · $when';
+  }
+
+  /// Short label for the device's local zone, e.g. `CDT`; falls back to a
+  /// `UTC±HH:MM` offset when the platform reports no abbreviation.
+  static String _zoneLabel() {
+    final now = DateTime.now();
+    final name = now.timeZoneName.trim();
+    if (name.isNotEmpty) return name;
+    final offset = now.timeZoneOffset;
+    final sign = offset.isNegative ? '-' : '+';
+    final abs = offset.abs();
+    return 'UTC$sign${abs.inHours.toString().padLeft(2, '0')}:'
+        '${(abs.inMinutes % 60).toString().padLeft(2, '0')}';
   }
 
   static String _humanSize(int bytes) {

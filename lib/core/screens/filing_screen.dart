@@ -17,12 +17,23 @@ import '../l10n/l10n.dart';
 import '../services/connection_manager.dart';
 import '../services/desktop_gateway_client.dart';
 import '../services/filing_gateway_client.dart';
+import '../services/projects_gateway_client.dart' show GatewayRpcCall;
 import '../theme/hermes_theme.dart';
 import '../widgets/hermes_components.dart';
 
 class FilingScreen extends StatefulWidget {
   final SavedConnection connection;
-  const FilingScreen({required this.connection, super.key});
+
+  /// Test-only RPC override: when set, the screen talks to this function
+  /// instead of opening a Desktop gateway socket. Mirrors the recovery-
+  /// socket seam pattern used elsewhere; production callers never pass it.
+  final GatewayRpcCall? testRpc;
+
+  const FilingScreen({
+    required this.connection,
+    this.testRpc,
+    super.key,
+  });
 
   @override
   State<FilingScreen> createState() => _FilingScreenState();
@@ -30,6 +41,7 @@ class FilingScreen extends StatefulWidget {
 
 class _FilingScreenState extends State<FilingScreen> {
   DesktopGatewayClient? _gateway;
+  FilingGatewayClient? _testClient;
   FilingStatus? _status;
   List<FilingSuggestion> _suggestions = const [];
   FilingPolicy? _policy;
@@ -45,6 +57,11 @@ class _FilingScreenState extends State<FilingScreen> {
   }
 
   void _open() {
+    if (widget.testRpc != null) {
+      _testClient = FilingGatewayClient(widget.testRpc!);
+      _load();
+      return;
+    }
     try {
       _gateway = DesktopGatewayClient.fromConnection(widget.connection);
     } catch (e) {
@@ -63,8 +80,10 @@ class _FilingScreenState extends State<FilingScreen> {
     super.dispose();
   }
 
+  FilingGatewayClient? get _client => _testClient ?? _gateway?.filing;
+
   Future<void> _load() async {
-    final client = _gateway?.filing;
+    final client = _client;
     if (client == null) return;
     setState(() {
       _loading = true;
@@ -105,7 +124,7 @@ class _FilingScreenState extends State<FilingScreen> {
   }
 
   Future<void> _accept(FilingSuggestion s) async {
-    final client = _gateway?.filing;
+    final client = _client;
     if (client == null || _busySessions.contains(s.sessionId)) return;
     if (s.cwd.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -133,7 +152,7 @@ class _FilingScreenState extends State<FilingScreen> {
   }
 
   Future<void> _reject(FilingSuggestion s) async {
-    final client = _gateway?.filing;
+    final client = _client;
     if (client == null || _busySessions.contains(s.sessionId)) return;
     if (s.cwd.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
