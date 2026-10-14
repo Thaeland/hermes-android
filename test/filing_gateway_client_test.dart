@@ -98,6 +98,26 @@ void main() {
       expect(rpc.calls.single.params['source'], 'android:accept');
     });
 
+    test('apply refuses an empty project before any RPC', () async {
+      final rpc = _RecordingRpc([]);
+      final client = FilingGatewayClient(rpc.call);
+
+      await expectLater(
+        client.apply(path: '/p', project: '   '),
+        throwsA(isA<ArgumentError>()),
+      );
+      expect(rpc.calls, isEmpty);
+    });
+
+    test('apply trims the project name', () async {
+      final rpc = _RecordingRpc([_ok({'note': 'filed'})]);
+      final client = FilingGatewayClient(rpc.call);
+
+      await client.apply(path: '/p', project: ' App ');
+
+      expect(rpc.calls.single.params['project'], 'App');
+    });
+
     test('reject omits a blank project', () async {
       final rpc = _RecordingRpc([_ok({})]);
       final client = FilingGatewayClient(rpc.call);

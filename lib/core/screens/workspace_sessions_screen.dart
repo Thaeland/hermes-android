@@ -474,7 +474,6 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
       } while (_loadQueued && mounted);
     } finally {
       _loadInFlight = false;
-      if (_loadQueued && mounted) unawaited(_load());
     }
   }
 

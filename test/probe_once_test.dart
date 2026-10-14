@@ -26,4 +26,26 @@ void main() {
     expect(runs, 1);
     expect(inflight.containsKey('org'), isTrue);
   });
+
+  test('forget after an await drops the cached probe so callers re-probe',
+      () async {
+    // The transient-failure path: the probe fails mid-flight (after an
+    // await) and forgets itself so a later call re-probes instead of
+    // caching a failed verdict for the app's lifetime.
+    final inflight = <String, Future<void>>{};
+    var runs = 0;
+    await rememberProbe(inflight, 'org', (forget) async {
+      runs++;
+      await Future<void>.delayed(Duration.zero);
+      forget();
+    });
+    expect(inflight.containsKey('org'), isFalse);
+
+    await rememberProbe(inflight, 'org', (forget) async {
+      runs++;
+      await Future<void>.delayed(Duration.zero);
+      forget();
+    });
+    expect(runs, 2);
+  });
 }

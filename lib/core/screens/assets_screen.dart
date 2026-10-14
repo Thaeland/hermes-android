@@ -65,6 +65,7 @@ class AssetsScreen extends StatefulWidget {
 
 class _AssetsScreenState extends State<AssetsScreen> {
   DesktopGatewayClient? _gateway;
+  int _loadGeneration = 0;
   List<HermesAsset> _assets = const [];
   AssetFilter _filter = AssetFilter.all;
   bool _loading = true;
@@ -99,13 +100,14 @@ class _AssetsScreenState extends State<AssetsScreen> {
   Future<void> _load() async {
     final client = _gateway?.assets;
     if (client == null) return;
+    final generation = ++_loadGeneration;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
       final status = await client.status();
-      if (!mounted) return;
+      if (!mounted || generation != _loadGeneration) return;
       if (!status.available) {
         setState(() {
           _loading = false;
@@ -117,20 +119,20 @@ class _AssetsScreenState extends State<AssetsScreen> {
         kind: _filter.kind,
         projectId: widget.projectId,
       );
-      if (!mounted) return;
+      if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _assets = assets;
         _loading = false;
         _unsupported = false;
       });
     } on AssetsUnsupportedException {
-      if (!mounted) return;
+      if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _loading = false;
         _unsupported = true;
       });
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || generation != _loadGeneration) return;
       setState(() {
         _loading = false;
         _error = e.toString();
@@ -312,6 +314,9 @@ class _AssetsScreenState extends State<AssetsScreen> {
   static String _humanSize(int bytes) {
     if (bytes < 1024) return '$bytes B';
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    if (bytes < 1024 * 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
   }
 }

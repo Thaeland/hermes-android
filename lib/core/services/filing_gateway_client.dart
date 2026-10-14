@@ -160,9 +160,13 @@ class FilingGatewayClient {
 
   /// Accept a suggestion: records the rule and mirrors it into projects.db.
   Future<String> apply({required String path, required String project}) async {
+    final trimmed = project.trim();
+    if (trimmed.isEmpty) {
+      throw ArgumentError.value(project, 'project', 'must not be empty');
+    }
     final result = await _request('filing.apply', {
       'path': path,
-      'project': project,
+      'project': trimmed,
       'source': 'android:accept',
     });
     final note = result['note'];
