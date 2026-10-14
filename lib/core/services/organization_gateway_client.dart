@@ -165,7 +165,12 @@ class OrganizationGatewayClient {
       return true;
     } on OrganizationUnsupportedException {
       return false;
-    } on JsonRpcError {
+    } on JsonRpcError catch (error) {
+      // Only a server-answered error proves the method exists. Locally
+      // synthesized transport failures (code == null: connection_closed,
+      // timeout, ready drift) leave the verdict unknown — rethrow so the
+      // caller's transient-retry path handles them.
+      if (error.code == null) rethrow;
       return true;
     }
   }

@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hermes_android/core/services/organization_gateway_client.dart';
+import 'package:hermes_android/core/services/ws_client.dart';
 
 /// Records the JSON-RPC calls a test makes and replays canned envelopes.
 class _RecordingRpc {
@@ -168,6 +169,25 @@ void main() {
       final client = OrganizationGatewayClient(rpc.call);
 
       expect(await client.mutationsAvailable(), isTrue);
+    });
+
+    test('mutationsAvailable rethrows transport failures instead of proving '
+        'support', () async {
+      // ws_client synthesizes these with code == null when the socket dies
+      // or a request times out — silence is not a proof of support.
+      Future<Map<String, dynamic>> call(
+        String method,
+        Map<String, dynamic> params,
+      ) async {
+        throw JsonRpcError(
+          method,
+          'Connection closed',
+          reason: 'connection_closed',
+        );
+      }
+
+      final client = OrganizationGatewayClient(call);
+      await expectLater(client.mutationsAvailable(), throwsA(isA<JsonRpcError>()));
     });
   });
 }
