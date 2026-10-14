@@ -48,4 +48,47 @@ void main() {
     });
     expect(runs, 2);
   });
+
+  test('probeRetryDelay backs off per failure and exhausts at the budget', () {
+    expect(probeRetryDelay(1), const Duration(seconds: 2));
+    expect(probeRetryDelay(2), const Duration(seconds: 4));
+    expect(probeRetryDelay(3), isNull);
+    expect(probeRetryDelay(9), isNull);
+  });
+
+  testWidgets('the scheduler fires the re-probe once the backoff elapses', (
+    tester,
+  ) async {
+    final scheduler = ProbeRetryScheduler();
+    var calls = 0;
+    scheduler.schedule('org', 1, () => calls++);
+    expect(calls, 0);
+    await tester.pump(const Duration(seconds: 1));
+    expect(calls, 0);
+    await tester.pump(const Duration(seconds: 1));
+    expect(calls, 1);
+    scheduler.dispose();
+  });
+
+  testWidgets('a reschedule for the same family replaces the pending timer', (
+    tester,
+  ) async {
+    final scheduler = ProbeRetryScheduler();
+    var calls = 0;
+    scheduler.schedule('org', 1, () => calls++);
+    // Second blip: the older timer must not fire in addition to the new one.
+    scheduler.schedule('org', 2, () => calls++);
+    await tester.pump(const Duration(seconds: 4));
+    expect(calls, 1);
+    scheduler.dispose();
+  });
+
+  testWidgets('dispose cancels pending re-probes', (tester) async {
+    final scheduler = ProbeRetryScheduler();
+    var calls = 0;
+    scheduler.schedule('org', 1, () => calls++);
+    scheduler.dispose();
+    await tester.pump(const Duration(seconds: 30));
+    expect(calls, 0);
+  });
 }

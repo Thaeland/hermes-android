@@ -888,6 +888,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   @override
   void dispose() {
     _homeGeneration++;
+    _probeRetry.dispose();
     // Only tear down what this screen created; an injected repository stays
     // owned by whoever supplied it.
     if (_ownsRepository) {
@@ -1649,6 +1650,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   /// pinning a wrong verdict forever.
   final Map<String, int> _probeTransientFailures = {};
   static const _maxProbeRetries = 3;
+  final ProbeRetryScheduler _probeRetry = ProbeRetryScheduler();
 
   /// Runs a capability probe at most once, no matter how many rebuilds ask.
   /// Concurrent requests share the same in-flight future, so a burst of
@@ -1695,7 +1697,16 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         // re-probe must never form a settle loop.
         final failures = (_probeTransientFailures[family] ?? 0) + 1;
         _probeTransientFailures[family] = failures;
-        if (failures < _maxProbeRetries) forget();
+        if (failures < _maxProbeRetries) {
+          forget();
+          // Nothing else is guaranteed to re-trigger a probe (the verdict
+          // stays untouched, so no rebuild follows), so schedule the
+          // backoff re-probe directly. Time-triggered, capped by
+          // probeRetryDelay — it cannot form a settle loop with rebuilds.
+          _probeRetry.schedule(family, failures, () {
+            if (mounted) unawaited(_probeCapability(family, probe, apply));
+          });
+        }
       } finally {
         if (ownsProbeOnly) gateway.close();
       }
