@@ -4,9 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hermes_android/core/models/session.dart';
 import 'package:hermes_android/core/screens/workspace_sessions_screen.dart';
+import 'package:hermes_android/core/services/local_chat_pin_store.dart';
 import 'package:hermes_android/core/theme/hermes_theme.dart';
 import 'package:hermes_android/core/widgets/hermes_components.dart';
 import 'package:hermes_android/core/widgets/hermes_shell.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'support/l10n_test_utils.dart';
 import 'package:hermes_android/l10n/app_localizations.dart';
 
@@ -18,6 +20,7 @@ Session _session(
   bool isActive = false,
   bool pinned = false,
   String source = 'gateway',
+  String? lineageRootId,
 }) => Session(
   id: id,
   title: title,
@@ -30,6 +33,7 @@ Session _session(
   lastActive: lastActive ?? 1750000000,
   archived: archived,
   pinned: pinned,
+  lineageRootId: lineageRootId,
 );
 
 void main() {
@@ -554,6 +558,8 @@ void main() {
       WidgetTester tester, {
       required WorkspaceBatchRunner? runBatch,
       WorkspaceBatchUndoRunner? undoBatch,
+      LocalChatPinStore? pinStore,
+      List<Session>? sessions,
     }) async {
       await tester.pumpWidget(
         MaterialApp(
@@ -569,7 +575,7 @@ void main() {
               embedded: true,
               now: now,
               load: () async => WorkspaceSessionsData(
-                sessions: [
+                sessions: sessions ?? [
                   _session('s1', 'First', lastActive: 1750000000),
                   _session('s2', 'Second', lastActive: 1750000000),
                 ],
@@ -577,6 +583,7 @@ void main() {
               onOpenSession: (_) {},
               runBatch: runBatch,
               undoBatch: undoBatch,
+              pinStore: pinStore,
             ),
           ),
         ),
@@ -765,6 +772,74 @@ void main() {
       await tester.pump();
 
       expect(find.text('First'), findsNothing);
+    });
+
+    testWidgets('a locally-pinned chat keeps its pinned group in select mode', (
+      tester,
+    ) async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final store = LocalChatPinStore(prefs, connectionId: 'c1');
+      // Pin names the compression root; the list shows the live tip.
+      await store.setPinned('root1', pinned: true);
+
+      await pumpBatch(
+        tester,
+        runBatch: (ids, action) async => const WorkspaceBatchOutcome(
+          batchId: 'b-pin',
+          requested: 1,
+          applied: 1,
+          failed: 0,
+        ),
+        pinStore: store,
+        sessions: [
+          _session(
+            's1',
+            'First',
+            lastActive: 1750000000,
+            lineageRootId: 'root1',
+          ),
+          _session('s2', 'Second', lastActive: 1750000000),
+        ],
+      );
+
+      expect(find.text(l10n.pinned_on_this_device), findsOneWidget);
+      expect(find.text('First'), findsOneWidget);
+
+      // Selection works on a locally-pinned row without disturbing the group.
+      await tester.longPress(find.text('First'));
+      await tester.pumpAndSettle();
+      expect(find.text(l10n.n_selected(1)), findsOneWidget);
+      expect(find.text(l10n.pinned_on_this_device), findsOneWidget);
+
+      await tester.tap(find.byTooltip(l10n.archive));
+      await settleSnackBar(tester);
+      expect(find.text(l10n.archived_n_chats(1)), findsOneWidget);
+    });
+
+    testWidgets('a batch pin does not write local pins', (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      final prefs = await SharedPreferences.getInstance();
+      final store = LocalChatPinStore(prefs, connectionId: 'c1');
+
+      await pumpBatch(
+        tester,
+        runBatch: (ids, action) async => WorkspaceBatchOutcome(
+          batchId: 'b-org',
+          requested: ids.length,
+          applied: ids.length,
+          failed: 0,
+        ),
+        pinStore: store,
+      );
+
+      await selectBoth(tester);
+      await tester.tap(find.byTooltip(l10n.pin));
+      await settleSnackBar(tester);
+
+      // Organization pins live server-side; the device store stays empty.
+      expect(await store.load(), isEmpty);
+      expect(find.text(l10n.pinned_on_this_device), findsNothing);
     });
   });
 
