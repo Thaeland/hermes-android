@@ -345,7 +345,10 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
 
   /// Coalesces refresh ticks with manual pulls: a slow load must never
   /// overlap the next tick (an older completion would win the setState).
+  /// A skipped call still marks [_loadQueued] so the in-flight fetch is
+  /// followed by one more pass (batch/undo must not keep pre-mutation rows).
   bool _loadInFlight = false;
+  bool _loadQueued = false;
 
   /// Batch selection mode. Enters on long-press (when the gateway proved
   /// `organization.*`), exits on cancel or after a batch completes.
@@ -446,23 +449,32 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
   }
 
   Future<void> _load() async {
-    if (_loadInFlight) return;
+    if (_loadInFlight) {
+      _loadQueued = true;
+      return;
+    }
     _loadInFlight = true;
     try {
-      final data = await widget.load();
-      final pins = await widget.pinStore?.load() ?? const <String>[];
-      if (mounted) {
-        setState(() {
-          _data = data;
-          _pinnedIds = pins;
-          _error = null;
-        });
-      }
-    } catch (error) {
-      debugPrint('[workspace-sessions] load failed: $error');
-      if (mounted) setState(() => _error = error);
+      do {
+        _loadQueued = false;
+        try {
+          final data = await widget.load();
+          final pins = await widget.pinStore?.load() ?? const <String>[];
+          if (mounted) {
+            setState(() {
+              _data = data;
+              _pinnedIds = pins;
+              _error = null;
+            });
+          }
+        } catch (error) {
+          debugPrint('[workspace-sessions] load failed: $error');
+          if (mounted) setState(() => _error = error);
+        }
+      } while (_loadQueued && mounted);
     } finally {
       _loadInFlight = false;
+      if (_loadQueued && mounted) unawaited(_load());
     }
   }
 

@@ -703,6 +703,69 @@ void main() {
       expect(find.text('1 selected'), findsNothing);
       expect(find.byTooltip('Pin'), findsNothing);
     });
+
+    testWidgets('a batch reload still runs after an in-flight fetch', (
+      tester,
+    ) async {
+      var loads = 0;
+      final second = Completer<WorkspaceSessionsData>();
+      final two = WorkspaceSessionsData(
+        sessions: [
+          _session('s1', 'First', lastActive: 1750000000),
+          _session('s2', 'Second', lastActive: 1750000000),
+        ],
+      );
+      Future<WorkspaceSessionsData> load() {
+        loads++;
+        if (loads == 1) return Future.value(two);
+        if (loads == 2) return second.future;
+        return Future.value(const WorkspaceSessionsData());
+      }
+
+      await tester.pumpWidget(
+        MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          theme: hermesTheme(Brightness.dark),
+          home: Scaffold(
+            body: WorkspaceSessionsScreen(
+              title: 'Chats',
+              view: WorkspaceSessionView.all,
+              embedded: true,
+              now: DateTime.fromMillisecondsSinceEpoch(1750000000 * 1000),
+              refreshInterval: const Duration(seconds: 10),
+              load: load,
+              onOpenSession: (_) {},
+              runBatch: (ids, action) async => const WorkspaceBatchOutcome(
+                batchId: 'b-stale',
+                requested: 2,
+                applied: 2,
+                failed: 0,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('First'), findsOneWidget);
+
+      await tester.pump(const Duration(seconds: 10));
+      expect(loads, 2);
+
+      await tester.longPress(find.text('First'));
+      await tester.pump();
+      await tester.tap(find.text('Second'));
+      await tester.pump();
+      await tester.tap(find.byTooltip('Archive'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+
+      second.complete(two);
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.text('First'), findsNothing);
+    });
   });
 
   testWidgets('search opens a result and Archived Quick offers Promote', (
@@ -945,13 +1008,14 @@ void main() {
     await tester.pump(const Duration(seconds: 10));
     expect(loads, 1);
 
-    // Settle the slow load, then the next tick runs normally.
+    // Settle the slow load: the skipped tick replays once, then the
+    // next interval fires as usual.
     gate.complete(
       WorkspaceSessionsData(sessions: [_session('s1', 'Daily driver')]),
     );
     await tester.pump();
     await tester.pump(const Duration(seconds: 10));
     await tester.pump();
-    expect(loads, 2);
+    expect(loads, 3);
   });
 }
