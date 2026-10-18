@@ -90,7 +90,16 @@ class DesktopGatewayClient {
     required this._baseUrl,
     required this._dashboard,
     this._gatewayProfile,
-  });
+  }) {
+    _liveClientCount++;
+  }
+
+  static int _liveClientCount = 0;
+
+  /// Number of clients created and not yet [close]d. The app-root lifecycle
+  /// observer uses this to decide whether a backgrounded app has live
+  /// gateway sockets worth a foreground keep-alive service.
+  static int get liveConnectionCount => _liveClientCount;
 
   /// The canonical gateway origin for [connection].
   ///
@@ -1090,7 +1099,10 @@ class DesktopGatewayClient {
   }
 
   void close() {
+    // Idempotent: a double close must not double-decrement the live count.
+    if (_closed) return;
     _closed = true;
+    _liveClientCount--;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
     _asyncEventListener = null;

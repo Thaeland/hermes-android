@@ -2,6 +2,7 @@ package com.hermesagent.hermes_android
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.OpenableColumns
 import io.flutter.embedding.android.FlutterActivity
@@ -14,6 +15,7 @@ import java.util.UUID
 class MainActivity : FlutterActivity() {
     private val shareChannelName = "com.hermesagent.hermes_android/share"
     private val launchChannelName = "com.hermesagent.hermes_android/launch"
+    private val keepAliveChannelName = "com.hermesagent.hermes_android/keepalive"
     private val quickChatAction = "com.hermesagent.hermes_android.action.QUICK_CHAT"
     private val maxSharedItems = 10
     private val maxSharedBytes = 64L * 1024L * 1024L
@@ -54,6 +56,33 @@ class MainActivity : FlutterActivity() {
                 }
             }
         }
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, keepAliveChannelName).apply {
+            setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "start" -> result.success(startKeepAliveService())
+                    "stop" -> {
+                        stopService(Intent(this@MainActivity, ConnectionKeepAliveService::class.java))
+                        result.success(true)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        }
+    }
+
+    /// Returns false when the OS refuses the foreground-service start (Android
+    /// 12+ background-start limits on some OEMs). The transport's
+    /// reconnect-on-resume loop remains the fallback in that case.
+    private fun startKeepAliveService(): Boolean = try {
+        val intent = Intent(this, ConnectionKeepAliveService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent)
+        } else {
+            startService(intent)
+        }
+        true
+    } catch (_: Exception) {
+        false
     }
 
     override fun onNewIntent(intent: Intent) {

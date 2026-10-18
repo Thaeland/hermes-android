@@ -2,6 +2,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <application
         android:label="${appLabel}"
         android:name="${applicationName}"
@@ -46,6 +48,18 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- Holds the process at foreground priority while backgrounded so
+             the gateway WebSocket heartbeat keeps running (see
+             ConnectionKeepAliveService.kt). Started from Dart only while
+             gateway clients are open. -->
+        <service
+            android:name=".ConnectionKeepAliveService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps the Hermes gateway WebSocket alive while the app is backgrounded so running replies keep streaming" />
+        </service>
     </application>
     <queries>
         <intent>

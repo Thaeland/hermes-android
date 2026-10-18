@@ -8,7 +8,9 @@ import 'core/services/composer_draft_store.dart';
 import 'core/services/config_backup.dart';
 import 'core/services/config_backup_io.dart';
 import 'core/services/config_backup_service.dart';
+import 'core/services/connection_keepalive_service.dart';
 import 'core/services/connection_manager.dart';
+import 'core/services/desktop_gateway_client.dart';
 import 'core/services/gateway_turn_application_controller.dart';
 import 'core/services/local_chat_pin_store.dart';
 import 'core/services/notification_prefs.dart';
@@ -260,8 +262,13 @@ class HermesApp extends StatefulWidget {
   }
 }
 
-class HermesAppState extends State<HermesApp> {
+class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
   late final GatewayTurnApplicationController _turnApplicationController;
+
+  /// Android foreground keep-alive: while the app is backgrounded with live
+  /// gateway clients, a foreground service holds the process so heartbeat
+  /// timers keep firing and the WebSocket survives minimization.
+  final ConnectionKeepAliveService _keepAlive = ConnectionKeepAliveService();
 
   /// Pushes from the app root (notification taps) need a navigator below the
   /// MaterialApp this state builds.
@@ -270,6 +277,7 @@ class HermesAppState extends State<HermesApp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _turnApplicationController = GatewayTurnApplicationController();
     unawaited(NotificationPrefsStore.load());
     notificationResponseHandler = _handleNotificationResponse;
@@ -280,6 +288,26 @@ class HermesAppState extends State<HermesApp> {
           .takeInitialNotificationResponse();
       if (initial != null && mounted) _handleNotificationResponse(initial);
     });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.resumed:
+        // Foreground: the OS will not freeze us, the service is pure noise.
+        unawaited(_keepAlive.stop());
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.hidden:
+      case AppLifecycleState.paused:
+        // Leave-the-foreground transitions fire in sequence; the first one
+        // still runs while the FGS start is permitted. Only worth a service
+        // when there is actually a socket to protect.
+        if (DesktopGatewayClient.liveConnectionCount > 0) {
+          unawaited(_keepAlive.start());
+        }
+      case AppLifecycleState.detached:
+        break;
+    }
   }
 
   /// The connection a notification response should act on: the last one the
@@ -450,6 +478,7 @@ class HermesAppState extends State<HermesApp> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     unawaited(_turnApplicationController.close());
     super.dispose();
   }
