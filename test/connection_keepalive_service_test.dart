@@ -93,6 +93,277 @@ void main() {
     expect(service.isActive, isFalse);
   });
 
+  test(
+      'a background request landing during an in-flight start is retained',
+      () async {
+    // Rapid cycle: minimize → resume → minimize while the first native
+    // start is still pending. The second start() is refused by the
+    // in-flight guard and the first start then sees a stale cycle and
+    // stops — leaving the app backgrounded with keep-alive inactive,
+    // precisely when it is needed. The latest requested state must win.
+    final firstStart = Completer<bool>();
+    var first = true;
+    final calls = <String>[];
+    mockChannel((call) async {
+      calls.add(call.method);
+      if (call.method == 'start' && first) {
+        first = false;
+        return firstStart.future;
+      }
+      return true;
+    });
+
+    final service = ConnectionKeepAliveService();
+
+    // Background: start #1 goes in flight.
+    service.onAppLifecycleState(
+      AppLifecycleState.inactive,
+      hasLiveSocket: true,
+    );
+    await pumpEventQueue();
+
+    // Resume: stop races the pending start.
+    service.onAppLifecycleState(
+      AppLifecycleState.resumed,
+      hasLiveSocket: true,
+    );
+    await pumpEventQueue();
+
+    // Background again: start #2 is refused while start #1 is in flight.
+    service.onAppLifecycleState(
+      AppLifecycleState.inactive,
+      hasLiveSocket: true,
+    );
+    await pumpEventQueue();
+
+    // The first native start finally lands (stale). The retained
+    // background request must still leave the service active.
+    firstStart.complete(true);
+    await pumpEventQueue();
+    await pumpEventQueue();
+
+    expect(service.isActive, isTrue);
+    expect(calls, containsAllInOrder(['start', 'stop', 'start']));
+
+    // A later resume must still stop it: the retained retry is not a
+    // permanently unstoppable service.
+    service.onAppLifecycleState(
+      AppLifecycleState.resumed,
+      hasLiveSocket: true,
+    );
+    await pumpEventQueue();
+    expect(service.isActive, isFalse);
+    expect(calls.last, 'stop');
+  });
+
+  test(
+      'a retained background retry runs even when the stale first start was refused',
+      () async {
+    // Same rapid cycle as above, but the in-flight start is refused
+    // (Android 12+ background-start limits). The retained request must
+    // still get its own fresh attempt once the refusal lands.
+    final firstStart = Completer<bool>();
+    var first = true;
+    final calls = <String>[];
+    mockChannel((call) async {
+      calls.add(call.method);
+      if (call.method == 'start' && first) {
+        first = false;
+        return firstStart.future;
+      }
+      return true;
+    });
+
+    final service = ConnectionKeepAliveService();
+    service.onAppLifecycleState(
+      AppLifecycleState.inactive,
+      hasLiveSocket: true,
+    );
+    await pumpEventQueue();
+    service.onAppLifecycleState(
+      AppLifecycleState.resumed,
+      hasLiveSocket: true,
+    );
+    await pumpEventQueue();
+    service.onAppLifecycleState(
+      AppLifecycleState.inactive,
+      hasLiveSocket: true,
+    );
+    await pumpEventQueue();
+
+    firstStart.complete(false); // refused start lands, stale
+    await pumpEventQueue();
+    await pumpEventQueue();
+
+    expect(service.isActive, isTrue);
+    expect(calls, containsAllInOrder(['start', 'stop', 'start']));
+  });
+
+  test('a malformed native reply does not wedge the service forever', () async {
+    // The typed invoke casts the reply to bool?; a malformed native
+    // response raises TypeError. If that escapes without resetting
+    // _starting, every later start only records _pendingStart and the
+    // keep-alive is permanently dead while backgrounded.
+    var malformed = true;
+    mockChannel((call) async {
+      if (call.method == 'start' && malformed) return 42;
+      return true;
+    });
+
+    final service = ConnectionKeepAliveService();
+    await expectLater(service.start(), throwsA(isA<TypeError>()));
+
+    // Once the native side behaves, a fresh background must work again.
+    malformed = false;
+    await service.start();
+    expect(service.isActive, isTrue);
+  });
+
+  test('a stop after a retained request cancels it', () async {
+    // background → resume → background → resume, all while the first
+    // native start is pending. The second (final) stop must cancel the
+    // retained background request — a retry after resume would leave a
+    // foreground service running in the foreground.
+    final firstStart = Completer<bool>();
+    var first = true;
+    final calls = <String>[];
+    mockChannel((call) async {
+      calls.add(call.method);
+      if (call.method == 'start' && first) {
+        first = false;
+        return firstStart.future;
+      }
+      return true;
+    });
+
+    final service = ConnectionKeepAliveService();
+    unawaited(service.start());
+    await pumpEventQueue();
+    await service.stop();
+    unawaited(service.start()); // records the retained request
+    await pumpEventQueue();
+    await service.stop(); // cancels it
+
+    firstStart.complete(true);
+    await pumpEventQueue();
+    await pumpEventQueue();
+
+    expect(service.isActive, isFalse);
+    // No retry: only the first start ever reached the native side.
+    expect(calls.where((c) => c == 'start'), hasLength(1));
+    expect(calls.last, 'stop');
+  });
+
+  test('a stop racing the retained retry still stops the service', () async {
+    // The compensating-stop contract must hold for the retry start too,
+    // not just the first-generation start.
+    final firstStart = Completer<bool>();
+    final retryStart = Completer<bool>();
+    var first = true;
+    final calls = <String>[];
+    mockChannel((call) async {
+      calls.add(call.method);
+      if (call.method == 'start') {
+        if (first) {
+          first = false;
+          return firstStart.future;
+        }
+        return retryStart.future;
+      }
+      return true;
+    });
+
+    final service = ConnectionKeepAliveService();
+    unawaited(service.start());
+    await pumpEventQueue();
+    await service.stop();
+    unawaited(service.start()); // retained
+    await pumpEventQueue();
+
+    firstStart.complete(true); // stale → retry fires, now in flight
+    await pumpEventQueue();
+    await service.stop(); // races the retry
+    retryStart.complete(true);
+    await pumpEventQueue();
+    await pumpEventQueue();
+
+    expect(service.isActive, isFalse);
+    expect(calls, containsAllInOrder(['start', 'stop', 'start', 'stop']));
+    expect(calls.last, 'stop');
+  });
+
+  test('a refused retry leaves the service inactive with nothing leaked',
+      () async {
+    // The retained retry's own start may be refused too (OEM limits).
+    // That is a silent no-op — no active flag, no orphaned service.
+    final firstStart = Completer<bool>();
+    var first = true;
+    final calls = <String>[];
+    mockChannel((call) async {
+      calls.add(call.method);
+      if (call.method == 'start') {
+        if (first) {
+          first = false;
+          return firstStart.future;
+        }
+        return false; // the retry is refused
+      }
+      return true;
+    });
+
+    final service = ConnectionKeepAliveService();
+    unawaited(service.start());
+    await pumpEventQueue();
+    await service.stop();
+    unawaited(service.start());
+    await pumpEventQueue();
+    firstStart.complete(true);
+    await pumpEventQueue();
+    await pumpEventQueue();
+
+    expect(service.isActive, isFalse);
+    expect(calls, containsAllInOrder(['start', 'stop', 'start']));
+  });
+
+  test('burst double-start leaves no stale retained request past a stop',
+      () async {
+    // inactive → paused fires start() twice with no stop between: the
+    // second records a retained request that never gets consumed (the
+    // first start lands non-stale). stop() must clear it so a later
+    // stop-raced start cannot resurrect the service after resume.
+    final slowStart = Completer<bool>();
+    var slow = false;
+    final calls = <String>[];
+    mockChannel((call) async {
+      calls.add(call.method);
+      if (call.method == 'start' && slow) return slowStart.future;
+      return true;
+    });
+
+    final service = ConnectionKeepAliveService();
+    unawaited(service.start());
+    unawaited(service.start()); // records a stale retained request
+    await pumpEventQueue();
+    expect(service.isActive, isTrue);
+
+    await service.stop(); // must clear the stale retained request
+    expect(service.isActive, isFalse);
+
+    // A stop racing the next start must still stop it (no retry).
+    slow = true;
+    unawaited(service.start());
+    await pumpEventQueue();
+    await service.stop();
+    slowStart.complete(true);
+    await pumpEventQueue();
+    await pumpEventQueue();
+
+    expect(service.isActive, isFalse);
+    // The burst's second start was only recorded, never dispatched.
+    expect(calls.where((c) => c == 'start'), hasLength(2));
+    expect(calls.last, 'stop');
+  });
+
   test('lifecycle policy: background-with-socket starts; resume and detach stop', () async {
     final calls = <String>[];
     mockChannel((call) async {

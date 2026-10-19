@@ -20,13 +20,23 @@ class ConnectionKeepAliveService {
 
   bool _active = false;
   bool _starting = false;
+
+  /// A start requested while another start is in flight. The in-flight
+  /// guard would otherwise swallow it, and the in-flight start — now
+  /// stale — would stop the service, leaving a backgrounded app without
+  /// keep-alive. The latest requested state must win instead.
+  bool _pendingStart = false;
   int _cycle = 0;
 
   /// True when the native keep-alive service was started and not yet stopped.
   bool get isActive => _active;
 
   Future<void> start() async {
-    if (_active || _starting) return;
+    if (_active) return;
+    if (_starting) {
+      _pendingStart = true;
+      return;
+    }
     _starting = true;
     final cycle = ++_cycle;
     var started = false;
@@ -37,9 +47,23 @@ class ConnectionKeepAliveService {
     } on MissingPluginException {
       // Non-Android host (tests, desktop): nothing to keep alive.
       started = false;
+    } finally {
+      // Must reset even if an unexpected error escapes the typed invoke
+      // (a malformed native reply raises TypeError): a leaked _starting
+      // wedges the service permanently — every later start would only
+      // record _pendingStart and nothing would ever consume it.
+      _starting = false;
     }
-    _starting = false;
     if (cycle != _cycle) {
+      if (_pendingStart) {
+        // A background landed after a stop raced this start (rapid
+        // minimize → resume → minimize). The latest request is a start,
+        // so honour it rather than tearing the service down. The stop
+        // that bumped the cycle already reached the native side, so no
+        // compensating stop is owed here.
+        _pendingStart = false;
+        return start();
+      }
       // A stop landed while this start was in flight (fast minimize +
       // return). Its stop may have raced ahead of the native start, so
       // send another to guarantee the service ends stopped.
@@ -55,6 +79,7 @@ class ConnectionKeepAliveService {
     // that always reaches the native side is the only recovery path.
     // Native stopService on a stopped service is a cheap no-op.
     _cycle++;
+    _pendingStart = false;
     _active = false;
     await _sendStop();
   }
