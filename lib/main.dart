@@ -292,22 +292,10 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    switch (state) {
-      case AppLifecycleState.resumed:
-        // Foreground: the OS will not freeze us, the service is pure noise.
-        unawaited(_keepAlive.stop());
-      case AppLifecycleState.inactive:
-      case AppLifecycleState.hidden:
-      case AppLifecycleState.paused:
-        // Leave-the-foreground transitions fire in sequence; the first one
-        // still runs while the FGS start is permitted. Only worth a service
-        // when there is actually a socket to protect.
-        if (DesktopGatewayClient.liveConnectionCount > 0) {
-          unawaited(_keepAlive.start());
-        }
-      case AppLifecycleState.detached:
-        break;
-    }
+    _keepAlive.onAppLifecycleState(
+      state,
+      hasLiveSocket: DesktopGatewayClient.hasLiveSocket,
+    );
   }
 
   /// The connection a notification response should act on: the last one the
@@ -479,6 +467,9 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    // Belt for the detached case: if the widget tree tears down while the
+    // service is up, the native side must not outlive its only controller.
+    unawaited(_keepAlive.stop());
     unawaited(_turnApplicationController.close());
     super.dispose();
   }
