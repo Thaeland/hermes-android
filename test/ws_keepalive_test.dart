@@ -99,40 +99,6 @@ void main() {
     await client.ensureSession('mob-ka');
     expect(gateway.resumedStoredIds, contains('stored-ka-1'));
   });
-
-  test('hasLiveSocket gates the keep-alive on actually-live sockets', () async {
-    // The background service must start only when a socket exists to
-    // protect. Long-lived clients that never opened a socket (the turn
-    // application controller holds one per connection for the whole app
-    // lifetime) must not trigger it on every backgrounding.
-    final gateway = await _KeepAliveFakeGateway.start();
-    addTearDown(gateway.stop);
-    final client = DesktopGatewayClient.fromConnection(
-      SavedConnection(
-        id: 'conn-gate',
-        label: 'Local fake',
-        host: 'localhost',
-        port: gateway.port,
-        apiKey: 'fixture-key',
-        useHttps: false,
-        desktopGatewayUrl: 'http://127.0.0.1:${gateway.port}',
-        dashboardUsername: 'u',
-        dashboardPassword: 'p',
-      ),
-    );
-
-    // Created but never connected: nothing to keep alive.
-    expect(DesktopGatewayClient.hasLiveSocket, isFalse);
-
-    await client.ensureSession('mob-gate');
-    expect(DesktopGatewayClient.hasLiveSocket, isTrue);
-
-    client.close();
-    expect(DesktopGatewayClient.hasLiveSocket, isFalse);
-    // Double close must not corrupt the registry.
-    client.close();
-    expect(DesktopGatewayClient.hasLiveSocket, isFalse);
-  });
 }
 
 Future<void> _waitFor(

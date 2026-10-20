@@ -91,24 +91,10 @@ class DesktopGatewayClient {
     required this._dashboard,
     this._gatewayProfile,
   }) {
-    _liveClients.add(this);
+    // Clients no longer track a global registry: the keep-alive policy is
+    // driven by unresolved turns (see ConnectionKeepAliveService), not by
+    // merely-live sockets.
   }
-
-  static final Set<DesktopGatewayClient> _liveClients = <DesktopGatewayClient>{};
-
-  bool get _hasLiveSocket =>
-      !_closed &&
-      (_reconnectTimer != null ||
-          _socketInFlight != null ||
-          (_ws?.isConnected ?? false));
-
-  /// True when any open client has a live (or reconnecting) gateway socket.
-  /// The app-root lifecycle observer uses this to decide whether a
-  /// backgrounded app has a connection worth a foreground keep-alive
-  /// service. Clients alone are not enough: the turn application controller
-  /// holds one client per connection for the whole app lifetime, most of
-  /// which is spent with no socket open.
-  static bool get hasLiveSocket => _liveClients.any((c) => c._hasLiveSocket);
 
   /// The canonical gateway origin for [connection].
   ///
@@ -1108,10 +1094,9 @@ class DesktopGatewayClient {
   }
 
   void close() {
-    // Idempotent: a double close must not re-enter or corrupt the registry.
+    // Idempotent: a double close must not re-enter or corrupt state.
     if (_closed) return;
     _closed = true;
-    _liveClients.remove(this);
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
     _asyncEventListener = null;

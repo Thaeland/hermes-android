@@ -118,21 +118,21 @@ void main() {
     // Background: start #1 goes in flight.
     service.onAppLifecycleState(
       AppLifecycleState.inactive,
-      hasLiveSocket: true,
+      hasActiveTurn: true,
     );
     await pumpEventQueue();
 
     // Resume: stop races the pending start.
     service.onAppLifecycleState(
       AppLifecycleState.resumed,
-      hasLiveSocket: true,
+      hasActiveTurn: true,
     );
     await pumpEventQueue();
 
     // Background again: start #2 is refused while start #1 is in flight.
     service.onAppLifecycleState(
       AppLifecycleState.inactive,
-      hasLiveSocket: true,
+      hasActiveTurn: true,
     );
     await pumpEventQueue();
 
@@ -149,7 +149,7 @@ void main() {
     // permanently unstoppable service.
     service.onAppLifecycleState(
       AppLifecycleState.resumed,
-      hasLiveSocket: true,
+      hasActiveTurn: true,
     );
     await pumpEventQueue();
     expect(service.isActive, isFalse);
@@ -177,17 +177,17 @@ void main() {
     final service = ConnectionKeepAliveService();
     service.onAppLifecycleState(
       AppLifecycleState.inactive,
-      hasLiveSocket: true,
+      hasActiveTurn: true,
     );
     await pumpEventQueue();
     service.onAppLifecycleState(
       AppLifecycleState.resumed,
-      hasLiveSocket: true,
+      hasActiveTurn: true,
     );
     await pumpEventQueue();
     service.onAppLifecycleState(
       AppLifecycleState.inactive,
-      hasLiveSocket: true,
+      hasActiveTurn: true,
     );
     await pumpEventQueue();
 
@@ -364,7 +364,7 @@ void main() {
     expect(calls.last, 'stop');
   });
 
-  test('lifecycle policy: background-with-socket starts; resume and detach stop', () async {
+  test('lifecycle policy: background-with-active-turn starts; resume and detach stop', () async {
     final calls = <String>[];
     mockChannel((call) async {
       calls.add(call.method);
@@ -373,18 +373,20 @@ void main() {
 
     final service = ConnectionKeepAliveService();
 
-    // Backgrounding with nothing connected must not start the service.
+    // Backgrounding with no unresolved turn must not start the service:
+    // an idle (or reconnecting) socket alone is not user-perceptible work,
+    // and a persistent notification for it fails Play's FGS criteria.
     service.onAppLifecycleState(
       AppLifecycleState.inactive,
-      hasLiveSocket: false,
+      hasActiveTurn: false,
     );
     await pumpEventQueue();
     expect(calls, isEmpty);
 
-    // Backgrounding with a live socket starts it.
+    // Backgrounding with a turn in flight starts it.
     service.onAppLifecycleState(
       AppLifecycleState.inactive,
-      hasLiveSocket: true,
+      hasActiveTurn: true,
     );
     await pumpEventQueue();
     expect(calls, ['start']);
@@ -394,7 +396,7 @@ void main() {
     // process with a permanent notification protecting a dead socket.
     service.onAppLifecycleState(
       AppLifecycleState.detached,
-      hasLiveSocket: true,
+      hasActiveTurn: true,
     );
     await pumpEventQueue();
     expect(calls, containsAllInOrder(['start', 'stop']));
@@ -403,14 +405,111 @@ void main() {
     // Resume stops too (a foregrounded app never needs the service).
     service.onAppLifecycleState(
       AppLifecycleState.inactive,
-      hasLiveSocket: true,
+      hasActiveTurn: true,
     );
     await pumpEventQueue();
     service.onAppLifecycleState(
       AppLifecycleState.resumed,
-      hasLiveSocket: true,
+      hasActiveTurn: true,
     );
     await pumpEventQueue();
     expect(calls, containsAllInOrder(['start', 'stop', 'start', 'stop']));
+  });
+
+  test('a turn settling while backgrounded stops the service', () async {
+    // The bounded-lifetime stop condition: the service exists only while
+    // a user-visible turn is unresolved. A turn that completes minutes
+    // after backgrounding must end the notification then, not at resume.
+    final calls = <String>[];
+    mockChannel((call) async {
+      calls.add(call.method);
+      return true;
+    });
+
+    final service = ConnectionKeepAliveService();
+    service.onAppLifecycleState(
+      AppLifecycleState.inactive,
+      hasActiveTurn: true,
+    );
+    await pumpEventQueue();
+    expect(calls, ['start']);
+
+    service.onTurnActivityChanged(false);
+    await pumpEventQueue();
+    expect(calls, containsAllInOrder(['start', 'stop']));
+    expect(service.isActive, isFalse);
+
+    // A second settle event (multiple turns settling) stays a no-op.
+    service.onTurnActivityChanged(false);
+    await pumpEventQueue();
+    expect(calls.last, 'stop');
+  });
+
+  test('a turn starting while backgrounded starts the service', () async {
+    // Backgrounded with no turn (service not started), then a detached or
+    // recovered turn becomes active: the app must gain protection then.
+    final calls = <String>[];
+    mockChannel((call) async {
+      calls.add(call.method);
+      return true;
+    });
+
+    final service = ConnectionKeepAliveService();
+    service.onAppLifecycleState(
+      AppLifecycleState.inactive,
+      hasActiveTurn: false,
+    );
+    await pumpEventQueue();
+    expect(calls, isEmpty);
+
+    service.onTurnActivityChanged(true);
+    await pumpEventQueue();
+    expect(calls, ['start']);
+    expect(service.isActive, isTrue);
+  });
+
+  test('turn activity in the foreground never touches the service', () async {
+    // A foregrounded app never needs the service; a turn starting or
+    // settling while resumed must not start (or spuriously stop) it.
+    final calls = <String>[];
+    mockChannel((call) async {
+      calls.add(call.method);
+      return true;
+    });
+
+    final service = ConnectionKeepAliveService();
+    service.onTurnActivityChanged(true);
+    service.onTurnActivityChanged(false);
+    await pumpEventQueue();
+    expect(calls, isEmpty);
+  });
+
+  test('turn activity after detach does not restart the service', () async {
+    // After `detached` no isolate survives to stop the service, so the
+    // backgrounded flag must be cleared: a late activity event (e.g. a
+    // settle landing during teardown) must not start it again.
+    final calls = <String>[];
+    mockChannel((call) async {
+      calls.add(call.method);
+      return true;
+    });
+
+    final service = ConnectionKeepAliveService();
+    service.onAppLifecycleState(
+      AppLifecycleState.inactive,
+      hasActiveTurn: true,
+    );
+    await pumpEventQueue();
+    service.onAppLifecycleState(
+      AppLifecycleState.detached,
+      hasActiveTurn: true,
+    );
+    await pumpEventQueue();
+    expect(calls, containsAllInOrder(['start', 'stop']));
+
+    service.onTurnActivityChanged(true);
+    await pumpEventQueue();
+    expect(calls.last, 'stop');
+    expect(service.isActive, isFalse);
   });
 }

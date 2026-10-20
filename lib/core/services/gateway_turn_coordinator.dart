@@ -133,6 +133,7 @@ class GatewayTurnCoordinatorRegistry {
   final Expando<bool> _leasedSockets = Expando<bool>();
   final Map<String, int> _sessionGenerations = {};
   final Map<String, _GatewayTurnSettledRegistration> _turnSettledListeners = {};
+  final Map<Object, void Function()> _turnActivityListeners = {};
   final Map<String, _GatewayTurnSessionBoundRegistration>
   _sessionBoundListeners = {};
   Future<void> _tail = Future<void>.value();
@@ -190,6 +191,37 @@ class GatewayTurnCoordinatorRegistry {
     final current = _turnSettledListeners[localSessionId];
     if (current == null || !identical(current.token, registration)) return;
     _turnSettledListeners.remove(localSessionId);
+  }
+
+  /// True when any retained coordinator has an unresolved turn. The
+  /// background keep-alive policy uses this to bound the foreground
+  /// service to user-visible work instead of merely-live sockets.
+  bool get hasActiveTurn => _coordinators.values.any((c) => c.hasActiveTurn);
+
+  /// Registers an app-level observer notified whenever any coordinator's
+  /// active-turn state may have changed. Listeners recompute [hasActiveTurn]
+  /// themselves; notifications are deliberately value-less and idempotent.
+  Object addTurnActivityListener(void Function() listener) {
+    if (_closed) {
+      throw const GatewayTurnCoordinatorException(
+        GatewayTurnCoordinatorFailure.closed,
+      );
+    }
+    final token = Object();
+    _turnActivityListeners[token] = listener;
+    return token;
+  }
+
+  void removeTurnActivityListener(Object token) {
+    _turnActivityListeners.remove(token);
+  }
+
+  void _notifyTurnActivity() {
+    for (final listener in _turnActivityListeners.values.toList(
+      growable: false,
+    )) {
+      listener();
+    }
   }
 
   /// Registers the current route owner for one local session's bindings.
@@ -259,6 +291,9 @@ class GatewayTurnCoordinatorRegistry {
               )
               ..onTurnSettled = (state) {
                 _turnSettledListeners[localSessionId]?.listener(state);
+              }
+              ..onTurnActivityChanged = (_) {
+                _notifyTurnActivity();
               }
               ..onSessionBound = (local, stored) {
                 _sessionBoundListeners[localSessionId]?.listener(local, stored);
@@ -383,6 +418,7 @@ class GatewayTurnCoordinatorRegistry {
     _closed = true;
     _generation += 1;
     _turnSettledListeners.clear();
+    _turnActivityListeners.clear();
     _sessionBoundListeners.clear();
     return _serialized(() async {
       final coordinators = _coordinators.values.toList(growable: false);
@@ -477,6 +513,21 @@ class GatewayTurnCoordinator {
   /// Called exactly once when a turn is settled into the tombstone,
   /// whether completed successfully or fail-closed.
   GatewayTurnSettledCallback? onTurnSettled;
+
+  /// Called after every mutation that can cross the active/inactive
+  /// boundary (submit, settle, discard, recovery restore), reporting the
+  /// coordinator's current `hasActiveTurn`. The value is idempotent —
+  /// consumers recompute the aggregate — so redundant calls are harmless.
+  /// The background keep-alive policy uses this to bound the foreground
+  /// service to unresolved turns.
+  void Function(bool active)? onTurnActivityChanged;
+
+  /// True while at least one submitted turn is unresolved (in flight,
+  /// disconnected-but-recovering, or awaiting reconcile). Settled turns
+  /// live in tombstones and do not count.
+  bool get hasActiveTurn => _states.isNotEmpty;
+
+  void _notifyTurnActivity() => onTurnActivityChanged?.call(_states.isNotEmpty);
 
   /// Called after every authoritative durable `session.open` binding.
   GatewayTurnSessionBoundCallback? onSessionBound;
@@ -575,6 +626,7 @@ class GatewayTurnCoordinator {
     ).markSubmissionStarted();
     _states[clientTurnId] = state;
     if (onState != null) _observers[clientTurnId] = onState;
+    _notifyTurnActivity();
 
     // The durable read-back performed by GatewayTurnJournal completes before
     // the first and only prompt.submit write is allowed onto the socket.
@@ -1058,6 +1110,7 @@ class GatewayTurnCoordinator {
         if (entry.turnId != null) {
           _clientTurnByTurnId[entry.turnId!] = entry.clientTurnId;
         }
+        _notifyTurnActivity();
       }
       if (!_stateBytesWithinCapability(state, _runtimeBinding!.capability)) {
         state = state.failReconcile(
@@ -1471,6 +1524,7 @@ class GatewayTurnCoordinator {
     if (state.turnId != null) {
       _clientTurnByTurnId[state.turnId!] = state.clientTurnId;
     }
+    _notifyTurnActivity();
   }
 
   Future<void> _persistAndNotify(GatewayTurnRecoveryState state) async {
@@ -1572,6 +1626,7 @@ class GatewayTurnCoordinator {
     while (_settledTombstones.length > maxSettledTombstones) {
       _settledTombstones.remove(_settledTombstones.keys.first);
     }
+    _notifyTurnActivity();
     onTurnSettled?.call(state);
   }
 
@@ -1583,15 +1638,18 @@ class GatewayTurnCoordinator {
     if (turnId != null && _clientTurnByTurnId[turnId] == state.clientTurnId) {
       _clientTurnByTurnId.remove(turnId);
     }
+    _notifyTurnActivity();
   }
 
   void _releaseAllMemory() {
+    final wasActive = _states.isNotEmpty;
     _states.clear();
     _clientTurnByTurnId.clear();
     _observers.clear();
     _settledTombstones.clear();
     _durableTimestampFloors.clear();
     _invalidateStagedAttachments();
+    if (wasActive) _notifyTurnActivity();
   }
 
   GatewayTurnRecoveryState? get _processPoisonedFailure =>

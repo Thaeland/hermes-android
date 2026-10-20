@@ -8,18 +8,27 @@ import 'package:flutter/services.dart';
 /// survive minimization instead of being frozen or killed by the OS.
 ///
 /// The native side is a `specialUse` foreground service
-/// (`ConnectionKeepAliveService.kt`). Dart owns the policy: start when the
-/// app leaves the foreground while a gateway socket is live, stop on resume
-/// (a foregrounded app never needs it) and on detach (no isolate survives
-/// to stop it later). A refused start (Android 12+ background-start limits
-/// on some OEMs) is not an error: the transport's reconnect-on-resume loop
-/// remains the fallback, so callers must never gate UI on [isActive].
+/// (`ConnectionKeepAliveService.kt`). Dart owns the policy, and the
+/// service is bounded to user-visible work: it runs only while an
+/// unresolved chat turn needs the socket, never for an idle or merely
+/// reconnecting connection. Stop conditions: the turn settles while
+/// backgrounded ([onTurnActivityChanged] with no active turn), the app
+/// resumes (a foregrounded app never needs it), or the app detaches (no
+/// isolate survives to stop it later). This bounded lifetime is what
+/// keeps the persistent notification defensible under Play's
+/// foreground-service criteria: it protects work the user started, and
+/// it ends when that work ends.
+///
+/// A refused start (Android 12+ background-start limits on some OEMs) is
+/// not an error: the transport's reconnect-on-resume loop remains the
+/// fallback, so callers must never gate UI on [isActive].
 class ConnectionKeepAliveService {
   static const MethodChannel channel =
       MethodChannel('com.hermesagent.hermes_android/keepalive');
 
   bool _active = false;
   bool _starting = false;
+  bool _backgrounded = false;
 
   /// A start requested while another start is in flight. The in-flight
   /// guard would otherwise swallow it, and the in-flight start — now
@@ -85,26 +94,42 @@ class ConnectionKeepAliveService {
   }
 
   /// The app-root lifecycle policy, kept here so it is testable without
-  /// pumping the whole app: backgrounding with a live socket starts the
-  /// service; resume stops it (foreground never needs it); detach stops
+  /// pumping the whole app: backgrounding with an unresolved turn starts
+  /// the service; resume stops it (foreground never needs it); detach stops
   /// it too — after `detached` no Dart isolate survives to stop it, and
   /// an orphaned foreground service would pin the process with a
   /// permanent notification protecting a dead socket.
   void onAppLifecycleState(
     AppLifecycleState state, {
-    required bool hasLiveSocket,
+    required bool hasActiveTurn,
   }) {
     switch (state) {
       case AppLifecycleState.resumed:
       case AppLifecycleState.detached:
+        _backgrounded = false;
         unawaited(stop());
       case AppLifecycleState.inactive:
       case AppLifecycleState.hidden:
       case AppLifecycleState.paused:
         // Leave-the-foreground transitions fire in sequence; the first
         // one still runs while the FGS start is permitted. Only worth a
-        // service when there is actually a socket to protect.
-        if (hasLiveSocket) unawaited(start());
+        // service when there is actually a turn in flight to protect.
+        _backgrounded = true;
+        if (hasActiveTurn) unawaited(start());
+    }
+  }
+
+  /// The bounded-lifetime stop condition: called whenever the app-wide
+  /// active-turn state may have changed. While backgrounded, the service
+  /// follows the work — a turn settling ends the notification then, not
+  /// at resume; a turn becoming active (e.g. a recovered or detached turn)
+  /// gains protection. In the foreground the service is never needed.
+  void onTurnActivityChanged(bool hasActiveTurn) {
+    if (!_backgrounded) return;
+    if (hasActiveTurn) {
+      unawaited(start());
+    } else {
+      unawaited(stop());
     }
   }
 

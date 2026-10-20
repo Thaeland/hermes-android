@@ -80,7 +80,7 @@ class ConnectionKeepAliveService : Service() {
         return builder
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentTitle("Hermes Agent")
-            .setContentText("Keeping the gateway connection alive")
+            .setContentText("Finishing your request")
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .build()
