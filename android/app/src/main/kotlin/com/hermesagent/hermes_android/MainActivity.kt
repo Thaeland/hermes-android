@@ -70,6 +70,18 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    override fun onDestroy() {
+        // Finishing with Back removes the Activity without calling the
+        // service's onTaskRemoved. Stop natively before the Flutter engine
+        // tears down: Dart's async "stop" message can otherwise be lost,
+        // leaving a foreground notification with no live turn to settle.
+        // A configuration-change recreation is not a finish.
+        if (isFinishing) {
+            stopService(Intent(this, ConnectionKeepAliveService::class.java))
+        }
+        super.onDestroy()
+    }
+
     /// Returns false when the OS refuses the foreground-service start (Android
     /// 12+ background-start limits on some OEMs). The transport's
     /// reconnect-on-resume loop remains the fallback in that case.

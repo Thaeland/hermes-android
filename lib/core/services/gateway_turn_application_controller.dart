@@ -160,8 +160,7 @@ class GatewayTurnApplicationController {
   /// uses this to bound the foreground service to user-visible work
   /// instead of merely-live sockets.
   bool get hasActiveTurn =>
-      _legacyTurns.isNotEmpty ||
-      _sessions.values.any((s) => s.hasActiveTurn);
+      _legacyTurns.isNotEmpty || _sessions.values.any((s) => s.hasActiveTurn);
 
   /// Registers a legacy (stock-gateway) send as an app-wide active turn.
   /// Stock gateways — and every stored chat on any gateway — submit
@@ -226,13 +225,12 @@ class GatewayTurnApplicationController {
     final hadTrackedTurns =
         _legacyTurns.isNotEmpty ||
         _sessions.values.any((session) => session.hasActiveTurn);
-    _legacyTurns.clear();
-    // Listeners must observe the true→false flip: a backgrounded
-    // keep-alive started for an in-flight turn would otherwise never
-    // receive its stop through the notify path.
-    if (hadTrackedTurns) _notifyActivityListeners();
     final sessions = _sessions.values.toList(growable: false);
+    _legacyTurns.clear();
     _sessions.clear();
+    // Listeners must observe the true→false flip even when both a legacy
+    // send and a retained recovery session were active at shutdown.
+    if (hadTrackedTurns) _notifyActivityListeners();
     Object? firstError;
     StackTrace? firstStack;
     for (final session in sessions) {

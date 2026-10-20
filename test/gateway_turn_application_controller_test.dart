@@ -105,6 +105,29 @@ void main() {
     },
   );
 
+  test(
+    'close notifies a false aggregate with legacy and recovery turns',
+    () async {
+      final controller = GatewayTurnApplicationController(
+        sessionFactory: (_) => _FakeApplicationSession(),
+      );
+      final recovery =
+          controller.sessionFor(_connection()) as _FakeApplicationSession;
+      recovery.activeTurn = true;
+      final legacy = controller.beginLegacyTurn();
+      final observed = <bool>[];
+      controller.addTurnActivityListener(
+        () => observed.add(controller.hasActiveTurn),
+      );
+
+      await controller.close();
+      expect(observed, [false]);
+      expect(controller.hasActiveTurn, isFalse);
+      controller.endLegacyTurn(legacy);
+      expect(observed, [false]);
+    },
+  );
+
   test('activity notifications carry the app-wide aggregate, not the '
       'firing session', () async {
     // Pins the main.dart closure contract: the keep-alive recomputes
