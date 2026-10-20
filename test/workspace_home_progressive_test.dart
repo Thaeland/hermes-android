@@ -170,6 +170,92 @@ void main() {
     },
   );
 
+  testWidgets('overlapping Home refreshes share only in-flight pages', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(500, 1200);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final firstPage = Completer<http.Response>();
+    final fullPage = Completer<http.Response>();
+    final requested = <Uri>[];
+    final client = MockClient((request) async {
+      requested.add(request.url);
+      if (request.url.queryParameters['limit'] == '5') {
+        return requested
+                    .where((uri) => uri.queryParameters['limit'] == '5')
+                    .length ==
+                1
+            ? firstPage.future
+            : _page(List.generate(5, _row));
+      }
+      if (request.url.queryParameters['offset'] == '0') {
+        return requested
+                    .where((uri) => uri.queryParameters['limit'] == '100')
+                    .length ==
+                1
+            ? fullPage.future
+            : _page(List.generate(3, _row));
+      }
+      return _page([]);
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        theme: hermesTheme(Brightness.dark),
+        home: WorkspaceScreen(
+          connection: SavedConnection(
+            id: 'overlapping-refresh',
+            label: 'Test',
+            host: 'example.invalid',
+            port: 8642,
+            apiKey: 'test-key',
+          ),
+          testSessionsHttpClient: client,
+          turnSignalsLoader: (_) async => HomeTurnSignals.empty,
+        ),
+      ),
+    );
+    await tester.pump();
+    final home = tester.state<HomePaneState>(find.byType(HomePane));
+    unawaited(home.refresh());
+    unawaited(home.refresh());
+    await tester.pump();
+    expect(
+      requested.where((uri) => uri.queryParameters['limit'] == '5'),
+      hasLength(1),
+    );
+
+    firstPage.complete(_page(List.generate(5, _row)));
+    await tester.pump(const Duration(milliseconds: 1));
+    expect(
+      requested.where((uri) => uri.queryParameters['limit'] == '100'),
+      hasLength(1),
+    );
+    unawaited(home.refresh());
+    unawaited(home.refresh());
+    await tester.pump();
+    expect(
+      requested.where((uri) => uri.queryParameters['limit'] == '100'),
+      hasLength(1),
+    );
+
+    fullPage.complete(_page(List.generate(3, _row)));
+    await tester.pumpAndSettle();
+    unawaited(home.refresh());
+    await tester.pumpAndSettle();
+    // A completed request is never reused: a later refresh sees new work.
+    expect(
+      requested.where(
+        (uri) =>
+            uri.queryParameters['limit'] == '100' &&
+            uri.queryParameters['offset'] == '0',
+      ),
+      hasLength(2),
+    );
+  });
+
   testWidgets('opening Chats during Home scan shares the pending request', (
     tester,
   ) async {
