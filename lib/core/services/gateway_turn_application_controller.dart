@@ -223,7 +223,14 @@ class GatewayTurnApplicationController {
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
+    final hadTrackedTurns =
+        _legacyTurns.isNotEmpty ||
+        _sessions.values.any((session) => session.hasActiveTurn);
     _legacyTurns.clear();
+    // Listeners must observe the true→false flip: a backgrounded
+    // keep-alive started for an in-flight turn would otherwise never
+    // receive its stop through the notify path.
+    if (hadTrackedTurns) _notifyActivityListeners();
     final sessions = _sessions.values.toList(growable: false);
     _sessions.clear();
     Object? firstError;

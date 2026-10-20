@@ -10,13 +10,23 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../services/connection_manager.dart';
+import '../services/gateway_turn_application_controller.dart';
 import '../utils/relative_time.dart';
 import 'chat_screen.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
 class CronScreen extends StatefulWidget {
   final SavedConnection connection;
-  const CronScreen({required this.connection, super.key});
+
+  /// Threaded to run-transcript chats so follow-up sends there earn the
+  /// turn-bounded keep-alive like every other route (a cron run is an
+  /// ordinary session; its sends go through the stock transport).
+  final GatewayTurnApplicationController? turnApplicationController;
+  const CronScreen({
+    required this.connection,
+    this.turnApplicationController,
+    super.key,
+  });
 
   @override
   State<CronScreen> createState() => _CronScreenState();
@@ -247,7 +257,11 @@ class _CronScreenState extends State<CronScreen> {
   void _openRun(Session run) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => ChatScreen(connection: widget.connection, session: run),
+        builder: (_) => ChatScreen(
+          connection: widget.connection,
+          session: run,
+          turnApplicationController: widget.turnApplicationController,
+        ),
       ),
     );
   }

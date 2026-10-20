@@ -22,7 +22,7 @@ import 'support/fake_voice_composer_adapter.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('legacy turn slots drive the app-wide active-turn signal', () {
+  test('legacy turn slots drive the app-wide active-turn signal', () async {
     final controller = GatewayTurnApplicationController(
       sessionFactory: (_) => throw StateError('no recovery session expected'),
     );
@@ -45,6 +45,25 @@ void main() {
     // listeners into a spurious start.
     controller.endLegacyTurn(second);
     controller.endLegacyTurn(Object());
+    expect(controller.hasActiveTurn, isFalse);
+
+    // Close-interaction contract (reviewer gap): the true→false flip
+    // must reach listeners at close (a backgrounded keep-alive gets its
+    // stop through the notify path), begin-after-close is inert, and
+    // end-after-close never throws.
+    final live = controller.beginLegacyTurn();
+    expect(controller.hasActiveTurn, isTrue);
+    var sawFalseAfterClose = false;
+    controller.addTurnActivityListener(
+      () => sawFalseAfterClose = sawFalseAfterClose || !controller.hasActiveTurn,
+    );
+    await controller.close();
+    expect(sawFalseAfterClose, isTrue);
+    expect(controller.hasActiveTurn, isFalse);
+    final inert = controller.beginLegacyTurn();
+    expect(controller.hasActiveTurn, isFalse);
+    controller.endLegacyTurn(inert);
+    controller.endLegacyTurn(live);
     expect(controller.hasActiveTurn, isFalse);
   });
 
@@ -116,6 +135,70 @@ void main() {
       // The reply lands while still backgrounded: the service must end
       // then, not wait for resume.
       submitGate.complete();
+      await tester.pumpAndSettle();
+      expect(controller.hasActiveTurn, isFalse);
+      expect(calls, containsAllInOrder(['start', 'stop']));
+      expect(keepAlive.isActive, isFalse);
+    },
+  );
+
+  testWidgets(
+    'a throwing stock-gateway send while backgrounded releases the service',
+    (tester) async {
+      // Reviewer gap: the socket-death analogue — the send itself fails.
+      // The finally-release must drop the signal so the backgrounded
+      // service stops instead of pinning on a dead turn.
+      SharedPreferences.setMockInitialValues({'verbose_mode': false});
+      final controller = GatewayTurnApplicationController(
+        sessionFactory: (_) =>
+            throw StateError('stock path must not open recovery sessions'),
+      );
+      final submitGate = Completer<void>();
+      await _pumpChat(
+        tester,
+        controller,
+        remoteSubmit: ({
+          required sessionId,
+          required text,
+          required onEvent,
+          required onSent,
+        }) async {
+          onSent();
+          await submitGate.future;
+        },
+      );
+
+      await tester.enterText(find.byType(TextField), 'Doomed stock turn');
+      await tester.testTextInput.receiveAction(TextInputAction.done);
+      await tester.pump();
+      await tester.pump();
+      expect(controller.hasActiveTurn, isTrue);
+
+      final calls = <String>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(
+            ConnectionKeepAliveService.channel,
+            (call) async {
+              calls.add(call.method);
+              return true;
+            },
+          );
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(ConnectionKeepAliveService.channel, null),
+      );
+      final keepAlive = ConnectionKeepAliveService();
+      controller.addTurnActivityListener(
+        () => keepAlive.onTurnActivityChanged(controller.hasActiveTurn),
+      );
+      keepAlive.onAppLifecycleState(
+        AppLifecycleState.paused,
+        hasActiveTurn: controller.hasActiveTurn,
+      );
+      await tester.pump();
+      expect(calls, contains('start'));
+
+      submitGate.completeError(StateError('socket died mid-reply'));
       await tester.pumpAndSettle();
       expect(controller.hasActiveTurn, isFalse);
       expect(calls, containsAllInOrder(['start', 'stop']));

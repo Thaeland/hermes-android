@@ -1162,7 +1162,13 @@ class _SessionListScreenState extends State<SessionListScreen> {
               leading: const Icon(Icons.schedule),
               title: Text(context.l10n.cron_jobs),
               onTap: () =>
-                  _openScreen(CronScreen(connection: widget.connection)),
+                  _openScreen(
+                    CronScreen(
+                      connection: widget.connection,
+                      turnApplicationController:
+                          widget.turnApplicationController,
+                    ),
+                  ),
             ),
             ListTile(
               leading: const Icon(Icons.auto_awesome),

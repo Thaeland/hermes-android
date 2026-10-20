@@ -1549,7 +1549,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       case 'files':
         unawaited(_openFiles());
       case 'cron':
-        _push(CronScreen(connection: connection));
+        _push(
+          CronScreen(
+            connection: connection,
+            turnApplicationController: widget.turnApplicationController,
+          ),
+        );
       case 'skills':
         _push(SkillsScreen(connection: connection));
       case 'memory':

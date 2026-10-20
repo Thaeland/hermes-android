@@ -905,6 +905,97 @@ void main() {
   );
 
   test(
+    'transport loss over an already-uncertain turn still drops the signal',
+    () async {
+      // Reviewer gap: the loss notify must fire even when no state
+      // changes. An interrupt-marked-uncertain turn has no transition
+      // left to fire on socket death, so without an unconditional
+      // notify the backgrounded service would pin on it forever.
+      String? clientTurnId;
+      final fixture = await _GatewayFixture.start(
+        handler: (request, connectionIndex) {
+          final params = request['params'] as Map<String, dynamic>;
+          if (request['method'] == 'session.open') {
+            return _openResult(
+              mobileSessionId: params['mobile_session_id'] as String,
+              connectionIndex: connectionIndex,
+            );
+          }
+          if (request['method'] == 'prompt.submit') {
+            return <String, dynamic>{
+              'accepted': true,
+              'automatic_resubmit': false,
+              'client_turn_id': params['client_turn_id'],
+              'turn_id': 'turn-1',
+              'status': 'accepted',
+              'last_seq': 0,
+              'created': true,
+            };
+          }
+          if (request['method'] == 'turn.interrupt') {
+            return <String, dynamic>{
+              'automatic_resubmit': false,
+              'client_turn_id': clientTurnId,
+              'turn_id': 'turn-1',
+              'status': 'running',
+              'last_seq': 0,
+            };
+          }
+          if (request['method'] == 'turn.reconcile') {
+            return _reconcilePage(
+              turnId: 'turn-1',
+              status: 'running',
+              lastSeq: 0,
+              events: <Map<String, dynamic>>[],
+              hasMore: false,
+              nextAfterSeq: 0,
+            );
+          }
+          throw StateError('Unexpected method ${request['method']}');
+        },
+      );
+      var uuidIndex = 0;
+      final registry = GatewayTurnCoordinatorRegistry(
+        connectionId: 'connection-a',
+        endpointDigest: _digest,
+        journal: GatewayTurnJournal(store: _MemoryJournalStore()),
+        freshSocketFactory: () async => WsClient(fixture.baseUrl),
+        uuidFactory: () => _uuidFor(++uuidIndex),
+      );
+      final activity = <bool>[];
+      final token = registry.addTurnActivityListener(
+        () => activity.add(registry.hasActiveTurn),
+      );
+
+      try {
+        final state = await registry.submit(
+          localSessionId: 'local-a',
+          text: 'alpha',
+        );
+        clientTurnId = state.clientTurnId;
+        await registry.interrupt(
+          localSessionId: 'local-a',
+          clientTurnId: state.clientTurnId,
+        );
+        // Uncertain but the socket is live: the turn still earns
+        // keep-alive (reconcile reported it running, not terminal).
+        expect(registry.hasActiveTurn, isTrue);
+        activity.clear();
+
+        await fixture.closeSocket();
+        await _waitFor(() => activity.isNotEmpty);
+        expect(registry.hasActiveTurn, isFalse);
+        expect(activity.last, isFalse);
+
+        registry.removeTurnActivityListener(token);
+      } finally {
+        await registry.closeAll();
+        await fixture.close();
+      }
+    },
+  );
+
+  test(
     'coordinator reports runtime binding and preserves inherited events',
     () async {
       final fixture = await _GatewayFixture.start();
