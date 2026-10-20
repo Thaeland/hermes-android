@@ -4,6 +4,30 @@ All notable changes since v1.0.7 are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The [README](README.md)
 shows only the three latest releases.
 
+## [2.1.24] - 2026-10-21
+
+### Added
+
+- Android keeps an in-flight Gateway chat turn connected while the app is in
+  the background, with a temporary foreground-service notification. The
+  service stops when the turn settles, its socket is lost, the app resumes,
+  or the activity finishes. Disconnected uncertain turns are not resent
+  automatically (PR #152).
+
+### Fixed
+
+- Concurrent Home refreshes share pending session-list requests instead of
+  starting duplicate full scans. A newer first page remains visible on Home
+  and Chats when an older shared scan completes (PR #156). Issue #149 remains
+  open for transfer measurements and separate API transport work.
+
+### Thanks
+
+- [@Thaeland](https://github.com/Thaeland) for the Android background-turn
+  keep-alive, stock-gateway and existing-chat coverage, lifecycle guards and
+  regressions in PR #152. Maintainer follow-up commits closed the Activity
+  finish and mixed-turn shutdown edges without changing their commits.
+
 ## [2.1.23] - 2026-10-20
 
 ### Fixed

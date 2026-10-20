@@ -1,4 +1,4 @@
-# Hermes Android — v2.1.23
+# Hermes Android — v2.1.24
 
 Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — chat with your Hermes sessions from a phone or tablet over local Wi-Fi or a private Tailscale network.
 
@@ -14,15 +14,16 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
 
 ## Current release
 
-- Version: **2.1.23** (build 2166)
+- Version: **2.1.24** (build 2167)
 - Package: `com.hermesagent.hermes_android`
 - Recommended APK for modern phones: ARM64 release build from the
   [Releases](https://github.com/rusty4444/hermes-android/releases) page.
 - Production builds are signed with a private release keystore. Debug APKs
   signed with the Android debug certificate remain available for testing
   under the `com.hermesagent.hermes_android.dev` package ID.
-- v2.1.23 fixes duplicate previewed answers with work by
-  [@krotname](https://github.com/krotname) and a maintainer follow-up. See
+- v2.1.24 protects in-flight Gateway chats while backgrounded with work by
+  [@Thaeland](https://github.com/Thaeland), and coalesces overlapping Home
+  session scans. See
   [Credits](#credits) and the [changelog](CHANGELOG.md).
 - The app checks [GitHub Releases](https://github.com/rusty4444/hermes-android/releases)
   on ordinary launches. An answered check limits network requests to once
@@ -74,6 +75,18 @@ See [CHANGELOG.md](CHANGELOG.md) for the complete release history and
 [docs/HERMESAPK_DEVELOPMENT_LOG.md](docs/HERMESAPK_DEVELOPMENT_LOG.md) for the
 sanitized implementation and validation record.
 
+## What's new in v2.1.24
+
+- **Backgrounded turns stay connected** — while a chat request is in flight,
+  Android keeps the Gateway socket and heartbeat active with a temporary
+  notification. The service stops when the turn settles, the transport drops,
+  or the app returns to the foreground (PR #152, @Thaeland). A disconnected
+  turn is not resent automatically; recovery still reconciles on return.
+- **Fewer duplicate Home requests** — overlapping refreshes share an in-flight
+  session scan. A new or renamed chat from a fresher first page is not replaced
+  when the older scan completes (PR #156). This does not add a server cursor or
+  change transcript fetches; see #149 for the remaining work.
+
 ## What's new in v2.1.23
 
 - **No duplicate previewed answers** — final Gateway responses settle onto
@@ -92,18 +105,6 @@ sanitized implementation and validation record.
 - **Batch clarifications stay in chat** — answering one question no longer
   dismisses the conversation or the next question, even when a cancellation or
   approval overlaps it (PR #145, @dadofsambonzuki).
-
-## Optimisation Release — what's new in v2.1.21
-
-- **Faster startup** — the first Flutter frame appears before saved credentials
-  and Android launch intents finish loading; secure migration and recovery
-  still complete before the connected Home screen opens.
-- **Progressive Home and Chats** — Home displays its first five sessions while
-  the full list loads behind a progress bar. Opening Chats early shows available
-  human conversations and the same progress state, adding more as scan pages
-  arrive. After Home has loaded, Chats reuses its complete session list instead
-  of scanning it again. Older blocked work, local pins, and Quick Chat archive
-  records remain available (PR #146).
 
 ## Features
 
@@ -462,7 +463,7 @@ cp build/app/outputs/flutter-apk/app-*-release.apk release-apks/
 block in `android/app/build.gradle.kts` derives per-ABI codes as
 `base * 10 + ABI code` (armeabi-v7a = 1, arm64-v8a = 2, x86_64 = 3), so the
 codes stay ordered armeabi-v7a < arm64-v8a < x86_64 as fdroiddata requires.
-For v2.1.23, base `2166` therefore produces codes `21661`/`21662`/`21663`.
+For v2.1.24, base `2167` therefore produces codes `21671`/`21672`/`21673`.
 CI reads the completed arm64 APK with `aapt` and fails if that relationship
 drifts. Release-floor checks continue to apply to the base value and must not
 be weakened to rely on the ABI code.
@@ -604,7 +605,9 @@ lib/
   wire-contract fixes, safe pagination and folder ownership, transport
   hardening, and the accompanying regression suite. Released in v2.1.7. They
   later added secure inline `MEDIA:` delivery cards and the complete gateway
-  file-type contract in PR #137 (v2.1.15).
+  file-type contract in PR #137 (v2.1.15), then turn-bounded Android foreground
+  keep-alive for backgrounded Gateway chats in PR #152 (v2.1.24). A maintainer
+  follow-up closed shutdown edges while preserving their commit history.
 - **spsDrop** — reported that Android could not connect through a private
   Caddy/Tailscale gateway whose CA was installed in the device trust store
   (#108). Fixed in v2.1.6.
