@@ -17,13 +17,24 @@ import android.os.IBinder
  * keep firing and the live gateway WebSocket survives minimization instead
  * of being frozen by cached-app freezing or killed by battery managers.
  *
- * Started and stopped from Dart over the keepalive MethodChannel, only while
- * gateway clients are open (see ConnectionKeepAliveService.dart). The
- * service itself is transport-agnostic: it exists purely to keep the process
- * — and therefore its sockets — alive.
+ * Started and stopped from Dart over the keepalive MethodChannel, only
+ * while an unresolved user-visible chat turn needs the socket (see
+ * connection_keepalive_service.dart) — never for an idle or merely
+ * reconnecting connection. The service itself is transport-agnostic: it
+ * exists purely to keep the process — and therefore its sockets — alive.
  */
 class ConnectionKeepAliveService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // Native backstop for the detach race: Dart's stop on `detached`
+        // is an async platform message that can lose to engine teardown.
+        // When the task is swiped away the service must end on the native
+        // side regardless, or it is orphaned with a permanent
+        // notification and no Dart isolate left to stop it.
+        stopSelf()
+        super.onTaskRemoved(rootIntent)
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         // A sticky restart would carry no live Dart side to ever stop it; the
@@ -54,7 +65,7 @@ class ConnectionKeepAliveService : Service() {
                     NotificationManager.IMPORTANCE_LOW,
                 ).apply {
                     description =
-                        "Shows while Hermes keeps its gateway connection alive in the background"
+                        "Shows while Hermes finishes your request in the background"
                     setShowBadge(false)
                 },
             )

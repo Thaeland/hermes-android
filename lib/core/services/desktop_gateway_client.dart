@@ -90,11 +90,10 @@ class DesktopGatewayClient {
     required this._baseUrl,
     required this._dashboard,
     this._gatewayProfile,
-  }) {
-    // Clients no longer track a global registry: the keep-alive policy is
-    // driven by unresolved turns (see ConnectionKeepAliveService), not by
-    // merely-live sockets.
-  }
+  });
+  // No global client registry: the keep-alive policy is driven by
+  // unresolved turns (see ConnectionKeepAliveService), not by
+  // merely-live sockets.
 
   /// The canonical gateway origin for [connection].
   ///

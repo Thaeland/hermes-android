@@ -128,7 +128,6 @@ class GatewayTurnApplicationController {
   final GatewayTurnApplicationSessionFactory _sessionFactory;
   final Map<String, GatewayTurnApplicationSession> _sessions = {};
   final Map<Object, void Function()> _activityListeners = {};
-  final Set<Object> _activityForwarderTokens = {};
   final Set<GatewayTurnApplicationSession> _forwardedSessions = {};
   bool _closed = false;
 
@@ -145,7 +144,10 @@ class GatewayTurnApplicationController {
   GatewayTurnApplicationSession sessionFor(SavedConnection connection) {
     if (_closed) throw StateError('Gateway turn application owner is closed.');
     final key = _connectionScopeKey(connection);
-    final session = _sessions.putIfAbsent(key, () => _sessionFactory(connection));
+    final session = _sessions.putIfAbsent(
+      key,
+      () => _sessionFactory(connection),
+    );
     if (_activityListeners.isNotEmpty) {
       _forwardActivityFrom(session);
     }
@@ -173,14 +175,15 @@ class GatewayTurnApplicationController {
     _activityListeners.remove(token);
   }
 
-  /// Each session gets exactly one forwarding registration while app-level
-  /// listeners exist; the session set makes repeat calls idempotent.
+  /// Each session gets exactly one forwarding registration, ever; the
+  /// session set makes repeat calls idempotent. The forwarder outlives
+  /// app-level listener removal by design — it fires into an empty
+  /// listener map, which is cheap — so re-adding a listener never
+  /// double-registers a session.
   void _forwardActivityFrom(GatewayTurnApplicationSession session) {
     if (_forwardedSessions.contains(session)) return;
     _forwardedSessions.add(session);
-    _activityForwarderTokens.add(
-      session.addTurnActivityListener(_notifyActivityListeners),
-    );
+    session.addTurnActivityListener(_notifyActivityListeners);
   }
 
   void _notifyActivityListeners() {

@@ -51,44 +51,89 @@ void main() {
     expect(created.map((session) => session.closeCount), everyElement(1));
   });
 
-  test('aggregates active turns and forwards activity across sessions', () async {
-    final created = <_FakeApplicationSession>[];
+  test(
+    'aggregates active turns and forwards activity across sessions',
+    () async {
+      final created = <_FakeApplicationSession>[];
+      final controller = GatewayTurnApplicationController(
+        sessionFactory: (_) {
+          final session = _FakeApplicationSession();
+          created.add(session);
+          return session;
+        },
+      );
+      // A session created before the app-level listener must still forward.
+      final early =
+          controller.sessionFor(_connection()) as _FakeApplicationSession;
+      var notifications = 0;
+      final token = controller.addTurnActivityListener(() => notifications++);
+
+      early.activeTurn = true;
+      early.fireActivity();
+      expect(controller.hasActiveTurn, isTrue);
+      expect(notifications, 1);
+
+      early.activeTurn = false;
+      early.fireActivity();
+      expect(controller.hasActiveTurn, isFalse);
+      expect(notifications, 2);
+
+      // A session created after the listener must forward too.
+      final late =
+          controller.sessionFor(_connection(apiKey: 'other'))
+              as _FakeApplicationSession;
+      late.activeTurn = true;
+      late.fireActivity();
+      expect(controller.hasActiveTurn, isTrue);
+      expect(notifications, 3);
+
+      controller.removeTurnActivityListener(token);
+      late.activeTurn = false;
+      late.fireActivity();
+      expect(notifications, 3);
+      expect(controller.hasActiveTurn, isFalse);
+
+      // Re-adding must not double-register the sessions' forwarders: one
+      // session firing must yield exactly one app-level notification.
+      var readded = 0;
+      final token2 = controller.addTurnActivityListener(() => readded++);
+      late.activeTurn = true;
+      late.fireActivity();
+      expect(readded, 1);
+      controller.removeTurnActivityListener(token2);
+      await controller.close();
+    },
+  );
+
+  test('activity notifications carry the app-wide aggregate, not the '
+      'firing session', () async {
+    // Pins the main.dart closure contract: the keep-alive recomputes
+    // controller.hasActiveTurn inside the listener. If a regression wired
+    // the per-session value instead, session A settling would read false
+    // while session B still streams — stopping the service mid-turn.
     final controller = GatewayTurnApplicationController(
-      sessionFactory: (_) {
-        final session = _FakeApplicationSession();
-        created.add(session);
-        return session;
-      },
+      sessionFactory: (_) => _FakeApplicationSession(),
     );
-    // A session created before the app-level listener must still forward.
-    final early =
+    final sessionA =
         controller.sessionFor(_connection()) as _FakeApplicationSession;
-    var notifications = 0;
-    final token = controller.addTurnActivityListener(() => notifications++);
+    final sessionB =
+        controller.sessionFor(_connection(apiKey: 'second-key'))
+            as _FakeApplicationSession;
+    sessionA.activeTurn = true;
+    sessionB.activeTurn = true;
 
-    early.activeTurn = true;
-    early.fireActivity();
-    expect(controller.hasActiveTurn, isTrue);
-    expect(notifications, 1);
+    final seen = <bool>[];
+    controller.addTurnActivityListener(
+      () => seen.add(controller.hasActiveTurn),
+    );
 
-    early.activeTurn = false;
-    early.fireActivity();
-    expect(controller.hasActiveTurn, isFalse);
-    expect(notifications, 2);
+    sessionA.activeTurn = false;
+    sessionA.fireActivity();
+    expect(seen, [true]); // B still unresolved: aggregate stays active
 
-    // A session created after the listener must forward too.
-    final late = controller.sessionFor(_connection(apiKey: 'other'))
-        as _FakeApplicationSession;
-    late.activeTurn = true;
-    late.fireActivity();
-    expect(controller.hasActiveTurn, isTrue);
-    expect(notifications, 3);
-
-    controller.removeTurnActivityListener(token);
-    late.activeTurn = false;
-    late.fireActivity();
-    expect(notifications, 3);
-    expect(controller.hasActiveTurn, isFalse);
+    sessionB.activeTurn = false;
+    sessionB.fireActivity();
+    expect(seen, [true, false]);
     await controller.close();
   });
 }
