@@ -2815,6 +2815,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       );
     });
 
+    // Stock-gateway coverage: this transport carries every stock send and
+    // every stored chat, and never enters the recovery-v2 coordinator —
+    // register the turn app-wide so the keep-alive can bound itself to it.
+    // Released in the finally at the end of this method, so every settle
+    // and error path ends it exactly once.
+    final turnController = widget.turnApplicationController;
+    final legacyTurnToken = turnController?.beginLegacyTurn();
     try {
       if (desktopGateway != null) {
         await _applySessionModelOverride(desktopGateway);
@@ -2976,6 +2983,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _handleSendError(error);
       unawaited(_refreshDeferredHistoryIfIdle());
       unawaited(_resyncLegacyHistoryAfterResume());
+    } finally {
+      if (turnController != null && legacyTurnToken != null) {
+        turnController.endLegacyTurn(legacyTurnToken);
+      }
     }
   }
 

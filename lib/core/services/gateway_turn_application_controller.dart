@@ -129,6 +129,7 @@ class GatewayTurnApplicationController {
   final Map<String, GatewayTurnApplicationSession> _sessions = {};
   final Map<Object, void Function()> _activityListeners = {};
   final Set<GatewayTurnApplicationSession> _forwardedSessions = {};
+  final Set<Object> _legacyTurns = {};
   bool _closed = false;
 
   GatewayTurnApplicationController({
@@ -154,10 +155,35 @@ class GatewayTurnApplicationController {
     return session;
   }
 
-  /// True while any retained session has an unresolved turn. The app-root
-  /// keep-alive policy uses this to bound the foreground service to
-  /// user-visible work instead of merely-live sockets.
-  bool get hasActiveTurn => _sessions.values.any((s) => s.hasActiveTurn);
+  /// True while any retained session has an unresolved turn OR a legacy
+  /// (stock-gateway) send is in flight. The app-root keep-alive policy
+  /// uses this to bound the foreground service to user-visible work
+  /// instead of merely-live sockets.
+  bool get hasActiveTurn =>
+      _legacyTurns.isNotEmpty ||
+      _sessions.values.any((s) => s.hasActiveTurn);
+
+  /// Registers a legacy (stock-gateway) send as an app-wide active turn.
+  /// Stock gateways — and every stored chat on any gateway — submit
+  /// through `_sendDesktopGatewayMessage` and never enter the recovery-v2
+  /// coordinator, so without this slot the keep-alive would be a no-op on
+  /// exactly the transport the app ships against. Returns an opaque token
+  /// for [endLegacyTurn]; after [close] it returns an inert token.
+  Object beginLegacyTurn() {
+    final token = Object();
+    if (_closed) return token;
+    _legacyTurns.add(token);
+    _notifyActivityListeners();
+    return token;
+  }
+
+  /// Releases a token from [beginLegacyTurn]. Unknown tokens and tokens
+  /// ended twice are no-ops — a settle racing app shutdown must never
+  /// throw from a `finally`.
+  void endLegacyTurn(Object token) {
+    if (!_legacyTurns.remove(token)) return;
+    _notifyActivityListeners();
+  }
 
   /// Registers an app-level observer notified when [hasActiveTurn] may have
   /// changed, across every session — including sessions created later.
@@ -197,6 +223,7 @@ class GatewayTurnApplicationController {
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
+    _legacyTurns.clear();
     final sessions = _sessions.values.toList(growable: false);
     _sessions.clear();
     Object? firstError;
