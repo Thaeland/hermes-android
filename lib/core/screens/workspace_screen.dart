@@ -285,6 +285,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   /// untitled rather than being dropped or given a fabricated name.
   Map<String, String> _sessionTitles = const {};
   int _homeGeneration = 0;
+  Future<SessionListPage>? _homeFirstPageScan;
   Future<List<Session>>? _homeFullScan;
   List<Session>? _homeFirstPageSessions;
   List<Session>? _chatPreviewSessions;
@@ -415,11 +416,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   Future<List<Session>> _loadHome() {
     final generation = ++_homeGeneration;
     unawaited(_refreshTurnSignals(generation));
-    return _loadSessions().then((sessions) {
-      if (!mounted || generation != _homeGeneration) return sessions;
-      _onHomeSessions(sessions, generation: generation, complete: true);
-      return sessions;
-    });
+    return (widget.sessionsLoader == null
+            ? _loadFullHomeSessions()
+            : _loadSessions())
+        .then((sessions) {
+          if (!mounted || generation != _homeGeneration) return sessions;
+          _onHomeSessions(sessions, generation: generation, complete: true);
+          return sessions;
+        });
   }
 
   Future<List<Session>> _loadHomeProgressively(
@@ -429,28 +433,75 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     unawaited(_refreshTurnSignals(generation));
     // Stock may append pinned back-fill beyond the requested limit; the full
     // scan below retains those rows and all older work.
-    final page = await _sessionClient.getSessionsPage(limit: 5);
+    final page = await _loadFirstHomePage();
     final first = page.sessions.take(5).toList(growable: false);
     if (!mounted || generation != _homeGeneration) return first;
     _homeFirstPageSessions = first;
     if (_destination == HermesDestination.chats) setState(() {});
     _onHomeSessions(first, generation: generation, complete: false);
-    // Give the pane a frame to show the first slice before starting the scan.
-    unawaited(
-      Future<void>.delayed(Duration.zero, () async {
-        try {
-          final full = await _loadFullHomeSessions();
+    // Give the pane a frame to show the first slice before starting a new
+    // scan. If an earlier refresh already has one in flight, subscribe now:
+    // deferring that subscription can outlive the scan and start a duplicate.
+    Future<void> finishScan(
+      Future<List<Session>> scan, {
+      required bool startedBeforeFirstPage,
+    }) async {
+      try {
+        final scanned = await scan;
+        if (!mounted || generation != _homeGeneration) return;
+        // A shared scan can predate this refresh. Its earlier offset=0
+        // snapshot must not replace a newer first page (new chat, rename,
+        // or pin) when it completes. The scan is not deletion-safe anyway.
+        final full = startedBeforeFirstPage
+            ? [
+                ...first,
+                ...scanned.where(
+                  (old) => !first.any((recent) => recent.id == old.id),
+                ),
+              ]
+            : scanned;
+        _completeHomeSessions = List.unmodifiable(full);
+        if (_destination == HermesDestination.chats) setState(() {});
+        _onHomeSessions(full, generation: generation, complete: true);
+        onUpdate(full);
+      } catch (_) {
+        // Keep the successfully loaded first page even if an older shared
+        // scan failed. Report the incomplete scan to Home without erasing it.
+        if (mounted && generation == _homeGeneration) onUpdate(null);
+      }
+    }
+
+    final pending = _homeFullScan;
+    if (pending != null) {
+      unawaited(finishScan(pending, startedBeforeFirstPage: true));
+    } else {
+      unawaited(
+        Future<void>.delayed(Duration.zero, () async {
           if (!mounted || generation != _homeGeneration) return;
-          _completeHomeSessions = List.unmodifiable(full);
-          if (_destination == HermesDestination.chats) setState(() {});
-          _onHomeSessions(full, generation: generation, complete: true);
-          onUpdate(full);
-        } catch (_) {
-          if (mounted && generation == _homeGeneration) onUpdate(null);
-        }
-      }),
-    );
+          await finishScan(
+            _loadFullHomeSessions(),
+            startedBeforeFirstPage: false,
+          );
+        }),
+      );
+    }
     return first;
+  }
+
+  /// A resume and an initial Home load can request the same first page in
+  /// parallel. Only share requests that are still in flight: after one
+  /// settles, the next refresh must see newly created/updated sessions.
+  Future<SessionListPage> _loadFirstHomePage() {
+    final pending = _homeFirstPageScan;
+    if (pending != null) return pending;
+    final scan = _sessionClient.getSessionsPage(limit: 5);
+    _homeFirstPageScan = scan;
+    void clear() {
+      if (identical(_homeFirstPageScan, scan)) _homeFirstPageScan = null;
+    }
+
+    unawaited(scan.then<void>((_) => clear(), onError: (Object _) => clear()));
+    return scan;
   }
 
   /// A refresh may supersede the Home projection without making the ongoing
@@ -602,7 +653,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     if (_sessionTitles.isEmpty) {
       final generation = _homeGeneration;
       try {
-        final sessions = await _loadSessions();
+        final sessions = await (widget.sessionsLoader == null
+            ? _loadFullHomeSessions()
+            : _loadSessions());
         if (mounted && generation == _homeGeneration) {
           _cacheSessionTitles(sessions);
         }
