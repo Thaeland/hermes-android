@@ -22,6 +22,15 @@ import 'support/fake_voice_composer_adapter.dart';
 /// answer emits `clarify.remaining` before the response future completes
 /// (see `DesktopGatewayClient.respondToClarify`).
 class _BatchClarifySession implements GatewayTurnApplicationSession {
+  @override
+  bool get hasActiveTurn => false;
+
+  @override
+  Object addTurnActivityListener(void Function() listener) => Object();
+
+  @override
+  void removeTurnActivityListener(Object token) {}
+
   _BatchClarifySession(this.emit);
 
   final void Function(StreamEvent event) emit;

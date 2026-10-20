@@ -106,6 +106,16 @@ abstract interface class GatewayTurnApplicationSession {
 
   /// Removes [registration] without disturbing a replacement route owner.
   void removeSessionBoundListener(String localSessionId, Object registration);
+
+  /// True while this session has an unresolved turn (in flight, recovering,
+  /// or awaiting reconcile). The background keep-alive policy aggregates
+  /// this across sessions to bound the foreground service to real work.
+  bool get hasActiveTurn;
+
+  /// Registers an observer notified when [hasActiveTurn] may have changed.
+  Object addTurnActivityListener(void Function() listener);
+
+  void removeTurnActivityListener(Object token);
 }
 
 /// Owns recovery registries above screen and Navigator lifetimes.
@@ -117,6 +127,9 @@ abstract interface class GatewayTurnApplicationSession {
 class GatewayTurnApplicationController {
   final GatewayTurnApplicationSessionFactory _sessionFactory;
   final Map<String, GatewayTurnApplicationSession> _sessions = {};
+  final Map<Object, void Function()> _activityListeners = {};
+  final Set<GatewayTurnApplicationSession> _forwardedSessions = {};
+  final Set<Object> _legacyTurns = {};
   bool _closed = false;
 
   GatewayTurnApplicationController({
@@ -132,7 +145,76 @@ class GatewayTurnApplicationController {
   GatewayTurnApplicationSession sessionFor(SavedConnection connection) {
     if (_closed) throw StateError('Gateway turn application owner is closed.');
     final key = _connectionScopeKey(connection);
-    return _sessions.putIfAbsent(key, () => _sessionFactory(connection));
+    final session = _sessions.putIfAbsent(
+      key,
+      () => _sessionFactory(connection),
+    );
+    if (_activityListeners.isNotEmpty) {
+      _forwardActivityFrom(session);
+    }
+    return session;
+  }
+
+  /// True while any retained session has an unresolved turn OR a legacy
+  /// (stock-gateway) send is in flight. The app-root keep-alive policy
+  /// uses this to bound the foreground service to user-visible work
+  /// instead of merely-live sockets.
+  bool get hasActiveTurn =>
+      _legacyTurns.isNotEmpty || _sessions.values.any((s) => s.hasActiveTurn);
+
+  /// Registers a legacy (stock-gateway) send as an app-wide active turn.
+  /// Stock gateways — and every stored chat on any gateway — submit
+  /// through `_sendDesktopGatewayMessage` and never enter the recovery-v2
+  /// coordinator, so without this slot the keep-alive would be a no-op on
+  /// exactly the transport the app ships against. Returns an opaque token
+  /// for [endLegacyTurn]; after [close] it returns an inert token.
+  Object beginLegacyTurn() {
+    final token = Object();
+    if (_closed) return token;
+    _legacyTurns.add(token);
+    _notifyActivityListeners();
+    return token;
+  }
+
+  /// Releases a token from [beginLegacyTurn]. Unknown tokens and tokens
+  /// ended twice are no-ops — a settle racing app shutdown must never
+  /// throw from a `finally`.
+  void endLegacyTurn(Object token) {
+    if (!_legacyTurns.remove(token)) return;
+    _notifyActivityListeners();
+  }
+
+  /// Registers an app-level observer notified when [hasActiveTurn] may have
+  /// changed, across every session — including sessions created later.
+  Object addTurnActivityListener(void Function() listener) {
+    if (_closed) throw StateError('Gateway turn application owner is closed.');
+    final token = Object();
+    _activityListeners[token] = listener;
+    for (final session in _sessions.values) {
+      _forwardActivityFrom(session);
+    }
+    return token;
+  }
+
+  void removeTurnActivityListener(Object token) {
+    _activityListeners.remove(token);
+  }
+
+  /// Each session gets exactly one forwarding registration, ever; the
+  /// session set makes repeat calls idempotent. The forwarder outlives
+  /// app-level listener removal by design — it fires into an empty
+  /// listener map, which is cheap — so re-adding a listener never
+  /// double-registers a session.
+  void _forwardActivityFrom(GatewayTurnApplicationSession session) {
+    if (_forwardedSessions.contains(session)) return;
+    _forwardedSessions.add(session);
+    session.addTurnActivityListener(_notifyActivityListeners);
+  }
+
+  void _notifyActivityListeners() {
+    for (final listener in _activityListeners.values.toList(growable: false)) {
+      listener();
+    }
   }
 
   int get retainedSessionCount => _sessions.length;
@@ -140,8 +222,15 @@ class GatewayTurnApplicationController {
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
+    final hadTrackedTurns =
+        _legacyTurns.isNotEmpty ||
+        _sessions.values.any((session) => session.hasActiveTurn);
     final sessions = _sessions.values.toList(growable: false);
+    _legacyTurns.clear();
     _sessions.clear();
+    // Listeners must observe the true→false flip even when both a legacy
+    // send and a retained recovery session were active at shutdown.
+    if (hadTrackedTurns) _notifyActivityListeners();
     Object? firstError;
     StackTrace? firstStack;
     for (final session in sessions) {
@@ -225,6 +314,20 @@ class _CoordinatorGatewayTurnApplicationSession
   ) {
     _requireOpen();
     return _registry.setTurnSettledListener(localSessionId, listener);
+  }
+
+  @override
+  bool get hasActiveTurn => _registry.hasActiveTurn;
+
+  @override
+  Object addTurnActivityListener(void Function() listener) {
+    _requireOpen();
+    return _registry.addTurnActivityListener(listener);
+  }
+
+  @override
+  void removeTurnActivityListener(Object token) {
+    _registry.removeTurnActivityListener(token);
   }
 
   @override

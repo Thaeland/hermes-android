@@ -934,6 +934,15 @@ GatewayTurnRecoveryState _completedState(String text) {
 }
 
 class _FakeTurnSession implements GatewayTurnApplicationSession {
+  @override
+  bool get hasActiveTurn => false;
+
+  @override
+  Object addTurnActivityListener(void Function() listener) => Object();
+
+  @override
+  void removeTurnActivityListener(Object token) {}
+
   final List<Object> _recoverResults;
   final GatewayTurnRecoveryState? submitResult;
   final Object? submitError;

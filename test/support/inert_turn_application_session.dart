@@ -75,6 +75,15 @@ class InertTurnApplicationSession implements GatewayTurnApplicationSession {
   void removeSessionBoundListener(String localSessionId, Object registration) {}
 
   @override
+  bool get hasActiveTurn => false;
+
+  @override
+  Object addTurnActivityListener(void Function() listener) => Object();
+
+  @override
+  void removeTurnActivityListener(Object token) {}
+
+  @override
   Future<List<GatewayTurnRecoveryState>> recoverPending(
     String localSessionId, {
     GatewayTurnStateCallback? onState,

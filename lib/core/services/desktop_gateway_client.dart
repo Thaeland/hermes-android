@@ -91,6 +91,9 @@ class DesktopGatewayClient {
     required this._dashboard,
     this._gatewayProfile,
   });
+  // No global client registry: the keep-alive policy is driven by
+  // unresolved turns (see ConnectionKeepAliveService), not by
+  // merely-live sockets.
 
   /// The canonical gateway origin for [connection].
   ///
@@ -1090,6 +1093,8 @@ class DesktopGatewayClient {
   }
 
   void close() {
+    // Idempotent: a double close must not re-enter or corrupt state.
+    if (_closed) return;
     _closed = true;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;

@@ -525,6 +525,15 @@ GatewayTurnRecoveryState _interruptedState() =>
 /// Turn session that keeps the settle callback ChatScreen registers, so a test
 /// can fire it the way the real gateway would.
 class _CallbackCapturingTurnSession implements GatewayTurnApplicationSession {
+  @override
+  bool get hasActiveTurn => false;
+
+  @override
+  Object addTurnActivityListener(void Function() listener) => Object();
+
+  @override
+  void removeTurnActivityListener(Object token) {}
+
   final Map<String, (Object, GatewayTurnSettledCallback)> _settledListeners =
       {};
   final Set<String> _activeApprovals = {};

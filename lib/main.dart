@@ -8,6 +8,7 @@ import 'core/services/composer_draft_store.dart';
 import 'core/services/config_backup.dart';
 import 'core/services/config_backup_io.dart';
 import 'core/services/config_backup_service.dart';
+import 'core/services/connection_keepalive_service.dart';
 import 'core/services/connection_manager.dart';
 import 'core/services/gateway_turn_application_controller.dart';
 import 'core/services/local_chat_pin_store.dart';
@@ -260,8 +261,17 @@ class HermesApp extends StatefulWidget {
   }
 }
 
-class HermesAppState extends State<HermesApp> {
+class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
   late final GatewayTurnApplicationController _turnApplicationController;
+
+  /// Android foreground keep-alive: while the app is backgrounded with an
+  /// unresolved chat turn, a foreground service holds the process so
+  /// heartbeat timers keep firing and the WebSocket survives minimization.
+  /// Bounded to active turns — an idle connection never earns a persistent
+  /// notification.
+  final ConnectionKeepAliveService _keepAlive = ConnectionKeepAliveService();
+
+  Object? _keepAliveTurnActivityToken;
 
   /// Pushes from the app root (notification taps) need a navigator below the
   /// MaterialApp this state builds.
@@ -270,7 +280,17 @@ class HermesAppState extends State<HermesApp> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _turnApplicationController = GatewayTurnApplicationController();
+    // The keep-alive follows the work: a turn settling (or starting) while
+    // backgrounded must end (or earn) the foreground service immediately,
+    // not wait for the next resume.
+    _keepAliveTurnActivityToken = _turnApplicationController
+        .addTurnActivityListener(
+          () => _keepAlive.onTurnActivityChanged(
+            _turnApplicationController.hasActiveTurn,
+          ),
+        );
     unawaited(NotificationPrefsStore.load());
     notificationResponseHandler = _handleNotificationResponse;
     // A notification that launched a terminated app carries its tap/action in
@@ -280,6 +300,14 @@ class HermesAppState extends State<HermesApp> {
           .takeInitialNotificationResponse();
       if (initial != null && mounted) _handleNotificationResponse(initial);
     });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _keepAlive.onAppLifecycleState(
+      state,
+      hasActiveTurn: _turnApplicationController.hasActiveTurn,
+    );
   }
 
   /// The connection a notification response should act on: the last one the
@@ -450,6 +478,15 @@ class HermesAppState extends State<HermesApp> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    final token = _keepAliveTurnActivityToken;
+    if (token != null) {
+      _turnApplicationController.removeTurnActivityListener(token);
+      _keepAliveTurnActivityToken = null;
+    }
+    // Belt for the detached case: if the widget tree tears down while the
+    // service is up, the native side must not outlive its only controller.
+    unawaited(_keepAlive.stop());
     unawaited(_turnApplicationController.close());
     super.dispose();
   }
