@@ -864,6 +864,47 @@ void main() {
   );
 
   test(
+    'transport loss bounds the keep-alive signal while the turn stays retained',
+    () async {
+      // Reviewer finding: a disconnected recovery-v2 turn must not pin
+      // the foreground service — there is no live socket to protect, and
+      // reconcile happens on resume (never an auto-resend). The turn
+      // stays journaled, but the app-wide active-turn signal must drop
+      // the moment the transport is lost.
+      final fixture = await _GatewayFixture.start();
+      var uuidIndex = 0;
+      final registry = GatewayTurnCoordinatorRegistry(
+        connectionId: 'connection-a',
+        endpointDigest: _digest,
+        journal: GatewayTurnJournal(store: _MemoryJournalStore()),
+        freshSocketFactory: () async => WsClient(fixture.baseUrl),
+        uuidFactory: () => _uuidFor(++uuidIndex),
+      );
+      final activity = <bool>[];
+      final token = registry.addTurnActivityListener(
+        () => activity.add(registry.hasActiveTurn),
+      );
+
+      try {
+        await registry.submit(localSessionId: 'local-a', text: 'alpha');
+        expect(registry.hasActiveTurn, isTrue);
+
+        await fixture.closeSocket();
+        await _waitFor(() => !registry.hasActiveTurn);
+        expect(activity.last, isFalse);
+        // No live socket and no background reconnect loop: the signal
+        // stays down until a resume-driven operation re-establishes it.
+        expect(registry.hasActiveTurn, isFalse);
+
+        registry.removeTurnActivityListener(token);
+      } finally {
+        await registry.closeAll();
+        await fixture.close();
+      }
+    },
+  );
+
+  test(
     'coordinator reports runtime binding and preserves inherited events',
     () async {
       final fixture = await _GatewayFixture.start();

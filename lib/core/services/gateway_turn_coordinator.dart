@@ -522,12 +522,16 @@ class GatewayTurnCoordinator {
   /// service to unresolved turns.
   void Function(bool active)? onTurnActivityChanged;
 
-  /// True while at least one submitted turn is unresolved (in flight,
-  /// disconnected-but-recovering, or awaiting reconcile). Settled turns
-  /// live in tombstones and do not count.
-  bool get hasActiveTurn => _states.isNotEmpty;
+  /// True while at least one submitted turn is unresolved (in flight or
+  /// awaiting reconcile) AND the transport is live. Settled turns live in
+  /// tombstones and do not count. A turn whose socket was lost does not
+  /// count either: the foreground service exists to protect a live socket,
+  /// and with the transport gone there is nothing to protect — reconcile
+  /// runs on resume (never an auto-resend), so an FGS on a dead connection
+  /// would pin the process for a socket that cannot deliver anything.
+  bool get hasActiveTurn => _states.isNotEmpty && _client?.isConnected == true;
 
-  void _notifyTurnActivity() => onTurnActivityChanged?.call(_states.isNotEmpty);
+  void _notifyTurnActivity() => onTurnActivityChanged?.call(hasActiveTurn);
 
   /// Called after every authoritative durable `session.open` binding.
   GatewayTurnSessionBoundCallback? onSessionBound;
@@ -1329,6 +1333,10 @@ class GatewayTurnCoordinator {
         firstError ??= error;
         firstStack ??= stack;
       }
+      // The transport is gone: the keep-alive signal must drop even when
+      // no state changed (an already-uncertain turn would otherwise pin
+      // the foreground service on a dead socket until resume).
+      _notifyTurnActivity();
     }
     if (firstError != null) {
       Error.throwWithStackTrace(firstError, firstStack!);
@@ -1422,6 +1430,10 @@ class GatewayTurnCoordinator {
         firstError ??= error;
         firstStack ??= stack;
       }
+      // The transport is gone: the keep-alive signal must drop even when
+      // no state changed (an already-uncertain turn would otherwise pin
+      // the foreground service on a dead socket until resume).
+      _notifyTurnActivity();
     }
     if (firstError != null) {
       Error.throwWithStackTrace(firstError, firstStack!);
