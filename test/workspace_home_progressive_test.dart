@@ -187,7 +187,15 @@ void main() {
                     .length ==
                 1
             ? firstPage.future
-            : _page(List.generate(5, _row));
+            : _page([
+                ...List.generate(4, _row),
+                {
+                  ..._row(100),
+                  'title': 'New chat',
+                  'started_at':
+                      DateTime.now().millisecondsSinceEpoch / 1000.0 + 100,
+                },
+              ]);
       }
       if (request.url.queryParameters['offset'] == '0') {
         return requested
@@ -195,7 +203,15 @@ void main() {
                     .length ==
                 1
             ? fullPage.future
-            : _page(List.generate(3, _row));
+            : _page([
+                ...List.generate(3, _row),
+                {
+                  ..._row(100),
+                  'title': 'New chat',
+                  'started_at':
+                      DateTime.now().millisecondsSinceEpoch / 1000.0 + 100,
+                },
+              ]);
       }
       return _page([]);
     });
@@ -236,12 +252,27 @@ void main() {
     unawaited(home.refresh());
     unawaited(home.refresh());
     await tester.pump();
+    expect(find.text('New chat'), findsOneWidget);
     expect(
       requested.where((uri) => uri.queryParameters['limit'] == '100'),
       hasLength(1),
     );
 
+    // The older scan started before the new chat existed. Completing it
+    // must not replace the newer five-row page on Home or in Chats.
     fullPage.complete(_page(List.generate(3, _row)));
+    await tester.pumpAndSettle();
+    expect(find.text('New chat'), findsOneWidget);
+    await tester.tap(find.text('Chats').last);
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: find.byType(WorkspaceSessionsScreen),
+        matching: find.text('New chat'),
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Home').last);
     await tester.pumpAndSettle();
     unawaited(home.refresh());
     await tester.pumpAndSettle();

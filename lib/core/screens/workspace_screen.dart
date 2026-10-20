@@ -442,27 +442,46 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     // Give the pane a frame to show the first slice before starting a new
     // scan. If an earlier refresh already has one in flight, subscribe now:
     // deferring that subscription can outlive the scan and start a duplicate.
-    Future<void> finishScan(Future<List<Session>> scan) async {
+    Future<void> finishScan(
+      Future<List<Session>> scan, {
+      required bool startedBeforeFirstPage,
+    }) async {
       try {
-        final full = await scan;
+        final scanned = await scan;
         if (!mounted || generation != _homeGeneration) return;
+        // A shared scan can predate this refresh. Its earlier offset=0
+        // snapshot must not replace a newer first page (new chat, rename,
+        // or pin) when it completes. The scan is not deletion-safe anyway.
+        final full = startedBeforeFirstPage
+            ? [
+                ...first,
+                ...scanned.where(
+                  (old) => !first.any((recent) => recent.id == old.id),
+                ),
+              ]
+            : scanned;
         _completeHomeSessions = List.unmodifiable(full);
         if (_destination == HermesDestination.chats) setState(() {});
         _onHomeSessions(full, generation: generation, complete: true);
         onUpdate(full);
       } catch (_) {
+        // Keep the successfully loaded first page even if an older shared
+        // scan failed. Report the incomplete scan to Home without erasing it.
         if (mounted && generation == _homeGeneration) onUpdate(null);
       }
     }
 
     final pending = _homeFullScan;
     if (pending != null) {
-      unawaited(finishScan(pending));
+      unawaited(finishScan(pending, startedBeforeFirstPage: true));
     } else {
       unawaited(
         Future<void>.delayed(Duration.zero, () async {
           if (!mounted || generation != _homeGeneration) return;
-          await finishScan(_loadFullHomeSessions());
+          await finishScan(
+            _loadFullHomeSessions(),
+            startedBeforeFirstPage: false,
+          );
         }),
       );
     }
