@@ -2406,6 +2406,12 @@ abstract class AppLocalizations {
   /// **'Recently completed'**
   String get recently_completed;
 
+  /// No description provided for @recently_active.
+  ///
+  /// In en, this message translates to:
+  /// **'Recently active'**
+  String get recently_active;
+
   /// No description provided for @recovering_hermes.
   ///
   /// In en, this message translates to:

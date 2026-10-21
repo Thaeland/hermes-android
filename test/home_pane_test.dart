@@ -21,7 +21,9 @@ Session _session({
   required String id,
   String title = 'Session',
   Duration startedAgo = const Duration(minutes: 5),
+  Duration? lastActiveAgo,
   Duration? endedAgo,
+  bool? isActive,
   String preview = 'preview',
 }) {
   return Session(
@@ -30,9 +32,10 @@ Session _session({
     model: 'claude-opus-5',
     source: 'gateway',
     messageCount: 4,
-    isActive: endedAgo == null,
+    isActive: isActive ?? endedAgo == null,
     preview: preview,
     startedAt: _epoch(startedAgo),
+    lastActive: lastActiveAgo == null ? 0 : _epoch(lastActiveAgo),
     endedAt: endedAgo == null ? null : _epoch(endedAgo),
   );
 }
@@ -199,6 +202,41 @@ void main() {
     expect(
       topOf(HomeSectionKind.continueWorking.title(l10n)),
       lessThan(topOf(HomeSectionKind.completedRecently.title(l10n))),
+    );
+  });
+
+  testWidgets('Home shows remote recency without claiming a live turn', (
+    tester,
+  ) async {
+    await _pump(
+      tester,
+      loadSessions: () async => [
+        _session(
+          id: 'remote',
+          title: 'Remote work',
+          startedAgo: const Duration(days: 30),
+          lastActiveAgo: const Duration(minutes: 1),
+          isActive: true,
+        ),
+        _session(
+          id: 'stale',
+          title: 'Older work',
+          startedAgo: const Duration(days: 1),
+          lastActiveAgo: const Duration(hours: 1),
+          isActive: false,
+        ),
+      ],
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Remote work'), findsOneWidget);
+    expect(find.text(l10n.recently_active), findsOneWidget);
+    expect(find.text(l10n.status_idle), findsOneWidget);
+    expect(find.text(l10n.status_running), findsNothing);
+    expect(find.text(l10n.running_now), findsNothing);
+    expect(
+      tester.getTopLeft(find.text('Remote work')).dy,
+      lessThan(tester.getTopLeft(find.text('Older work')).dy),
     );
   });
 

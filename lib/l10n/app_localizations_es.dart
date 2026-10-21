@@ -1371,6 +1371,9 @@ class AppLocalizationsEs extends AppLocalizations {
   String get recently_completed => 'Completado recientemente';
 
   @override
+  String get recently_active => 'Actividad reciente';
+
+  @override
   String get recovering_hermes => 'Recuperando Hermes…';
 
   @override

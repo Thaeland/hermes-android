@@ -61,13 +61,18 @@ class HomeItem {
   final String? projectName;
 
   /// The moment this session last did something: its end time when finished,
-  /// otherwise its start time.
+  /// otherwise its last activity (falling back to start time for older rows).
   final double activityAt;
+
+  /// Recent server activity is not proof of a live turn. Home labels this
+  /// separately from the journal-backed [HermesStatus.running] state.
+  final bool recentlyActive;
 
   const HomeItem({
     required this.session,
     required this.status,
     required this.activityAt,
+    this.recentlyActive = false,
     this.attentionLabel,
     this.projectName,
   });
@@ -110,8 +115,12 @@ class HomeDigest {
   bool get needsAttention => blockedCount > 0;
 }
 
-/// How long an untouched active session still counts as resumable.
+/// How long an untouched unfinished session still counts as resumable.
 const Duration kHomeContinueWindow = Duration(days: 14);
+
+/// A recency hint, not a live-turn signal. Matches the API's five-minute
+/// `is_active` heuristic without treating it as authoritative Running.
+const Duration kHomeRecentlyActiveWindow = Duration(minutes: 5);
 
 /// How long finished work stays on Home.
 const Duration kHomeCompletedWindow = Duration(days: 7);
@@ -122,8 +131,11 @@ const int kHomeSectionLimit = 5;
 /// Builds the Home digest.
 ///
 /// [attention] maps a session id to the reason it is blocked; [running] holds
-/// the ids with live work. Ids that match no session are ignored rather than
-/// invented, so a stale event can never conjure a phantom row.
+/// the ids with journal-observed live work. The API's `is_active` only means
+/// recent activity and cannot establish that a turn is currently running;
+/// `session.active_list` is scoped to one gateway and misses other clients.
+/// Ids that match no session are ignored rather than invented, so a stale
+/// event can never conjure a phantom row.
 ///
 /// [archived] holds the ids that have left the resumable views — in practice
 /// the Quick chats past their 72 h deadline, per
@@ -162,7 +174,9 @@ HomeDigest buildHomeDigest({
   for (final session in sessions) {
     final endedAt = session.endedAt;
     final finished = endedAt != null;
-    final activityAt = endedAt ?? session.startedAt;
+    final activityAt =
+        endedAt ??
+        (session.lastActive > 0 ? session.lastActive : session.startedAt);
     final reason = attention[session.id];
 
     if (reason != null) {
@@ -214,6 +228,10 @@ HomeDigest buildHomeDigest({
         session: session,
         status: HermesStatus.idle,
         activityAt: activityAt,
+        recentlyActive:
+            activityAt <= nowSeconds &&
+            activityAt >=
+                nowSeconds - kHomeRecentlyActiveWindow.inMilliseconds / 1000.0,
         projectName: projectNames[session.id],
       ),
     );

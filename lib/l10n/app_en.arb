@@ -380,6 +380,7 @@
   "ready_to_upload": "Ready to upload",
   "reasoning": "Reasoning",
   "recently_completed": "Recently completed",
+  "recently_active": "Recently active",
   "recovering_hermes": "Recovering Hermes…",
   "refresh": "Refresh",
   "regenerate_response": "Regenerate response",

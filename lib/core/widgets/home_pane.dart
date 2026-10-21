@@ -50,7 +50,8 @@ class HomePane extends StatefulWidget {
   /// Session id to the reason it is blocked.
   final Map<String, String> attention;
 
-  /// Session ids with live work.
+  /// Session ids with work observed by this device's turn journal. Server
+  /// recency is presented separately, never passed here as proof of Running.
   final Set<String> running;
 
   /// Session ids that have left the resumable views — the Quick chats past
@@ -361,7 +362,12 @@ class _HomeItemCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: HermesSpacing.sm),
-              StatusChip(status: item.status),
+              StatusChip(
+                status: item.status,
+                label: item.recentlyActive
+                    ? context.l10n.recently_active
+                    : null,
+              ),
             ],
           ),
           if (reason != null) ...[
