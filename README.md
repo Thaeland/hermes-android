@@ -54,8 +54,10 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
   device's ordering. Pins are saved per connection and included in app backups.
 - **New chat inside a Project** uses that Project's server folder as the
   session working directory before the first prompt, so the chat appears in
-  the Project on refresh. A Project without a folder cannot file chats on
-  stock Hermes: add a folder first rather than opening an unassigned chat.
+  the Project on refresh. Project card chat counts refresh when you return
+  from a Project or reselect the Projects tab. A Project without a folder
+  cannot file chats on stock Hermes: add a folder first rather than opening
+  an unassigned chat.
   **Quick chat** remains deliberately unfiled.
 - Native approval, sudo/secret, clarification, reasoning, tool activity,
   notifications, background results, reviews, and subagent status. Expanded
