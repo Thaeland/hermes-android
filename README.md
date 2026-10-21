@@ -58,7 +58,10 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
   stock Hermes: add a folder first rather than opening an unassigned chat.
   **Quick chat** remains deliberately unfiled.
 - Native approval, sudo/secret, clarification, reasoning, tool activity,
-  notifications, background results, reviews, and subagent status.
+  notifications, background results, reviews, and subagent status. Expanded
+  tool cards show a time for each call, and a collapsed card shows the latest
+  known activity. Live events use the phone's observation time; persisted
+  results use the server's recorded time. Unknown times are not guessed.
 - Persistent reconnect/session resume and defensive retry handling.
 - **Background turn notifications** — Android notifications fire when a
   gateway turn completes while the app is backgrounded, mirroring the
