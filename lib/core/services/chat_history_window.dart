@@ -15,7 +15,9 @@ class ChatHistoryPageBatch {
 
 class ChatHistoryWindow {
   static const pageSize = 50;
-  static const initialPageBudget = 6;
+  // Covers ordinary long tool runs without transferring an unbounded transcript.
+  // Work beyond this window remains reachable with Load more.
+  static const initialPageBudget = 12;
 
   List<Map<String, dynamic>> rows = [];
   int _olderOffset = 0;
@@ -31,7 +33,7 @@ class ChatHistoryWindow {
     return int.tryParse(id?.toString() ?? '');
   }
 
-  /// Fetch at most six raw pages on a cold open, stopping as soon as both
+  /// Fetch at most twelve raw pages on a cold open, stopping as soon as both
   /// sides of the conversation are visible or the server reaches its end.
   /// Subsequent refreshes only need the first page: already loaded older rows
   /// remain in [rows]. A failed *additional* page keeps the usable first page.

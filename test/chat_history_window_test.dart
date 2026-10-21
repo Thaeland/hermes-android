@@ -47,7 +47,7 @@ void main() {
       final all = [
         row(1, 'user', 'Old question'),
         row(2, 'assistant', 'Old reply'),
-        for (var id = 3; id <= 412; id++) row(id, 'tool', 'output $id'),
+        for (var id = 3; id <= 812; id++) row(id, 'tool', 'output $id'),
       ];
       final window = ChatHistoryWindow();
       final offsets = <int>[];
@@ -56,14 +56,16 @@ void main() {
         return latestPage(all, offset);
       });
       window.acceptRecent(batch);
-      expect(offsets, [0, 50, 100, 150, 200, 250]);
-      expect(window.rows.length, 300);
+      expect(offsets, [
+        for (var offset = 0; offset < 600; offset += 50) offset,
+      ]);
+      expect(window.rows.length, 600);
       expect(window.hasOlder, isTrue);
 
       // A live turn inserts enough rows to slide the entire latest page.
       all.addAll([
-        for (var id = 413; id <= 470; id++) row(id, 'tool', 'output $id'),
-        row(471, 'assistant', 'Completed'),
+        for (var id = 813; id <= 870; id++) row(id, 'tool', 'output $id'),
+        row(871, 'assistant', 'Completed'),
       ]);
       window.acceptRecent(
         await window.fetchRecent((offset) async {
@@ -72,7 +74,7 @@ void main() {
         }),
       );
       expect(window.rows.last['content'], 'Completed');
-      expect(window.rows.any((item) => item['id'] == 113), isTrue);
+      expect(window.rows.any((item) => item['id'] == 213), isTrue);
       expect(
         window.rows.map((item) => item['id']).toSet().length,
         window.rows.length,

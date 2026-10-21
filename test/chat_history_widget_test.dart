@@ -138,10 +138,12 @@ void main() {
   testWidgets('bounded open exposes Load more and fetches older conversation', (
     tester,
   ) async {
-    final client = _HistoryHttpClient(_toolHeavyRows(312));
+    final client = _HistoryHttpClient(_toolHeavyRows(612));
     await tester.pumpWidget(_chat(client));
     await tester.pumpAndSettle();
-    expect(client.offsets, [0, 50, 100, 150, 200, 250]);
+    expect(client.offsets, [
+      for (var offset = 0; offset < 600; offset += 50) offset,
+    ]);
     expect(find.text('Earlier question'), findsNothing);
 
     final olderButton = find.byKey(const Key('chat-load-older'));
@@ -152,7 +154,7 @@ void main() {
     );
     await tester.tap(olderButton);
     await tester.pumpAndSettle();
-    expect(client.offsets.last, 300);
+    expect(client.offsets.last, 600);
     expect(find.text('Earlier question'), findsOneWidget);
     expect(find.text('Earlier answer'), findsOneWidget);
   });
