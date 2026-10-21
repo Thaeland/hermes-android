@@ -1371,6 +1371,9 @@ class AppLocalizationsPt extends AppLocalizations {
   String get recently_completed => 'Concluído recentemente';
 
   @override
+  String get recently_active => 'Ativo recentemente';
+
+  @override
   String get recovering_hermes => 'Recuperando o Hermes…';
 
   @override
@@ -3884,6 +3887,9 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get recently_completed => 'Concluído recentemente';
+
+  @override
+  String get recently_active => 'Ativo recentemente';
 
   @override
   String get recovering_hermes => 'Recuperando o Hermes…';

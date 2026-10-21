@@ -19,6 +19,7 @@ import '../services/attachment_draft_service.dart';
 import '../services/composer_draft_store.dart';
 import '../services/chat_model_override_store.dart';
 import '../services/chat_density_preference.dart';
+import '../services/chat_history_window.dart';
 import '../services/desktop_gateway_client.dart';
 import '../services/gateway_turn_application_controller.dart';
 import '../services/gateway_turn_coordinator.dart';
@@ -345,6 +346,8 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   List<Map<String, dynamic>> _messages = [];
+  final ChatHistoryWindow _historyWindow = ChatHistoryWindow();
+  bool _loadingOlder = false;
   final List<GatewayToolActivity> _toolActivities = [];
 
   /// Expansion choices for tool-activity cards, keyed by group id so they
@@ -410,7 +413,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Timer? _reattachRetryTimer;
   static const _reattachRetryBaseDelay = Duration(milliseconds: 500);
   static const _reattachRetryMaxDelay = Duration(seconds: 30);
-  static const _historyPageSize = 50;
 
   /// Backstop for [releaseClientAfterStreamSettles] on the dispose path: a
   /// stream that never settles must not hold this screen's HTTP client open
@@ -1332,7 +1334,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
 
     try {
-      final messages = await _getRecentMessages(sessionId ?? widget.session.id);
+      final batch = await _historyWindow.fetchRecent(
+        (offset) => _client.getMessages(
+          sessionId ?? widget.session.id,
+          limit: ChatHistoryWindow.pageSize,
+          offset: offset,
+          latest: true,
+        ),
+        shouldContinue: () =>
+            mounted && responseGeneration == _responseGeneration,
+      );
       if (!mounted) return;
       // A remote turn can start while history is still hydrating. Its local
       // optimistic messages and stream are newer than this response, so never
@@ -1342,6 +1353,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _deferHistoryRefresh();
         return;
       }
+      _historyWindow.acceptRecent(batch);
+      final messages = _historyWindow.rows;
       _extractToolMessages(messages);
       final completedPendingReattach =
           _pendingReattachResync &&
@@ -1368,6 +1381,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           setState(() => _loading = false);
           return;
         }
+        if (_messages.isNotEmpty) {
+          setState(() => _loading = false);
+          return;
+        }
         setState(() {
           _messages = [];
           _historyGeneration++;
@@ -1384,7 +1401,68 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<List<Map<String, dynamic>>> _getRecentMessages(String sessionId) =>
-      _client.getMessages(sessionId, limit: _historyPageSize, latest: true);
+      _client.getMessages(
+        sessionId,
+        limit: ChatHistoryWindow.pageSize,
+        latest: true,
+      );
+
+  void _acceptRecentMessages(List<Map<String, dynamic>> recent) {
+    _historyWindow.acceptRecent(
+      ChatHistoryPageBatch(
+        recent,
+        recent.length,
+        recent.length == ChatHistoryWindow.pageSize,
+      ),
+    );
+    _extractToolMessages(_historyWindow.rows);
+  }
+
+  Future<void> _loadOlderMessages() async {
+    if (_loadingOlder || !_historyWindow.hasOlder) return;
+    final responseGeneration = _responseGeneration;
+    final offset = _historyWindow.olderOffset;
+    final sessionId = _storedSessionKey;
+    final oldExtent = _scrollController.hasClients
+        ? _scrollController.position.maxScrollExtent
+        : 0.0;
+    final oldPixels = _scrollController.hasClients
+        ? _scrollController.position.pixels
+        : 0.0;
+    setState(() => _loadingOlder = true);
+    try {
+      final older = await _client.getMessages(
+        sessionId,
+        limit: ChatHistoryWindow.pageSize,
+        offset: offset,
+        latest: true,
+      );
+      if (!mounted ||
+          sessionId != _storedSessionKey ||
+          responseGeneration != _responseGeneration ||
+          _sending ||
+          _streaming) {
+        return;
+      }
+      _historyWindow.acceptOlder(older);
+      _extractToolMessages(_historyWindow.rows);
+      setState(() => _messages = _historyWindow.rows);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted || !_scrollController.hasClients) return;
+        final delta = _scrollController.position.maxScrollExtent - oldExtent;
+        _scrollController.jumpTo(
+          (oldPixels + delta).clamp(
+            0.0,
+            _scrollController.position.maxScrollExtent,
+          ),
+        );
+      });
+    } catch (_) {
+      // Leave the control available for a retry without hiding loaded rows.
+    } finally {
+      if (mounted) setState(() => _loadingOlder = false);
+    }
+  }
 
   /// A remote turn may start while the initial bounded transcript request is
   /// still in flight. Its stale response must not overwrite optimistic or
@@ -1422,9 +1500,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         retryAfterSettlement = true;
         return;
       }
-      _extractToolMessages(messages);
+      _acceptRecentMessages(messages);
       setState(() {
-        _messages = messages;
+        _messages = _historyWindow.rows;
         _historyGeneration += 1;
         _error = null;
       });
@@ -1617,10 +1695,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (!_canRunReattachResync || generation != _reattachGeneration) return;
       final messages = await _getRecentMessages(_storedSessionKey);
       if (!_canRunReattachResync || generation != _reattachGeneration) return;
-      _extractToolMessages(messages);
       final completed = _hasTerminalAssistantAfterWatermark(messages);
+      _acceptRecentMessages(messages);
       setState(() {
-        _messages = messages;
+        _messages = _historyWindow.rows;
         _historyGeneration += 1;
         _loading = false;
         _error = null;
@@ -1667,9 +1745,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     try {
       final messages = await _getRecentMessages(widget.session.id);
       if (!mounted || _appInBackground) return;
-      _extractToolMessages(messages);
+      _acceptRecentMessages(messages);
       setState(() {
-        _messages = messages;
+        _messages = _historyWindow.rows;
         _legacyHistoryResyncPending = false;
       });
       _scheduleInitialEndAlignment();
@@ -2710,13 +2788,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         try {
           final messages = await _getRecentMessages(widget.session.id);
           if (!mounted || responseGeneration != _responseGeneration) return;
-          _extractToolMessages(messages);
           if (pendingImage != null) {
             await _attachmentDraftService.removeCachedFile(pendingImage);
           }
           if (!mounted || responseGeneration != _responseGeneration) return;
+          _acceptRecentMessages(messages);
           setState(() {
-            _messages = messages;
+            _messages = _historyWindow.rows;
             if (pendingImage != null) {
               _attachmentDrafts.removeWhere(
                 (draft) => draft.id == pendingImage.id,
@@ -4786,11 +4864,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildBody() {
-    if (_loading) {
+    if (_loading && _messages.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
 
-    if (_error != null) {
+    if (_error != null && _messages.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
@@ -4839,7 +4917,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
     }
 
-    return NotificationListener<ScrollMetricsNotification>(
+    final list = NotificationListener<ScrollMetricsNotification>(
       onNotification: (notification) {
         _syncEndAffordance(notification.metrics, clearUnreadAtEnd: false);
         return false;
@@ -4849,9 +4927,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         child: ListView.builder(
           controller: _scrollController,
           padding: EdgeInsets.only(bottom: _chatDensity.listEndPadding),
-          itemCount: displayMessages.length,
+          itemCount: displayMessages.length + (_historyWindow.hasOlder ? 1 : 0),
           itemBuilder: (context, index) {
-            final item = displayMessages[index];
+            if (_historyWindow.hasOlder && index == 0) {
+              return Center(
+                child: TextButton(
+                  key: const Key('chat-load-older'),
+                  onPressed: _loadingOlder || _sending || _streaming
+                      ? null
+                      : _loadOlderMessages,
+                  child: _loadingOlder
+                      ? const CircularProgressIndicator()
+                      : Text(context.l10n.load_more),
+                ),
+              );
+            }
+            final item =
+                displayMessages[index - (_historyWindow.hasOlder ? 1 : 0)];
 
             if (item is ChatToolActivityGroup) {
               return GatewayActivityCard(
@@ -4914,6 +5006,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           },
         ),
       ),
+    );
+    if (!_loading && _error == null) return list;
+    return Column(
+      children: [
+        if (_loading) const LinearProgressIndicator(),
+        if (_error != null)
+          MaterialBanner(
+            content: Text(context.l10n.failed_to_load_messages),
+            actions: [
+              TextButton(
+                onPressed: () => unawaited(_fetchMessages()),
+                child: Text(context.l10n.retry),
+              ),
+            ],
+          ),
+        Expanded(child: list),
+      ],
     );
   }
 

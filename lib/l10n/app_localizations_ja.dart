@@ -1333,6 +1333,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get recently_completed => '最近完了';
 
   @override
+  String get recently_active => '最近アクティブ';
+
+  @override
   String get recovering_hermes => 'Hermesを復旧中…';
 
   @override

@@ -1373,6 +1373,9 @@ class AppLocalizationsDe extends AppLocalizations {
   String get recently_completed => 'Kürzlich abgeschlossen';
 
   @override
+  String get recently_active => 'Kürzlich aktiv';
+
+  @override
   String get recovering_hermes => 'Hermes wird wiederhergestellt…';
 
   @override

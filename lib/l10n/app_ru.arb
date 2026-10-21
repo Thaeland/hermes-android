@@ -380,6 +380,7 @@
   "ready_to_upload": "Готово к отправке",
   "reasoning": "Рассуждения",
   "recently_completed": "Недавно завершено",
+  "recently_active": "Недавно активен",
   "recovering_hermes": "Восстановление Hermes…",
   "refresh": "Обновить",
   "regenerate_response": "Сгенерировать ответ заново",

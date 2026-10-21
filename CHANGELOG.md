@@ -4,6 +4,24 @@ All notable changes since v1.0.7 are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The [README](README.md)
 shows only the three latest releases.
 
+## [2.1.25] - 2026-10-21
+
+### Fixed
+
+- Reopening a tool-heavy chat now loads enough earlier history to keep the
+  latest conversation visible rather than showing only collapsible tool calls.
+  Older messages can be loaded on demand, and a fresh history page no longer
+  discards previously loaded dialogue during an active turn.
+- Home no longer labels a recently active conversation from another device as
+  definitively idle. It distinguishes recent server activity from a turn the
+  Android app knows is running, and sorts unfinished conversations by their
+  latest activity instead of their creation time.
+
+### Thanks
+
+- No external contributors in this patch. Implementation and regression tests
+  were assisted by Hermes Agent.
+
 ## [2.1.24] - 2026-10-21
 
 ### Added

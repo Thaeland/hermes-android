@@ -1363,6 +1363,9 @@ class AppLocalizationsRu extends AppLocalizations {
   String get recently_completed => 'Недавно завершено';
 
   @override
+  String get recently_active => 'Недавно активен';
+
+  @override
   String get recovering_hermes => 'Восстановление Hermes…';
 
   @override

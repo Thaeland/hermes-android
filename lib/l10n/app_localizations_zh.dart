@@ -1320,6 +1320,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get recently_completed => '最近完成';
 
   @override
+  String get recently_active => '最近活跃';
+
+  @override
   String get recovering_hermes => '正在恢复 Hermes…';
 
   @override
@@ -3748,6 +3751,9 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get recently_completed => '最近完成';
+
+  @override
+  String get recently_active => '最近活跃';
 
   @override
   String get recovering_hermes => '正在恢复 Hermes…';

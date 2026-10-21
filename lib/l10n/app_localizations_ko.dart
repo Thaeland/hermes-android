@@ -1330,6 +1330,9 @@ class AppLocalizationsKo extends AppLocalizations {
   String get recently_completed => '최근 완료됨';
 
   @override
+  String get recently_active => '최근 활동';
+
+  @override
   String get recovering_hermes => 'Hermes 복구 중…';
 
   @override

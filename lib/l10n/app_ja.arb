@@ -380,6 +380,7 @@
   "ready_to_upload": "アップロード準備完了",
   "reasoning": "推論",
   "recently_completed": "最近完了",
+  "recently_active": "最近アクティブ",
   "recovering_hermes": "Hermesを復旧中…",
   "refresh": "更新",
   "regenerate_response": "応答を再生成",
