@@ -19,12 +19,20 @@ class _HistoryHttpClient extends http.BaseClient {
   List<Map<String, dynamic>> rows;
   final List<int> offsets = [];
   final List<Uri> requests = [];
+  Completer<void>? responseGate;
+  bool failNextRequest = false;
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
     requests.add(request.url);
     if (request.method != 'GET' || !request.url.path.endsWith('/messages')) {
       return http.StreamedResponse(Stream.value(utf8.encode('{}')), 404);
+    }
+    final gate = responseGate;
+    if (gate != null) await gate.future;
+    if (failNextRequest) {
+      failNextRequest = false;
+      return http.StreamedResponse(Stream.value(utf8.encode('{}')), 503);
     }
 
     final offset = int.parse(request.url.queryParameters['offset'] ?? '0');
@@ -133,6 +141,34 @@ void main() {
     expect(find.text('Earlier question'), findsOneWidget);
     expect(find.text('Earlier answer'), findsOneWidget);
     expect(find.text('Completed answer'), findsOneWidget);
+  });
+
+  testWidgets('refresh keeps dialogue visible while loading and on failure', (
+    tester,
+  ) async {
+    final client = _HistoryHttpClient([
+      {'id': 1, 'role': 'user', 'content': 'Keep this question'},
+      {'id': 2, 'role': 'assistant', 'content': 'Keep this answer'},
+    ]);
+    await tester.pumpWidget(_chat(client));
+    await tester.pumpAndSettle();
+    expect(find.text('Keep this question'), findsOneWidget);
+
+    final gate = client.responseGate = Completer<void>();
+    await tester.tap(find.byTooltip('Chat actions'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Refresh'));
+    await tester.pump();
+    expect(find.text('Keep this question'), findsOneWidget);
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+
+    client.failNextRequest = true;
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('Keep this question'), findsOneWidget);
+    expect(find.text('Keep this answer'), findsOneWidget);
+    expect(find.text('Failed to load messages'), findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
   });
 
   testWidgets('bounded open exposes Load more and fetches older conversation', (

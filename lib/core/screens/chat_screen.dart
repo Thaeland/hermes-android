@@ -4864,11 +4864,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildBody() {
-    if (_loading) {
+    if (_loading && _messages.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
 
-    if (_error != null) {
+    if (_error != null && _messages.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
@@ -4917,7 +4917,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
     }
 
-    return NotificationListener<ScrollMetricsNotification>(
+    final list = NotificationListener<ScrollMetricsNotification>(
       onNotification: (notification) {
         _syncEndAffordance(notification.metrics, clearUnreadAtEnd: false);
         return false;
@@ -5006,6 +5006,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           },
         ),
       ),
+    );
+    if (!_loading && _error == null) return list;
+    return Column(
+      children: [
+        if (_loading) const LinearProgressIndicator(),
+        if (_error != null)
+          MaterialBanner(
+            content: Text(context.l10n.failed_to_load_messages),
+            actions: [
+              TextButton(
+                onPressed: () => unawaited(_fetchMessages()),
+                child: Text(context.l10n.retry),
+              ),
+            ],
+          ),
+        Expanded(child: list),
+      ],
     );
   }
 
