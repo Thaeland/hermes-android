@@ -247,6 +247,7 @@ class ProjectsRepository {
   bool _sessionsUnsupported = false;
 
   ProjectsTreeOverview? _overviewCache;
+  int _overviewGeneration = 0;
   bool _overviewUnsupported = false;
 
   ProjectsRepository({
@@ -336,12 +337,19 @@ class ProjectsRepository {
     }
     final cached = _overviewCache;
     if (!refresh && cached != null) return cached;
+    final generation = ++_overviewGeneration;
     try {
       final overview = await client.tree();
-      _overviewCache = overview;
-      return overview;
+      // A later refresh can complete first. Never let an older tree replace
+      // the shared counts/placement cache or leak back to a waiting caller.
+      if (_closed) return ProjectsTreeOverview.empty;
+      if (generation == _overviewGeneration) _overviewCache = overview;
+      return _overviewCache ?? ProjectsTreeOverview.empty;
     } on ProjectsUnsupportedException {
-      _overviewUnsupported = true;
+      if (!_closed && generation == _overviewGeneration) {
+        _overviewUnsupported = true;
+        _overviewCache = null;
+      }
       return ProjectsTreeOverview.empty;
     }
   }

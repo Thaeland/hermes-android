@@ -474,6 +474,11 @@ void main() {
     stale.complete();
     await tester.pumpAndSettle();
     expect(find.text('4 chats'), findsOneWidget);
+    // The pane generation guard alone does not protect repository consumers.
+    // A later cached read must retain the newer tree after the stale reply.
+    final cached = await repository.overview();
+    expect(cached.projects.single.sessionCount, 4);
+    expect(gateway.treeCalls, 3);
   });
 
   testWidgets('offers a designed empty state with a create action', (
