@@ -1,4 +1,4 @@
-# Hermes Android — v2.1.24
+# Hermes Android — v2.1.25
 
 Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — chat with your Hermes sessions from a phone or tablet over local Wi-Fi or a private Tailscale network.
 
@@ -14,17 +14,16 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
 
 ## Current release
 
-- Version: **2.1.24** (build 2167)
+- Version: **2.1.25** (build 2168)
 - Package: `com.hermesagent.hermes_android`
 - Recommended APK for modern phones: ARM64 release build from the
   [Releases](https://github.com/rusty4444/hermes-android/releases) page.
 - Production builds are signed with a private release keystore. Debug APKs
   signed with the Android debug certificate remain available for testing
   under the `com.hermesagent.hermes_android.dev` package ID.
-- v2.1.24 protects in-flight Gateway chats while backgrounded with work by
-  [@Thaeland](https://github.com/Thaeland), and coalesces overlapping Home
-  session scans. See
-  [Credits](#credits) and the [changelog](CHANGELOG.md).
+- v2.1.25 keeps earlier dialogue visible when active tool calls fill the
+  latest transcript page, and makes Home distinguish recent server activity
+  from a turn confirmed running on the phone. See the [changelog](CHANGELOG.md).
 - The app checks [GitHub Releases](https://github.com/rusty4444/hermes-android/releases)
   on ordinary launches. An answered check limits network requests to once
   every 12 hours; offline attempts may retry at the next launch. A newer build
@@ -75,6 +74,17 @@ See [CHANGELOG.md](CHANGELOG.md) for the complete release history and
 [docs/HERMESAPK_DEVELOPMENT_LOG.md](docs/HERMESAPK_DEVELOPMENT_LOG.md) for the
 sanitized implementation and validation record.
 
+## What's new in v2.1.25
+
+- **Conversation stays in view during long tool runs** — opening a chat loads
+  past the latest tool-only rows to recover the previous dialogue. Older
+  messages remain available on demand; refreshing does not discard dialogue
+  already loaded on this screen.
+- **More honest Home status** — a recent server activity timestamp is not
+  mistaken for proof of a live turn, but it is no longer called definitively
+  idle either. Home sorts unfinished work by latest activity. Confirmed
+  Android turns still appear under Running and blocked turns under Needs you.
+
 ## What's new in v2.1.24
 
 - **Backgrounded turns stay connected** — while a chat request is in flight,
@@ -92,19 +102,6 @@ sanitized implementation and validation record.
 - **No duplicate previewed answers** — final Gateway responses settle onto
   the matching interim bubble without losing separate commentary or late
   reasoning (PR #153, [@krotname](https://github.com/krotname)).
-
-## What's new in v2.1.22
-
-- **Compact chat density** — choose Settings → Appearance → Chat density for
-  tighter bubbles and fewer visual sender labels; speaker information remains
-  available to screen readers. The setting updates open chats and survives
-  backup restore (PR #147, @igitur).
-- **Tool cards respect your choice** — collapse a running activity card and it
-  stays closed as tools arrive or the row moves; expand it and it stays open
-  after the turn finishes (PR #148, @igitur).
-- **Batch clarifications stay in chat** — answering one question no longer
-  dismisses the conversation or the next question, even when a cancellation or
-  approval overlaps it (PR #145, @dadofsambonzuki).
 
 ## Features
 
@@ -463,7 +460,7 @@ cp build/app/outputs/flutter-apk/app-*-release.apk release-apks/
 block in `android/app/build.gradle.kts` derives per-ABI codes as
 `base * 10 + ABI code` (armeabi-v7a = 1, arm64-v8a = 2, x86_64 = 3), so the
 codes stay ordered armeabi-v7a < arm64-v8a < x86_64 as fdroiddata requires.
-For v2.1.24, base `2167` therefore produces codes `21671`/`21672`/`21673`.
+For v2.1.25, base `2168` therefore produces codes `21681`/`21682`/`21683`.
 CI reads the completed arm64 APK with `aapt` and fails if that relationship
 drifts. Release-floor checks continue to apply to the base value and must not
 be weakened to rely on the ABI code.
