@@ -28,7 +28,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'support/l10n_test_utils.dart';
 import 'package:hermes_android/l10n/app_localizations.dart';
 
-
 final _now = DateTime.utc(2026, 8, 29, 12);
 
 double _secondsAgo(Duration ago) =>
@@ -89,15 +88,19 @@ Future<ProjectsRepository> _repository(
   );
 }
 
-Map<String, dynamic> _projectJson({required String id, required String name}) =>
-    {
-      'id': id,
-      'slug': name.toLowerCase(),
-      'name': name,
-      'archived': false,
-      'created_at': 1750000000,
-      'folders': const [],
-    };
+Map<String, dynamic> _projectJson({
+  required String id,
+  required String name,
+  String? primaryPath,
+}) => {
+  'id': id,
+  'slug': name.toLowerCase(),
+  'name': name,
+  'archived': false,
+  'created_at': 1750000000,
+  'primary_path': ?primaryPath,
+  'folders': const [],
+};
 
 Future<void> _pumpWorkspace(
   WidgetTester tester, {
@@ -244,7 +247,11 @@ void main() {
         tester,
         connection: _connection(desktopGatewayUrl: 'https://host:8642'),
         repository: await _repository([
-          _projectJson(id: 'p1', name: 'Hermes Android'),
+          _projectJson(
+            id: 'p1',
+            name: 'Hermes Android',
+            primaryPath: '/srv/projects/hermes-android',
+          ),
         ]),
         onNewChat: drafts.add,
       );
