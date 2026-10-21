@@ -2188,6 +2188,24 @@ class AppLocalizationsPt extends AppLocalizations {
   }
 
   @override
+  String tool_start_observed(Object time) {
+    return 'Início observado às $time (hora local)';
+  }
+
+  @override
+  String tool_last_observed(Object time) {
+    return 'Última observação às $time (hora local)';
+  }
+
+  @override
+  String tool_result_recorded(Object time) {
+    return 'Resultado registado às $time (hora local)';
+  }
+
+  @override
+  String get tool_time_unavailable => 'Hora indisponível';
+
+  @override
   String get hermes_is_using_a_tool => 'O Hermes está usando uma ferramenta';
 
   @override
@@ -4698,6 +4716,24 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String activity_completed_summary(Object count) {
     return '$count concluídos';
   }
+
+  @override
+  String tool_start_observed(Object time) {
+    return 'Início observado às $time (horário local)';
+  }
+
+  @override
+  String tool_last_observed(Object time) {
+    return 'Última observação às $time (horário local)';
+  }
+
+  @override
+  String tool_result_recorded(Object time) {
+    return 'Resultado registrado às $time (horário local)';
+  }
+
+  @override
+  String get tool_time_unavailable => 'Horário indisponível';
 
   @override
   String get hermes_is_using_a_tool => 'O Hermes está usando uma ferramenta';

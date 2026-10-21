@@ -2189,6 +2189,24 @@ class AppLocalizationsRu extends AppLocalizations {
   }
 
   @override
+  String tool_start_observed(Object time) {
+    return 'Начало замечено в $time (местное время)';
+  }
+
+  @override
+  String tool_last_observed(Object time) {
+    return 'Последнее наблюдение в $time (местное время)';
+  }
+
+  @override
+  String tool_result_recorded(Object time) {
+    return 'Результат записан в $time (местное время)';
+  }
+
+  @override
+  String get tool_time_unavailable => 'Время неизвестно';
+
+  @override
   String get hermes_is_using_a_tool => 'Hermes использует инструмент';
 
   @override

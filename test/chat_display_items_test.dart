@@ -144,6 +144,60 @@ void main() {
     });
 
     test(
+      'projects durable row times independently and retains group anchor',
+      () {
+        final first = GatewayToolActivity.fromStoredResult(
+          name: 'read_file',
+          timestamp: 1792544523,
+        );
+        final second = GatewayToolActivity.fromStoredResult(
+          name: 'terminal',
+          timestamp: null,
+        );
+        final items = buildChatDisplayItems(
+          messages: [
+            {
+              'id': 41,
+              'role': 'tool',
+              'content': 'first',
+              'timestamp': 1792544523,
+            },
+            {'id': 42, 'role': 'tool', 'content': 'second'},
+          ],
+          toolActivities: [first, second],
+        );
+        final group = items.single as ChatToolActivityGroup;
+        expect(group.id, 'message:41');
+        expect(group.activities[0].lastActivityAt, first.lastActivityAt);
+        expect(group.activities[1].lastActivityAt, isNull);
+        expect(group.latestKnownActivity, same(first));
+        expect(group.activities[0].startedAt, isNull);
+      },
+    );
+
+    test('latest timestamp comes from any row, not merely the final row', () {
+      final later = GatewayToolActivity(
+        name: 'read_file',
+        phase: GatewayToolActivityPhase.completed,
+        lastActivityAt: DateTime.utc(2026, 10, 21, 1, 2, 9),
+        lastActivityTimeSource: GatewayToolTimeSource.observed,
+      );
+      final earlier = GatewayToolActivity(
+        name: 'terminal',
+        phase: GatewayToolActivityPhase.completed,
+        lastActivityAt: DateTime.utc(2026, 10, 21, 1, 2, 3),
+        lastActivityTimeSource: GatewayToolTimeSource.storedResult,
+      );
+      final items = buildChatDisplayItems(
+        messages: const [],
+        toolActivities: [later, earlier, _tool('unknown')],
+      );
+      final group = items.single as ChatToolActivityGroup;
+      expect(group.latestKnownActivity, same(later));
+      expect(group.activities, hasLength(3));
+    });
+
+    test(
       'suppresses a tool result bubble even without a matching activity',
       () {
         final items = buildChatDisplayItems(

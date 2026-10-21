@@ -1952,6 +1952,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _extractToolMessages(List<Map<String, dynamic>> messages) {
+    final observedByToolId = {
+      for (final activity in _toolActivities)
+        if (activity.toolId != null) activity.toolId!: activity,
+    };
     _toolActivities.clear();
     for (final msg in messages) {
       if (!isToolResultMessage(msg)) continue;
@@ -1972,10 +1976,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (toolName.isEmpty) toolName = 'tool';
 
       _toolActivities.add(
-        GatewayToolActivity(
+        GatewayToolActivity.fromStoredResult(
           toolId: toolCallId.isEmpty ? null : toolCallId,
           name: toolName,
-          phase: GatewayToolActivityPhase.completed,
+          timestamp: msg['timestamp'],
+          observedStart: observedByToolId[toolCallId]?.startedAt,
+          observedLastActivity: observedByToolId[toolCallId]?.lastActivityAt,
         ),
       );
     }
@@ -4363,7 +4369,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     Map<String, dynamic> progress, {
     String eventType = 'tool.start',
   }) {
-    final update = GatewayToolActivity.fromGatewayEvent(eventType, progress);
+    final update = GatewayToolActivity.fromGatewayEvent(
+      eventType,
+      progress,
+      observedAt: DateTime.now(),
+    );
     if (update == null) return;
     setState(() {
       var idx = update.toolId == null
@@ -4372,9 +4382,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               (activity) => activity.toolId == update.toolId,
             );
       if (idx < 0) {
+        // A different gateway tool id is a different call, even when two
+        // concurrent calls share the same tool name. Only id-less updates can
+        // fall back to the most recent active call by name.
         idx = _toolActivities.lastIndexWhere(
           (activity) =>
               !activity.isTerminal &&
+              (update.toolId == null || activity.toolId == null) &&
               activity.name.toLowerCase() == update.name.toLowerCase(),
         );
       }

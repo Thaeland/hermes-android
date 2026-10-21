@@ -2127,6 +2127,24 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
+  String tool_start_observed(Object time) {
+    return '開始を観測 $time（現地時刻）';
+  }
+
+  @override
+  String tool_last_observed(Object time) {
+    return '最終観測 $time（現地時刻）';
+  }
+
+  @override
+  String tool_result_recorded(Object time) {
+    return '結果を記録 $time（現地時刻）';
+  }
+
+  @override
+  String get tool_time_unavailable => '時刻は不明';
+
+  @override
   String get hermes_is_using_a_tool => 'Hermesがツールを使用中';
 
   @override

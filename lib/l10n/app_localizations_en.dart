@@ -2171,6 +2171,24 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String tool_start_observed(Object time) {
+    return 'Start observed $time (local)';
+  }
+
+  @override
+  String tool_last_observed(Object time) {
+    return 'Last observed $time (local)';
+  }
+
+  @override
+  String tool_result_recorded(Object time) {
+    return 'Result recorded $time (local)';
+  }
+
+  @override
+  String get tool_time_unavailable => 'Time unavailable';
+
+  @override
   String get hermes_is_using_a_tool => 'Hermes is using a tool';
 
   @override

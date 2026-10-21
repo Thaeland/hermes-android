@@ -2193,6 +2193,24 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
+  String tool_start_observed(Object time) {
+    return 'Start beobachtet um $time (Ortszeit)';
+  }
+
+  @override
+  String tool_last_observed(Object time) {
+    return 'Zuletzt beobachtet um $time (Ortszeit)';
+  }
+
+  @override
+  String tool_result_recorded(Object time) {
+    return 'Ergebnis erfasst um $time (Ortszeit)';
+  }
+
+  @override
+  String get tool_time_unavailable => 'Uhrzeit nicht verfügbar';
+
+  @override
   String get hermes_is_using_a_tool => 'Hermes verwendet ein Tool';
 
   @override

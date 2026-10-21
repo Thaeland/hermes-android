@@ -2110,6 +2110,24 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String tool_start_observed(Object time) {
+    return '观察到开始 $time（本地时间）';
+  }
+
+  @override
+  String tool_last_observed(Object time) {
+    return '最后观察时间 $time（本地时间）';
+  }
+
+  @override
+  String tool_result_recorded(Object time) {
+    return '结果记录时间 $time（本地时间）';
+  }
+
+  @override
+  String get tool_time_unavailable => '时间不可用';
+
+  @override
   String get hermes_is_using_a_tool => 'Hermes 正在使用工具';
 
   @override
@@ -4535,6 +4553,24 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String activity_completed_summary(Object count) {
     return '已完成 $count 个';
   }
+
+  @override
+  String tool_start_observed(Object time) {
+    return '观察到开始 $time（本地时间）';
+  }
+
+  @override
+  String tool_last_observed(Object time) {
+    return '最后观察时间 $time（本地时间）';
+  }
+
+  @override
+  String tool_result_recorded(Object time) {
+    return '结果记录时间 $time（本地时间）';
+  }
+
+  @override
+  String get tool_time_unavailable => '时间不可用';
 
   @override
   String get hermes_is_using_a_tool => 'Hermes 正在使用工具';

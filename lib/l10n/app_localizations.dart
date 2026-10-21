@@ -3699,6 +3699,30 @@ abstract class AppLocalizations {
   /// **'{count} completed'**
   String activity_completed_summary(Object count);
 
+  /// No description provided for @tool_start_observed.
+  ///
+  /// In en, this message translates to:
+  /// **'Start observed {time} (local)'**
+  String tool_start_observed(Object time);
+
+  /// No description provided for @tool_last_observed.
+  ///
+  /// In en, this message translates to:
+  /// **'Last observed {time} (local)'**
+  String tool_last_observed(Object time);
+
+  /// No description provided for @tool_result_recorded.
+  ///
+  /// In en, this message translates to:
+  /// **'Result recorded {time} (local)'**
+  String tool_result_recorded(Object time);
+
+  /// No description provided for @tool_time_unavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Time unavailable'**
+  String get tool_time_unavailable;
+
   /// No description provided for @hermes_is_using_a_tool.
   ///
   /// In en, this message translates to:

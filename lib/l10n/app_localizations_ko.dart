@@ -2128,6 +2128,24 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
+  String tool_start_observed(Object time) {
+    return '시작 관측 $time (현지 시간)';
+  }
+
+  @override
+  String tool_last_observed(Object time) {
+    return '마지막 관측 $time (현지 시간)';
+  }
+
+  @override
+  String tool_result_recorded(Object time) {
+    return '결과 기록 $time (현지 시간)';
+  }
+
+  @override
+  String get tool_time_unavailable => '시간 정보 없음';
+
+  @override
   String get hermes_is_using_a_tool => 'Hermes가 도구를 사용 중입니다';
 
   @override
