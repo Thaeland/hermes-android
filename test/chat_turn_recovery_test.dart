@@ -56,6 +56,15 @@ void main() {
 
     expect(shouldUseRecoveryV2ForSession(serverSession), isFalse);
     expect(shouldUseRecoveryV2ForSession(localDraft), isTrue);
+    // session.open has no cwd: a Project draft must use stock
+    // session.create(cwd) rather than silently becoming Unassigned.
+    expect(
+      shouldUseRecoveryV2ForSession(
+        localDraft,
+        projectWorkingDirectory: ' /srv/projects/work ',
+      ),
+      isFalse,
+    );
     expect(
       shouldEstablishLegacyDesktopSession(
         serverSession,

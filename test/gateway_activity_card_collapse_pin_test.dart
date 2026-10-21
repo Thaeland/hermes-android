@@ -74,6 +74,31 @@ void main() {
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
   });
 
+  testWidgets(
+    'a pinned-closed card updates last observed time without reopening',
+    (tester) async {
+      final start = DateTime(2026, 10, 21, 1, 2, 3);
+      final progress = start.add(const Duration(seconds: 5));
+      final running = GatewayToolActivity.fromGatewayEvent('tool.start', {
+        'tool_id': 'call-1',
+        'name': 'terminal',
+      }, observedAt: start)!;
+      await _pumpCard(tester, [running]);
+      await _tapHeader(tester);
+      expect(_isExpanded(tester), isFalse);
+      await _pumpCard(tester, [
+        running.merge(
+          GatewayToolActivity.fromGatewayEvent('tool.progress', {
+            'tool_id': 'call-1',
+            'name': 'terminal',
+          }, observedAt: progress)!,
+        ),
+      ]);
+      expect(_isExpanded(tester), isFalse);
+      expect(find.text('Last observed 01:02:08 (local)'), findsOneWidget);
+    },
+  );
+
   testWidgets('a collapsed card reports the turn finishing', (tester) async {
     await _pumpCard(tester, [_running('terminal', 'call-1')]);
     await _tapHeader(tester);

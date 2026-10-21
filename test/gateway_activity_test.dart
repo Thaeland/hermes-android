@@ -89,6 +89,94 @@ void main() {
       expect(merged.phase, GatewayToolActivityPhase.progress);
       expect(merged.detail, 'Halfway through');
     });
+
+    test(
+      'preserves observed start and advances last activity on every event',
+      () {
+        final startTime = DateTime.utc(2026, 10, 21, 1, 2, 3);
+        final progressTime = startTime.add(const Duration(seconds: 4));
+        final completeTime = startTime.add(const Duration(seconds: 9));
+        final start = GatewayToolActivity.fromGatewayEvent('tool.start', {
+          'tool_id': 'call-1',
+          'name': 'terminal',
+        }, observedAt: startTime)!;
+        final progress = GatewayToolActivity.fromGatewayEvent('tool.progress', {
+          'tool_id': 'call-1',
+          'name': 'terminal',
+        }, observedAt: progressTime)!;
+        final complete = GatewayToolActivity.fromGatewayEvent('tool.complete', {
+          'tool_id': 'call-1',
+          'name': 'terminal',
+        }, observedAt: completeTime)!;
+        final merged = start.merge(progress).merge(complete);
+        expect(merged.identity, start.identity);
+        expect(merged.startedAt, startTime);
+        expect(merged.lastActivityAt, completeTime);
+        expect(merged.lastActivityTimeSource, GatewayToolTimeSource.observed);
+        expect(start.lastActivityAt, startTime);
+        expect(start.merge(progress).lastActivityAt, progressTime);
+      },
+    );
+
+    test('first progress or completion does not invent a start time', () {
+      final observed = DateTime.utc(2026, 10, 21, 1, 2, 3);
+      for (final event in ['tool.progress', 'tool.complete']) {
+        final activity = GatewayToolActivity.fromGatewayEvent(event, {
+          'name': 'terminal',
+        }, observedAt: observed)!;
+        expect(activity.startedAt, isNull);
+        expect(activity.lastActivityAt, observed);
+      }
+      expect(
+        GatewayToolActivity.fromGatewayEvent('tool.start', {
+          'name': 'terminal',
+        })!.lastActivityAt,
+        isNull,
+      );
+    });
+
+    test('stored result uses numeric Unix seconds, never fetch time', () {
+      final result = GatewayToolActivity.fromStoredResult(
+        name: 'terminal',
+        timestamp: 1792544523.125,
+      );
+      expect(result.startedAt, isNull);
+      expect(
+        result.lastActivityAt,
+        DateTime.fromMillisecondsSinceEpoch(1792544523125, isUtc: true),
+      );
+      expect(result.lastActivityTimeSource, GatewayToolTimeSource.storedResult);
+      final withObservedStart = GatewayToolActivity.fromStoredResult(
+        name: 'terminal',
+        timestamp: 1792544523,
+        observedStart: DateTime.utc(2026, 10, 21),
+      );
+      expect(withObservedStart.startedAt, DateTime.utc(2026, 10, 21));
+      final observedEnd = DateTime.utc(2026, 10, 21, 1, 2, 10);
+      final fallback = GatewayToolActivity.fromStoredResult(
+        name: 'terminal',
+        timestamp: null,
+        observedLastActivity: observedEnd,
+      );
+      expect(fallback.startedAt, isNull);
+      expect(fallback.lastActivityAt, observedEnd);
+      expect(fallback.lastActivityTimeSource, GatewayToolTimeSource.observed);
+      for (final invalid in [
+        null,
+        '1792544523',
+        -1,
+        double.nan,
+        double.infinity,
+      ]) {
+        final unknown = GatewayToolActivity.fromStoredResult(
+          name: 'terminal',
+          timestamp: invalid,
+        );
+        expect(unknown.startedAt, isNull);
+        expect(unknown.lastActivityAt, isNull);
+        expect(unknown.lastActivityTimeSource, isNull);
+      }
+    });
   });
 
   group('GatewayTurnStatus', () {
@@ -112,8 +200,8 @@ void main() {
     ) async {
       await tester.pumpWidget(
         MaterialApp(
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
-      supportedLocales: AppLocalizations.supportedLocales,
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
           home: Scaffold(
             body: GatewayActivityCard(
               activities: [
@@ -141,8 +229,8 @@ void main() {
     ) async {
       await tester.pumpWidget(
         MaterialApp(
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
-      supportedLocales: AppLocalizations.supportedLocales,
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
           home: Scaffold(
             body: GatewayActivityCard(
               verbose: true,
@@ -173,8 +261,8 @@ void main() {
           'Line two with additional context. Line three. Line four.';
       await tester.pumpWidget(
         MaterialApp(
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
-      supportedLocales: AppLocalizations.supportedLocales,
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
           home: Scaffold(
             body: GatewayActivityCard(
               verbose: true,

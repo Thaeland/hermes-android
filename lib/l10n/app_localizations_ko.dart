@@ -1798,7 +1798,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get this_project_has_no_folder_to_open_the_chat_in =>
-      '이 프로젝트에 채팅을 열 폴더가 없습니다. 미할당 상태로 열렸습니다. 채팅을 그룹화하려면 프로젝트에 폴더를 추가하세요.';
+      '이 프로젝트에서 채팅을 시작하려면 폴더가 필요합니다. 폴더를 추가한 후 다시 시도하세요.';
 
   @override
   String get this_chat_has_no_messages_available_in_the_desktop_session =>
@@ -2126,6 +2126,24 @@ class AppLocalizationsKo extends AppLocalizations {
   String activity_completed_summary(Object count) {
     return '$count개 완료';
   }
+
+  @override
+  String tool_start_observed(Object time) {
+    return '시작 관측 $time (현지 시간)';
+  }
+
+  @override
+  String tool_last_observed(Object time) {
+    return '마지막 관측 $time (현지 시간)';
+  }
+
+  @override
+  String tool_result_recorded(Object time) {
+    return '결과 기록 $time (현지 시간)';
+  }
+
+  @override
+  String get tool_time_unavailable => '시간 정보 없음';
 
   @override
   String get hermes_is_using_a_tool => 'Hermes가 도구를 사용 중입니다';

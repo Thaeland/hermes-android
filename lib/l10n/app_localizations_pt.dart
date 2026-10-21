@@ -1850,7 +1850,7 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get this_project_has_no_folder_to_open_the_chat_in =>
-      'Este projeto não tem uma pasta para abrir o chat — ele foi aberto sem atribuição. Adicione uma pasta ao projeto para agrupar seus chats.';
+      'Este projeto precisa de uma pasta antes de iniciar um chat nele. Adicione uma pasta e tente novamente.';
 
   @override
   String get this_chat_has_no_messages_available_in_the_desktop_session =>
@@ -2186,6 +2186,24 @@ class AppLocalizationsPt extends AppLocalizations {
   String activity_completed_summary(Object count) {
     return '$count concluídos';
   }
+
+  @override
+  String tool_start_observed(Object time) {
+    return 'Início observado às $time (hora local)';
+  }
+
+  @override
+  String tool_last_observed(Object time) {
+    return 'Última observação às $time (hora local)';
+  }
+
+  @override
+  String tool_result_recorded(Object time) {
+    return 'Resultado registado às $time (hora local)';
+  }
+
+  @override
+  String get tool_time_unavailable => 'Hora indisponível';
 
   @override
   String get hermes_is_using_a_tool => 'O Hermes está usando uma ferramenta';
@@ -4362,7 +4380,7 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get this_project_has_no_folder_to_open_the_chat_in =>
-      'Este projeto não tem uma pasta para abrir o chat — ele foi aberto sem atribuição. Adicione uma pasta ao projeto para agrupar seus chats.';
+      'Este projeto precisa de uma pasta antes de iniciar um chat nele. Adicione uma pasta e tente novamente.';
 
   @override
   String get this_chat_has_no_messages_available_in_the_desktop_session =>
@@ -4698,6 +4716,24 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String activity_completed_summary(Object count) {
     return '$count concluídos';
   }
+
+  @override
+  String tool_start_observed(Object time) {
+    return 'Início observado às $time (horário local)';
+  }
+
+  @override
+  String tool_last_observed(Object time) {
+    return 'Última observação às $time (horário local)';
+  }
+
+  @override
+  String tool_result_recorded(Object time) {
+    return 'Resultado registrado às $time (horário local)';
+  }
+
+  @override
+  String get tool_time_unavailable => 'Horário indisponível';
 
   @override
   String get hermes_is_using_a_tool => 'O Hermes está usando uma ferramenta';

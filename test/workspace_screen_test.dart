@@ -536,7 +536,11 @@ void main() {
       tester,
       connection: _connection(desktopGatewayUrl: 'https://host:8642'),
       repository: await _repository([
-        _projectJson(id: 'p1', name: 'Hermes Android'),
+        _projectJson(
+          id: 'p1',
+          name: 'Hermes Android',
+          primaryPath: '/srv/projects/hermes-android',
+        ),
       ], assignments: assignments),
       onNewChat: opened.add,
       newChatSessionIdFactory: () => 'project-detail-chat',
@@ -554,6 +558,35 @@ void main() {
     // starting the chat issues no assignment RPC.
     expect(assignments, isEmpty);
     expect(opened.single.projectId, 'p1');
+    expect(opened.single.isQuick, isFalse);
+    expect(
+      opened.single.projectWorkingDirectory,
+      '/srv/projects/hermes-android',
+    );
+  });
+
+  testWidgets('a folderless Project detail cannot start an unfiled chat', (
+    tester,
+  ) async {
+    final opened = <NewChatDraft>[];
+    await _pump(
+      tester,
+      connection: _connection(desktopGatewayUrl: 'https://host:8642'),
+      repository: await _repository([
+        _projectJson(id: 'p1', name: 'Folderless'),
+      ]),
+      onNewChat: opened.add,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Projects').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Folderless'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(kProjectNewChatButtonKey));
+    await tester.pumpAndSettle();
+
+    expect(opened, isEmpty);
+    expect(find.textContaining('needs a folder'), findsOneWidget);
   });
 
   testWidgets('a host callback suppresses the built-in project route', (
@@ -1487,8 +1520,8 @@ void main() {
       final opened = <NewChatDraft>[];
       final assignments = <Map<String, dynamic>>[];
       final repository = await _repository([
-        _projectJson(id: 'p1', name: 'Hermes Android'),
-        _projectJson(id: 'p2', name: 'ScriptHive'),
+        _projectJson(id: 'p1', name: 'Hermes Android', primaryPath: '/srv/p1'),
+        _projectJson(id: 'p2', name: 'ScriptHive', primaryPath: '/srv/p2'),
       ], assignments: assignments);
       await _pump(
         tester,
@@ -1553,35 +1586,32 @@ void main() {
       },
     );
 
-    testWidgets(
-      'a folderless Project on a stock gateway says unassigned, not folder',
-      (tester) async {
-        // Android allows name-only Projects; without a folder the cwd
-        // fallback cannot bind the session, so the snackbar must not
-        // claim the chat opened in a folder that was never sent.
-        final opened = <NewChatDraft>[];
-        await _pump(
-          tester,
-          connection: _connection(desktopGatewayUrl: 'https://host:8642'),
-          repository: await _repository([
-            _projectJson(id: 'p1', name: 'Nameless'),
-          ]),
-          sessions: const [],
-          onNewChat: opened.add,
-          newChatSessionIdFactory: () => 'folderless-chat',
-        );
-        await tester.pumpAndSettle();
+    testWidgets('a folderless Project refuses to open an unassigned chat', (
+      tester,
+    ) async {
+      // Android allows name-only Projects; without a folder the cwd
+      // fallback cannot bind the session, so no chat is opened.
+      final opened = <NewChatDraft>[];
+      await _pump(
+        tester,
+        connection: _connection(desktopGatewayUrl: 'https://host:8642'),
+        repository: await _repository([
+          _projectJson(id: 'p1', name: 'Nameless'),
+        ]),
+        sessions: const [],
+        onNewChat: opened.add,
+        newChatSessionIdFactory: () => 'folderless-chat',
+      );
+      await tester.pumpAndSettle();
 
-        await tester.tap(find.byKey(kWorkspaceNewChatButtonKey));
-        await tester.pumpAndSettle();
-        await tester.tap(find.text(NewChatMode.projectChat.label(l10n)));
-        await tester.pumpAndSettle();
+      await tester.tap(find.byKey(kWorkspaceNewChatButtonKey));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(NewChatMode.projectChat.label(l10n)));
+      await tester.pumpAndSettle();
 
-        expect(opened, hasLength(1));
-        expect(opened.single.projectWorkingDirectory, isNull);
-        expect(find.textContaining('opened unassigned'), findsOneWidget);
-      },
-    );
+      expect(opened, isEmpty);
+      expect(find.textContaining('needs a folder'), findsOneWidget);
+    });
 
     testWidgets('a project chat with exactly one project skips the picker', (
       tester,
@@ -1593,7 +1623,11 @@ void main() {
         tester,
         connection: _connection(desktopGatewayUrl: 'https://host:8642'),
         repository: await _repository([
-          _projectJson(id: 'p1', name: 'Hermes Android'),
+          _projectJson(
+            id: 'p1',
+            name: 'Hermes Android',
+            primaryPath: '/srv/projects/hermes-android',
+          ),
         ]),
         sessions: const [],
         onNewChat: opened.add,
@@ -1704,7 +1738,11 @@ void main() {
       final opened = <NewChatDraft>[];
       final assignments = <Map<String, dynamic>>[];
       final repository = await _repository([
-        _projectJson(id: 'p1', name: 'Hermes Android'),
+        _projectJson(
+          id: 'p1',
+          name: 'Hermes Android',
+          primaryPath: '/srv/projects/hermes-android',
+        ),
       ], assignments: assignments);
       await _pump(
         tester,
@@ -2001,7 +2039,11 @@ void main() {
       // unrelated binding may issue assignment writes.
       final assignments = <Map<String, dynamic>>[];
       final repository = await _repository([
-        _projectJson(id: 'p1', name: 'Hermes Android'),
+        _projectJson(
+          id: 'p1',
+          name: 'Hermes Android',
+          primaryPath: '/srv/projects/hermes-android',
+        ),
       ], assignments: assignments);
       final turnSession = _ControllableTurnSession();
       final controller = GatewayTurnApplicationController(

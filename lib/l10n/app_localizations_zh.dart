@@ -1782,7 +1782,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get this_project_has_no_folder_to_open_the_chat_in =>
-      '此项目没有可用于打开聊天的文件夹 —— 已默认设为未分配。请为项目添加文件夹以便对聊天进行分组。';
+      '此项目需要先添加文件夹才能在其中开始聊天。添加文件夹后请重试。';
 
   @override
   String get this_chat_has_no_messages_available_in_the_desktop_session =>
@@ -2108,6 +2108,24 @@ class AppLocalizationsZh extends AppLocalizations {
   String activity_completed_summary(Object count) {
     return '已完成 $count 个';
   }
+
+  @override
+  String tool_start_observed(Object time) {
+    return '观察到开始 $time（本地时间）';
+  }
+
+  @override
+  String tool_last_observed(Object time) {
+    return '最后观察时间 $time（本地时间）';
+  }
+
+  @override
+  String tool_result_recorded(Object time) {
+    return '结果记录时间 $time（本地时间）';
+  }
+
+  @override
+  String get tool_time_unavailable => '时间不可用';
 
   @override
   String get hermes_is_using_a_tool => 'Hermes 正在使用工具';
@@ -4209,7 +4227,7 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get this_project_has_no_folder_to_open_the_chat_in =>
-      '此项目没有可用于打开聊天的文件夹 —— 已默认设为未分配。请为项目添加文件夹以便对聊天进行分组。';
+      '此项目需要先添加文件夹才能在其中开始聊天。添加文件夹后请重试。';
 
   @override
   String get this_chat_has_no_messages_available_in_the_desktop_session =>
@@ -4535,6 +4553,24 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String activity_completed_summary(Object count) {
     return '已完成 $count 个';
   }
+
+  @override
+  String tool_start_observed(Object time) {
+    return '观察到开始 $time（本地时间）';
+  }
+
+  @override
+  String tool_last_observed(Object time) {
+    return '最后观察时间 $time（本地时间）';
+  }
+
+  @override
+  String tool_result_recorded(Object time) {
+    return '结果记录时间 $time（本地时间）';
+  }
+
+  @override
+  String get tool_time_unavailable => '时间不可用';
 
   @override
   String get hermes_is_using_a_tool => 'Hermes 正在使用工具';

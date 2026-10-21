@@ -1855,7 +1855,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get this_project_has_no_folder_to_open_the_chat_in =>
-      'Ce projet n\'a pas de dossier dans lequel ouvrir la discussion — elle s\'est ouverte sans affectation. Ajoutez un dossier au projet pour regrouper ses discussions.';
+      'Ce projet a besoin d\'un dossier avant de pouvoir y démarrer une discussion. Ajoutez un dossier, puis réessayez.';
 
   @override
   String get this_chat_has_no_messages_available_in_the_desktop_session =>
@@ -2190,6 +2190,24 @@ class AppLocalizationsFr extends AppLocalizations {
   String activity_completed_summary(Object count) {
     return '$count terminés';
   }
+
+  @override
+  String tool_start_observed(Object time) {
+    return 'Début observé à $time (heure locale)';
+  }
+
+  @override
+  String tool_last_observed(Object time) {
+    return 'Dernière observation à $time (heure locale)';
+  }
+
+  @override
+  String tool_result_recorded(Object time) {
+    return 'Résultat enregistré à $time (heure locale)';
+  }
+
+  @override
+  String get tool_time_unavailable => 'Heure indisponible';
 
   @override
   String get hermes_is_using_a_tool => 'Hermes utilise un outil';

@@ -3217,7 +3217,7 @@ abstract class AppLocalizations {
   /// No description provided for @this_project_has_no_folder_to_open_the_chat_in.
   ///
   /// In en, this message translates to:
-  /// **'This Project has no folder to open the chat in — it opened unassigned. Add a folder to the Project to group its chats.'**
+  /// **'This Project needs a folder before you can start a chat in it. Add a folder and try again.'**
   String get this_project_has_no_folder_to_open_the_chat_in;
 
   /// No description provided for @this_chat_has_no_messages_available_in_the_desktop_session.
@@ -3698,6 +3698,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{count} completed'**
   String activity_completed_summary(Object count);
+
+  /// No description provided for @tool_start_observed.
+  ///
+  /// In en, this message translates to:
+  /// **'Start observed {time} (local)'**
+  String tool_start_observed(Object time);
+
+  /// No description provided for @tool_last_observed.
+  ///
+  /// In en, this message translates to:
+  /// **'Last observed {time} (local)'**
+  String tool_last_observed(Object time);
+
+  /// No description provided for @tool_result_recorded.
+  ///
+  /// In en, this message translates to:
+  /// **'Result recorded {time} (local)'**
+  String tool_result_recorded(Object time);
+
+  /// No description provided for @tool_time_unavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Time unavailable'**
+  String get tool_time_unavailable;
 
   /// No description provided for @hermes_is_using_a_tool.
   ///

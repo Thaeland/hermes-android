@@ -1850,7 +1850,7 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get this_project_has_no_folder_to_open_the_chat_in =>
-      'Este proyecto no tiene una carpeta para abrir el chat; se abrió sin asignar. Agrega una carpeta al proyecto para agrupar sus chats.';
+      'Este proyecto necesita una carpeta antes de iniciar un chat en él. Agrega una carpeta e inténtalo de nuevo.';
 
   @override
   String get this_chat_has_no_messages_available_in_the_desktop_session =>
@@ -2185,6 +2185,24 @@ class AppLocalizationsEs extends AppLocalizations {
   String activity_completed_summary(Object count) {
     return '$count completados';
   }
+
+  @override
+  String tool_start_observed(Object time) {
+    return 'Inicio observado $time (hora local)';
+  }
+
+  @override
+  String tool_last_observed(Object time) {
+    return 'Última observación $time (hora local)';
+  }
+
+  @override
+  String tool_result_recorded(Object time) {
+    return 'Resultado registrado $time (hora local)';
+  }
+
+  @override
+  String get tool_time_unavailable => 'Hora no disponible';
 
   @override
   String get hermes_is_using_a_tool => 'Hermes está usando una herramienta';

@@ -53,6 +53,76 @@ void main() {
     expect(find.text('Completed in 4.2 s'), findsOneWidget);
   });
 
+  testWidgets(
+    'collapsed header shows latest known time; expanded rows show both',
+    (tester) async {
+      final start = DateTime(2026, 10, 21, 1, 2, 3);
+      final firstEnd = DateTime(2026, 10, 21, 1, 2, 9);
+      final secondEnd = DateTime(2026, 10, 21, 4, 5, 6);
+      await _pump(tester, [
+        GatewayToolActivity(
+          name: 'read_file',
+          phase: GatewayToolActivityPhase.completed,
+          startedAt: start,
+          lastActivityAt: firstEnd,
+          lastActivityTimeSource: GatewayToolTimeSource.observed,
+        ),
+        GatewayToolActivity(
+          name: 'terminal',
+          phase: GatewayToolActivityPhase.completed,
+          lastActivityAt: secondEnd,
+          lastActivityTimeSource: GatewayToolTimeSource.storedResult,
+        ),
+      ]);
+      expect(find.text('Result recorded 04:05:06 (local)'), findsOneWidget);
+      expect(find.text('Start observed 01:02:03 (local)'), findsNothing);
+      await tester.tap(find.text('Tool activity'));
+      await tester.pumpAndSettle();
+      expect(find.text('Start observed 01:02:03 (local)'), findsOneWidget);
+      expect(find.text('Last observed 01:02:09 (local)'), findsOneWidget);
+      expect(find.text('Result recorded 04:05:06 (local)'), findsNWidgets(2));
+      expect(find.textContaining('Start observed 04:05:06'), findsNothing);
+    },
+  );
+
+  testWidgets('unknown times stay explicit in header and row semantics', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    await _pump(tester, [
+      GatewayToolActivity(
+        name: 'terminal',
+        phase: GatewayToolActivityPhase.completed,
+      ),
+    ]);
+    expect(find.text('Time unavailable'), findsOneWidget);
+    await tester.tap(find.text('Tool activity'));
+    await tester.pumpAndSettle();
+    expect(find.text('Time unavailable'), findsNWidgets(2));
+    expect(
+      find.bySemanticsLabel(RegExp('Terminal: Completed, Time unavailable')),
+      findsOneWidget,
+    );
+    semantics.dispose();
+  });
+
+  testWidgets('server instant is displayed in device-local time', (
+    tester,
+  ) async {
+    final instant = DateTime.utc(2026, 10, 21, 1, 2, 3);
+    final local = instant.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    final clock =
+        '${two(local.hour)}:${two(local.minute)}:${two(local.second)}';
+    await _pump(tester, [
+      GatewayToolActivity.fromStoredResult(
+        name: 'terminal',
+        timestamp: instant.millisecondsSinceEpoch / 1000,
+      ),
+    ]);
+    expect(find.text('Result recorded $clock (local)'), findsOneWidget);
+  });
+
   testWidgets('running activity opens automatically', (tester) async {
     await _pump(tester, [
       GatewayToolActivity(

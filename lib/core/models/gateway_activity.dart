@@ -6,6 +6,25 @@ enum GatewayToolActivityPhase {
   failed,
 }
 
+/// Whether a tool time is a device-side observation or a durable result row.
+enum GatewayToolTimeSource { observed, storedResult }
+
+/// Most recent evidenced time within a group, irrespective of row order.
+GatewayToolActivity? latestKnownToolActivity(
+  Iterable<GatewayToolActivity> activities,
+) {
+  GatewayToolActivity? latest;
+  for (final activity in activities) {
+    final at = activity.lastActivityAt;
+    if (at != null &&
+        (latest?.lastActivityAt == null ||
+            !at.isBefore(latest!.lastActivityAt!))) {
+      latest = activity;
+    }
+  }
+  return latest;
+}
+
 class GatewayToolActivity {
   static const _maxNameLength = 120;
   static const _maxDetailLength = 500;
@@ -23,6 +42,12 @@ class GatewayToolActivity {
   final double? durationSeconds;
   final String? emoji;
 
+  /// Only set when a live start event was actually observed. A persisted tool
+  /// result never establishes when the call started.
+  final DateTime? startedAt;
+  final DateTime? lastActivityAt;
+  final GatewayToolTimeSource? lastActivityTimeSource;
+
   GatewayToolActivity({
     required this.name,
     required this.phase,
@@ -31,6 +56,9 @@ class GatewayToolActivity {
     this.detail,
     this.durationSeconds,
     this.emoji,
+    this.startedAt,
+    this.lastActivityAt,
+    this.lastActivityTimeSource,
   }) : identity =
            identity ??
            (toolId != null && toolId.trim().isNotEmpty
@@ -70,8 +98,9 @@ class GatewayToolActivity {
 
   static GatewayToolActivity? fromGatewayEvent(
     String eventType,
-    Map<String, dynamic> data,
-  ) {
+    Map<String, dynamic> data, {
+    DateTime? observedAt,
+  }) {
     if (!eventType.startsWith('tool.')) return null;
 
     final toolId = _firstText(data, const [
@@ -116,6 +145,52 @@ class GatewayToolActivity {
       detail: detail,
       durationSeconds: durationSeconds,
       emoji: _normalizeText(_firstText(data, const ['emoji']), 8),
+      startedAt:
+          eventType == 'tool.start' && phase == GatewayToolActivityPhase.running
+          ? observedAt
+          : null,
+      lastActivityAt: observedAt,
+      lastActivityTimeSource: observedAt == null
+          ? null
+          : GatewayToolTimeSource.observed,
+    );
+  }
+
+  /// API message timestamps are Unix seconds (possibly fractional), not the
+  /// time this device fetched the history. Missing/invalid values stay unknown.
+  static DateTime? storedResultTime(dynamic timestamp) {
+    if (timestamp is! num || !timestamp.isFinite || timestamp <= 0) {
+      return null;
+    }
+    try {
+      return DateTime.fromMillisecondsSinceEpoch(
+        (timestamp * 1000).round(),
+        isUtc: true,
+      );
+    } on RangeError {
+      return null;
+    }
+  }
+
+  factory GatewayToolActivity.fromStoredResult({
+    required String name,
+    String? toolId,
+    required dynamic timestamp,
+    DateTime? observedStart,
+    DateTime? observedLastActivity,
+  }) {
+    final resultTime = storedResultTime(timestamp);
+    return GatewayToolActivity(
+      name: name,
+      toolId: toolId,
+      phase: GatewayToolActivityPhase.completed,
+      startedAt: observedStart,
+      lastActivityAt: resultTime ?? observedLastActivity,
+      lastActivityTimeSource: resultTime != null
+          ? GatewayToolTimeSource.storedResult
+          : observedLastActivity != null
+          ? GatewayToolTimeSource.observed
+          : null,
     );
   }
 
@@ -128,6 +203,10 @@ class GatewayToolActivity {
       detail: update.detail ?? detail,
       durationSeconds: update.durationSeconds ?? durationSeconds,
       emoji: update.emoji ?? emoji,
+      startedAt: startedAt ?? update.startedAt,
+      lastActivityAt: update.lastActivityAt ?? lastActivityAt,
+      lastActivityTimeSource:
+          update.lastActivityTimeSource ?? lastActivityTimeSource,
     );
   }
 

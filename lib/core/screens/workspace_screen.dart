@@ -1139,7 +1139,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             projectName: project.name,
             projectWorkingDirectory: project.workingDirectory,
           ),
-          onNewChat: () => unawaited(_startProjectChat(project)),
+          onNewChat: () => _startProjectChat(project),
           projects: repository.current.projects,
           onMoveSession: (session, targetProjectId) =>
               repository.moveSessionToProject(
@@ -1310,9 +1310,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   /// never shipped upstream, so there is nothing to fail or retry here.
   ///
   /// A Project with no folder cannot be bound this way (Android allows
-  /// name-only Projects), so the message must not claim a folder that was
-  /// never sent. The chat still opens; the user is told plainly it is
-  /// unassigned and what to do about it.
+  /// name-only Projects). Do not create a misleading unassigned chat under
+  /// a Project header; ask the user to add a folder first.
   Future<void> _finishNewChat(
     NewChatDraft draft, {
     String? initialComposerText,
@@ -1321,7 +1320,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     if (draft.projectId != null) {
       final hasFolder =
           (draft.projectWorkingDirectory?.trim().isNotEmpty ?? false);
-      if (!hasFolder && mounted) {
+      if (!hasFolder) {
+        if (!mounted) return;
         final messenger = ScaffoldMessenger.of(context);
         messenger.hideCurrentSnackBar();
         messenger.showSnackBar(
@@ -1332,6 +1332,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             duration: Duration(seconds: 6),
           ),
         );
+        return;
       }
     }
 

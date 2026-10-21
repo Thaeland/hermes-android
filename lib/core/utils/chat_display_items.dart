@@ -22,6 +22,11 @@ class ChatToolActivityGroup {
 
   final String id;
   final List<GatewayToolActivity> activities;
+
+  /// The most recent timestamp we can substantiate, not a guessed time for
+  /// unobserved calls or for an older result without a server timestamp.
+  GatewayToolActivity? get latestKnownActivity =>
+      latestKnownToolActivity(activities);
 }
 
 /// Project a raw Hermes message list into the heterogeneous list the chat

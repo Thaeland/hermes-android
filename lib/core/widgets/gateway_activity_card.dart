@@ -1,10 +1,25 @@
 import 'package:flutter/material.dart';
 
 import '../models/gateway_activity.dart';
+import '../l10n/l10n.dart';
 import '../theme/hermes_theme.dart';
 import 'hermes_components.dart';
 
-import 'package:hermes_android/core/l10n/l10n.dart';
+String _localClockTime(DateTime instant) {
+  final local = instant.toLocal();
+  String two(int value) => value.toString().padLeft(2, '0');
+  return '${two(local.hour)}:${two(local.minute)}:${two(local.second)}';
+}
+
+String _lastActivityTimeLabel(BuildContext context, GatewayToolActivity? item) {
+  final at = item?.lastActivityAt;
+  if (at == null) return context.l10n.tool_time_unavailable;
+  final time = _localClockTime(at);
+  return item!.lastActivityTimeSource == GatewayToolTimeSource.storedResult
+      ? context.l10n.tool_result_recorded(time)
+      : context.l10n.tool_last_observed(time);
+}
+
 class GatewayActivityCard extends StatefulWidget {
   final List<GatewayToolActivity> activities;
   final bool verbose;
@@ -110,6 +125,10 @@ class _GatewayActivityCardState extends State<GatewayActivityCard> {
         : failures > 0
         ? HermesStatus.failed
         : HermesStatus.completed;
+    final latestTime = _lastActivityTimeLabel(
+      context,
+      latestKnownToolActivity(activities),
+    );
 
     return Padding(
       padding: const EdgeInsets.symmetric(
@@ -145,7 +164,16 @@ class _GatewayActivityCardState extends State<GatewayActivityCard> {
                           : Theme.of(context).colorScheme.primary,
                     ),
               title: Text(context.l10n.tool_activity),
-              subtitle: Text(subtitle),
+              subtitle: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(subtitle),
+                  Text(
+                    latestTime,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
+              ),
               children: [
                 const Divider(height: 1),
                 for (final activity in activities)
@@ -172,12 +200,22 @@ class _GatewayActivityRow extends StatelessWidget {
         : activity.isTerminal
         ? Theme.of(context).colorScheme.primary
         : Theme.of(context).colorScheme.secondary;
+    final timeLabel = _lastActivityTimeLabel(context, activity);
+    final startLabel = activity.startedAt == null
+        ? null
+        : context.l10n.tool_start_observed(
+            _localClockTime(activity.startedAt!),
+          );
 
     return Semantics(
-      label: context.l10n.activity_name_status(
-        activity.displayName,
-        activity.statusLabel,
-      ),
+      label: [
+        context.l10n.activity_name_status(
+          activity.displayName,
+          activity.statusLabel,
+        ),
+        ?startLabel,
+        timeLabel,
+      ].join(', '),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
         child: Row(
@@ -220,6 +258,14 @@ class _GatewayActivityRow extends StatelessWidget {
                       context,
                     ).textTheme.bodySmall?.copyWith(color: color),
                   ),
+                  if (startLabel != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      startLabel,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                  Text(timeLabel, style: Theme.of(context).textTheme.bodySmall),
                   if (activity.detail != null) ...[
                     const SizedBox(height: 4),
                     Text(

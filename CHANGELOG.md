@@ -4,6 +4,28 @@ All notable changes since v1.0.7 are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The [README](README.md)
 shows only the three latest releases.
 
+## [2.1.26] - 2026-10-21
+
+### Fixed
+
+- A new chat started inside a Project now binds the Project folder before its
+  first prompt or attachment, so stock Hermes files it in the Project rather
+  than creating an unassigned chat. Project detail refreshes after returning
+  from the chat. A folderless Project now asks for a folder instead of quietly
+  opening an unassigned chat.
+
+### Added
+
+- Tool activity shows a timestamp for each call when expanded and the latest
+  known activity time when collapsed. Live times are labelled as observed on
+  the phone; stored result times come from the server. Unknown times are
+  explicitly marked unavailable, and no unobserved start time is invented.
+
+### Thanks
+
+- No external contributors in this patch. Implementation and regressions were
+  assisted by Hermes Agent.
+
 ## [2.1.25] - 2026-10-21
 
 ### Fixed
