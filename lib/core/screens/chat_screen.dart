@@ -68,9 +68,15 @@ const hermesUserMessageForeground = Color(0xFF1C1B1F);
 /// Recovery v2 opens a new server session and cannot yet target an existing
 /// Gateway session. Keep it confined to locally-created drafts; a session from
 /// `GET /sessions` must submit through the legacy transport that accepts its
-/// exact session id.
+/// exact session id. A Project draft also uses legacy until `session.open`
+/// supports `cwd`, since stock Hermes files it by the creation cwd.
 @visibleForTesting
-bool shouldUseRecoveryV2ForSession(Session session) => session.isLocalDraft;
+bool shouldUseRecoveryV2ForSession(
+  Session session, {
+  String? projectWorkingDirectory,
+}) =>
+    session.isLocalDraft &&
+    (projectWorkingDirectory?.trim().isNotEmpty != true);
 
 /// Avoid opening the same local draft once through the legacy client's
 /// `session.create` path and again through recovery v2's `session.open` path.
@@ -301,6 +307,11 @@ class ChatScreen extends StatefulWidget {
   @visibleForTesting
   final VoidCallback? testDesktopSessionEnsured;
 
+  /// Observes the project-cwd binding before a legacy draft's first prompt.
+  @visibleForTesting
+  final Future<void> Function(String sessionId, String cwd)?
+  testLegacyProjectSessionEnsure;
+
   /// Test seam mirroring `DesktopGatewayClient.storedSessionKeyFor`: maps
   /// the mobile session id to the gateway's stored DB key so a test can
   /// assert the reattach history refetch targets the stored identity.
@@ -335,6 +346,7 @@ class ChatScreen extends StatefulWidget {
     this.testDesktopAsyncEventHook,
     this.testProjectOverviewLoader,
     this.testDesktopSessionEnsured,
+    this.testLegacyProjectSessionEnsure,
     this.testStoredSessionKey,
     this.testMediaFilesClient,
     super.key,
@@ -584,10 +596,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     widget.testDesktopAsyncEventHook?.handler = (event) {
       _handleDesktopAsyncEvent(widget.session.id, event);
     };
+    // The experimental recovery-v2 session.open contract carries no cwd.
+    // Project drafts must use stock session.create(cwd), or the server files
+    // them as unassigned even when their header names a Project.
     _turnApplicationSession =
         widget.testTurnApplicationSession ??
         (_desktopGateway != null &&
-                shouldUseRecoveryV2ForSession(widget.session)
+                shouldUseRecoveryV2ForSession(
+                  widget.session,
+                  projectWorkingDirectory: widget.projectWorkingDirectory,
+                )
             ? widget.turnApplicationController?.sessionFor(widget.connection)
             : null);
     final turnApplicationSession = _turnApplicationSession;
@@ -2901,6 +2919,27 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final turnController = widget.turnApplicationController;
     final legacyTurnToken = turnController?.beginLegacyTurn();
     try {
+      // Local drafts skip the eager legacy bind while recovery-v2 capability
+      // detection is pending. Once this send has selected the legacy path,
+      // bind a Project draft *before* model overrides, file.attach or prompt
+      // can create a default-cwd session. Stock Hermes derives membership
+      // from the cwd supplied on session.create; a later ensure cannot move it.
+      final projectCwd = widget.projectWorkingDirectory?.trim();
+      if (widget.session.isLocalDraft &&
+          projectCwd != null &&
+          projectCwd.isNotEmpty) {
+        if (desktopGateway != null) {
+          await desktopGateway.ensureSession(
+            widget.session.id,
+            workingDirectory: projectCwd,
+          );
+        } else {
+          await widget.testLegacyProjectSessionEnsure?.call(
+            widget.session.id,
+            projectCwd,
+          );
+        }
+      }
       if (desktopGateway != null) {
         await _applySessionModelOverride(desktopGateway);
       }

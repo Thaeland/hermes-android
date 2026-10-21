@@ -1797,7 +1797,7 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get this_project_has_no_folder_to_open_the_chat_in =>
-      'このプロジェクトにはチャットを開くためのフォルダがありません — 未割り当てとして開きました。チャットをまとめるにはプロジェクトにフォルダを追加してください。';
+      'このプロジェクトでチャットを開始するにはフォルダが必要です。フォルダを追加してから再試行してください。';
 
   @override
   String get this_chat_has_no_messages_available_in_the_desktop_session =>

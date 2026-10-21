@@ -512,7 +512,7 @@
   "thinking_effort": "Effort de raisonnement",
   "this_hermes_gateway_does_not_support_opening_a_project_yet": "Cette passerelle Hermes ne prend pas encore en charge l'ouverture d'un projet. Mettez à jour Hermes sur le serveur pour parcourir un projet depuis votre téléphone.",
   "this_hermes_gateway_is_older_than_server_side_projects_so": "Cette passerelle Hermes est antérieure aux projets côté serveur ; les discussions ne sont donc regroupées que sur cet appareil. Mettez à jour Hermes pour partager les mêmes projets entre vos appareils.",
-  "this_project_has_no_folder_to_open_the_chat_in": "Ce projet n'a pas de dossier dans lequel ouvrir la discussion — elle s'est ouverte sans affectation. Ajoutez un dossier au projet pour regrouper ses discussions.",
+  "this_project_has_no_folder_to_open_the_chat_in": "Ce projet a besoin d'un dossier avant de pouvoir y démarrer une discussion. Ajoutez un dossier, puis réessayez.",
   "this_chat_has_no_messages_available_in_the_desktop_session": "Cette discussion n'a pas encore de messages disponibles dans la session Desktop.",
   "this_creates_a_permanent_rule_in_hermes_review_the_full": "Cela crée une règle permanente dans Hermes. Examinez la commande complète avant de confirmer.",
   "this_gateway_does_not_host_projects_yet_update_the_gateway": "Cette passerelle n'héberge pas encore de projets. Mettez à jour la passerelle pour organiser les discussions sur tous vos appareils.",

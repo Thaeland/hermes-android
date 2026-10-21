@@ -1798,7 +1798,7 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get this_project_has_no_folder_to_open_the_chat_in =>
-      '이 프로젝트에 채팅을 열 폴더가 없습니다. 미할당 상태로 열렸습니다. 채팅을 그룹화하려면 프로젝트에 폴더를 추가하세요.';
+      '이 프로젝트에서 채팅을 시작하려면 폴더가 필요합니다. 폴더를 추가한 후 다시 시도하세요.';
 
   @override
   String get this_chat_has_no_messages_available_in_the_desktop_session =>

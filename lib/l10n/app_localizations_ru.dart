@@ -1845,7 +1845,7 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get this_project_has_no_folder_to_open_the_chat_in =>
-      'В этом проекте нет папки, в которой можно открыть чат — он открылся неназначенным. Добавьте папку в проект, чтобы группировать его чаты.';
+      'Чтобы начать чат в этом проекте, сначала добавьте в него папку. Затем попробуйте ещё раз.';
 
   @override
   String get this_chat_has_no_messages_available_in_the_desktop_session =>

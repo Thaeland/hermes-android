@@ -31,6 +31,7 @@ import '../utils/relative_time.dart';
 import 'hermes_components.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
+
 /// Reads one project's chats. Mirrors `ProjectsRepository.projectSessions` so
 /// the screen can be driven by a fake in tests without a gateway.
 typedef ProjectSessionsLoader =
@@ -58,7 +59,7 @@ class ProjectDetailScreen extends StatefulWidget {
   final ValueChanged<Session>? onOpenSession;
 
   /// Starts a chat already scoped to this Project.
-  final VoidCallback? onNewChat;
+  final Future<void> Function()? onNewChat;
 
   /// Server Projects offered as move destinations for existing chats.
   final List<HermesProject> projects;
@@ -196,15 +197,17 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
         // files chats by folder and cannot un-file one). Report the real
         // reason instead of a generic failure with a doomed Retry.
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(context.l10n.couldn_t_move_to(target.label, reason))),
+          SnackBar(
+            content: Text(context.l10n.couldn_t_move_to(target.label, reason)),
+          ),
         );
         return;
       }
       await _load(refresh: true);
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(context.l10n.moved_to(target.label))));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.moved_to(target.label))),
+      );
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -334,7 +337,9 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
       builder: (dialogContext) => AlertDialog(
         title: Text(context.l10n.delete_3(_projectName)),
         content: Text(
-          context.l10n.this_permanently_deletes_the_project_chats_will_not_be_deleted,
+          context
+              .l10n
+              .this_permanently_deletes_the_project_chats_will_not_be_deleted,
         ),
         actions: [
           TextButton(
@@ -471,7 +476,10 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
           ? null
           : FloatingActionButton.extended(
               key: kProjectNewChatButtonKey,
-              onPressed: widget.onNewChat,
+              onPressed: () async {
+                await widget.onNewChat?.call();
+                if (mounted) await _load(refresh: true);
+              },
               icon: const Icon(Icons.add_rounded),
               label: Text(context.l10n.new_chat_2),
             ),
@@ -491,8 +499,9 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
     if (view.support == ProjectsSupport.unsupported) {
       return ErrorState.unsupported(
         title: context.l10n.project_chats_unavailable,
-        message:
-            context.l10n.this_hermes_gateway_does_not_support_opening_a_project_yet,
+        message: context
+            .l10n
+            .this_hermes_gateway_does_not_support_opening_a_project_yet,
       );
     }
 
@@ -500,8 +509,9 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
     if (view.error != null && view.sessions.isEmpty && !view.isStale) {
       return ErrorState(
         title: context.l10n.could_not_open_this_project,
-        message:
-            context.l10n.check_that_the_gateway_is_running_and_reachable_then_try,
+        message: context
+            .l10n
+            .check_that_the_gateway_is_running_and_reachable_then_try,
         onRetry: () => _load(refresh: true),
       );
     }
@@ -567,8 +577,9 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
               child: EmptyState(
                 icon: Icons.forum_outlined,
                 title: context.l10n.no_chats_yet,
-                message:
-                    context.l10n.chats_you_start_in_this_project_will_appear_here_on,
+                message: context
+                    .l10n
+                    .chats_you_start_in_this_project_will_appear_here_on,
               ),
             )
           else if (filtered.isEmpty)
@@ -580,8 +591,9 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
               child: EmptyState(
                 icon: Icons.search_off,
                 title: context.l10n.no_matches,
-                message:
-                    context.l10n.no_chats_in_this_project_match(_searchQuery.trim()),
+                message: context.l10n.no_chats_in_this_project_match(
+                  _searchQuery.trim(),
+                ),
               ),
             )
           else
@@ -717,8 +729,9 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
               child: EmptyState(
                 icon: Icons.folder_open_outlined,
                 title: context.l10n.no_folders_yet,
-                message:
-                    context.l10n.the_server_has_not_reported_folders_for_this_project_yet,
+                message: context
+                    .l10n
+                    .the_server_has_not_reported_folders_for_this_project_yet,
               ),
             )
           else ...[
@@ -771,8 +784,9 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
             padding: EdgeInsets.only(top: HermesSpacing.xl),
             child: ErrorState.unsupported(
               title: context.l10n.assets_unavailable,
-              message:
-                  context.l10n.assets_need_a_server_authoritative_assets_index_in_the_hermes,
+              message: context
+                  .l10n
+                  .assets_need_a_server_authoritative_assets_index_in_the_hermes,
             ),
           ),
         ],
@@ -801,8 +815,9 @@ class _ProjectDetailScreenState extends State<ProjectDetailScreen>
               child: EmptyState(
                 icon: Icons.bolt_outlined,
                 title: context.l10n.no_activity_yet,
-                message:
-                    context.l10n.chats_in_this_project_will_show_their_state_and_last,
+                message: context
+                    .l10n
+                    .chats_in_this_project_will_show_their_state_and_last,
               ),
             )
           else

@@ -3217,7 +3217,7 @@ abstract class AppLocalizations {
   /// No description provided for @this_project_has_no_folder_to_open_the_chat_in.
   ///
   /// In en, this message translates to:
-  /// **'This Project has no folder to open the chat in — it opened unassigned. Add a folder to the Project to group its chats.'**
+  /// **'This Project needs a folder before you can start a chat in it. Add a folder and try again.'**
   String get this_project_has_no_folder_to_open_the_chat_in;
 
   /// No description provided for @this_chat_has_no_messages_available_in_the_desktop_session.

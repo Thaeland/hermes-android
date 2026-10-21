@@ -512,7 +512,7 @@
   "thinking_effort": "Esfuerzo de razonamiento",
   "this_hermes_gateway_does_not_support_opening_a_project_yet": "Este Gateway de Hermes aún no admite abrir proyectos. Actualiza Hermes en el servidor para explorar un proyecto desde el teléfono.",
   "this_hermes_gateway_is_older_than_server_side_projects_so": "Este Gateway de Hermes es anterior a los proyectos del servidor, por lo que los chats se agrupan solo en este dispositivo. Actualiza Hermes para compartir los mismos proyectos entre tus dispositivos.",
-  "this_project_has_no_folder_to_open_the_chat_in": "Este proyecto no tiene una carpeta para abrir el chat; se abrió sin asignar. Agrega una carpeta al proyecto para agrupar sus chats.",
+  "this_project_has_no_folder_to_open_the_chat_in": "Este proyecto necesita una carpeta antes de iniciar un chat en él. Agrega una carpeta e inténtalo de nuevo.",
   "this_chat_has_no_messages_available_in_the_desktop_session": "Este chat aún no tiene mensajes disponibles en la sesión de Desktop.",
   "this_creates_a_permanent_rule_in_hermes_review_the_full": "Esto crea una regla permanente en Hermes. Revisa el comando completo antes de confirmar.",
   "this_gateway_does_not_host_projects_yet_update_the_gateway": "Este Gateway aún no aloja proyectos. Actualiza el Gateway para organizar chats en todos tus dispositivos.",

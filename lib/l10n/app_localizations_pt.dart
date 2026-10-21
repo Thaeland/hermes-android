@@ -1850,7 +1850,7 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get this_project_has_no_folder_to_open_the_chat_in =>
-      'Este projeto não tem uma pasta para abrir o chat — ele foi aberto sem atribuição. Adicione uma pasta ao projeto para agrupar seus chats.';
+      'Este projeto precisa de uma pasta antes de iniciar um chat nele. Adicione uma pasta e tente novamente.';
 
   @override
   String get this_chat_has_no_messages_available_in_the_desktop_session =>
@@ -4362,7 +4362,7 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get this_project_has_no_folder_to_open_the_chat_in =>
-      'Este projeto não tem uma pasta para abrir o chat — ele foi aberto sem atribuição. Adicione uma pasta ao projeto para agrupar seus chats.';
+      'Este projeto precisa de uma pasta antes de iniciar um chat nele. Adicione uma pasta e tente novamente.';
 
   @override
   String get this_chat_has_no_messages_available_in_the_desktop_session =>

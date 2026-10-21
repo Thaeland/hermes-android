@@ -514,7 +514,7 @@
   "thinking_effort": "Thinking effort",
   "this_hermes_gateway_does_not_support_opening_a_project_yet": "This Hermes gateway does not support opening a project yet. Update Hermes on the server to browse a project from your phone.",
   "this_hermes_gateway_is_older_than_server_side_projects_so": "This Hermes gateway is older than server-side projects, so chats stay grouped on this device only. Update Hermes to share the same projects across your devices.",
-  "this_project_has_no_folder_to_open_the_chat_in": "This Project has no folder to open the chat in — it opened unassigned. Add a folder to the Project to group its chats.",
+  "this_project_has_no_folder_to_open_the_chat_in": "This Project needs a folder before you can start a chat in it. Add a folder and try again.",
   "this_chat_has_no_messages_available_in_the_desktop_session": "This chat has no messages available in the Desktop session yet.",
   "this_creates_a_permanent_rule_in_hermes_review_the_full": "This creates a permanent rule in Hermes. Review the full command before confirming.",
   "this_gateway_does_not_host_projects_yet_update_the_gateway": "This gateway does not host projects yet. Update the gateway to organize chats across your devices.",

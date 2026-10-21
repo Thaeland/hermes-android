@@ -1835,7 +1835,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get this_project_has_no_folder_to_open_the_chat_in =>
-      'This Project has no folder to open the chat in — it opened unassigned. Add a folder to the Project to group its chats.';
+      'This Project needs a folder before you can start a chat in it. Add a folder and try again.';
 
   @override
   String get this_chat_has_no_messages_available_in_the_desktop_session =>

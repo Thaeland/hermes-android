@@ -512,7 +512,7 @@
   "thinking_effort": "Denkaufwand",
   "this_hermes_gateway_does_not_support_opening_a_project_yet": "Dieses Hermes-Gateway unterstützt das Öffnen eines Projekts noch nicht. Aktualisiere Hermes auf dem Server, um ein Projekt vom Telefon aus zu durchsuchen.",
   "this_hermes_gateway_is_older_than_server_side_projects_so": "Dieses Hermes-Gateway ist älter als serverseitige Projekte, daher bleiben Chats nur auf diesem Gerät gruppiert. Aktualisiere Hermes, um dieselben Projekte geräteübergreifend zu teilen.",
-  "this_project_has_no_folder_to_open_the_chat_in": "Dieses Projekt hat keinen Ordner, in dem der Chat geöffnet werden kann — er wurde nicht zugewiesen geöffnet. Füge dem Projekt einen Ordner hinzu, um seine Chats zu gruppieren.",
+  "this_project_has_no_folder_to_open_the_chat_in": "Dieses Projekt benötigt einen Ordner, bevor du darin einen Chat starten kannst. Füge einen Ordner hinzu und versuche es erneut.",
   "this_chat_has_no_messages_available_in_the_desktop_session": "Dieser Chat hat noch keine Nachrichten in der Desktop-Sitzung.",
   "this_creates_a_permanent_rule_in_hermes_review_the_full": "Dies erstellt eine dauerhafte Regel in Hermes. Überprüfe den vollständigen Befehl, bevor du bestätigst.",
   "this_gateway_does_not_host_projects_yet_update_the_gateway": "Dieses Gateway hostet noch keine Projekte. Aktualisiere das Gateway, um Chats geräteübergreifend zu organisieren.",

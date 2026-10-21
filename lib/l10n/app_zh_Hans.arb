@@ -512,7 +512,7 @@
   "thinking_effort": "思考强度",
   "this_hermes_gateway_does_not_support_opening_a_project_yet": "此 Hermes 网关尚不支持打开项目。请更新服务器上的 Hermes 以在手机上浏览项目。",
   "this_hermes_gateway_is_older_than_server_side_projects_so": "此 Hermes 网关版本旧于服务端项目功能，因此聊天仅在此设备上分组。请更新 Hermes 以在多台设备间共享相同项目。",
-  "this_project_has_no_folder_to_open_the_chat_in": "此项目没有可用于打开聊天的文件夹 —— 已默认设为未分配。请为项目添加文件夹以便对聊天进行分组。",
+  "this_project_has_no_folder_to_open_the_chat_in": "此项目需要先添加文件夹才能在其中开始聊天。添加文件夹后请重试。",
   "this_chat_has_no_messages_available_in_the_desktop_session": "此聊天在 Desktop 会话中暂无可用消息。",
   "this_creates_a_permanent_rule_in_hermes_review_the_full": "这将在 Hermes 中创建永久规则。确认前请仔细检查完整命令。",
   "this_gateway_does_not_host_projects_yet_update_the_gateway": "此网关尚不支持托管项目。请更新网关以在各设备间整理聊天。",

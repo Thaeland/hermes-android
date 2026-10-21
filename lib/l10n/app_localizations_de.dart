@@ -1856,7 +1856,7 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get this_project_has_no_folder_to_open_the_chat_in =>
-      'Dieses Projekt hat keinen Ordner, in dem der Chat geöffnet werden kann — er wurde nicht zugewiesen geöffnet. Füge dem Projekt einen Ordner hinzu, um seine Chats zu gruppieren.';
+      'Dieses Projekt benötigt einen Ordner, bevor du darin einen Chat starten kannst. Füge einen Ordner hinzu und versuche es erneut.';
 
   @override
   String get this_chat_has_no_messages_available_in_the_desktop_session =>
