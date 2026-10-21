@@ -4,6 +4,19 @@ All notable changes since v1.0.7 are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The [README](README.md)
 shows only the three latest releases.
 
+## [2.1.27] - 2026-10-22
+
+### Fixed
+
+- Project cards now update their chat counts when you return from a Project,
+  reselect the Projects tab, or resume the app. An older overlapping response
+  cannot overwrite newer counts or the shared Project placement cache (PR #159).
+
+### Thanks
+
+- No external contributors in this patch. Implementation and regression tests
+  were assisted by Hermes Agent.
+
 ## [2.1.26] - 2026-10-21
 
 ### Fixed

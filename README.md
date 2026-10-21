@@ -1,4 +1,4 @@
-# Hermes Android — v2.1.26
+# Hermes Android — v2.1.27
 
 Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — chat with your Hermes sessions from a phone or tablet over local Wi-Fi or a private Tailscale network.
 
@@ -14,15 +14,15 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
 
 ## Current release
 
-- Version: **2.1.26** (build 2169)
+- Version: **2.1.27** (build 2170)
 - Package: `com.hermesagent.hermes_android`
 - Recommended APK for modern phones: ARM64 release build from the
   [Releases](https://github.com/rusty4444/hermes-android/releases) page.
 - Production builds are signed with a private release keystore. Debug APKs
   signed with the Android debug certificate remain available for testing
   under the `com.hermesagent.hermes_android.dev` package ID.
-- v2.1.26 files new Project chats in their Project folder before the first
-  prompt, and shows evidenced times for tool calls. See the
+- v2.1.27 refreshes Project card chat counts on return, tab reselect and app
+  resume without letting a late response restore stale counts. See the
   [changelog](CHANGELOG.md).
 - The app checks [GitHub Releases](https://github.com/rusty4444/hermes-android/releases)
   on ordinary launches. An answered check limits network requests to once
@@ -84,6 +84,12 @@ See [CHANGELOG.md](CHANGELOG.md) for the complete release history and
 [docs/HERMESAPK_DEVELOPMENT_LOG.md](docs/HERMESAPK_DEVELOPMENT_LOG.md) for the
 sanitized implementation and validation record.
 
+## What's new in v2.1.27
+
+- **Project counts stay current** — returning from a Project, reselecting the
+  Projects tab, or resuming the app refreshes its chat count. A late older
+  response cannot replace the newest count or cached Project placement.
+
 ## What's new in v2.1.26
 
 - **Project chats stay in their Project** — New chat in a Project binds its
@@ -104,18 +110,6 @@ sanitized implementation and validation record.
   mistaken for proof of a live turn, but it is no longer called definitively
   idle either. Home sorts unfinished work by latest activity. Confirmed
   Android turns still appear under Running and blocked turns under Needs you.
-
-## What's new in v2.1.24
-
-- **Backgrounded turns stay connected** — while a chat request is in flight,
-  Android keeps the Gateway socket and heartbeat active with a temporary
-  notification. The service stops when the turn settles, the transport drops,
-  or the app returns to the foreground (PR #152, @Thaeland). A disconnected
-  turn is not resent automatically; recovery still reconciles on return.
-- **Fewer duplicate Home requests** — overlapping refreshes share an in-flight
-  session scan. A new or renamed chat from a fresher first page is not replaced
-  when the older scan completes (PR #156). This does not add a server cursor or
-  change transcript fetches; see #149 for the remaining work.
 
 ## Features
 
@@ -474,7 +468,7 @@ cp build/app/outputs/flutter-apk/app-*-release.apk release-apks/
 block in `android/app/build.gradle.kts` derives per-ABI codes as
 `base * 10 + ABI code` (armeabi-v7a = 1, arm64-v8a = 2, x86_64 = 3), so the
 codes stay ordered armeabi-v7a < arm64-v8a < x86_64 as fdroiddata requires.
-For v2.1.26, base `2169` therefore produces codes `21691`/`21692`/`21693`.
+For v2.1.27, base `2170` therefore produces codes `21701`/`21702`/`21703`.
 CI reads the completed arm64 APK with `aapt` and fails if that relationship
 drifts. Release-floor checks continue to apply to the base value and must not
 be weakened to rely on the ABI code.
