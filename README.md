@@ -1,4 +1,4 @@
-# Hermes Android — v2.1.29
+# Hermes Android — v2.1.30
 
 Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — chat with your Hermes sessions from a phone or tablet over local Wi-Fi or a private Tailscale network.
 
@@ -14,16 +14,15 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
 
 ## Current release
 
-- Version: **2.1.29** (build 2172)
+- Version: **2.1.30** (build 2173)
 - Package: `com.hermesagent.hermes_android`
 - Recommended APK for modern phones: ARM64 release build from the
   [Releases](https://github.com/rusty4444/hermes-android/releases) page.
 - Production builds are signed with a private release keystore. Debug APKs
   signed with the Android debug certificate remain available for testing
   under the `com.hermesagent.hermes_android.dev` package ID.
-- v2.1.29 adds Move to project to the Chats action menu, for unassigned
-  conversations and chats that already belong to another Project. See the
-  [changelog](CHANGELOG.md).
+- v2.1.30 restores Return/newline on the keyboard and keeps the composer
+  editable during message setup and replies. See the [changelog](CHANGELOG.md).
 - The app checks [GitHub Releases](https://github.com/rusty4444/hermes-android/releases)
   on ordinary launches. An answered check limits network requests to once
   every 12 hours; offline attempts may retry at the next launch. A newer build
@@ -89,6 +88,15 @@ See [CHANGELOG.md](CHANGELOG.md) for the complete release history and
 [docs/HERMESAPK_DEVELOPMENT_LOG.md](docs/HERMESAPK_DEVELOPMENT_LOG.md) for the
 sanitized implementation and validation record.
 
+## What's new in v2.1.30
+
+- Enter inserts a new line instead of sending. Use the on-screen Send button.
+- Start typing a follow-up immediately after Send, including during attachment
+  uploads, replies and reconnects. Delayed setup cannot erase the new draft.
+- A rejected prompt returns only if you have not edited the cleared composer.
+  Newer text and deliberately cleared drafts are left alone. Sending another
+  turn remains blocked while the current turn or recovery is active.
+
 ## What's new in v2.1.29
 
 - Move a chat into a Project or between Projects from the Chats row's action
@@ -105,13 +113,6 @@ sanitized implementation and validation record.
 - Blank names cannot submit. Cancelling leaves the title unchanged, and a
   failed save keeps the previous title and shows the error.
 
-## What's new in v2.1.27
-
-- **Project counts stay current** — returning from a Project, reselecting the
-  Projects tab, or resuming the app refreshes its chat count. A late older
-  response cannot replace the newest count or cached Project placement.
-
-
 ## Features
 
 - **Hermes chat on Android** — browse sessions, create new chats, and send prompts to your Hermes Agent.
@@ -126,7 +127,7 @@ sanitized implementation and validation record.
 - **Memory viewer** — inspect conversation memory across sessions.
 - **Verbose mode toggle** — show raw message metadata (role, tool calls, timestamps) in chat.
 - **Three-way theme toggle** — Dark / Light / System default.
-- **Keyboard handling** — auto-scroll on keyboard open, send action on Enter, FAB to scroll to bottom.
+- **Keyboard handling** — Enter inserts a new line; use the on-screen Send button to submit. The composer stays editable during setup and replies, so you can draft a follow-up without waiting. A failed submission restores its prompt only if you have not edited the cleared composer. FAB to scroll to bottom.
 - **Voice chat** — microphone dictation sends recognised speech to Hermes, with optional text-to-speech replies.
 
 ## Screenshots
@@ -469,7 +470,7 @@ cp build/app/outputs/flutter-apk/app-*-release.apk release-apks/
 block in `android/app/build.gradle.kts` derives per-ABI codes as
 `base * 10 + ABI code` (armeabi-v7a = 1, arm64-v8a = 2, x86_64 = 3), so the
 codes stay ordered armeabi-v7a < arm64-v8a < x86_64 as fdroiddata requires.
-For v2.1.29, base `2172` therefore produces codes `21721`/`21722`/`21723`.
+For v2.1.30, base `2173` therefore produces codes `21731`/`21732`/`21733`.
 CI reads the completed arm64 APK with `aapt` and fails if that relationship
 drifts. Release-floor checks continue to apply to the base value and must not
 be weakened to rely on the ABI code.

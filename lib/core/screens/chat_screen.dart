@@ -392,6 +392,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   // Chat sending state
   final _textController = TextEditingController();
   int _composerRevision = 0;
+  int _clearedComposerRevision = 0;
+  String? _pendingComposerPrompt;
   final _imagePicker = ImagePicker();
   final List<AttachmentDraft> _attachmentDrafts = [];
   String? _sessionModel;
@@ -405,6 +407,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _changingModel = false;
   bool _sending = false;
   bool _streaming = false;
+  bool _preparingSend = false;
   GatewayTurnStatus? _gatewayTurnStatus;
   _ResponseTransport _activeResponseTransport = _ResponseTransport.none;
   String? _activeClientTurnId;
@@ -783,7 +786,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       ComposerDraftStore.save(
         connectionId: widget.connection.id,
         sessionId: widget.session.id,
-        text: _textController.text,
+        text: _composerDraftForPersistence,
       ),
     );
     _textController.dispose();
@@ -829,7 +832,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ComposerDraftStore.save(
           connectionId: widget.connection.id,
           sessionId: widget.session.id,
-          text: _textController.text,
+          text: _composerDraftForPersistence,
         ),
       );
       _pauseReattachRetry();
@@ -2717,7 +2720,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   /// Send message via SSE streaming (Gateway API Server).
   Future<void> _sendMessage({bool speakResponse = false}) async {
-    if (_voiceComposer.listening) return;
+    if (_voiceComposer.listening || _preparingSend) return;
     final text = _textController.text.trim();
     final attachments = List<AttachmentDraft>.from(_attachmentDrafts);
     if (text.isEmpty && attachments.isEmpty) return;
@@ -2731,9 +2734,49 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _error = null;
       });
     }
-    await _sessionModelRestore;
-    if (!mounted) return;
+    final usesRemoteTransport =
+        (_turnApplicationSession != null && !_legacyTransportFallback) ||
+        _desktopGateway != null ||
+        widget.testRemotePromptSubmit != null;
+    try {
+      if (usesRemoteTransport) {
+        _attachmentDraftService.validateRemoteDrafts(attachments);
+      } else {
+        _attachmentDraftService.validateRestDrafts(attachments);
+      }
+    } on AttachmentDraftException catch (error) {
+      _showAttachmentError(error.message);
+      return;
+    }
 
+    // Own this submission before the first await. Only the captured prompt is
+    // consumed; setup, uploads and stream callbacks must not clear newer text.
+    _preparingSend = true;
+    setState(() => _sending = true);
+    _clearComposerForSend(text);
+    try {
+      await _sessionModelRestore;
+    } catch (error) {
+      if (!mounted) return;
+      _restoreComposerAfterRejectedSend(text);
+      _handleSendError(error);
+      return;
+    } finally {
+      _preparingSend = false;
+    }
+    if (!mounted) return;
+    await _submitMessage(
+      text: text,
+      attachments: attachments,
+      speakResponse: speakResponse,
+    );
+  }
+
+  Future<void> _submitMessage({
+    required String text,
+    required List<AttachmentDraft> attachments,
+    required bool speakResponse,
+  }) async {
     // A remote-gateway profile uses one transport for every prompt. Images and
     // arbitrary files are both attached with the official `file.attach` RPC.
     if (_turnApplicationSession != null && !_legacyTransportFallback) {
@@ -2753,12 +2796,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       return;
     }
 
-    try {
-      _attachmentDraftService.validateRestDrafts(attachments);
-    } on AttachmentDraftException catch (error) {
-      _showAttachmentError(error.message);
-      return;
-    }
     final pendingImage = attachments.firstOrNull;
     String? imageDataUrl;
     if (pendingImage != null) {
@@ -2768,6 +2805,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       } catch (_) {
         if (mounted) setState(() => _sending = false);
         if (!mounted) return;
+        _restoreComposerAfterRejectedSend(text);
         _showAttachmentError(
           context.l10n.unable_to_read_the_selected_image_the_selection_was_kept,
         );
@@ -2786,7 +2824,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             },
           ];
 
-    _clearComposerForSend();
+    _commitComposerForSend();
     _awaitingVoiceReply = speakResponse && _voiceReplyEnabled;
     final responseGeneration = ++_responseGeneration;
     _activeResponseTransport = _ResponseTransport.rest;
@@ -2932,13 +2970,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       );
       return;
     }
-    try {
-      _attachmentDraftService.validateRemoteDrafts(attachments);
-    } on AttachmentDraftException catch (error) {
-      _showAttachmentError(error.message);
-      return;
-    }
-
     _awaitingVoiceReply = speakResponse && _voiceReplyEnabled;
     final responseGeneration = ++_responseGeneration;
     // History generation at send time: if a reattach resync replaces
@@ -3045,7 +3076,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             text,
             attachmentLabels,
           ].where((part) => part.trim().isNotEmpty).join('\n\n');
-          _clearComposerForSend();
+          _commitComposerForSend();
           _scrollCoordinator.beginStreaming(isNearEnd: _isNearEnd());
           setState(() {
             _streaming = true;
@@ -3126,15 +3157,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       // carries the user prompt and, if the detached turn finished, the
       // reply). Restoring the composer and stripping the local turn would
       // clobber it, so skip the restore and just surface the error state.
-      final resyncLanded = _historyGeneration != historyAtSend;
-      if (turnAdded && !resyncLanded && !promptSubmitted) {
+      final resyncLanded = turnAdded && _historyGeneration != historyAtSend;
+      if (!resyncLanded && !promptSubmitted) {
         setState(() {
-          if (_messages.isNotEmpty &&
+          if (turnAdded &&
+              _messages.isNotEmpty &&
               _messages.last['role'] == 'assistant' &&
               (_messages.last['content']?.toString().isEmpty ?? true)) {
             _messages.removeLast();
           }
-          if (_messages.isNotEmpty && _messages.last['role'] == 'user') {
+          if (turnAdded &&
+              _messages.isNotEmpty &&
+              _messages.last['role'] == 'user') {
             _messages.removeLast();
           }
           _restoreComposerAfterRejectedSend(text);
@@ -3160,13 +3194,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }) async {
     final turnSession = _turnApplicationSession;
     if (turnSession == null) return;
-    try {
-      _attachmentDraftService.validateRemoteDrafts(attachments);
-    } on AttachmentDraftException catch (error) {
-      _showAttachmentError(error.message);
-      return;
-    }
-
     _awaitingVoiceReply = speakResponse && _voiceReplyEnabled;
     final responseGeneration = ++_responseGeneration;
     _activeResponseTransport = _ResponseTransport.desktop;
@@ -3246,6 +3273,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           ..status = AttachmentDraftStatus.ready
           ..error = null;
       }
+      _restoreComposerAfterRejectedSend(text);
       _handleSendError(error);
       unawaited(_refreshDeferredHistoryIfIdle());
       return;
@@ -3260,7 +3288,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       text,
       attachmentLabels,
     ].where((part) => part.trim().isNotEmpty).join('\n\n');
-    _clearComposerForSend();
+    _commitComposerForSend();
     _scrollCoordinator.beginStreaming(isNearEnd: _isNearEnd());
     setState(() {
       _streaming = true;
@@ -4351,30 +4379,56 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  /// Clears the composer and its stored draft at the same boundary, so a
-  /// process kill right after sending cannot resurrect the sent prompt.
-  void _clearComposerForSend() {
-    _textController.clear();
-    unawaited(
-      ComposerDraftStore.save(
-        connectionId: widget.connection.id,
-        sessionId: widget.session.id,
-        text: '',
-      ),
-    );
+  String get _composerDraftForPersistence {
+    final pending = _pendingComposerPrompt;
+    return pending != null && _composerRevision == _clearedComposerRevision
+        ? pending
+        : _textController.text;
   }
 
-  /// A definite send rejection: put the text back into the composer and the
-  /// store so the user does not lose what they typed.
-  void _restoreComposerAfterRejectedSend(String text) {
-    if (text.trim().isEmpty) return;
-    _textController.text = text;
-    _textController.selection = TextSelection.collapsed(offset: text.length);
+  /// Clear the visible draft immediately but retain the unsent prompt through
+  /// cancellable setup. Leaving during an upload must not silently lose it.
+  void _clearComposerForSend(String text) {
+    _pendingComposerPrompt = text;
+    _textController.clear();
+    _clearedComposerRevision = _composerRevision;
     unawaited(
       ComposerDraftStore.save(
         connectionId: widget.connection.id,
         sessionId: widget.session.id,
         text: text,
+      ),
+    );
+  }
+
+  /// Preparation finished: hand off the prompt without touching newer typing.
+  void _commitComposerForSend() {
+    _pendingComposerPrompt = null;
+    unawaited(
+      ComposerDraftStore.save(
+        connectionId: widget.connection.id,
+        sessionId: widget.session.id,
+        text: _textController.text,
+      ),
+    );
+  }
+
+  /// Restore only the send's untouched draft. A newer edit (including typing
+  /// and then deleting) belongs to the user, not this failed submission.
+  void _restoreComposerAfterRejectedSend(String text) {
+    _pendingComposerPrompt = null;
+    if (text.trim().isEmpty) return;
+    if (_composerRevision == _clearedComposerRevision) {
+      _textController.value = TextEditingValue(
+        text: text,
+        selection: TextSelection.collapsed(offset: text.length),
+      );
+    }
+    unawaited(
+      ComposerDraftStore.save(
+        connectionId: widget.connection.id,
+        sessionId: widget.session.id,
+        text: _textController.text,
       ),
     );
   }
@@ -4862,12 +4916,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         maxLines: 5,
                         textCapitalization: TextCapitalization.sentences,
                         keyboardType: TextInputType.multiline,
-                        textInputAction: TextInputAction.send,
-                        enabled:
-                            !_transcriptLoadBlocksComposer &&
-                            !_streaming &&
-                            !_pendingReattachResync,
-                        onSubmitted: (_) => _sendMessage(),
+                        textInputAction: TextInputAction.newline,
+                        enabled: !_transcriptLoadBlocksComposer,
                       ),
                     ),
                   ),
