@@ -300,6 +300,8 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
   Object? _error;
   String _query = '';
   final Set<String> _promoting = {};
+  int _projectRevision = 0;
+  final _movedProjects = <String, ({int revision, String label})>{};
   final Set<String> _renameDialogs = {};
   final Set<String> _renaming = {};
 
@@ -348,9 +350,16 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
     // background page) after Chats has already mounted. Never replace a
     // completed metadata read with provisional data from a parent rebuild.
     if ((_data == null || _data!.isPartial) && widget.initialData != null) {
-      _data = _withSessionTitles(widget.initialData!, {
-        for (final entry in _savedTitles.entries) entry.key: entry.value.title,
-      });
+      _data = _withProjectMoves(
+        _withSessionTitles(widget.initialData!, {
+          for (final entry in _savedTitles.entries)
+            entry.key: entry.value.title,
+        }),
+        {
+          for (final entry in _movedProjects.entries)
+            entry.key: entry.value.label,
+        },
+      );
     }
   }
 
@@ -429,17 +438,25 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
 
   Future<void> _loadOnce() async {
     final titleRevision = _titleRevision;
+    final projectRevision = _projectRevision;
     try {
       final data = await widget.load();
       if (!mounted) return;
       final pins = await widget.pinStore?.load() ?? const <String>[];
       if (mounted) {
         setState(() {
-          _data = _withSessionTitles(data, {
-            for (final entry in _savedTitles.entries)
-              if (entry.value.revision > titleRevision)
-                entry.key: entry.value.title,
-          });
+          _data = _withProjectMoves(
+            _withSessionTitles(data, {
+              for (final entry in _savedTitles.entries)
+                if (entry.value.revision > titleRevision)
+                  entry.key: entry.value.title,
+            }),
+            {
+              for (final entry in _movedProjects.entries)
+                if (entry.value.revision > projectRevision)
+                  entry.key: entry.value.label,
+            },
+          );
           _pinnedIds = pins;
           _error = null;
         });
@@ -532,54 +549,66 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
     }
   }
 
-  Future<void> _promote(Session session) async {
+  /// Patch only the metadata owned by successful moves, never session rows.
+  /// Old responses still contribute new chats, previews, titles and pins.
+  WorkspaceSessionsData _withProjectMoves(
+    WorkspaceSessionsData data,
+    Map<String, String> moves,
+  ) {
+    if (moves.isEmpty) return data;
+    return WorkspaceSessionsData(
+      sessions: data.sessions,
+      archivedSessions: data.archivedSessions,
+      isPartial: data.isPartial,
+      claimedSessionIds: {...data.claimedSessionIds, ...moves.keys},
+      archivedQuickChatIds: data.archivedQuickChatIds.difference(
+        moves.keys.toSet(),
+      ),
+      projectLabels: {...data.projectLabels, ...moves},
+      projectsKnown: data.projectsKnown,
+    );
+  }
+
+  Future<void> _promote(Session session, {bool fromMenu = false}) async {
     final promote = widget.onPromote;
-    if (promote == null || _promoting.contains(session.id)) return;
+    if (promote == null || !mounted || _promoting.contains(session.id)) return;
     setState(() => _promoting.add(session.id));
     try {
-      final projectLabel = await promote(session);
+      // Own the flight before popup teardown, including the destination picker.
+      if (fromMenu) await Future<void>.delayed(kThemeAnimationDuration);
       if (!mounted) return;
-      final data = _data;
-      if (data != null) {
-        setState(() {
-          _data = WorkspaceSessionsData(
-            sessions: data.sessions,
-            isPartial: data.isPartial,
-            // The move claims the chat: add it to the claim set so the
-            // Unassigned view drops the row immediately instead of
-            // waiting for the next reload.
-            claimedSessionIds: {...data.claimedSessionIds, session.id},
-            archivedQuickChatIds: {
-              for (final id in data.archivedQuickChatIds)
-                if (id != session.id) id,
-            },
-            // Ownership and its visible label are one piece of state. Updating
-            // only claimedSessionIds made the row disappear from Unassigned,
-            // then show "Unassigned" when All was selected immediately.
-            projectLabels: {...data.projectLabels, session.id: projectLabel},
-            archivedSessions: data.archivedSessions,
-            projectsKnown: data.projectsKnown,
-          );
-          _promoting.remove(session.id);
-        });
-      }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(context.l10n.moved_to_a_project)));
+      final current = _currentSession(session.id);
+      if (current == null) return;
+      final projectLabel = await promote(current);
+      if (!mounted) return;
+      setState(() {
+        _movedProjects[session.id] = (
+          revision: ++_projectRevision,
+          label: projectLabel,
+        );
+        final data = _data;
+        if (data != null) {
+          _data = _withProjectMoves(data, {session.id: projectLabel});
+        }
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.moved_to(projectLabel))),
+      );
     } catch (error) {
-      if (!mounted) return;
-      setState(() => _promoting.remove(session.id));
-      if (error is QuickChatPromotionCancelled) return;
+      if (!mounted || error is QuickChatPromotionCancelled) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           persist: false,
-          content: Text(context.l10n.couldn_t_promote_conversation),
+          content: Text('${context.l10n.couldn_t_move_conversation}: $error'),
           action: SnackBarAction(
             label: context.l10n.retry,
             onPressed: () => unawaited(_promote(session)),
           ),
         ),
       );
+    } finally {
+      _promoting.remove(session.id);
+      if (mounted) setState(() {});
     }
   }
 
@@ -900,12 +929,15 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
                     onPressed: () => unawaited(_promote(session)),
                     icon: const Icon(Icons.drive_file_move_outline),
                   ),
-          if (_renaming.contains(session.id))
+          if (_renaming.contains(session.id) ||
+              (!showPromote && _promoting.contains(session.id)))
             const SizedBox.square(
               dimension: 24,
               child: CircularProgressIndicator(strokeWidth: 2),
             ),
-          if (widget.pinStore != null || widget.onRename != null)
+          if (widget.pinStore != null ||
+              widget.onRename != null ||
+              widget.onPromote != null)
             PopupMenuButton<String>(
               tooltip: context.l10n.chat_actions,
               onSelected: (action) {
@@ -914,6 +946,8 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
                     unawaited(_rename(session));
                   case 'pin':
                     unawaited(_togglePin(session));
+                  case 'move':
+                    unawaited(_promote(session, fromMenu: true));
                 }
               },
               itemBuilder: (_) => [
@@ -922,6 +956,12 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
                     value: 'rename',
                     enabled: !_renaming.contains(session.id),
                     child: Text(context.l10n.rename),
+                  ),
+                if (widget.onPromote != null && !isMachineSession(session))
+                  PopupMenuItem(
+                    value: 'move',
+                    enabled: !_promoting.contains(session.id),
+                    child: Text(context.l10n.move_to_project),
                   ),
                 if (widget.pinStore != null)
                   PopupMenuItem(

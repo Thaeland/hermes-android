@@ -4,6 +4,26 @@ All notable changes since v1.0.7 are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The [README](README.md)
 shows only the three latest releases.
 
+## [2.1.29] - 2026-10-22
+
+### Added
+
+- Move to project in the Chats row action menu, including chats that already
+  belong to another Project. Choose an active destination with a server
+  folder; Hermes updates the stored chat's working folder and placement.
+- Quick Chats filed into a Project leave their device-local quick retention
+  schedule after the move. Messages, titles and pins stay intact.
+
+### Fixed
+
+- Chat rows update their Project label after a move and leave Unassigned.
+  A list read started before the move cannot restore old placement metadata.
+  Cancelling or a failed move preserves the original placement.
+
+### Thanks
+
+- Hermes Agent assisted with implementation, review and regression tests.
+
 ## [2.1.28] - 2026-10-22
 
 ### Added

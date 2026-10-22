@@ -1,4 +1,4 @@
-# Hermes Android — v2.1.28
+# Hermes Android — v2.1.29
 
 Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — chat with your Hermes sessions from a phone or tablet over local Wi-Fi or a private Tailscale network.
 
@@ -14,15 +14,15 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
 
 ## Current release
 
-- Version: **2.1.28** (build 2171)
+- Version: **2.1.29** (build 2172)
 - Package: `com.hermesagent.hermes_android`
 - Recommended APK for modern phones: ARM64 release build from the
   [Releases](https://github.com/rusty4444/hermes-android/releases) page.
 - Production builds are signed with a private release keystore. Debug APKs
   signed with the Android debug certificate remain available for testing
   under the `com.hermesagent.hermes_android.dev` package ID.
-- v2.1.28 adds Rename to the Chats list and open-chat action menus, with
-  server-saved titles for Remote Gateway and REST connections. See the
+- v2.1.29 adds Move to project to the Chats action menu, for unassigned
+  conversations and chats that already belong to another Project. See the
   [changelog](CHANGELOG.md).
 - The app checks [GitHub Releases](https://github.com/rusty4444/hermes-android/releases)
   on ordinary launches. An answered check limits network requests to once
@@ -51,6 +51,8 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
 - Rename a chat from its Chats row's action menu or the open chat's top-right
   menu. The title saves to Hermes and appears on other devices after refresh;
   REST-only connections also support Rename. See [Renaming chats](docs/renaming-chats.md).
+- Move conversations into a Project or between Projects from the Chats action
+  menu. Destination Projects need a server folder. See [Moving chats](docs/moving-chats.md).
 - Pin and unpin chats on this device from the Chats action menu. Local pins
   stay above the dated chat list, including when a chat has moved past the
   first page; they do not change Hermes's server-side pinned flag or another
@@ -87,6 +89,14 @@ See [CHANGELOG.md](CHANGELOG.md) for the complete release history and
 [docs/HERMESAPK_DEVELOPMENT_LOG.md](docs/HERMESAPK_DEVELOPMENT_LOG.md) for the
 sanitized implementation and validation record.
 
+## What's new in v2.1.29
+
+- Move a chat into a Project or between Projects from the Chats row's action
+  menu. Choose the destination before the app changes its server working folder.
+- After a move, Chats shows the new Project and Unassigned no longer lists
+  the conversation. Cancel or a failed move leaves its placement unchanged.
+  See [Moving chats between Projects](docs/moving-chats.md).
+
 ## What's new in v2.1.28
 
 - Rename chats from the Chats list or the open-chat menu. Both Remote Gateway
@@ -100,16 +110,6 @@ sanitized implementation and validation record.
 - **Project counts stay current** — returning from a Project, reselecting the
   Projects tab, or resuming the app refreshes its chat count. A late older
   response cannot replace the newest count or cached Project placement.
-
-## What's new in v2.1.26
-
-- **Project chats stay in their Project** — New chat in a Project binds its
-  folder before the first prompt and refreshes the Project list when you
-  return. A Project without a folder asks you to add one instead of creating
-  an unassigned chat.
-- **Tool-call times** — each expanded tool row shows when its activity was
-  observed or its result was stored; a collapsed card shows the latest known
-  activity. Missing times remain marked unavailable rather than guessed.
 
 
 ## Features
@@ -469,7 +469,7 @@ cp build/app/outputs/flutter-apk/app-*-release.apk release-apks/
 block in `android/app/build.gradle.kts` derives per-ABI codes as
 `base * 10 + ABI code` (armeabi-v7a = 1, arm64-v8a = 2, x86_64 = 3), so the
 codes stay ordered armeabi-v7a < arm64-v8a < x86_64 as fdroiddata requires.
-For v2.1.28, base `2171` therefore produces codes `21711`/`21712`/`21713`.
+For v2.1.29, base `2172` therefore produces codes `21721`/`21722`/`21723`.
 CI reads the completed arm64 APK with `aapt` and fails if that relationship
 drifts. Release-floor checks continue to apply to the base value and must not
 be weakened to rely on the ABI code.
