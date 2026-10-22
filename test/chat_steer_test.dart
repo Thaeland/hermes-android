@@ -716,6 +716,65 @@ void main() {
     );
 
     testWidgets(
+      'navigating away with a resync-held queued note does not drain during dispose',
+      (tester) async {
+        final submitGate = Completer<void>();
+        final submitted = <String>[];
+        final hook = TestDesktopConnectionHook();
+        await _pumpChat(
+          tester,
+          remoteSubmit: ({
+            required sessionId,
+            required text,
+            required onEvent,
+            required onSent,
+          }) async {
+            submitted.add(text);
+            onSent();
+            if (submitted.length == 1) {
+              await submitGate.future;
+            }
+          },
+          steer: (sessionId, text) async => SteerOutcome.rejected,
+          connectionHook: hook,
+        );
+        hook.handler?.call(DesktopConnectionState.connected);
+        await tester.pump();
+
+        await tester.enterText(find.byType(TextField), 'first prompt');
+        await tester.tap(find.byTooltip('Send'));
+        await tester.pump();
+        await tester.pump();
+
+        await tester.enterText(find.byType(TextField), 'held note');
+        await tester.tap(find.byKey(const Key('chat-steer-button')));
+        await tester.pump();
+
+        // The socket drops after the accepted prompt: the reattach resync
+        // hold arms and the settle drain queues behind it.
+        hook.handler?.call(DesktopConnectionState.reconnecting);
+        await tester.pump();
+        submitGate.complete();
+        await tester.pump();
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+        expect(submitted, ['first prompt']);
+
+        // The user backs out instead of waiting for reconnect. dispose()
+        // clears the resync hold — the drain must NOT re-fire from that
+        // clear: `mounted` is still true inside dispose, so the drain
+        // would reach setState on a defunct element (debug assert) or
+        // silently persist a note from a send that never happens
+        // (release). Unmounting the screen must be clean.
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+
+        expect(submitted, ['first prompt']);
+      },
+    );
+
+    testWidgets(
       'a failed drain send does not requeue and duplicate on the next drain',
       (tester) async {
         final submitGate = Completer<void>();

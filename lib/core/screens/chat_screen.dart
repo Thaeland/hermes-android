@@ -441,6 +441,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final List<_PendingSteer> _pendingSteers = [];
   bool _steerDrainInFlight = false;
 
+  /// True once dispose() has begun. `mounted` stays true until dispose
+  /// returns, so drain entry points must check this to avoid firing a
+  /// send into a tearing-down state (setState on a defunct element in
+  /// debug; a silent composer/draft write in release).
+  bool _isDisposing = false;
+
   /// Holds the joined note text while a drain send is in flight. The submit
   /// catch reads this as an opt-in to restore-on-failure past the
   /// `promptSubmitted` gate: a submitted-but-failed drain send is the user's
@@ -774,6 +780,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    // `mounted` is still true inside dispose (the element goes defunct
+    // before dispose runs, its _element nulls after), so any drain
+    // re-trigger fired from dispose must read this instead.
+    _isDisposing = true;
     WidgetsBinding.instance.removeObserver(this);
     chatDensitySelection.removeListener(_onChatDensityChanged);
     _projectNameRefreshGeneration += 1;
@@ -3005,7 +3015,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             _messages.removeLast();
           }
         });
-        if (!hadContent) _restoreComposerAfterRejectedSend(text);
+        if (!hadContent) {
+          _restoreComposerAfterRejectedSend(
+            text,
+            appendToNewerDraft: _drainRestoreText != null,
+          );
+        }
         _handleSendError(error, removePendingUserMessage: true);
       },
     );
@@ -3403,7 +3418,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           if (_messages.isNotEmpty && _messages.last['role'] == 'user') {
             _messages.removeLast();
           }
-          _restoreComposerAfterRejectedSend(text);
+          _restoreComposerAfterRejectedSend(
+            text,
+            appendToNewerDraft: _drainRestoreText != null,
+          );
           for (final draft in attachments) {
             draft
               ..status = AttachmentDraftStatus.ready
@@ -4487,6 +4505,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void _maybeDrainPendingSteer() {
     if (_pendingSteers.isEmpty) return;
     if (!mounted ||
+        _isDisposing ||
         _streaming ||
         _sending ||
         _steerDrainInFlight ||
@@ -4517,9 +4536,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     // exit: a drain held by an internal guard (reattach resync, blocked
     // transcript, voice) must NOT re-fire from its own finally — those
     // holds are not tested by _maybeDrainPendingSteer, so a blind
-    // re-check would re-enter the hold synchronously forever. Each hold
-    // has its own release trigger that re-drains (resync clear, mic
-    // stop, settle).
+    // re-check would re-enter the hold synchronously forever. Resync and
+    // voice holds have release triggers that re-drain (resync clear, mic
+    // stop); the transcript-load hold cannot coexist with a queued note
+    // (steer requires a desktop gateway, which excludes the getter).
     var reachedWork = false;
     try {
       // Reconcile every ack-uncertain steer BEFORE resending anything: a
