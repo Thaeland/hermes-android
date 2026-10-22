@@ -4,6 +4,27 @@ All notable changes since v1.0.7 are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The [README](README.md)
 shows only the three latest releases.
 
+## [2.1.28] - 2026-10-22
+
+### Added
+
+- Rename chats from the Chats list and the open-chat action menu. Remote
+  Gateway and REST-only connections save the title on the Hermes server,
+  using the chat's stored identity without creating a new session.
+- The rename dialog supports keyboard submission, trims surrounding spaces
+  and prevents blank names. Cancelling or keeping the same name makes no
+  request; failed saves retain the previous title and show the server error.
+
+### Fixed
+
+- Returning from an open chat refreshes its title in Chats. Search, exports
+  and notifications use the renamed title. A list refresh started before a
+  successful rename cannot restore the old title or discard other row data.
+
+### Thanks
+
+- Hermes Agent assisted with implementation, review and regression tests.
+
 ## [2.1.27] - 2026-10-22
 
 ### Fixed

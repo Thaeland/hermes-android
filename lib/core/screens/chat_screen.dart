@@ -5,6 +5,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import '../widgets/session_name_dialog.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -370,6 +371,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final Map<String, Timer> _notificationTimers = {};
   late final List<GatewayNotice> _gatewayNotices;
   bool _loading = true;
+  late String _sessionTitle;
+  bool _renaming = false;
   String? _error;
   late final ApiClient _client;
   late final GatewayChatClient _gateway;
@@ -498,6 +501,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    _sessionTitle = widget.session.title;
     WidgetsBinding.instance.addObserver(this);
     _projectName = _normalisedProjectName(widget.projectName);
     _textController.addListener(_onComposerChanged);
@@ -682,7 +686,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   void _onSessionBound(String localSessionId, String storedSessionId) {
     if (localSessionId != widget.session.id) return;
-    _storedSessionId = storedSessionId;
+    if (!mounted) return;
+    setState(() => _storedSessionId = storedSessionId);
     unawaited(_refreshProjectName());
   }
 
@@ -947,8 +952,46 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     await _sendMessage();
   }
 
+  bool get _canRename =>
+      !_renaming &&
+      !_sending &&
+      !_pendingReattachResync &&
+      (!widget.session.isLocalDraft ||
+          _storedSessionId != null ||
+          _storedSessionKey != widget.session.id ||
+          _messages.isNotEmpty);
+
+  Future<void> _renameSession() async {
+    if (!_canRename) return;
+    setState(() => _renaming = true);
+    try {
+      // Let the popup route finish closing before presenting another route.
+      await Future<void>.delayed(kThemeAnimationDuration);
+      if (!mounted) return;
+      final title = await showSessionNameDialog(
+        context: context,
+        title: context.l10n.rename_chat,
+        initialValue: _sessionTitle,
+        actionLabel: context.l10n.rename,
+      );
+      if (!mounted || title == null || title == _sessionTitle.trim()) return;
+      final savedTitle = await _client.renameSession(
+        sessionId: _storedSessionId ?? _storedSessionKey,
+        title: title,
+      );
+      if (mounted) setState(() => _sessionTitle = savedTitle);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.could_not_rename_chat(error))),
+      );
+    } finally {
+      if (mounted) setState(() => _renaming = false);
+    }
+  }
+
   Future<void> _exportConversation() async {
-    final buffer = StringBuffer('# ${widget.session.title}\n\n');
+    final buffer = StringBuffer('# $_sessionTitle\n\n');
     for (final message in _messages) {
       final role = message['role']?.toString();
       if (role != 'user' && role != 'assistant' && role != 'agent') continue;
@@ -967,10 +1010,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ..writeln();
     }
     await SharePlus.instance.share(
-      ShareParams(
-        subject: widget.session.title,
-        text: buffer.toString().trim(),
-      ),
+      ShareParams(subject: _sessionTitle, text: buffer.toString().trim()),
     );
   }
 
@@ -1094,14 +1134,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       completed
           ? _turnNotifications.showTurnCompleted(
               title: context.l10n.hermes_response_ready,
-              turnSummary: '${widget.session.title}: $summary',
+              turnSummary: '$_sessionTitle: $summary',
               turnId: turnId,
               sessionId: widget.session.id,
               connectionId: widget.connection.id,
             )
           : _turnNotifications.showTurnFailed(
               title: context.l10n.the_turn_failed,
-              turnSummary: '${widget.session.title}: $summary',
+              turnSummary: '$_sessionTitle: $summary',
               turnId: turnId,
               sessionId: widget.session.id,
               connectionId: widget.connection.id,
@@ -1124,7 +1164,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     unawaited(
       _turnNotifications.showKind(
         kind: HermesNotificationKind.approval,
-        title: '${context.l10n.approval_needed} — ${widget.session.title}',
+        title: '${context.l10n.approval_needed} — $_sessionTitle',
         body: body,
         eventId: serverRequestId,
         sessionId: widget.session.id,
@@ -1150,7 +1190,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     unawaited(
       _turnNotifications.showKind(
         kind: HermesNotificationKind.input,
-        title: '${context.l10n.input_needed} — ${widget.session.title}',
+        title: '${context.l10n.input_needed} — $_sessionTitle',
         body: trimmed.length > 140 ? '${trimmed.substring(0, 140)}…' : trimmed,
         eventId: eventId,
         sessionId: widget.session.id,
@@ -4439,9 +4479,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       appBar: AppBar(
         centerTitle: false,
         title: Text(
-          widget.session.title.trim().isEmpty
+          _sessionTitle.trim().isEmpty
               ? context.l10n.untitled_chat
-              : widget.session.title,
+              : _sessionTitle,
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
           style: Theme.of(context).textTheme.titleMedium,
@@ -4480,8 +4520,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   _fetchMessages();
                 }
                 if (action == 'export') _exportConversation();
+                if (action == 'rename') unawaited(_renameSession());
               },
               itemBuilder: (_) => [
+                PopupMenuItem(
+                  value: 'rename',
+                  enabled: _canRename,
+                  child: ListTile(
+                    leading: Icon(Icons.edit_outlined),
+                    title: Text(context.l10n.rename),
+                  ),
+                ),
                 PopupMenuItem(
                   value: 'refresh',
                   enabled: !_pendingReattachResync,
