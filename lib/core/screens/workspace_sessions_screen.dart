@@ -316,9 +316,10 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
   Timer? _refreshTimer;
   bool _visible = true;
 
-  /// Coalesces refresh ticks with manual pulls: a slow load must never
-  /// overlap the next tick (an older completion would win the setState).
-  bool _loadInFlight = false;
+  /// Ticks share the current read; explicit refreshes queue one fresh read
+  /// after it so a return from chat cannot lose a rename behind an old load.
+  Future<void>? _loadInFlight;
+  Future<void>? _queuedRefresh;
 
   /// The active chip filter in the embedded Chats browser.
   WorkspaceChatsFilter _filter = WorkspaceChatsFilter.all;
@@ -408,15 +409,29 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
     super.dispose();
   }
 
-  /// Reloads Chats after returning from a conversation opened by the parent.
-  Future<void> refresh() => _load();
+  /// Completes after a read started at or after this refresh request.
+  Future<void> refresh() {
+    if (!mounted) return Future<void>.value();
+    final pending = _loadInFlight;
+    if (pending == null) return _load();
+    return _queuedRefresh ??= pending.then<void>((_) {
+      _queuedRefresh = null;
+      return _load();
+    });
+  }
 
-  Future<void> _load() async {
-    if (_loadInFlight) return;
-    _loadInFlight = true;
+  Future<void> _load() {
+    if (!mounted) return Future<void>.value();
+    return _loadInFlight ??= _loadOnce().whenComplete(() {
+      _loadInFlight = null;
+    });
+  }
+
+  Future<void> _loadOnce() async {
     final titleRevision = _titleRevision;
     try {
       final data = await widget.load();
+      if (!mounted) return;
       final pins = await widget.pinStore?.load() ?? const <String>[];
       if (mounted) {
         setState(() {
@@ -432,8 +447,6 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
     } catch (error) {
       debugPrint('[workspace-sessions] load failed: $error');
       if (mounted) setState(() => _error = error);
-    } finally {
-      _loadInFlight = false;
     }
   }
 
@@ -664,7 +677,7 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
           ];
 
     return RefreshIndicator(
-      onRefresh: _load,
+      onRefresh: refresh,
       child: ListView(
         padding: const EdgeInsets.fromLTRB(
           HermesSpacing.lg,

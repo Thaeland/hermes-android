@@ -1236,6 +1236,106 @@ void main() {
   });
 
   testWidgets(
+    'queued explicit refreshes share one fresh read and await its completion',
+    (tester) async {
+      final key = GlobalKey<WorkspaceSessionsScreenState>();
+      final staleLoad = Completer<WorkspaceSessionsData>();
+      final freshLoad = Completer<WorkspaceSessionsData>();
+      var loads = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          theme: hermesTheme(Brightness.dark),
+          home: WorkspaceSessionsScreen(
+            key: key,
+            title: 'Chats',
+            view: WorkspaceSessionView.all,
+            refreshInterval: const Duration(seconds: 10),
+            load: () {
+              loads++;
+              return loads == 1 ? staleLoad.future : freshLoad.future;
+            },
+            onOpenSession: (_) {},
+          ),
+        ),
+      );
+      var refreshCompleted = false;
+      final refresh = key.currentState!.refresh();
+      final secondRefresh = key.currentState!.refresh();
+      expect(identical(refresh, secondRefresh), isTrue);
+      unawaited(refresh.then<void>((_) => refreshCompleted = true));
+      await tester.pump(const Duration(seconds: 30));
+      expect(loads, 1);
+      expect(refreshCompleted, isFalse);
+
+      staleLoad.complete(
+        WorkspaceSessionsData(sessions: [_session('s1', 'Old snapshot')]),
+      );
+      await tester.pump();
+      expect(loads, 2);
+      expect(refreshCompleted, isFalse);
+      await tester.pump(const Duration(seconds: 30));
+      expect(loads, 2);
+
+      freshLoad.complete(
+        WorkspaceSessionsData(
+          sessions: [_session('s1', 'Confirmed new title')],
+        ),
+      );
+      await Future.wait([refresh, secondRefresh]);
+      await tester.pumpAndSettle();
+      expect(refreshCompleted, isTrue);
+      expect(find.text('Confirmed new title'), findsOneWidget);
+      expect(find.text('Old snapshot'), findsNothing);
+      expect(loads, 2);
+      await tester.pumpWidget(const SizedBox());
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  for (final fails in [false, true]) {
+    testWidgets(
+      'disposed queued refresh skips new reads after old load ${fails ? 'fails' : 'succeeds'}',
+      (tester) async {
+        final key = GlobalKey<WorkspaceSessionsScreenState>();
+        final staleLoad = Completer<WorkspaceSessionsData>();
+        var loads = 0;
+        await tester.pumpWidget(
+          MaterialApp(
+            localizationsDelegates: AppLocalizations.localizationsDelegates,
+            supportedLocales: AppLocalizations.supportedLocales,
+            theme: hermesTheme(Brightness.dark),
+            home: WorkspaceSessionsScreen(
+              key: key,
+              title: 'Chats',
+              view: WorkspaceSessionView.all,
+              load: () {
+                loads++;
+                return staleLoad.future;
+              },
+              onOpenSession: (_) {},
+            ),
+          ),
+        );
+        final state = key.currentState!;
+        final refresh = state.refresh();
+        await tester.pumpWidget(const SizedBox());
+        if (fails) {
+          staleLoad.completeError(StateError('Late load failure'));
+        } else {
+          staleLoad.complete(const WorkspaceSessionsData());
+        }
+        await refresh;
+        await state.refresh();
+        await tester.pumpAndSettle();
+        expect(loads, 1);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
+  testWidgets(
     'refreshes the list on the injected interval and stops on dispose',
     (tester) async {
       var loads = 0;
