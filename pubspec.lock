@@ -757,6 +757,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "7.0.2"
+  pkcs12_parser:
+    dependency: "direct main"
+    description:
+      name: pkcs12_parser
+      sha256: "1e1019e4deb57148f45c0755d9a755dc8a5a96a59c9b14721ec89b3f3f450614"
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.1.0"
   platform:
     dependency: transitive
     description:
@@ -773,6 +781,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.1.8"
+  pointycastle:
+    dependency: transitive
+    description:
+      name: pointycastle
+      sha256: "92aa3841d083cc4b0f4709b5c74fd6409a3e6ba833ffc7dc6a8fee096366acf5"
+      url: "https://pub.dev"
+    source: hosted
+    version: "4.0.0"
   pool:
     dependency: transitive
     description:

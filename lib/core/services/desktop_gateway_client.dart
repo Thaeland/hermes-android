@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
 
+import '../models/client_certificate.dart';
 import 'capability_registry.dart';
 import 'connection_manager.dart';
 import 'gateway_turn_coordinator.dart';
@@ -39,6 +40,7 @@ class DesktopGatewayClient {
   /// Hermes profile the gateway socket should run chats under, or null to
   /// let the server use its own. See [SavedConnection.gatewayProfile].
   final String? _gatewayProfile;
+  final ClientCertificateConfig? _clientCertificate;
   WsClient? _ws;
   Future<WsClient>? _socketInFlight;
   Timer? _reconnectTimer;
@@ -90,6 +92,7 @@ class DesktopGatewayClient {
     required this._baseUrl,
     required this._dashboard,
     this._gatewayProfile,
+    this._clientCertificate,
   });
   // No global client registry: the keep-alive policy is driven by
   // unresolved turns (see ConnectionKeepAliveService), not by
@@ -179,8 +182,10 @@ class DesktopGatewayClient {
         proxied: connection.dashboardProxied,
         username: connection.dashboardUsername,
         password: connection.dashboardPassword,
+        clientCertificate: connection.clientCertificate,
       ),
       gatewayProfile: connection.gatewayProfile,
+      clientCertificate: connection.clientCertificate,
     );
   }
 
@@ -285,7 +290,12 @@ class DesktopGatewayClient {
     _capabilities.reset();
     final ticket = await _dashboard.mintWebSocketTicket();
     if (_closed) throw StateError('DesktopGatewayClient is closed.');
-    final client = WsClient(_baseUrl, ticket: ticket, profile: _gatewayProfile);
+    final client = WsClient(
+      _baseUrl,
+      ticket: ticket,
+      profile: _gatewayProfile,
+      clientCertificate: _clientCertificate,
+    );
     _installAsyncEventBridge(client);
     final inheritedConnectionListener = client.onConnectionChanged;
     client.onConnectionChanged = (connected) {
@@ -599,6 +609,7 @@ class DesktopGatewayClient {
                 _baseUrl,
                 ticket: ticket,
                 profile: _gatewayProfile,
+                clientCertificate: _clientCertificate,
               );
               _installAsyncEventBridge(client);
               return client;

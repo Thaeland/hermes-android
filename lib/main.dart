@@ -1,9 +1,13 @@
 import 'dart:async';
+import 'dart:io' as io;
 
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'core/models/client_certificate.dart';
 import 'core/services/android_launch_intent_service.dart';
 import 'core/services/android_share_intent_service.dart';
+import 'core/services/client_certificate_service.dart';
 import 'core/services/composer_draft_store.dart';
 import 'core/services/config_backup.dart';
 import 'core/services/config_backup_io.dart';
@@ -404,6 +408,7 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
           baseUrl: connection.baseUrl,
           apiKey: connection.apiKey,
           pathPrefix: connection.gatewayPrefix ?? '',
+          clientCertificate: connection.clientCertificate,
         );
         session = await client.getSessionById(sessionId);
       } catch (_) {
@@ -752,6 +757,8 @@ class HomeScreenState extends State<HomeScreen> {
               dashboardUsername,
               dashboardPassword,
               gatewayProfile,
+              clientCertificate,
+              clearClientCertificate = false,
             }) async {
               if (existing == null) {
                 await widget.connManager.saveConnection(
@@ -767,6 +774,7 @@ class HomeScreenState extends State<HomeScreen> {
                   dashboardUsername: dashboardUsername,
                   dashboardPassword: dashboardPassword,
                   gatewayProfile: gatewayProfile,
+                  clientCertificate: clientCertificate,
                 );
               } else {
                 await widget.connManager.updateConnection(
@@ -783,6 +791,8 @@ class HomeScreenState extends State<HomeScreen> {
                   dashboardUsername: dashboardUsername,
                   dashboardPassword: dashboardPassword,
                   gatewayProfile: gatewayProfile,
+                  clientCertificate: clientCertificate,
+                  clearClientCertificate: clearClientCertificate,
                 );
               }
               _refresh();
@@ -870,6 +880,7 @@ class HomeScreenState extends State<HomeScreen> {
                           baseUrl: baseUrl,
                           apiKey: key,
                           pathPrefix: conn.gatewayPrefix ?? '',
+                          clientCertificate: conn.clientCertificate,
                         );
                         final result = await client.checkHealth();
                         client.close();
@@ -1084,6 +1095,7 @@ class HomeScreenState extends State<HomeScreen> {
                           baseUrl: conn.baseUrl,
                           apiKey: conn.apiKey,
                           pathPrefix: gatewayPrefix,
+                          clientCertificate: conn.clientCertificate,
                         );
                         final result = await apiClient.checkHealth();
                         apiClient.close();
@@ -1107,6 +1119,7 @@ class HomeScreenState extends State<HomeScreen> {
                         proxied: proxied,
                         username: user.isEmpty ? null : user,
                         password: pass.isEmpty ? null : pass,
+                        clientCertificate: conn.clientCertificate,
                       );
                       try {
                         await client.getModelInfo();
@@ -1340,6 +1353,8 @@ class _AddDialog extends StatefulWidget {
     String? dashboardUsername,
     String? dashboardPassword,
     String? gatewayProfile,
+    ClientCertificateConfig? clientCertificate,
+    bool clearClientCertificate,
   })
   onSave;
   const _AddDialog({required this.onSave, this.initialConnection});
@@ -1360,8 +1375,17 @@ class _AddDialogState extends State<_AddDialog> {
   late final TextEditingController _dashPass;
   late final TextEditingController _desktopGatewayUrl;
   late final TextEditingController _gatewayProfile;
+  late final TextEditingController _certificatePassword;
+  late final ClientCertificateService _certificateService;
   late bool _showDashboard;
   late bool _dashboardProxied;
+  late bool _useClientCertificate;
+  ClientCertificateConfig? _clientCertificate;
+  List<int>? _pemCertificateBytes;
+  String? _pemCertificateName;
+  List<int>? _pemPrivateKeyBytes;
+  String? _pemPrivateKeyName;
+  bool _importingCertificate = false;
   bool _validating = false;
   String? _error;
 
@@ -1397,6 +1421,11 @@ class _AddDialogState extends State<_AddDialog> {
       text: conn?.desktopGatewayUrl ?? '',
     );
     _gatewayProfile = TextEditingController(text: conn?.gatewayProfile ?? '');
+    _certificateService = ClientCertificateService();
+    _certificatePassword = TextEditingController();
+    _clientCertificate = conn?.clientCertificate;
+    _useClientCertificate = conn?.clientCertificate != null;
+    _host.addListener(_onHostChanged);
     _dashboardProxied = conn?.dashboardProxied ?? false;
     _showDashboard =
         conn?.gatewayPrefix?.isNotEmpty == true ||
@@ -1407,6 +1436,166 @@ class _AddDialogState extends State<_AddDialog> {
         conn?.dashboardPassword?.isNotEmpty == true ||
         _dashboardProxied ||
         conn?.desktopGatewayUrl?.isNotEmpty == true;
+  }
+
+  void _onHostChanged() {
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  bool get _isHttpsInput {
+    final normalized = SavedConnection.normalizeHostAndPort(
+      _host.text.trim(),
+      int.tryParse(_port.text.trim()),
+    );
+    return normalized.useHttps;
+  }
+
+  Future<List<int>?> _fileBytes(PlatformFile file) async {
+    final bytes = file.bytes;
+    if (bytes != null) return bytes;
+    final path = file.path;
+    if (path == null) return null;
+    return io.File(path).readAsBytes();
+  }
+
+  Future<void> _pickPkcs12() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['p12', 'pfx'],
+        allowMultiple: false,
+        withData: true,
+      );
+      final file = result?.files.firstOrNull;
+      if (file == null) return;
+      final bytes = await _fileBytes(file);
+      if (bytes == null) {
+        if (!mounted) return;
+        setState(() => _error = context.l10n.certificate_import_failed);
+        return;
+      }
+      await _runCertificateImport(
+        () => _certificateService.importPkcs12(
+          bytes: bytes,
+          password: _certificatePassword.text,
+          label: file.name,
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _error = context.l10n.certificate_import_failed);
+    }
+  }
+
+  Future<void> _pickPemCertificate() async {
+    final file = await _pickPemFile();
+    if (file == null) return;
+    final bytes = await _fileBytes(file);
+    if (bytes == null) {
+      if (!mounted) return;
+      setState(() => _error = context.l10n.certificate_import_failed);
+      return;
+    }
+    _pemCertificateBytes = bytes;
+    _pemCertificateName = file.name;
+    await _importPemPairIfReady();
+  }
+
+  Future<void> _pickPemPrivateKey() async {
+    final file = await _pickPemFile();
+    if (file == null) return;
+    final bytes = await _fileBytes(file);
+    if (bytes == null) {
+      if (!mounted) return;
+      setState(() => _error = context.l10n.certificate_import_failed);
+      return;
+    }
+    _pemPrivateKeyBytes = bytes;
+    _pemPrivateKeyName = file.name;
+    await _importPemPairIfReady();
+  }
+
+  Future<PlatformFile?> _pickPemFile() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['pem', 'crt', 'cer', 'key'],
+        allowMultiple: false,
+        withData: true,
+      );
+      return result?.files.firstOrNull;
+    } catch (_) {
+      if (!mounted) return null;
+      setState(() => _error = context.l10n.certificate_import_failed);
+      return null;
+    }
+  }
+
+  Future<void> _importPemPairIfReady() async {
+    final certificateBytes = _pemCertificateBytes;
+    final privateKeyBytes = _pemPrivateKeyBytes;
+    if (certificateBytes == null || privateKeyBytes == null) {
+      if (mounted) setState(() {});
+      return;
+    }
+    final label =
+        _pemCertificateName ??
+        _pemPrivateKeyName ??
+        (widget.initialConnection?.label ?? 'Client certificate');
+    await _runCertificateImport(
+      () => _certificateService.importPemPair(
+        certificateBytes: certificateBytes,
+        privateKeyBytes: privateKeyBytes,
+        password: _certificatePassword.text,
+        label: label,
+      ),
+    );
+  }
+
+  Future<void> _runCertificateImport(
+    Future<ClientCertificateConfig> Function() import,
+  ) async {
+    setState(() {
+      _importingCertificate = true;
+      _error = null;
+    });
+    try {
+      final config = await import();
+      if (!mounted) return;
+      setState(() {
+        _clientCertificate = config;
+        _useClientCertificate = true;
+        _pemCertificateBytes = null;
+        _pemCertificateName = null;
+        _pemPrivateKeyBytes = null;
+        _pemPrivateKeyName = null;
+        _importingCertificate = false;
+      });
+    } on ClientCertificateImportException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
+        _importingCertificate = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _error = context.l10n.certificate_import_failed;
+        _importingCertificate = false;
+      });
+    }
+  }
+
+  void _removeClientCertificate() {
+    setState(() {
+      _clientCertificate = null;
+      _useClientCertificate = false;
+      _pemCertificateBytes = null;
+      _pemCertificateName = null;
+      _pemPrivateKeyBytes = null;
+      _pemPrivateKeyName = null;
+    });
   }
 
   Future<void> _validateAndSave() async {
@@ -1420,6 +1609,12 @@ class _AddDialogState extends State<_AddDialog> {
     // A blank Port field means "not supplied": normalizeHostAndPort then infers
     // 8642 for HTTP and 443 for HTTPS.
     if (label.isEmpty || host.isEmpty || (port != null && port <= 0)) return;
+    if (_importingCertificate) return;
+    final clientCertificate = _useClientCertificate ? _clientCertificate : null;
+    if (_useClientCertificate && clientCertificate == null) {
+      setState(() => _error = context.l10n.client_certificate_required);
+      return;
+    }
 
     setState(() {
       _validating = true;
@@ -1440,6 +1635,7 @@ class _AddDialogState extends State<_AddDialog> {
         baseUrl: baseUrl,
         apiKey: apiKey,
         pathPrefix: gatewayPrefix,
+        clientCertificate: clientCertificate,
       );
       final result = await client.checkHealth();
       client.close();
@@ -1495,6 +1691,7 @@ class _AddDialogState extends State<_AddDialog> {
           proxied: _dashboardProxied,
           username: dashUser.isEmpty ? null : dashUser,
           password: dashPass.isEmpty ? null : dashPass,
+          clientCertificate: clientCertificate,
         );
         try {
           await dashClient.getModelInfo();
@@ -1527,6 +1724,8 @@ class _AddDialogState extends State<_AddDialog> {
         dashboardUsername: dashUser.isEmpty ? null : dashUser,
         dashboardPassword: dashPass.isEmpty ? null : dashPass,
         gatewayProfile: gatewayProfile.isEmpty ? null : gatewayProfile,
+        clientCertificate: clientCertificate,
+        clearClientCertificate: clientCertificate == null,
       );
       if (mounted) Navigator.pop(context);
     } on CredentialStorageException {
@@ -1733,6 +1932,148 @@ class _AddDialogState extends State<_AddDialog> {
                 autocorrect: false,
               ),
             ],
+            if (_isHttpsInput || _useClientCertificate) ...[
+              const Divider(height: 24),
+              SwitchListTile(
+                key: const Key('connection_client_certificate_toggle'),
+                contentPadding: EdgeInsets.zero,
+                value: _useClientCertificate,
+                title: Text(context.l10n.client_certificate_mtls),
+                subtitle: Text(
+                  _isHttpsInput
+                      ? context.l10n.client_certificate_mtls_description
+                      : context.l10n.client_certificate_https_only,
+                ),
+                onChanged: _validating || _importingCertificate
+                    ? null
+                    : (value) {
+                        setState(() {
+                          _useClientCertificate = value;
+                          if (!value) {
+                            _clientCertificate = null;
+                            _pemCertificateBytes = null;
+                            _pemCertificateName = null;
+                            _pemPrivateKeyBytes = null;
+                            _pemPrivateKeyName = null;
+                          }
+                        });
+                      },
+              ),
+              if (_useClientCertificate) ...[
+                if (_clientCertificate case final certificate?) ...[
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.primary.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.verified_user_outlined, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            context.l10n.client_certificate_loaded(
+                              certificate.label,
+                            ),
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                        ),
+                        TextButton(
+                          key: const Key(
+                            'connection_client_certificate_remove',
+                          ),
+                          onPressed: _validating || _importingCertificate
+                              ? null
+                              : _removeClientCertificate,
+                          child: Text(context.l10n.remove_certificate),
+                        ),
+                      ],
+                    ),
+                  ),
+                ] else ...[
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton.icon(
+                      key: const Key('connection_client_certificate_pick_p12'),
+                      onPressed: _validating || _importingCertificate
+                          ? null
+                          : _pickPkcs12,
+                      icon: const Icon(Icons.upload_file, size: 18),
+                      label: Text(context.l10n.choose_p12_pfx),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          key: const Key(
+                            'connection_client_certificate_pick_cert_pem',
+                          ),
+                          onPressed: _validating || _importingCertificate
+                              ? null
+                              : _pickPemCertificate,
+                          child: Text(
+                            context.l10n.choose_certificate_pem,
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton(
+                          key: const Key(
+                            'connection_client_certificate_pick_key_pem',
+                          ),
+                          onPressed: _validating || _importingCertificate
+                              ? null
+                              : _pickPemPrivateKey,
+                          child: Text(
+                            context.l10n.choose_private_key_pem,
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (_pemCertificateName != null ||
+                      _pemPrivateKeyName != null) ...[
+                    const SizedBox(height: 6),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        [
+                          ?_pemCertificateName,
+                          ?_pemPrivateKeyName,
+                        ].join('  ·  '),
+                        style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                  TextField(
+                    key: const Key('connection_client_certificate_password'),
+                    controller: _certificatePassword,
+                    decoration: InputDecoration(
+                      labelText: context.l10n.certificate_password_optional,
+                    ),
+                    obscureText: true,
+                    enabled: !_validating && !_importingCertificate,
+                  ),
+                ],
+                if (_importingCertificate) ...[
+                  const SizedBox(height: 8),
+                  const LinearProgressIndicator(minHeight: 2),
+                ],
+              ],
+            ],
           ],
         ),
       ),
@@ -1742,7 +2083,9 @@ class _AddDialogState extends State<_AddDialog> {
           child: Text(context.l10n.cancel),
         ),
         FilledButton(
-          onPressed: _validating ? null : _validateAndSave,
+          onPressed: _validating || _importingCertificate
+              ? null
+              : _validateAndSave,
           child: _validating
               ? const SizedBox(
                   width: 18,
@@ -1762,6 +2105,7 @@ class _AddDialogState extends State<_AddDialog> {
 
   @override
   void dispose() {
+    _host.removeListener(_onHostChanged);
     _label.dispose();
     _host.dispose();
     _port.dispose();
@@ -1773,6 +2117,7 @@ class _AddDialogState extends State<_AddDialog> {
     _dashPass.dispose();
     _desktopGatewayUrl.dispose();
     _gatewayProfile.dispose();
+    _certificatePassword.dispose();
     super.dispose();
   }
 }

@@ -2,14 +2,14 @@
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
-import 'package:http/io_client.dart' show IOClient;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
+import '../models/client_certificate.dart';
 import '../models/connection.dart';
 import '../models/session.dart';
+import 'tls_client_factory.dart';
 
 // Re-export for convenience
 export '../models/connection.dart';
@@ -285,6 +285,7 @@ class ConnectionManager {
     String? dashboardUsername,
     String? dashboardPassword,
     String? gatewayProfile,
+    ClientCertificateConfig? clientCertificate,
   }) async {
     final normalized = SavedConnection.normalizeHostAndPort(host, port);
     final profile = gatewayProfile?.trim();
@@ -303,6 +304,7 @@ class ConnectionManager {
       dashboardUsername: dashboardUsername,
       dashboardPassword: dashboardPassword,
       gatewayProfile: profile == null || profile.isEmpty ? null : profile,
+      clientCertificate: clientCertificate,
     );
     final current = getConnections();
     current.insert(0, conn);
@@ -333,6 +335,8 @@ class ConnectionManager {
     String? dashboardUsername,
     String? dashboardPassword,
     String? gatewayProfile,
+    ClientCertificateConfig? clientCertificate,
+    bool clearClientCertificate = false,
   }) async {
     final current = getConnections();
     final idx = current.indexWhere((c) => c.id == connId);
@@ -375,6 +379,8 @@ class ConnectionManager {
       clearDashboardPassword: dashPass != null && dashPass.isEmpty,
       gatewayProfile: profile == null || profile.isEmpty ? null : profile,
       clearGatewayProfile: profile != null && profile.isEmpty,
+      clientCertificate: clientCertificate,
+      clearClientCertificate: clearClientCertificate,
     );
     await _commitCredentialAndMetadata(
       connectionId: connId,
@@ -639,10 +645,11 @@ class ApiClient {
     required String baseUrl,
     required String apiKey,
     String pathPrefix = '',
+    ClientCertificateConfig? clientCertificate,
     http.Client? httpClient,
   }) : _apiKey = apiKey,
        baseUrl = SavedConnection.joinBaseUrl(baseUrl, pathPrefix),
-       _http = httpClient ?? _freshClient();
+       _http = httpClient ?? _freshClient(clientCertificate);
 
   /// Builds a client that does not pool keep-alive sockets.
   ///
@@ -651,9 +658,8 @@ class ApiClient {
   /// then hangs). Home/tablet/LAN gateways are cheap to reconnect to, so a
   /// fresh TCP connection per request is a fair price for never wedging the
   /// session list on a stale socket.
-  static http.Client _freshClient() {
-    final io = HttpClient()..idleTimeout = Duration.zero;
-    return IOClient(io);
+  static http.Client _freshClient(ClientCertificateConfig? clientCertificate) {
+    return const TlsClientFactory().createRestClient(clientCertificate);
   }
 
   Map<String, String> get _headers => {
@@ -1364,6 +1370,8 @@ class DashboardClient {
     String? username,
     String? password,
     String? gatewayProfile,
+    ClientCertificateConfig? clientCertificate,
+    TlsClientFactory tlsClientFactory = const TlsClientFactory(),
     http.Client? httpClient,
   }) : _proxied = proxied,
        _username = username,
@@ -1375,7 +1383,8 @@ class DashboardClient {
          '${useHttps ? 'https' : 'http'}://$host:$port',
          pathPrefix,
        ),
-       _http = httpClient ?? http.Client();
+       _http =
+           httpClient ?? tlsClientFactory.createRestClient(clientCertificate);
 
   /// Clears cached auth only when the failed request used the current auth
   /// generation. Concurrent stale 401s therefore cannot invalidate a newer
