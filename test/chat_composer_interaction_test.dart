@@ -286,6 +286,79 @@ void main() {
     },
   );
 
+  for (final newerDraft in <String?>[null, 'New draft', '']) {
+    testWidgets('leaving during setup preserves draft "$newerDraft"', (
+      tester,
+    ) async {
+      final bind = Completer<void>();
+      var submits = 0;
+      await _pumpChat(
+        tester,
+        ensureProject: (_, _) => bind.future,
+        remoteSubmit:
+            ({
+              required sessionId,
+              required text,
+              required onEvent,
+              required onSent,
+            }) async {
+              submits++;
+            },
+      );
+      await tester.enterText(find.byKey(_composerKey), 'Unsent prompt');
+      await tester.tap(find.byTooltip('Send'));
+      await tester.pump();
+      expect(_draft(tester), isEmpty);
+      if (newerDraft != null) {
+        await tester.enterText(find.byKey(_composerKey), 'Intermediate edit');
+        await tester.enterText(find.byKey(_composerKey), newerDraft);
+      }
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      bind.complete();
+      await tester.pump();
+      expect(submits, 0);
+      await _pumpChat(tester);
+      expect(_draft(tester), newerDraft ?? 'Unsent prompt');
+    });
+  }
+
+  testWidgets('leaving during REST image preparation keeps the unsent prompt', (
+    tester,
+  ) async {
+    final read = Completer<String>();
+    var submits = 0;
+    await _pumpChat(
+      tester,
+      attachmentService: _AttachmentFixture(readResult: read.future),
+      attachments: [
+        AttachmentDraft(
+          id: 'image',
+          cachedPath: '/fixture/image.png',
+          name: 'image.png',
+          byteLength: 7,
+          mediaType: 'image/png',
+          kind: AttachmentDraftKind.image,
+          sanitized: true,
+        ),
+      ],
+      httpClient: MockClient((request) async {
+        if (request.method == 'POST') submits++;
+        return http.Response('{"data":[]}', 200);
+      }),
+    );
+    await tester.enterText(find.byKey(_composerKey), 'Unsent image prompt');
+    await tester.tap(find.byTooltip('Send'));
+    await tester.pump();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    read.complete('data:image/png;base64,Zml4dHVyZQ==');
+    await tester.pump();
+    expect(submits, 0);
+    await _pumpChat(tester);
+    expect(_draft(tester), 'Unsent image prompt');
+  });
+
   for (final newerDraft in ['', 'Rejected prompt']) {
     testWidgets('rejection respects intervening edits: "$newerDraft"', (
       tester,

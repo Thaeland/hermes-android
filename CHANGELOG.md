@@ -12,7 +12,8 @@ shows only the three latest releases.
   through the on-screen button rather than submitting when adding a paragraph.
 - The message composer remains editable during setup, attachment uploads,
   replies and reconnect recovery. Only the submitted draft is cleared; later
-  setup and reply callbacks cannot erase a follow-up being typed.
+  setup and reply callbacks cannot erase a follow-up being typed. Leaving
+  during setup retains the unsent prompt unless you have edited the new draft.
 - Failed submissions restore the original prompt only when the cleared draft
   has not been edited, including when newer typing was deliberately deleted.
   Send admission is reserved before asynchronous setup to prevent duplicate

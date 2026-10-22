@@ -393,6 +393,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final _textController = TextEditingController();
   int _composerRevision = 0;
   int _clearedComposerRevision = 0;
+  String? _pendingComposerPrompt;
   final _imagePicker = ImagePicker();
   final List<AttachmentDraft> _attachmentDrafts = [];
   String? _sessionModel;
@@ -785,7 +786,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       ComposerDraftStore.save(
         connectionId: widget.connection.id,
         sessionId: widget.session.id,
-        text: _textController.text,
+        text: _composerDraftForPersistence,
       ),
     );
     _textController.dispose();
@@ -831,7 +832,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ComposerDraftStore.save(
           connectionId: widget.connection.id,
           sessionId: widget.session.id,
-          text: _textController.text,
+          text: _composerDraftForPersistence,
         ),
       );
       _pauseReattachRetry();
@@ -2752,7 +2753,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     // consumed; setup, uploads and stream callbacks must not clear newer text.
     _preparingSend = true;
     setState(() => _sending = true);
-    _clearComposerForSend();
+    _clearComposerForSend(text);
     try {
       await _sessionModelRestore;
     } catch (error) {
@@ -2823,6 +2824,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             },
           ];
 
+    _commitComposerForSend();
     _awaitingVoiceReply = speakResponse && _voiceReplyEnabled;
     final responseGeneration = ++_responseGeneration;
     _activeResponseTransport = _ResponseTransport.rest;
@@ -3074,6 +3076,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             text,
             attachmentLabels,
           ].where((part) => part.trim().isNotEmpty).join('\n\n');
+          _commitComposerForSend();
           _scrollCoordinator.beginStreaming(isNearEnd: _isNearEnd());
           setState(() {
             _streaming = true;
@@ -3285,6 +3288,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       text,
       attachmentLabels,
     ].where((part) => part.trim().isNotEmpty).join('\n\n');
+    _commitComposerForSend();
     _scrollCoordinator.beginStreaming(isNearEnd: _isNearEnd());
     setState(() {
       _streaming = true;
@@ -4375,16 +4379,36 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  /// Clears the composer and its stored draft at the same boundary, so a
-  /// process kill right after sending cannot resurrect the sent prompt.
-  void _clearComposerForSend() {
+  String get _composerDraftForPersistence {
+    final pending = _pendingComposerPrompt;
+    return pending != null && _composerRevision == _clearedComposerRevision
+        ? pending
+        : _textController.text;
+  }
+
+  /// Clear the visible draft immediately but retain the unsent prompt through
+  /// cancellable setup. Leaving during an upload must not silently lose it.
+  void _clearComposerForSend(String text) {
+    _pendingComposerPrompt = text;
     _textController.clear();
     _clearedComposerRevision = _composerRevision;
     unawaited(
       ComposerDraftStore.save(
         connectionId: widget.connection.id,
         sessionId: widget.session.id,
-        text: '',
+        text: text,
+      ),
+    );
+  }
+
+  /// Preparation finished: hand off the prompt without touching newer typing.
+  void _commitComposerForSend() {
+    _pendingComposerPrompt = null;
+    unawaited(
+      ComposerDraftStore.save(
+        connectionId: widget.connection.id,
+        sessionId: widget.session.id,
+        text: _textController.text,
       ),
     );
   }
@@ -4392,6 +4416,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// Restore only the send's untouched draft. A newer edit (including typing
   /// and then deleting) belongs to the user, not this failed submission.
   void _restoreComposerAfterRejectedSend(String text) {
+    _pendingComposerPrompt = null;
     if (text.trim().isEmpty) return;
     if (_composerRevision == _clearedComposerRevision) {
       _textController.value = TextEditingValue(
