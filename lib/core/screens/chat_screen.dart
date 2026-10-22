@@ -441,6 +441,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final List<_PendingSteer> _pendingSteers = [];
   bool _steerDrainInFlight = false;
 
+  /// Holds the joined note text while a drain send is in flight. The submit
+  /// catch reads this as an opt-in to restore-on-failure past the
+  /// `promptSubmitted` gate: a submitted-but-failed drain send is the user's
+  /// to retry from the composer (the drain never requeues what it already
+  /// sent), so the words must land back in the composer instead of vanishing
+  /// with the stripped optimistic row. Normal sends keep the gate: an
+  /// accepted prompt may already be running server-side, and restoring it
+  /// there invites a duplicate execution.
+  String? _drainRestoreText;
+
   GatewayTurnStatus? _gatewayTurnStatus;
   _ResponseTransport _activeResponseTransport = _ResponseTransport.none;
   String? _activeClientTurnId;
@@ -3199,7 +3209,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       // reply). Restoring the composer and stripping the local turn would
       // clobber it, so skip the restore and just surface the error state.
       final resyncLanded = turnAdded && _historyGeneration != historyAtSend;
-      if (!resyncLanded && !promptSubmitted) {
+      // A drain send opts past the promptSubmitted gate: its caller will
+      // not requeue, so the failed note must return to the composer or it
+      // is lost when the deferred refresh strips the optimistic row.
+      if (!resyncLanded &&
+          (!promptSubmitted || _drainRestoreText != null)) {
         setState(() {
           if (turnAdded &&
               _messages.isNotEmpty &&
@@ -4514,7 +4528,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         // retry (the text is back in their composer), not ours to
         // requeue.
         final generationBefore = _responseGeneration;
-        await _sendMessage();
+        _drainRestoreText = joined;
+        try {
+          await _sendMessage();
+        } finally {
+          _drainRestoreText = null;
+        }
         if (!mounted) return;
         final submitted = _responseGeneration != generationBefore;
         _pendingSteers.removeWhere(sentEntries.contains);
