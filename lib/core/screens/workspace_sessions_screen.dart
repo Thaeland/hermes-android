@@ -8,6 +8,7 @@ import '../theme/hermes_theme.dart';
 import '../utils/relative_time.dart';
 import '../widgets/hermes_components.dart';
 import '../widgets/hermes_shell.dart';
+import '../widgets/session_name_dialog.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
 
@@ -200,6 +201,11 @@ class WorkspaceSessionsData {
 
 typedef WorkspaceSessionsLoader = Future<WorkspaceSessionsData> Function();
 
+/// Saves a title remotely and returns the authoritative saved title.
+/// Failures throw without changing the visible conversation.
+typedef WorkspaceSessionRenamer =
+    Future<String> Function(Session session, String title);
+
 /// Moves a session and returns the destination Project label. Returning the
 /// label lets the row update ownership and presentation in one state change,
 /// without waiting for a second projects.tree request.
@@ -256,6 +262,7 @@ class WorkspaceSessionsScreen extends StatefulWidget {
   final WorkspaceSessionsData? initialData;
   final ValueChanged<Session> onOpenSession;
   final WorkspaceSessionPromoter? onPromote;
+  final WorkspaceSessionRenamer? onRename;
   final LocalChatPinStore? pinStore;
   final bool embedded;
 
@@ -275,6 +282,7 @@ class WorkspaceSessionsScreen extends StatefulWidget {
     this.initialData,
     required this.onOpenSession,
     this.onPromote,
+    this.onRename,
     this.pinStore,
     this.embedded = false,
     this.now,
@@ -283,16 +291,22 @@ class WorkspaceSessionsScreen extends StatefulWidget {
   });
 
   @override
-  State<WorkspaceSessionsScreen> createState() =>
-      _WorkspaceSessionsScreenState();
+  WorkspaceSessionsScreenState createState() => WorkspaceSessionsScreenState();
 }
 
-class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
+class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
     with WidgetsBindingObserver {
   WorkspaceSessionsData? _data;
   Object? _error;
   String _query = '';
   final Set<String> _promoting = {};
+  final Set<String> _renameDialogs = {};
+  final Set<String> _renaming = {};
+
+  /// Only reads started before a successful rename need their title patched.
+  /// Keep the rest of each response, including unrelated rows and metadata.
+  int _titleRevision = 0;
+  final _savedTitles = <String, ({int revision, String title})>{};
   final Set<String> _pinChanges = {};
   List<String> _pinnedIds = const [];
 
@@ -333,7 +347,9 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
     // background page) after Chats has already mounted. Never replace a
     // completed metadata read with provisional data from a parent rebuild.
     if ((_data == null || _data!.isPartial) && widget.initialData != null) {
-      _data = widget.initialData;
+      _data = _withSessionTitles(widget.initialData!, {
+        for (final entry in _savedTitles.entries) entry.key: entry.value.title,
+      });
     }
   }
 
@@ -392,15 +408,23 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
     super.dispose();
   }
 
+  /// Reloads Chats after returning from a conversation opened by the parent.
+  Future<void> refresh() => _load();
+
   Future<void> _load() async {
     if (_loadInFlight) return;
     _loadInFlight = true;
+    final titleRevision = _titleRevision;
     try {
       final data = await widget.load();
       final pins = await widget.pinStore?.load() ?? const <String>[];
       if (mounted) {
         setState(() {
-          _data = data;
+          _data = _withSessionTitles(data, {
+            for (final entry in _savedTitles.entries)
+              if (entry.value.revision > titleRevision)
+                entry.key: entry.value.title,
+          });
           _pinnedIds = pins;
           _error = null;
         });
@@ -410,6 +434,88 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
       if (mounted) setState(() => _error = error);
     } finally {
       _loadInFlight = false;
+    }
+  }
+
+  WorkspaceSessionsData _withSessionTitles(
+    WorkspaceSessionsData data,
+    Map<String, String> titles,
+  ) {
+    if (titles.isEmpty) return data;
+    Session renamed(Session session) {
+      final title = titles[session.id];
+      return title == null ? session : session.withTitle(title);
+    }
+
+    return WorkspaceSessionsData(
+      sessions: data.sessions.map(renamed).toList(),
+      archivedSessions: data.archivedSessions.map(renamed).toList(),
+      isPartial: data.isPartial,
+      claimedSessionIds: data.claimedSessionIds,
+      archivedQuickChatIds: data.archivedQuickChatIds,
+      projectLabels: data.projectLabels,
+      projectsKnown: data.projectsKnown,
+    );
+  }
+
+  Session? _currentSession(String id) {
+    final data = _data;
+    if (data == null) return null;
+    // Match the browser's union: the archived copy wins if both are present.
+    for (final session in [...data.archivedSessions, ...data.sessions]) {
+      if (session.id == id) return session;
+    }
+    return null;
+  }
+
+  Future<void> _rename(Session session) async {
+    final rename = widget.onRename;
+    if (rename == null || !_renameDialogs.add(session.id)) return;
+    try {
+      // PopupMenuButton reports its selection before the popup route has
+      // finished teardown. Do not autofocus a dialog during that transition.
+      await Future<void>.delayed(kThemeAnimationDuration);
+      if (!mounted) return;
+      final current = _currentSession(session.id);
+      if (current == null) return;
+      final result = await showSessionNameDialog(
+        context: context,
+        title: context.l10n.rename_chat,
+        initialValue: current.title,
+        actionLabel: context.l10n.rename,
+      );
+      if (!mounted) return;
+      final title = result?.trim();
+      final latest = _currentSession(session.id);
+      if (title == null ||
+          title.isEmpty ||
+          latest == null ||
+          title == latest.title) {
+        return;
+      }
+      setState(() => _renaming.add(session.id));
+      final savedTitle = await rename(latest, title);
+      if (!mounted) return;
+      setState(() {
+        _savedTitles[session.id] = (
+          revision: ++_titleRevision,
+          title: savedTitle,
+        );
+        final data = _data;
+        if (data != null) {
+          _data = _withSessionTitles(data, {session.id: savedTitle});
+        }
+      });
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(context.l10n.could_not_rename_chat(error.toString())),
+        ),
+      );
+    } finally {
+      _renameDialogs.remove(session.id);
+      if (mounted) setState(() => _renaming.remove(session.id));
     }
   }
 
@@ -781,19 +887,38 @@ class _WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
                     onPressed: () => unawaited(_promote(session)),
                     icon: const Icon(Icons.drive_file_move_outline),
                   ),
-          if (widget.pinStore != null)
+          if (_renaming.contains(session.id))
+            const SizedBox.square(
+              dimension: 24,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          if (widget.pinStore != null || widget.onRename != null)
             PopupMenuButton<String>(
               tooltip: context.l10n.chat_actions,
-              onSelected: (_) => unawaited(_togglePin(session)),
+              onSelected: (action) {
+                switch (action) {
+                  case 'rename':
+                    unawaited(_rename(session));
+                  case 'pin':
+                    unawaited(_togglePin(session));
+                }
+              },
               itemBuilder: (_) => [
-                PopupMenuItem(
-                  value: 'pin',
-                  child: Text(
-                    locallyPinned
-                        ? context.l10n.unpin_on_this_device
-                        : context.l10n.pin_on_this_device,
+                if (widget.onRename != null)
+                  PopupMenuItem(
+                    value: 'rename',
+                    enabled: !_renaming.contains(session.id),
+                    child: Text(context.l10n.rename),
                   ),
-                ),
+                if (widget.pinStore != null)
+                  PopupMenuItem(
+                    value: 'pin',
+                    child: Text(
+                      locallyPinned
+                          ? context.l10n.unpin_on_this_device
+                          : context.l10n.pin_on_this_device,
+                    ),
+                  ),
               ],
             ),
         ],

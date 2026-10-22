@@ -1,4 +1,4 @@
-# Hermes Android — v2.1.27
+# Hermes Android — v2.1.28
 
 Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — chat with your Hermes sessions from a phone or tablet over local Wi-Fi or a private Tailscale network.
 
@@ -14,15 +14,15 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
 
 ## Current release
 
-- Version: **2.1.27** (build 2170)
+- Version: **2.1.28** (build 2171)
 - Package: `com.hermesagent.hermes_android`
 - Recommended APK for modern phones: ARM64 release build from the
   [Releases](https://github.com/rusty4444/hermes-android/releases) page.
 - Production builds are signed with a private release keystore. Debug APKs
   signed with the Android debug certificate remain available for testing
   under the `com.hermesagent.hermes_android.dev` package ID.
-- v2.1.27 refreshes Project card chat counts on return, tab reselect and app
-  resume without letting a late response restore stale counts. See the
+- v2.1.28 adds Rename to the Chats list and open-chat action menus, with
+  server-saved titles for Remote Gateway and REST connections. See the
   [changelog](CHANGELOG.md).
 - The app checks [GitHub Releases](https://github.com/rusty4444/hermes-android/releases)
   on ordinary launches. An answered check limits network requests to once
@@ -48,6 +48,9 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
 - Legacy REST remains fail-closed to one image and does not expose multi-select.
 - Per-chat model and thinking effort without changing the profile default.
 - Search, Rename, Branch, and Delete for remote conversations.
+- Rename a chat from its Chats row's action menu or the open chat's top-right
+  menu. The title saves to Hermes and appears on other devices after refresh;
+  REST-only connections also support Rename. See [Renaming chats](docs/renaming-chats.md).
 - Pin and unpin chats on this device from the Chats action menu. Local pins
   stay above the dated chat list, including when a chat has moved past the
   first page; they do not change Hermes's server-side pinned flag or another
@@ -84,6 +87,14 @@ See [CHANGELOG.md](CHANGELOG.md) for the complete release history and
 [docs/HERMESAPK_DEVELOPMENT_LOG.md](docs/HERMESAPK_DEVELOPMENT_LOG.md) for the
 sanitized implementation and validation record.
 
+## What's new in v2.1.28
+
+- Rename chats from the Chats list or the open-chat menu. Both Remote Gateway
+  and REST-only connections save the title to Hermes. Returning from a renamed
+  chat refreshes the Chats list; search and exports use the saved name.
+- Blank names cannot submit. Cancelling leaves the title unchanged, and a
+  failed save keeps the previous title and shows the error.
+
 ## What's new in v2.1.27
 
 - **Project counts stay current** — returning from a Project, reselecting the
@@ -100,16 +111,6 @@ sanitized implementation and validation record.
   observed or its result was stored; a collapsed card shows the latest known
   activity. Missing times remain marked unavailable rather than guessed.
 
-## What's new in v2.1.25
-
-- **Conversation stays in view during long tool runs** — opening a chat loads
-  past the latest tool-only rows to recover the previous dialogue. Older
-  messages remain available on demand; refreshing does not discard dialogue
-  already loaded on this screen.
-- **More honest Home status** — a recent server activity timestamp is not
-  mistaken for proof of a live turn, but it is no longer called definitively
-  idle either. Home sorts unfinished work by latest activity. Confirmed
-  Android turns still appear under Running and blocked turns under Needs you.
 
 ## Features
 
@@ -468,7 +469,7 @@ cp build/app/outputs/flutter-apk/app-*-release.apk release-apks/
 block in `android/app/build.gradle.kts` derives per-ABI codes as
 `base * 10 + ABI code` (armeabi-v7a = 1, arm64-v8a = 2, x86_64 = 3), so the
 codes stay ordered armeabi-v7a < arm64-v8a < x86_64 as fdroiddata requires.
-For v2.1.27, base `2170` therefore produces codes `21701`/`21702`/`21703`.
+For v2.1.28, base `2171` therefore produces codes `21711`/`21712`/`21713`.
 CI reads the completed arm64 APK with `aapt` and fails if that relationship
 drifts. Release-floor checks continue to apply to the base value and must not
 be weakened to rely on the ABI code.

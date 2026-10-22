@@ -284,6 +284,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   /// no new gateway contract; a turn whose chat is absent simply stays
   /// untitled rather than being dropped or given a fabricated name.
   Map<String, String> _sessionTitles = const {};
+  final _chatsKey = GlobalKey<WorkspaceSessionsScreenState>();
   int _homeGeneration = 0;
   Future<SessionListPage>? _homeFirstPageScan;
   Future<List<Session>>? _homeFullScan;
@@ -950,6 +951,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             _chatPreviewSessions ??
             _homeFirstPageSessions;
         return WorkspaceSessionsScreen(
+          key: _chatsKey,
           title: context.l10n.chats,
           view: WorkspaceSessionView.all,
           embedded: true,
@@ -972,6 +974,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           // The Unassigned chip inside this browser gets the same
           // move-to-project affordance as the standalone Unassigned view.
           onPromote: _moveUnassignedChat,
+          onRename: _renameSession,
         );
       case HermesDestination.projects:
         final repository = _repository;
@@ -1095,6 +1098,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     );
     if (!mounted) return;
     unawaited(_homeKey.currentState?.refresh() ?? Future<void>.value());
+    unawaited(_chatsKey.currentState?.refresh() ?? Future<void>.value());
   }
 
   /// Opens one project's detail screen.
@@ -1458,6 +1462,21 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     );
   }
 
+  Future<String> _renameSession(Session session, String title) async {
+    final savedTitle = await _sessionClient.renameSession(
+      sessionId: session.id,
+      title: title,
+    );
+    if (mounted) {
+      _sessionTitles = Map.unmodifiable({
+        ..._sessionTitles,
+        session.id: savedTitle,
+      });
+      unawaited(_homeKey.currentState?.refresh() ?? Future<void>.value());
+    }
+    return savedTitle;
+  }
+
   void _openWorkspaceSessionView(WorkspaceSessionView view) {
     final title = switch (view) {
       WorkspaceSessionView.all => context.l10n.all_chats,
@@ -1473,6 +1492,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         refreshInterval: widget.sessionsRefreshInterval,
         load: _loadWorkspaceSessionsData,
         onOpenSession: (session) => unawaited(_openSession(session)),
+        onRename: _renameSession,
         onPromote: switch (view) {
           WorkspaceSessionView.archivedQuick => _promoteQuickChat,
           WorkspaceSessionView.unassigned => _moveUnassignedChat,

@@ -14,6 +14,7 @@ import '../services/local_chat_pin_store.dart';
 import '../services/session_search_client.dart';
 import '../services/session_search_preferences.dart';
 import '../services/ws_client.dart';
+import '../widgets/session_name_dialog.dart';
 import 'chat_screen.dart';
 import 'settings_screen.dart';
 import 'memory_screen.dart';
@@ -24,38 +25,7 @@ import 'workspace_screen.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
 
-Future<String?> showSessionNameDialog({
-  required BuildContext context,
-  required String title,
-  required String initialValue,
-  required String actionLabel,
-}) async {
-  var draft = initialValue;
-  final result = await showDialog<String>(
-    context: context,
-    builder: (dialogContext) => AlertDialog(
-      title: Text(title),
-      content: TextFormField(
-        initialValue: initialValue,
-        autofocus: true,
-        maxLength: 120,
-        decoration: const InputDecoration(border: OutlineInputBorder()),
-        onChanged: (value) => draft = value,
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(dialogContext),
-          child: Text(context.l10n.cancel),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(dialogContext, draft.trim()),
-          child: Text(actionLabel),
-        ),
-      ],
-    ),
-  );
-  return result?.trim().isEmpty == true ? null : result;
-}
+export '../widgets/session_name_dialog.dart' show showSessionNameDialog;
 
 class SessionListScreen extends StatefulWidget {
   final SavedConnection connection;
@@ -102,6 +72,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
   LocalChatPinStore? _pinStore;
   List<String> _pinnedIds = const [];
   final Set<String> _pinChanges = {};
+  final Set<String> _renamingSessionIds = {};
   ChatSpaceStore? _spaceStore;
   ChatSpaceState _spaceState = const ChatSpaceState(
     spaces: [],
@@ -590,22 +561,27 @@ class _SessionListScreenState extends State<SessionListScreen> {
   );
 
   Future<void> _renameSession(Session session) async {
-    final gateway = _desktopGateway;
-    if (gateway == null) return;
-    final title = await _askForName(
-      title: context.l10n.rename_chat,
-      initialValue: session.title,
-      actionLabel: context.l10n.rename,
-    );
-    if (title == null || !mounted) return;
+    if (!_renamingSessionIds.add(session.id)) return;
     try {
-      await gateway.renameSession(sessionId: session.id, title: title);
+      final title = await _askForName(
+        title: context.l10n.rename_chat,
+        initialValue: session.title,
+        actionLabel: context.l10n.rename,
+      );
+      if (title == null || !mounted || title == session.title.trim()) return;
+      setState(() {});
+      await _client.renameSession(sessionId: session.id, title: title);
+      if (!mounted) return;
       await _fetchSessions();
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(context.l10n.could_not_rename_chat(error))),
       );
+    } finally {
+      if (mounted) {
+        setState(() => _renamingSessionIds.remove(session.id));
+      }
     }
   }
 
@@ -1161,14 +1137,12 @@ class _SessionListScreenState extends State<SessionListScreen> {
             ListTile(
               leading: const Icon(Icons.schedule),
               title: Text(context.l10n.cron_jobs),
-              onTap: () =>
-                  _openScreen(
-                    CronScreen(
-                      connection: widget.connection,
-                      turnApplicationController:
-                          widget.turnApplicationController,
-                    ),
-                  ),
+              onTap: () => _openScreen(
+                CronScreen(
+                  connection: widget.connection,
+                  turnApplicationController: widget.turnApplicationController,
+                ),
+              ),
             ),
             ListTile(
               leading: const Icon(Icons.auto_awesome),
@@ -1551,12 +1525,13 @@ class _SessionListScreenState extends State<SessionListScreen> {
             final searchHit = snippetsBySession[session.id];
             final isDeleting = _deletingSessionIds.contains(session.id);
             final isBranching = _branchingSessionIds.contains(session.id);
+            final isRenaming = _renamingSessionIds.contains(session.id);
             final locallyPinned =
                 localPinIdForSession(session, _pinnedIds) != null;
             return Card(
               margin: const EdgeInsets.only(bottom: 8),
               child: ListTile(
-                enabled: !isDeleting && !isBranching,
+                enabled: !isDeleting && !isBranching && !isRenaming,
                 leading: Icon(
                   locallyPinned
                       ? Icons.push_pin
@@ -1567,7 +1542,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
                       ? const Color(0xFFD4AF37)
                       : Colors.grey,
                 ),
-                trailing: isDeleting || isBranching
+                trailing: isDeleting || isBranching || isRenaming
                     ? const SizedBox(
                         width: 20,
                         height: 20,
@@ -1600,14 +1575,13 @@ class _SessionListScreenState extends State<SessionListScreen> {
                               title: Text(context.l10n.move_to_space),
                             ),
                           ),
-                          if (_desktopGateway != null)
-                            PopupMenuItem(
-                              value: 'rename',
-                              child: ListTile(
-                                leading: Icon(Icons.edit_outlined),
-                                title: Text(context.l10n.rename),
-                              ),
+                          PopupMenuItem(
+                            value: 'rename',
+                            child: ListTile(
+                              leading: Icon(Icons.edit_outlined),
+                              title: Text(context.l10n.rename),
                             ),
+                          ),
                           if (_desktopGateway != null)
                             PopupMenuItem(
                               value: 'branch',
