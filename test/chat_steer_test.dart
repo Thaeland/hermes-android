@@ -686,6 +686,145 @@ void main() {
     );
 
     testWidgets(
+      'a failed drain send appends to a newer draft instead of clobbering it',
+      (tester) async {
+        final submitGate = Completer<void>();
+        final drainFailGate = Completer<void>();
+        final submitted = <String>[];
+        final voice = FakeVoiceComposerAdapter();
+        await _pumpChat(
+          tester,
+          voiceAdapter: voice,
+          remoteSubmit: ({
+            required sessionId,
+            required text,
+            required onEvent,
+            required onSent,
+          }) async {
+            submitted.add(text);
+            if (submitted.length == 1) {
+              onSent();
+              await submitGate.future;
+              return;
+            }
+            // Drain send: accepted, the turn streams (composer stays
+            // editable), and only then does the submit fail.
+            onSent();
+            await drainFailGate.future;
+            throw Exception('gateway rejected submission');
+          },
+          steer: (sessionId, text) async => SteerOutcome.rejected,
+        );
+
+        await tester.enterText(find.byType(TextField), 'first prompt');
+        await tester.tap(find.byTooltip('Send'));
+        await tester.pump();
+        await tester.pump();
+
+        await tester.enterText(find.byType(TextField), 'held note');
+        await tester.tap(find.byKey(const Key('chat-steer-button')));
+        await tester.pump();
+
+        submitGate.complete();
+        await tester.pump();
+        await tester.pump();
+        expect(submitted, ['first prompt', 'held note']);
+
+        // The user replaces the send residue with a newer draft while
+        // the drain's turn is still streaming.
+        await tester.enterText(find.byType(TextField), 'new draft');
+        await tester.pump();
+
+        drainFailGate.complete();
+        await tester.pump();
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+
+        // The failed note must return WITHOUT destroying the newer draft:
+        // it appends behind the user's newer words instead of overwriting.
+        final composer = tester.widget<TextField>(find.byType(TextField));
+        expect(composer.controller!.text, 'new draft\n\nheld note');
+      },
+    );
+
+    testWidgets(
+      'a drain held for a pending reattach resync sends once after reconnect',
+      (tester) async {
+        final submitGate = Completer<void>();
+        final submitted = <String>[];
+        final voice = FakeVoiceComposerAdapter();
+        final hook = TestDesktopConnectionHook();
+        final history = _SteerChatHttpClient();
+        await _pumpChat(
+          tester,
+          voiceAdapter: voice,
+          connectionHook: hook,
+          httpClient: history,
+          remoteSubmit: ({
+            required sessionId,
+            required text,
+            required onEvent,
+            required onSent,
+          }) async {
+            submitted.add(text);
+            onSent();
+            if (submitted.length == 1) {
+              await submitGate.future;
+            }
+          },
+          steer: (sessionId, text) async => SteerOutcome.rejected,
+        );
+        hook.handler?.call(DesktopConnectionState.connected);
+        await tester.pump();
+
+        await tester.enterText(find.byType(TextField), 'first prompt');
+        await tester.tap(find.byTooltip('Send'));
+        await tester.pump();
+        await tester.pump();
+
+        await tester.enterText(find.byType(TextField), 'held note');
+        await tester.tap(find.byKey(const Key('chat-steer-button')));
+        await tester.pump();
+
+        // The socket drops after the accepted prompt: a reattach resync
+        // is pending, and _sendMessage would no-op into it.
+        hook.handler?.call(DesktopConnectionState.reconnecting);
+        await tester.pump();
+
+        submitGate.complete();
+        await tester.pump();
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+
+        // The drain must hold rather than no-op-send: firing anyway would
+        // requeue while leaving the note in the composer, and the next
+        // drain would append a copy of it.
+        expect(submitted, ['first prompt']);
+        final idle = tester.widget<TextField>(find.byType(TextField));
+        expect(idle.controller!.text, isEmpty);
+
+        // Reconnect: the resync lands (the detached turn's rows are now
+        // server-side), then a mic cycle drains the held note exactly once.
+        history.includeCompletedTurn = true;
+        hook.handler?.call(DesktopConnectionState.connected);
+        await tester.pumpAndSettle();
+        ScaffoldMessenger.of(tester.element(find.byType(Scaffold).first))
+            .clearSnackBars();
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('chat-mic-button')));
+        await tester.pump();
+        await tester.tap(find.bySemanticsLabel('Stop voice input'));
+        await tester.pump();
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+
+        expect(submitted, ['first prompt', 'held note']);
+        final after = tester.widget<TextField>(find.byType(TextField));
+        expect(after.controller!.text, isNot(contains('held note\n\nheld note')));
+      },
+    );
+
+    testWidgets(
       'an uncertain steer whose turn settled mid-RPC drains immediately',
       (tester) async {
         final submitGate = Completer<void>();
@@ -801,11 +940,13 @@ Future<void> _pumpChat(
   required Future<SteerOutcome> Function(String sessionId, String text) steer,
   FakeVoiceComposerAdapter? voiceAdapter,
   Future<List<Map<String, dynamic>>> Function(String sessionId)? steerHistory,
+  TestDesktopConnectionHook? connectionHook,
+  _SteerChatHttpClient? httpClient,
 }) async {
   final apiClient = ApiClient(
     baseUrl: 'http://steer.fixture',
     apiKey: 'fixture-key',
-    httpClient: _EmptyChatHttpClient(),
+    httpClient: httpClient ?? _EmptyChatHttpClient(),
   );
   await tester.pumpWidget(
     MaterialApp(
@@ -833,6 +974,7 @@ Future<void> _pumpChat(
         testRemotePromptSubmit: remoteSubmit,
         testDesktopSteer: steer,
         testSteerHistoryReconcile: steerHistory,
+        testDesktopConnectionHook: connectionHook,
         testVoiceComposerAdapter: voiceAdapter ?? FakeVoiceComposerAdapter(),
       ),
     ),
@@ -846,6 +988,35 @@ class _EmptyChatHttpClient extends http.BaseClient {
     if (request.method == 'GET' && request.url.path.endsWith('/messages')) {
       return http.StreamedResponse(
         Stream.value(utf8.encode(jsonEncode({'data': <Object>[]}))),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
+    }
+    return http.StreamedResponse(
+      Stream.value(utf8.encode(jsonEncode({'error': 'unexpected request'}))),
+      404,
+      headers: {'content-type': 'application/json'},
+    );
+  }
+}
+
+/// History client whose served transcript can grow: flipping
+/// [includeCompletedTurn] models the detached turn's rows landing
+/// server-side so a pending reattach resync can complete.
+class _SteerChatHttpClient extends http.BaseClient {
+  bool includeCompletedTurn = false;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    if (request.method == 'GET' && request.url.path.endsWith('/messages')) {
+      final rows = <Object>[
+        if (includeCompletedTurn) ...[
+          {'id': 1, 'role': 'user', 'content': 'first prompt'},
+          {'id': 2, 'role': 'assistant', 'content': 'done'},
+        ],
+      ];
+      return http.StreamedResponse(
+        Stream.value(utf8.encode(jsonEncode({'data': rows}))),
         200,
         headers: {'content-type': 'application/json'},
       );

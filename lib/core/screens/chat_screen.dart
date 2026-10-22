@@ -3226,7 +3226,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               _messages.last['role'] == 'user') {
             _messages.removeLast();
           }
-          _restoreComposerAfterRejectedSend(text);
+          // A drain send (promptSubmitted + flag) must not overwrite a
+          // newer draft the user typed while its turn streamed: append
+          // the failed note behind it instead (mirrors
+          // [_consumeSteeredText]'s respect for newer typing).
+          _restoreComposerAfterRejectedSend(
+            text,
+            appendToNewerDraft: promptSubmitted && _drainRestoreText != null,
+          );
           _attachmentDrafts
             ..clear()
             ..addAll(attachments);
@@ -4467,6 +4474,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void _maybeDrainPendingSteer() {
     if (_pendingSteers.isEmpty) return;
     if (!mounted || _streaming || _sending || _steerDrainInFlight) return;
+    // Mirror _sendMessage's no-op guards: firing into a pending reattach
+    // resync or a blocked transcript would no-op the send, requeue the
+    // notes, and leave composer residue the next drain appends a copy of.
     if (_voiceComposer.listening) {
       // Dictation owns the composer right now: auto-sending would silently
       // no-op in _sendMessage's listening guard, and appending would let the
@@ -4512,7 +4522,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       // user hit send): hold the notes for that turn's settle instead of
       // firing into a live turn, where _sendMessage would no-op and the
       // words would be lost.
-      if (_streaming || _sending || _voiceComposer.listening) return;
+      if (_streaming ||
+          _sending ||
+          _voiceComposer.listening ||
+          _pendingReattachResync ||
+          _transcriptLoadBlocksComposer) {
+        return;
+      }
       final joined = _pendingSteers.map((s) => s.text).join('\n\n');
       final sentEntries = List<_PendingSteer>.from(_pendingSteers);
       final draft = _textController.text;
@@ -4708,29 +4724,56 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  /// Preparation finished: hand off the prompt without touching newer typing.
-  void _commitComposerForSend() {
-    _pendingComposerPrompt = null;
-    unawaited(
-      ComposerDraftStore.save(
-        connectionId: widget.connection.id,
-        sessionId: widget.session.id,
-        text: _textController.text,
-      ),
-    );
-  }
-
-  /// Restore only the send's untouched draft. A newer edit (including typing
-  /// and then deleting) belongs to the user, not this failed submission.
-  void _restoreComposerAfterRejectedSend(String text) {
+  /// A definite send rejection: put the text back into the composer and the
+  /// store so the user does not lose what they typed.
+  ///
+  /// With [appendToNewerDraft] (a drain send whose turn was accepted and
+  /// then failed), the composer may meanwhile hold a newer draft typed
+  /// while the turn streamed. Overwrite only when it is empty or still
+  /// holds the send residue; otherwise append behind the newer words so
+  /// the failed note returns without destroying what the user typed.
+  /// Without it, restore only the send's untouched draft: a newer edit
+  /// (including typing and then deleting) belongs to the user, not this
+  /// failed submission.
+  void _restoreComposerAfterRejectedSend(
+    String text, {
+    bool appendToNewerDraft = false,
+  }) {
     _pendingComposerPrompt = null;
     if (text.trim().isEmpty) return;
-    if (_composerRevision == _clearedComposerRevision) {
+    var restored = text;
+    if (appendToNewerDraft) {
+      final current = _textController.text;
+      final trimmed = current.trim();
+      if (trimmed.isNotEmpty && trimmed != text.trim()) {
+        restored = '$current\n\n$text';
+      }
+      _textController.value = TextEditingValue(
+        text: restored,
+        selection: TextSelection.collapsed(offset: restored.length),
+      );
+    } else if (_composerRevision == _clearedComposerRevision) {
       _textController.value = TextEditingValue(
         text: text,
         selection: TextSelection.collapsed(offset: text.length),
       );
+    } else {
+      // A newer edit stands: leave the composer alone and let the store
+      // mirror it.
+      restored = _textController.text;
     }
+    unawaited(
+      ComposerDraftStore.save(
+        connectionId: widget.connection.id,
+        sessionId: widget.session.id,
+        text: restored,
+      ),
+    );
+  }
+
+  /// Preparation finished: hand off the prompt without touching newer typing.
+  void _commitComposerForSend() {
+    _pendingComposerPrompt = null;
     unawaited(
       ComposerDraftStore.save(
         connectionId: widget.connection.id,
