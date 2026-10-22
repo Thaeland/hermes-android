@@ -617,6 +617,105 @@ void main() {
     );
 
     testWidgets(
+      'a steer rejected before an errored turn settles drains on the error settle',
+      (tester) async {
+        final submitGate = Completer<void>();
+        final submitted = <String>[];
+        await _pumpChat(
+          tester,
+          remoteSubmit: ({
+            required sessionId,
+            required text,
+            required onEvent,
+            required onSent,
+          }) async {
+            submitted.add(text);
+            onSent();
+            if (submitted.length == 1) {
+              await submitGate.future;
+              // The turn dies with an error instead of finishing cleanly.
+              throw Exception('turn failed');
+            }
+          },
+          steer: (sessionId, text) async => SteerOutcome.rejected,
+        );
+
+        await tester.enterText(find.byType(TextField), 'first prompt');
+        await tester.tap(find.byTooltip('Send'));
+        await tester.pump();
+        await tester.pump();
+
+        await tester.enterText(find.byType(TextField), 'held note');
+        await tester.tap(find.byKey(const Key('chat-steer-button')));
+        await tester.pump();
+
+        // The turn ends in error: that is still a settle — the queued
+        // note must drain now, not wait for an unrelated trigger.
+        submitGate.complete();
+        await tester.pump();
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+
+        expect(submitted, ['first prompt', 'held note']);
+      },
+    );
+
+    testWidgets(
+      'a drain send failing before submission appends the note behind newer typing',
+      (tester) async {
+        final submitGate = Completer<void>();
+        final drainGate = Completer<void>();
+        final submitted = <String>[];
+        await _pumpChat(
+          tester,
+          remoteSubmit: ({
+            required sessionId,
+            required text,
+            required onEvent,
+            required onSent,
+          }) async {
+            submitted.add(text);
+            if (submitted.length == 1) {
+              onSent();
+              await submitGate.future;
+              return;
+            }
+            // Drain send: dies before the prompt is ever accepted.
+            await drainGate.future;
+            throw Exception('setup failed before submit');
+          },
+          steer: (sessionId, text) async => SteerOutcome.rejected,
+        );
+
+        await tester.enterText(find.byType(TextField), 'first prompt');
+        await tester.tap(find.byTooltip('Send'));
+        await tester.pump();
+        await tester.pump();
+
+        await tester.enterText(find.byType(TextField), 'held note');
+        await tester.tap(find.byKey(const Key('chat-steer-button')));
+        await tester.pump();
+
+        // Settle fires the drain; the drain send is in flight (composer
+        // cleared) when the user starts a fresh draft.
+        submitGate.complete();
+        await tester.pump();
+        await tester.pump();
+        await tester.enterText(find.byType(TextField), 'fresh typing');
+        drainGate.complete();
+        await tester.pump();
+        await tester.pump();
+        await tester.pump(const Duration(seconds: 1));
+
+        // The failed note must return behind the newer words — the drain
+        // never requeues, so anything else silently loses the user's note.
+        expect(submitted, ['first prompt', 'held note']);
+        final composer = tester.widget<TextField>(find.byType(TextField));
+        expect(composer.controller!.text, 'fresh typing\n\nheld note');
+      },
+    );
+
+    testWidgets(
       'a failed drain send does not requeue and duplicate on the next drain',
       (tester) async {
         final submitGate = Completer<void>();
@@ -804,18 +903,11 @@ void main() {
         expect(idle.controller!.text, isEmpty);
 
         // Reconnect: the resync lands (the detached turn's rows are now
-        // server-side), then a mic cycle drains the held note exactly once.
+        // server-side). The drain must re-fire on its own once the hold
+        // clears — no user interaction (mic cycle) may be required.
         history.includeCompletedTurn = true;
         hook.handler?.call(DesktopConnectionState.connected);
         await tester.pumpAndSettle();
-        ScaffoldMessenger.of(tester.element(find.byType(Scaffold).first))
-            .clearSnackBars();
-        await tester.pumpAndSettle();
-        await tester.tap(find.byKey(const Key('chat-mic-button')));
-        await tester.pump();
-        await tester.tap(find.bySemanticsLabel('Stop voice input'));
-        await tester.pump();
-        await tester.pump();
         await tester.pump(const Duration(seconds: 1));
 
         expect(submitted, ['first prompt', 'held note']);

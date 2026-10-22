@@ -1750,6 +1750,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _reattachLegacyTerminalWatermark = 0;
     _reattachRetryAttempt = 0;
     _reattachGeneration += 1;
+    // The resync was the only hold on a queued steer drain; re-fire now
+    // so the note does not sit until an unrelated trigger (mic cycle,
+    // next send) frees it.
+    _maybeDrainPendingSteer();
   }
 
   bool get _canRunReattachResync =>
@@ -3226,13 +3230,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               _messages.last['role'] == 'user') {
             _messages.removeLast();
           }
-          // A drain send (promptSubmitted + flag) must not overwrite a
-          // newer draft the user typed while its turn streamed: append
-          // the failed note behind it instead (mirrors
-          // [_consumeSteeredText]'s respect for newer typing).
+          // A drain send must not overwrite a newer draft the user typed
+          // while its turn streamed — or while its own setup was in
+          // flight: append the failed note behind it instead (mirrors
+          // [_consumeSteeredText]'s respect for newer typing). The drain
+          // never requeues, so the note returns regardless of whether
+          // the prompt was ever accepted.
           _restoreComposerAfterRejectedSend(
             text,
-            appendToNewerDraft: promptSubmitted && _drainRestoreText != null,
+            appendToNewerDraft: _drainRestoreText != null,
           );
           _attachmentDrafts
             ..clear()
@@ -3240,6 +3246,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         });
       }
       _handleSendError(error);
+      // An errored turn is still a settle: a steer rejected earlier will
+      // never be drained by a success-path settle, so drain here (no-op
+      // when nothing is pending).
+      _maybeDrainPendingSteer();
       unawaited(_refreshDeferredHistoryIfIdle());
       unawaited(_resyncLegacyHistoryAfterResume());
     } finally {
@@ -3335,7 +3345,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           ..status = AttachmentDraftStatus.ready
           ..error = null;
       }
-      _restoreComposerAfterRejectedSend(text);
+      _restoreComposerAfterRejectedSend(
+        text,
+        appendToNewerDraft: _drainRestoreText != null,
+      );
       _handleSendError(error);
       unawaited(_refreshDeferredHistoryIfIdle());
       return;
@@ -4473,7 +4486,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// composer instead of auto-sent, so nothing is overwritten or lost.
   void _maybeDrainPendingSteer() {
     if (_pendingSteers.isEmpty) return;
-    if (!mounted || _streaming || _sending || _steerDrainInFlight) return;
+    if (!mounted ||
+        _streaming ||
+        _sending ||
+        _steerDrainInFlight ||
+        // A stop is mid-flight: its interrupt may still land on whatever
+        // turn the drain starts, killing the drained note's turn after
+        // the note was submitted. Let the stop settle and its own
+        // post-stop drain take the queue.
+        _stopResponseInFlight) {
+      return;
+    }
     // Mirror _sendMessage's no-op guards: firing into a pending reattach
     // resync or a blocked transcript would no-op the send, requeue the
     // notes, and leave composer residue the next drain appends a copy of.
@@ -4490,6 +4513,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _drainPendingSteers() async {
     if (_steerDrainInFlight) return;
     _steerDrainInFlight = true;
+    // Only a drain that reached the consume/send branch may re-check on
+    // exit: a drain held by an internal guard (reattach resync, blocked
+    // transcript, voice) must NOT re-fire from its own finally — those
+    // holds are not tested by _maybeDrainPendingSteer, so a blind
+    // re-check would re-enter the hold synchronously forever. Each hold
+    // has its own release trigger that re-drains (resync clear, mic
+    // stop, settle).
+    var reachedWork = false;
     try {
       // Reconcile every ack-uncertain steer BEFORE resending anything: a
       // lost acknowledgement may hide a steer the gateway already applied,
@@ -4532,6 +4563,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       final joined = _pendingSteers.map((s) => s.text).join('\n\n');
       final sentEntries = List<_PendingSteer>.from(_pendingSteers);
       final draft = _textController.text;
+      reachedWork = true;
       if (draft.trim().isEmpty) {
         _textController.text = joined;
         // Every real submit path bumps _responseGeneration; the
@@ -4558,10 +4590,21 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         }
       } else {
         _pendingSteers.removeWhere(sentEntries.contains);
-        setState(() => _textController.text = '$draft\n\n$joined');
+        // The composer may already hold the note itself (a pre-submit
+        // failure restored it while the entry requeued): appending would
+        // duplicate. Exact residue means the note is already the user's
+        // to retry — consume the entries without touching the composer.
+        if (draft.trim() != joined.trim()) {
+          setState(() => _textController.text = '$draft\n\n$joined');
+        }
       }
     } finally {
       _steerDrainInFlight = false;
+      // A steer rejected while this drain was in flight was masked by the
+      // in-flight flag at its settle; re-check now that the flag is down.
+      // Only after real work: each re-check either consumes entries or
+      // holds without re-checking, so this cannot loop.
+      if (reachedWork) _maybeDrainPendingSteer();
     }
   }
 
