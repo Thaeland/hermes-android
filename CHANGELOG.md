@@ -4,6 +4,24 @@ All notable changes since v1.0.7 are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The [README](README.md)
 shows only the three latest releases.
 
+## [2.1.30] - 2026-10-22
+
+### Fixed
+
+- The keyboard's Enter/Return key inserts a new line. Send remains available
+  through the on-screen button rather than submitting when adding a paragraph.
+- The message composer remains editable during setup, attachment uploads,
+  replies and reconnect recovery. Only the submitted draft is cleared; later
+  setup and reply callbacks cannot erase a follow-up being typed.
+- Failed submissions restore the original prompt only when the cleared draft
+  has not been edited, including when newer typing was deliberately deleted.
+  Send admission is reserved before asynchronous setup to prevent duplicate
+  submissions from rapid taps. Existing send/recovery guards remain in place.
+
+### Thanks
+
+- Hermes Agent assisted with implementation, review and regression tests.
+
 ## [2.1.29] - 2026-10-22
 
 ### Added
