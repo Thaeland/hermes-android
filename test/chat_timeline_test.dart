@@ -216,8 +216,59 @@ void main() {
     },
   );
 
+  for (final separatedByTool in [false, true]) {
+    test(
+      'append reassignment preserves reasoning run IDs and receipt boundaries (tool: $separatedByTool)',
+      () {
+        final assistant = <String, dynamic>{
+          'role': 'assistant',
+          'content': 'A',
+        };
+        final pending = <String, dynamic>{'role': 'assistant', 'content': ''};
+        var state = const ChatTimeline()
+            .appendText(assistant, 'A')
+            .reasoning(assistant, reasoning('R1'));
+        if (separatedByTool) state = state.tool(pending, tool('t1'));
+        state = state.reasoning(pending, reasoning('R2'));
+        final next = state.reassignScope(pending, assistant);
+        final expected = [
+          'A',
+          'reasoning:R1',
+          if (separatedByTool) 't1',
+          'reasoning:R2',
+        ];
+        expect(
+          labels(buildChatDisplayItems(messages: [assistant], timeline: next)),
+          expected,
+        );
+        expect(next.runs.map((run) => run.id), state.runs.map((run) => run.id));
+        expect(
+          next.runs.map((run) => run.text),
+          state.runs.map((run) => run.text),
+        );
+        expect(next.forScope(pending), isEmpty);
+        expect(next.forScope(assistant), next.runs);
+        expect(state.forScope(pending).last.text, 'R2');
+        final confirmed = next.reasoning(
+          assistant,
+          reasoning('R1R2', replace: true),
+        );
+        expect(
+          confirmed.runs.map((run) => run.id),
+          next.runs.map((run) => run.id),
+        );
+        expect(
+          labels(
+            buildChatDisplayItems(messages: [assistant], timeline: confirmed),
+          ),
+          expected,
+        );
+      },
+    );
+  }
+
   test(
-    'preview reassignment combines late reasoning and retains tool positions',
+    'replacement reassignment replaces late reasoning at the existing anchor',
     () {
       final a = Object();
       final pending = Object();

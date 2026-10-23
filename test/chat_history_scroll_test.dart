@@ -125,6 +125,99 @@ void main() {
   });
 
   group('ChatScreen integration', () {
+    for (final completionFlag in ['response_previewed', 'response_reused']) {
+      testWidgets(
+        '$completionFlag completion preserves reasoning receipt order and card identity',
+        (tester) async {
+          tester.view.devicePixelRatio = 1;
+          tester.view.physicalSize = const Size(1000, 2400);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          addTearDown(tester.view.resetPhysicalSize);
+          final remote = _ControlledRemotePrompt();
+          await _pumpChat(
+            tester,
+            client: _ControlledChatHttpClient(const []),
+            connectionId: 'reasoning-order-$completionFlag',
+            sessionId: 'reasoning-order-$completionFlag',
+            remoteSubmit: remote.submit,
+          );
+          await tester.enterText(find.byType(TextField), 'Question');
+          await tester.tap(find.byTooltip('Send'));
+          await tester.pump();
+          await remote.started.future;
+          remote.emit('message.delta', {'text': 'A'});
+          remote.emit('reasoning.delta', {'text': 'R1'});
+          remote.emit('message.interim', {
+            'text': 'A',
+            'already_streamed': true,
+          });
+          remote.emit('tool.start', {'tool_id': 't1', 'name': 'terminal'});
+          remote.emit('reasoning.delta', {'text': 'R2', 'verbose': true});
+          await tester.pump(const Duration(milliseconds: 300));
+
+          List<String> rendered() => tester
+              .widgetList(
+                find.byWidgetPredicate(
+                  (widget) =>
+                      widget is MessageBubble ||
+                      widget is GatewayReasoningCard ||
+                      widget is GatewayActivityCard,
+                ),
+              )
+              .map(
+                (widget) => switch (widget) {
+                  MessageBubble bubble => bubble.content,
+                  GatewayReasoningCard card => 'reasoning:${card.text}',
+                  GatewayActivityCard card =>
+                    card.activities
+                        .map((activity) => activity.toolId)
+                        .join(','),
+                  _ => throw StateError('unexpected item'),
+                },
+              )
+              .toList();
+          final before = rendered();
+          expect(before, [
+            'Question',
+            'A',
+            'reasoning:R1',
+            't1',
+            'reasoning:R2',
+          ]);
+          final cards = find.byType(GatewayReasoningCard);
+          final keys = tester
+              .widgetList(cards)
+              .map((widget) => widget.key)
+              .toList();
+          final states = tester.stateList(cards).toList();
+          // Pin the two cards in opposite states before their scopes merge.
+          await tester.tap(find.text('Reasoning').first);
+          await tester.pump(const Duration(milliseconds: 300));
+          await tester.tap(find.text('Reasoning').last);
+          await tester.pump(const Duration(milliseconds: 300));
+          await tester.pump(const Duration(milliseconds: 300));
+          expect(find.text('R1'), findsOneWidget);
+          expect(find.text('R2'), findsNothing);
+
+          remote.emit('message.complete', {'text': 'A', completionFlag: true});
+          remote.finish();
+          await tester.pump(const Duration(milliseconds: 300));
+          expect(rendered(), before);
+          expect(tester.widgetList(cards).map((widget) => widget.key), keys);
+          expect(tester.stateList(cards), states);
+          expect(
+            tester
+                .widgetList<GatewayReasoningCard>(cards)
+                .map((card) => card.pinnedExpansion),
+            [true, false],
+          );
+          expect(find.text('R1'), findsOneWidget);
+          expect(find.text('R2'), findsNothing);
+          await tester.pumpWidget(const SizedBox.shrink());
+        },
+      );
+    }
+
     for (final newline in ['\n', '\r\n']) {
       testWidgets(
         'fragmented SSE ${newline.length} byte newline preserves receipt order and durable hydrate',
@@ -1044,21 +1137,28 @@ void main() {
           });
           remote.finish();
           await tester.pumpAndSettle();
-          final completedReasoning = event == 'reasoning.available'
-              ? 'Reasoning for $event'
-              : 'Partial reasoning. Reasoning for $event';
+          final completedCards = tester
+              .widgetList<GatewayReasoningCard>(
+                find.byType(GatewayReasoningCard),
+              )
+              .toList();
           expect(
-            tester
-                .widget<GatewayReasoningCard>(find.byType(GatewayReasoningCard))
-                .initiallyExpanded,
-            lateVerbose,
+            completedCards.map((card) => card.text),
+            event == 'reasoning.available'
+                ? ['Reasoning for $event']
+                : ['Partial reasoning. ', 'Reasoning for $event'],
           );
-          if (!lateVerbose) {
-            await tester.tap(find.text('Reasoning'));
-            await tester.pumpAndSettle();
-          }
-          expect(find.text(completedReasoning), findsOneWidget);
-          expect(find.text('Partial reasoning. '), findsNothing);
+          expect(
+            completedCards.map((card) => card.initiallyExpanded),
+            event == 'reasoning.available' ? [false] : [false, true],
+          );
+          await tester.tap(find.text('Reasoning').first);
+          await tester.pumpAndSettle();
+          expect(find.text('Reasoning for $event'), findsOneWidget);
+          expect(
+            find.text('Partial reasoning. '),
+            event == 'reasoning.available' ? findsNothing : findsOneWidget,
+          );
           expect(
             find.text('Answer for $event', findRichText: true),
             findsOneWidget,
