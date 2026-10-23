@@ -242,6 +242,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
     final created = SessionSearchClient(
       baseUrl: dashboard.baseUrl,
       headers: dashboard.authHeaders,
+      clientCertificate: widget.connection.clientCertificate,
       httpClient: widget.testHttpClient,
     );
     _searchDashboard = dashboard;
@@ -306,6 +307,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
       baseUrl: widget.connection.baseUrl,
       pathPrefix: widget.connection.gatewayPrefix ?? '',
       apiKey: widget.connection.apiKey,
+      clientCertificate: widget.connection.clientCertificate,
       httpClient: widget.testHttpClient,
     );
     _aiRewriter = created;

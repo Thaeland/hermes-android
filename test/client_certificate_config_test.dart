@@ -11,20 +11,35 @@ void main() {
   );
 
   group('ClientCertificateConfig', () {
-    test('round-trips through JSON', () {
-      final restored = ClientCertificateConfig.fromJson(config.toJson());
-
-      expect(restored, config);
-      expect(restored.hashCode, config.hashCode);
-    });
-
-    test('omits (and restores) a null key password', () {
-      final withoutPassword = config.copyWith(clearPrivateKeyPassword: true);
-      final json = withoutPassword.toJson();
+    test('never serializes the private-key password', () {
+      final json = config.toJson();
 
       expect(json.containsKey('private_key_password'), isFalse);
-      expect(ClientCertificateConfig.fromJson(json), withoutPassword);
-      expect(withoutPassword.privateKeyPassword, isNull);
+      expect(json.values, isNot(contains('secret')));
+      expect(json['label'], 'Hermes proxy');
+      expect(json['certificate_pem_path'], config.certificatePemPath);
+      expect(json['private_key_pem_path'], config.privateKeyPemPath);
+    });
+
+    test('fromJson still accepts a legacy plaintext password for migration', () {
+      final restored = ClientCertificateConfig.fromJson({
+        ...config.toJson(),
+        'private_key_password': 'legacy-secret',
+      });
+
+      // Readable so ConnectionManager can move it into the secure store; it is
+      // never written back out by toJson.
+      expect(restored.privateKeyPassword, 'legacy-secret');
+      expect(restored.toJson().containsKey('private_key_password'), isFalse);
+    });
+
+    test('fromJson treats a blank legacy password as absent', () {
+      final restored = ClientCertificateConfig.fromJson({
+        ...config.toJson(),
+        'private_key_password': '',
+      });
+
+      expect(restored.privateKeyPassword, isNull);
     });
 
     test('copyWith replaces only the requested fields', () {
@@ -34,6 +49,13 @@ void main() {
       expect(updated.certificatePemPath, config.certificatePemPath);
       expect(updated.privateKeyPemPath, config.privateKeyPemPath);
       expect(updated.privateKeyPassword, config.privateKeyPassword);
+    });
+
+    test('copyWith can clear the private-key password', () {
+      final cleared = config.copyWith(clearPrivateKeyPassword: true);
+
+      expect(cleared.privateKeyPassword, isNull);
+      expect(cleared.certificatePemPath, config.certificatePemPath);
     });
 
     test('equality includes every field', () {
@@ -55,7 +77,8 @@ void main() {
     });
   });
 
-  test('SavedConnection persists the client certificate in its map', () {
+  test('SavedConnection persists the certificate metadata without a password',
+      () {
     final connection = SavedConnection(
       id: 'conn-1',
       label: 'mTLS proxy',
@@ -66,13 +89,16 @@ void main() {
       clientCertificate: config,
     );
 
-    final restored = SavedConnection.fromMap(connection.toMap());
+    final map = connection.toMap();
+    final restored = SavedConnection.fromMap(map);
 
-    expect(restored.clientCertificate, config);
+    expect(restored.clientCertificate, config.copyWith(clearPrivateKeyPassword: true));
+    expect(restored.clientCertificate!.privateKeyPassword, isNull);
     expect(
-      connection.toMap()['client_certificate'],
-      isA<Map<String, dynamic>>(),
+      map['client_certificate'] as Map<String, dynamic>,
+      isNot(contains('private_key_password')),
     );
+    expect(connection.toMap()['client_certificate'], isA<Map<String, dynamic>>());
   });
 
   test('SavedConnection.copyWith can clear the client certificate', () {

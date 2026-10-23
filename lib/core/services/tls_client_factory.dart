@@ -18,14 +18,26 @@ HttpClient _defaultHttpClientBuilder(SecurityContext context) =>
 /// still rejected. A configured client certificate must load successfully;
 /// failures throw rather than retrying without it.
 class TlsClientFactory {
-  const TlsClientFactory({this.httpClientBuilder = _defaultHttpClientBuilder});
+  const TlsClientFactory({
+    this.httpClientBuilder = _defaultHttpClientBuilder,
+    this.trustedCertificatePaths = const <String>[],
+  });
 
   final HttpClientBuilder httpClientBuilder;
+
+  /// Extra PEM trust anchors (private CA certificates) to trust in addition to
+  /// the platform roots. Empty by default: production server trust stays at
+  /// the platform default.
+  final List<String> trustedCertificatePaths;
 
   SecurityContext? securityContextFor(ClientCertificateConfig? config) {
     if (config == null) return null;
     try {
-      return SecurityContext(withTrustedRoots: true)
+      final context = SecurityContext(withTrustedRoots: true);
+      for (final path in trustedCertificatePaths) {
+        context.setTrustedCertificates(path);
+      }
+      return context
         ..useCertificateChain(config.certificatePemPath)
         ..usePrivateKey(
           config.privateKeyPemPath,

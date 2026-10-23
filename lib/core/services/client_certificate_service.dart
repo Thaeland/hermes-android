@@ -19,12 +19,32 @@ class ClientCertificateImportException implements Exception {
   String toString() => message;
 }
 
+/// Removes certificate/key files that no saved connection references.
+///
+/// Kept as a narrow interface so [ConnectionManager] can garbage-collect
+/// identities after a successful save without depending on `path_provider` in
+/// unit tests.
+abstract interface class ClientCertificateFileStore {
+  /// Deletes every stored identity whose directory is not in
+  /// [referencedDirectoryPaths]. Best-effort: unreferenced staged imports are
+  /// also cleared.
+  Future<void> deleteUnreferenced(Iterable<String> referencedDirectoryPaths);
+}
+
 /// Imports PKCS#12 or PEM client certificates into app-private storage.
 ///
 /// The certificate and key are written as separate PEM files because
 /// `SecurityContext` loads them separately. Keys never leave the app sandbox.
-class ClientCertificateService {
+///
+/// Imports are **staged**: files are written under `client-certs/.staging/`
+/// and only moved into their permanent `client-certs/<id>/` directory by
+/// [commit], which the connection editor calls once the connection save has
+/// succeeded. A cancelled or failed save therefore never leaves a live
+/// private key behind; [discard] and [cleanupStaging] remove abandoned
+/// imports.
+class ClientCertificateService implements ClientCertificateFileStore {
   static const String _directoryName = 'client-certs';
+  static const String _stagingDirectoryName = '.staging';
   static const String _certificateFileName = 'certificate.pem';
   static const String _privateKeyFileName = 'private-key.pem';
 
@@ -35,6 +55,10 @@ class ClientCertificateService {
 
   /// Extracts the leaf certificate, chain, and private key from a `.p12`/
   /// `.pfx` container.
+  ///
+  /// The container password is used only to decrypt the file. The extracted
+  /// key is written unencrypted, so the password is deliberately **not**
+  /// retained: storing it would add a secret with no remaining use.
   Future<ClientCertificateConfig> importPkcs12({
     required List<int> bytes,
     required String? password,
@@ -74,7 +98,8 @@ class ClientCertificateService {
     return _writePair(
       certificatePem: certificatePem,
       privateKeyPem: parsed.privateKeyPem,
-      password: password,
+      // Pkcs12.load returns an unencrypted key, so no password is needed.
+      password: null,
       label: _resolveLabel(label, parsed.certificatePem),
     );
   }
@@ -102,9 +127,145 @@ class ClientCertificateService {
     return _writePair(
       certificatePem: certificatePem,
       privateKeyPem: privateKeyPem,
-      password: password,
+      // Only an encrypted PEM key needs (and therefore retains) a password.
+      password: _isEncryptedPrivateKey(privateKeyPem) ? password : null,
       label: _resolveLabel(label, certificatePem),
     );
+  }
+
+  /// Restores a key pair carried by an encrypted configuration backup.
+  ///
+  /// Writes straight into the permanent directory: a backup restore is a
+  /// complete, already-committed operation.
+  Future<ClientCertificateConfig> restore({
+    required String certificatePem,
+    required String privateKeyPem,
+    required String label,
+    String? password,
+  }) async {
+    return _writePair(
+      certificatePem: certificatePem,
+      privateKeyPem: privateKeyPem,
+      password: _isEncryptedPrivateKey(privateKeyPem) ? password : null,
+      label: label,
+      staged: false,
+    );
+  }
+
+  /// Reads the PEM contents referenced by [config].
+  ///
+  /// Used by the encrypted backup export. Throws [ClientCertificateImportException]
+  /// when a referenced file is missing so a backup never silently drops mTLS.
+  Future<({String certificatePem, String privateKeyPem})> readPair(
+    ClientCertificateConfig config,
+  ) async {
+    try {
+      final certificatePem = await File(
+        config.certificatePemPath,
+      ).readAsString();
+      final privateKeyPem = await File(config.privateKeyPemPath).readAsString();
+      return (
+        certificatePem: certificatePem,
+        privateKeyPem: privateKeyPem,
+      );
+    } catch (_) {
+      throw const ClientCertificateImportException(
+        'The saved client certificate files could not be read.',
+      );
+    }
+  }
+
+  /// Moves a staged import into permanent storage.
+  ///
+  /// Returns [config] unchanged when it is already permanent.
+  Future<ClientCertificateConfig> commit(ClientCertificateConfig config) async {
+    if (!await isStaged(config)) return config;
+    final directory = Directory(config.directoryPath);
+    final root = await _rootDirectory();
+    final destination = Directory(
+      '${root.path}${Platform.pathSeparator}${const Uuid().v4()}',
+    );
+    try {
+      await destination.parent.create(recursive: true);
+      await directory.rename(destination.path);
+    } catch (_) {
+      throw const ClientCertificateImportException(
+        'The client certificate could not be stored securely on this device.',
+      );
+    }
+    return ClientCertificateConfig(
+      label: config.label,
+      certificatePemPath:
+          '${destination.path}${Platform.pathSeparator}$_certificateFileName',
+      privateKeyPemPath:
+          '${destination.path}${Platform.pathSeparator}$_privateKeyFileName',
+      privateKeyPassword: config.privateKeyPassword,
+    );
+  }
+
+  /// Whether [config] still points into the staging area.
+  Future<bool> isStaged(ClientCertificateConfig config) async {
+    final staging = await _stagingRoot();
+    return _isWithin(config.directoryPath, staging.path);
+  }
+
+  /// Deletes a staged import that was never committed.
+  ///
+  /// Permanent identities are left alone: they may still be referenced by the
+  /// saved connection.
+  Future<void> discard(ClientCertificateConfig config) async {
+    if (!await isStaged(config)) return;
+    await _deleteDirectory(config.directoryPath);
+  }
+
+  /// Deletes a permanent identity. Only call once nothing references it.
+  Future<void> delete(ClientCertificateConfig config) async {
+    final root = await _rootDirectory();
+    if (!_isWithin(config.directoryPath, root.path)) return;
+    if (await isStaged(config)) return;
+    await _deleteDirectory(config.directoryPath);
+  }
+
+  /// Removes abandoned staged imports (app start, or after a failed save).
+  Future<void> cleanupStaging() async {
+    try {
+      final staging = await _stagingRoot();
+      if (!staging.existsSync()) return;
+      await for (final entity in staging.list()) {
+        if (entity is Directory) {
+          await _deleteDirectory(entity.path);
+        }
+      }
+    } catch (_) {
+      // Cleanup is best-effort; an unreadable staging directory must not stop
+      // the app from starting.
+    }
+  }
+
+  @override
+  Future<void> deleteUnreferenced(
+    Iterable<String> referencedDirectoryPaths,
+  ) async {
+    final root = await _rootDirectory();
+    if (!root.existsSync()) return;
+    final referenced = <String>{
+      for (final path in referencedDirectoryPaths)
+        _normalize(path),
+    };
+    // Staged imports are never "referenced" by a saved connection: they are
+    // leftovers from a cancelled flow.
+    await cleanupStaging();
+    final stagingPath = (await _stagingRoot()).path;
+    try {
+      await for (final entity in root.list()) {
+        if (entity is! Directory) continue;
+        if (_isWithin(entity.path, stagingPath)) continue;
+        if (referenced.contains(_normalize(entity.path))) continue;
+        await _deleteDirectory(entity.path);
+      }
+    } catch (_) {
+      // Garbage collection must never fail a connection save.
+    }
   }
 
   Future<ClientCertificateConfig> _writePair({
@@ -112,8 +273,11 @@ class ClientCertificateService {
     required String privateKeyPem,
     required String? password,
     required String label,
+    bool staged = true,
   }) async {
-    final directory = await _newCertificateDirectory();
+    final directory = staged
+        ? await _newStagingDirectory()
+        : await _newPermanentDirectory();
     final certificateFile = File(
       '${directory.path}${Platform.pathSeparator}$_certificateFileName',
     );
@@ -126,11 +290,7 @@ class ClientCertificateService {
     } catch (_) {
       // A partial import is unusable; remove it rather than leaving a config
       // that points at half-written PEM files.
-      try {
-        await directory.delete(recursive: true);
-      } catch (_) {
-        // The original storage failure is the actionable one.
-      }
+      await _deleteDirectory(directory.path);
       throw const ClientCertificateImportException(
         'The certificate could not be stored securely on this device.',
       );
@@ -145,15 +305,64 @@ class ClientCertificateService {
     );
   }
 
-  Future<Directory> _newCertificateDirectory() async {
+  Future<Directory> _rootDirectory() async {
     final support = await _supportDirectory();
+    return Directory(
+      '${support.path}${Platform.pathSeparator}$_directoryName',
+    );
+  }
+
+  Future<Directory> _stagingRoot() async {
+    final root = await _rootDirectory();
+    return Directory(
+      '${root.path}${Platform.pathSeparator}$_stagingDirectoryName',
+    );
+  }
+
+  Future<Directory> _newStagingDirectory() async {
+    final staging = await _stagingRoot();
     final directory = Directory(
-      '${support.path}${Platform.pathSeparator}$_directoryName'
-      '${Platform.pathSeparator}${const Uuid().v4()}',
+      '${staging.path}${Platform.pathSeparator}${const Uuid().v4()}',
     );
     await directory.create(recursive: true);
     return directory;
   }
+
+  Future<Directory> _newPermanentDirectory() async {
+    final root = await _rootDirectory();
+    final directory = Directory(
+      '${root.path}${Platform.pathSeparator}${const Uuid().v4()}',
+    );
+    await directory.create(recursive: true);
+    return directory;
+  }
+
+  Future<void> _deleteDirectory(String path) async {
+    try {
+      final directory = Directory(path);
+      if (directory.existsSync()) await directory.delete(recursive: true);
+    } catch (_) {
+      // A leftover directory is harmless; the original failure is actionable.
+    }
+  }
+
+  static bool _isWithin(String candidate, String parent) {
+    final normalizedCandidate = _normalize(candidate);
+    final normalizedParent = _normalize(parent);
+    return normalizedCandidate == normalizedParent ||
+        normalizedCandidate.startsWith('$normalizedParent${Platform.pathSeparator}');
+  }
+
+  static String _normalize(String path) {
+    var value = path;
+    while (value.length > 1 && value.endsWith(Platform.pathSeparator)) {
+      value = value.substring(0, value.length - 1);
+    }
+    return value;
+  }
+
+  static bool _isEncryptedPrivateKey(String privateKeyPem) =>
+      privateKeyPem.contains('ENCRYPTED PRIVATE KEY');
 
   /// Uses the caller-supplied label (usually the file name), falling back to
   /// the certificate CN when that label is blank.

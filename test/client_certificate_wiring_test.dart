@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hermes_android/core/models/client_certificate.dart';
+import 'package:hermes_android/core/services/client_certificate_service.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
 import 'package:hermes_android/core/services/tls_client_factory.dart';
 import 'package:hermes_android/core/services/ws_client.dart';
@@ -243,4 +244,196 @@ void main() {
     );
     expect(manager.getConnections().single.clientCertificate, isNull);
   });
+
+  test('ConnectionManager keeps the client-key password in secure storage, '
+      'never in preferences', () async {
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final prefs = await SharedPreferences.getInstance();
+    final credentials = _MemoryCredentialStore();
+    final manager = await ConnectionManager.create(
+      prefs,
+      credentialStore: credentials,
+    );
+    const withPassword = ClientCertificateConfig(
+      label: 'encrypted',
+      certificatePemPath: 'test/fixtures/client-cert.pem',
+      privateKeyPemPath: 'test/fixtures/client-key-encrypted.pem',
+      privateKeyPassword: 'key-password',
+    );
+
+    await manager.saveConnection(
+      'mTLS',
+      'https://hermes.example.com',
+      443,
+      'key',
+      clientCertificate: withPassword,
+    );
+
+    expect(manager.getConnections().single.clientCertificate!.privateKeyPassword,
+        'key-password');
+    expect(credentials.values.values.join(), contains('key-password'));
+    final storedJson = prefs.getStringList('saved_connections')!.join();
+    expect(storedJson, isNot(contains('key-password')));
+    expect(storedJson, isNot(contains('private_key_password')));
+  });
+
+  test('ConnectionManager migrates a legacy plaintext key password out of '
+      'preferences', () async {
+    const id = 'legacy-mtls';
+    SharedPreferences.setMockInitialValues(<String, Object>{
+      'saved_connections': <String>[
+        jsonEncode(<String, Object?>{
+          'id': id,
+          'label': 'Legacy mTLS',
+          'host': 'hermes.example.com',
+          'port': 443,
+          'use_https': true,
+          'client_certificate': <String, Object?>{
+            'label': 'legacy',
+            'certificate_pem_path': 'test/fixtures/client-cert.pem',
+            'private_key_pem_path': 'test/fixtures/client-key.pem',
+            'private_key_password': 'legacy-password',
+          },
+        }),
+      ],
+    });
+    final prefs = await SharedPreferences.getInstance();
+    final credentials = _MemoryCredentialStore();
+
+    final manager = await ConnectionManager.create(
+      prefs,
+      credentialStore: credentials,
+    );
+
+    expect(manager.getConnections().single.clientCertificate!.privateKeyPassword,
+        'legacy-password');
+    expect(credentials.values.values.join(), contains('legacy-password'));
+    final storedJson = prefs.getStringList('saved_connections')!.join();
+    expect(storedJson, isNot(contains('legacy-password')));
+    expect(storedJson, isNot(contains('private_key_password')));
+  });
+
+  test('deleting a connection removes its now-unreferenced certificate files',
+      () async {
+    final support = await Directory.systemTemp.createTemp(
+      'hermes-cert-gc-test',
+    );
+    addTearDown(() async {
+      if (support.existsSync()) await support.delete(recursive: true);
+    });
+    final certificates = ClientCertificateService(
+      supportDirectory: () async => support,
+    );
+    final committed = await certificates.commit(
+      await certificates.importPemPair(
+        certificateBytes: await File(
+          'test/fixtures/client-cert.pem',
+        ).readAsBytes(),
+        privateKeyBytes: await File(
+          'test/fixtures/client-key.pem',
+        ).readAsBytes(),
+        label: 'gc',
+      ),
+    );
+
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final prefs = await SharedPreferences.getInstance();
+    final manager = await ConnectionManager.create(
+      prefs,
+      credentialStore: _MemoryCredentialStore(),
+      certificateFiles: certificates,
+    );
+    await manager.saveConnection(
+      'mTLS',
+      'https://hermes.example.com',
+      443,
+      'key',
+      clientCertificate: committed,
+    );
+    expect(File(committed.certificatePemPath).existsSync(), isTrue);
+
+    await manager.deleteConnection(manager.getConnections().single.id);
+
+    expect(File(committed.certificatePemPath).existsSync(), isFalse);
+    expect(File(committed.privateKeyPemPath).existsSync(), isFalse);
+  });
+
+  test('a failed save preserves the still-referenced certificate files',
+      () async {
+    final support = await Directory.systemTemp.createTemp(
+      'hermes-cert-keep-test',
+    );
+    addTearDown(() async {
+      if (support.existsSync()) await support.delete(recursive: true);
+    });
+    final certificates = ClientCertificateService(
+      supportDirectory: () async => support,
+    );
+    final first = await certificates.commit(
+      await certificates.importPemPair(
+        certificateBytes: await File(
+          'test/fixtures/client-cert.pem',
+        ).readAsBytes(),
+        privateKeyBytes: await File(
+          'test/fixtures/client-key.pem',
+        ).readAsBytes(),
+        label: 'first',
+      ),
+    );
+    final second = await certificates.commit(
+      await certificates.importPemPair(
+        certificateBytes: await File(
+          'test/fixtures/client-cert.pem',
+        ).readAsBytes(),
+        privateKeyBytes: await File(
+          'test/fixtures/client-key.pem',
+        ).readAsBytes(),
+        label: 'second',
+      ),
+    );
+
+    SharedPreferences.setMockInitialValues(<String, Object>{});
+    final prefs = await SharedPreferences.getInstance();
+    final credentials = _FailingWriteCredentialStore();
+    final manager = await ConnectionManager.create(
+      prefs,
+      credentialStore: credentials,
+      certificateFiles: certificates,
+    );
+    await manager.saveConnection(
+      'mTLS',
+      'https://hermes.example.com',
+      443,
+      'key',
+      clientCertificate: first,
+    );
+
+    credentials.failWrites = true;
+    await expectLater(
+      manager.updateConnection(
+        manager.getConnections().single.id,
+        'mTLS',
+        'https://hermes.example.com',
+        443,
+        'key',
+        clientCertificate: second,
+      ),
+      throwsA(isA<CredentialStorageException>()),
+    );
+
+    // The old identity is still referenced by the unchanged connection.
+    expect(File(first.certificatePemPath).existsSync(), isTrue);
+    expect(File(first.privateKeyPemPath).existsSync(), isTrue);
+    expect(manager.getConnections().single.clientCertificate, first);
+  });
+}
+
+class _FailingWriteCredentialStore extends _MemoryCredentialStore {
+  bool failWrites = false;
+
+  @override
+  Future<void> write(String key, String value) async {
+    if (failWrites) throw StateError('secure storage unavailable');
+    await super.write(key, value);
+  }
 }

@@ -1,8 +1,15 @@
+import 'dart:io';
+
 /// A client certificate/key pair used for HTTP mutual TLS.
 ///
 /// The paths point into app-private storage. Key material itself is never
-/// copied into this model or into preferences; only the on-disk paths and the
-/// optional key password are stored here.
+/// copied into this model or into preferences; only the on-disk paths are
+/// stored there.
+///
+/// [privateKeyPassword] is intentionally **not** serialized by [toJson]: it is
+/// a runtime-only value that [ConnectionManager] keeps in the platform secure
+/// store. [fromJson] still accepts a legacy `private_key_password` field so an
+/// existing install can migrate it out of plain preferences.
 class ClientCertificateConfig {
   /// Human-readable name shown in the connection editor (usually the imported
   /// file name or the certificate's subject CN).
@@ -16,6 +23,8 @@ class ClientCertificateConfig {
   final String privateKeyPemPath;
 
   /// Password protecting the PEM private key, when it is encrypted.
+  ///
+  /// Runtime-only: persisted in [CredentialStore], never in preferences.
   final String? privateKeyPassword;
 
   const ClientCertificateConfig({
@@ -24,6 +33,9 @@ class ClientCertificateConfig {
     required this.privateKeyPemPath,
     this.privateKeyPassword,
   });
+
+  /// Directory holding this identity's PEM files.
+  String get directoryPath => File(certificatePemPath).parent.path;
 
   ClientCertificateConfig copyWith({
     String? label,
@@ -42,14 +54,17 @@ class ClientCertificateConfig {
     );
   }
 
+  /// Non-secret metadata only. The key password lives in the credential store.
   Map<String, dynamic> toJson() => <String, dynamic>{
     'label': label,
     'certificate_pem_path': certificatePemPath,
     'private_key_pem_path': privateKeyPemPath,
-    if (privateKeyPassword != null) 'private_key_password': privateKeyPassword,
   };
 
   factory ClientCertificateConfig.fromJson(Map<String, dynamic> json) {
+    // A legacy build wrote `private_key_password` here. Accept it so the
+    // migration in ConnectionManager can move it to the secure store; it is
+    // never written back by toJson.
     final password = json['private_key_password'] as String?;
     return ClientCertificateConfig(
       label: json['label'] as String,

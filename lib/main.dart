@@ -30,6 +30,8 @@ import 'package:hermes_android/core/l10n/l10n.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  // Remove any private key left behind by a cancelled connection import.
+  unawaited(ClientCertificateService().cleanupStaging());
   runApp(const StartupApp());
 }
 
@@ -1389,6 +1391,10 @@ class _AddDialogState extends State<_AddDialog> {
   bool _validating = false;
   String? _error;
 
+  /// Whether the current imported identity was committed by a successful save.
+  /// Anything still staged when the dialog closes is discarded.
+  bool _certificateSaved = false;
+
   bool get _isEditing => widget.initialConnection != null;
 
   @override
@@ -1562,10 +1568,20 @@ class _AddDialogState extends State<_AddDialog> {
     });
     try {
       final config = await import();
-      if (!mounted) return;
+      if (!mounted) {
+        // The dialog closed while parsing: never leave the imported key behind.
+        await _certificateService.discard(config);
+        return;
+      }
+      // Replacing an earlier staged pick must not leave that key on disk.
+      final previous = _clientCertificate;
+      if (previous != null) {
+        await _certificateService.discard(previous);
+      }
       setState(() {
         _clientCertificate = config;
         _useClientCertificate = true;
+        _certificateSaved = false;
         _pemCertificateBytes = null;
         _pemCertificateName = null;
         _pemPrivateKeyBytes = null;
@@ -1588,9 +1604,15 @@ class _AddDialogState extends State<_AddDialog> {
   }
 
   void _removeClientCertificate() {
+    final previous = _clientCertificate;
+    if (previous != null && !_certificateSaved) {
+      // A staged import that was never saved is simply abandoned.
+      unawaited(_certificateService.discard(previous));
+    }
     setState(() {
       _clientCertificate = null;
       _useClientCertificate = false;
+      _certificateSaved = false;
       _pemCertificateBytes = null;
       _pemCertificateName = null;
       _pemPrivateKeyBytes = null;
@@ -1711,22 +1733,42 @@ class _AddDialogState extends State<_AddDialog> {
         if (!mounted) return;
       }
 
-      await widget.onSave(
-        label,
-        host,
-        port,
-        apiKey,
-        gatewayPrefix: gatewayPrefix,
-        dashboardPrefix: dashboardPrefix,
-        dashboardProxied: _dashboardProxied,
-        desktopGatewayUrl: desktopGatewayUrl,
-        dashboardPort: dashPort,
-        dashboardUsername: dashUser.isEmpty ? null : dashUser,
-        dashboardPassword: dashPass.isEmpty ? null : dashPass,
-        gatewayProfile: gatewayProfile.isEmpty ? null : gatewayProfile,
-        clientCertificate: clientCertificate,
-        clearClientCertificate: clientCertificate == null,
-      );
+      // Move a staged import into permanent storage only now that the
+      // connection has passed validation. If the save itself fails, the new
+      // files are removed and the previously saved identity (still referenced
+      // by the unchanged connection) is preserved.
+      var savedCertificate = clientCertificate;
+      var createdCertificate = false;
+      if (savedCertificate != null &&
+          await _certificateService.isStaged(savedCertificate)) {
+        savedCertificate = await _certificateService.commit(savedCertificate);
+        createdCertificate = true;
+      }
+
+      try {
+        await widget.onSave(
+          label,
+          host,
+          port,
+          apiKey,
+          gatewayPrefix: gatewayPrefix,
+          dashboardPrefix: dashboardPrefix,
+          dashboardProxied: _dashboardProxied,
+          desktopGatewayUrl: desktopGatewayUrl,
+          dashboardPort: dashPort,
+          dashboardUsername: dashUser.isEmpty ? null : dashUser,
+          dashboardPassword: dashPass.isEmpty ? null : dashPass,
+          gatewayProfile: gatewayProfile.isEmpty ? null : gatewayProfile,
+          clientCertificate: savedCertificate,
+          clearClientCertificate: savedCertificate == null,
+        );
+      } catch (_) {
+        if (createdCertificate) {
+          await _certificateService.delete(savedCertificate!);
+        }
+        rethrow;
+      }
+      _certificateSaved = true;
       if (mounted) Navigator.pop(context);
     } on CredentialStorageException {
       if (!mounted) return;
@@ -1947,9 +1989,14 @@ class _AddDialogState extends State<_AddDialog> {
                 onChanged: _validating || _importingCertificate
                     ? null
                     : (value) {
+                        final previous = _clientCertificate;
+                        if (!value && previous != null && !_certificateSaved) {
+                          unawaited(_certificateService.discard(previous));
+                        }
                         setState(() {
                           _useClientCertificate = value;
                           if (!value) {
+                            _certificateSaved = false;
                             _clientCertificate = null;
                             _pemCertificateBytes = null;
                             _pemCertificateName = null;
@@ -2105,6 +2152,10 @@ class _AddDialogState extends State<_AddDialog> {
 
   @override
   void dispose() {
+    final certificate = _clientCertificate;
+    if (certificate != null && !_certificateSaved) {
+      unawaited(_certificateService.discard(certificate));
+    }
     _host.removeListener(_onHostChanged);
     _label.dispose();
     _host.dispose();
