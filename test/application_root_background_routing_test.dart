@@ -60,8 +60,58 @@ class _HeldRoutePush extends MobilePushService {
       delegate.isRouteCurrent(route);
 }
 
+class _HeldReloadAndWriteStore extends InMemorySharedPreferencesStore {
+  _HeldReloadAndWriteStore(this.reloadValues) : super.withData(reloadValues);
+  final Map<String, Object> reloadValues;
+  final reloadGate = Completer<void>();
+  final writeGate = Completer<bool>();
+  int reads = 0;
+  int policyWrites = 0;
+  @override
+  Future<Map<String, Object>> getAll() async {
+    reads++;
+    await reloadGate.future;
+    return reloadValues;
+  }
+
+  @override
+  Future<bool> setValue(String valueType, String key, Object value) {
+    if (key == 'flutter.${BackgroundWorkPrefsStore.storageKey}') {
+      policyWrites++;
+      return writeGate.future;
+    }
+    return super.setValue(valueType, key, value);
+  }
+}
+
+class _HeldPolicyWritesStore extends InMemorySharedPreferencesStore {
+  _HeldPolicyWritesStore(super.data) : super.withData();
+
+  final writes = <Completer<bool>>[];
+
+  @override
+  Future<bool> setValue(String valueType, String key, Object value) async {
+    if (key == 'flutter.${BackgroundWorkPrefsStore.storageKey}') {
+      final gate = Completer<bool>();
+      writes.add(gate);
+      if (!await gate.future) return false;
+    }
+    return super.setValue(valueType, key, value);
+  }
+}
+
 class _HeldSink extends RecordingTurnNotificationSink {
   Completer<void>? initialization;
+  Completer<void>? permissionCheck;
+  int checks = 0;
+  @override
+  Future<bool?> checkPermission() async {
+    final result = await super.checkPermission();
+    checks++;
+    await permissionCheck?.future;
+    return result;
+  }
+
   Completer<NotificationResponse?>? launch;
   @override
   Future<NotificationResponse?> takeInitialLaunchResponse() =>
@@ -349,6 +399,244 @@ void main() {
     notificationResponseHandler = null;
     pendingNotificationApprovals.value = const [];
   });
+
+  testWidgets(
+    'REGRESSION retried stored false load must not authorize a held optimistic true write',
+    (tester) async {
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      final f = _RootFixture();
+      await f.initialize();
+      final normal = await f.normal();
+      final chat = normal.findChat('local')!;
+      final turn = chat.submitPrepared(
+        reservation: chat.reserve()!,
+        text: 'test',
+        localContent: 'test',
+      );
+      turn.ignore();
+      await f.manager.prefs.setBool(BackgroundWorkPrefsStore.storageKey, false);
+      var loads = 0;
+      await tester.pumpWidget(
+        f.app(
+          loadPolicy: () async {
+            if (++loads == 1) throw StateError('initial hydration unavailable');
+            await BackgroundWorkPrefsStore.load();
+          },
+        ),
+      );
+      await pumps(tester);
+      final original = SharedPreferencesStorePlatform.instance;
+      final values = <String, Object>{
+        for (final key in f.manager.prefs.getKeys())
+          'flutter.$key': f.manager.prefs.get(key)!,
+      };
+      final held = _HeldReloadAndWriteStore(values);
+      SharedPreferencesStorePlatform.instance = held;
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await pumps(tester);
+      expect(f.keepalive.where((m) => m == 'start'), isEmpty);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await pumps(tester);
+      expect(held.reads, 1);
+      final saving = BackgroundWorkPrefsStore.setEnabled(true);
+      final savingOutcome = saving.then(
+        (_) => true,
+        onError: (Object _) => false,
+      );
+      held.reloadGate.complete();
+      await pumps(tester);
+      expect(held.policyWrites, 1);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await pumps(tester);
+      final startsBeforeWriteSuccess = f.keepalive
+          .where((m) => m == 'start')
+          .length;
+      held.writeGate.complete(false);
+      expect(await savingOutcome, isFalse);
+      SharedPreferencesStorePlatform.instance = original;
+      await f.close(tester);
+      await turn;
+      expect(
+        startsBeforeWriteSuccess,
+        0,
+        reason:
+            'Known stored false plus a still-unconfirmed true choice is not enabled authority',
+      );
+    },
+  );
+
+  for (final latestSaveSucceeds in [false, true]) {
+    testWidgets(
+      'queued policy choices remain disabled until latest save settles $latestSaveSucceeds',
+      (tester) async {
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        );
+        final f = _RootFixture();
+        await f.initialize();
+        final normal = await f.normal();
+        final chat = normal.findChat('local')!;
+        final turn = chat.submitPrepared(
+          reservation: chat.reserve()!,
+          text: 'test',
+          localContent: 'test',
+        );
+        turn.ignore();
+        await tester.pumpWidget(f.app());
+        await pumps(tester);
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+        await pumps(tester);
+        expect(f.keepalive.where((m) => m == 'start'), hasLength(1));
+        f.keepalive.clear();
+        final original = SharedPreferencesStorePlatform.instance;
+        final held = _HeldPolicyWritesStore({
+          for (final key in f.manager.prefs.getKeys())
+            'flutter.$key': f.manager.prefs.get(key)!,
+        });
+        SharedPreferencesStorePlatform.instance = held;
+        addTearDown(() {
+          for (final gate in held.writes) {
+            if (!gate.isCompleted) gate.complete(false);
+          }
+          SharedPreferencesStorePlatform.instance = original;
+        });
+        final disabling = BackgroundWorkPrefsStore.setEnabled(false);
+        await pumps(tester);
+        expect(held.writes, hasLength(1));
+        final enabling = BackgroundWorkPrefsStore.setEnabled(
+          true,
+        ).then((_) => true, onError: (Object _) => false);
+        await pumps(tester);
+        expect(f.keepalive.where((m) => m == 'start'), isEmpty);
+        held.writes[0].complete(true);
+        await disabling;
+        await pumps(tester);
+        expect(held.writes, hasLength(2));
+        expect(BackgroundWorkPrefsStore.confirmedEnabled, isFalse);
+        expect(backgroundWorkEnabled.value, isTrue);
+        expect(BackgroundWorkPrefsStore.pendingChoice.value, isTrue);
+        expect(f.keepalive.where((m) => m == 'start'), isEmpty);
+        held.writes[1].complete(latestSaveSucceeds);
+        expect(await enabling, latestSaveSucceeds);
+        await pumps(tester);
+        expect(BackgroundWorkPrefsStore.pendingChoice.value, isFalse);
+        expect(BackgroundWorkPrefsStore.confirmedEnabled, latestSaveSucceeds);
+        expect(backgroundWorkEnabled.value, latestSaveSucceeds);
+        expect(
+          f.keepalive.where((m) => m == 'start'),
+          hasLength(latestSaveSucceeds ? 1 : 0),
+        );
+        SharedPreferencesStorePlatform.instance = original;
+        await f.close(tester);
+        await turn;
+      },
+    );
+  }
+
+  for (final initiallyGranted in [false, true]) {
+    testWidgets(
+      'REGRESSION new resume refresh does not reuse a pre-pause permission observation $initiallyGranted',
+      (tester) async {
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        );
+        final f = _RootFixture();
+        await f.initialize();
+        f.sink.permissionResult = initiallyGranted;
+        f.sink.permissionCheck = Completer<void>();
+        await tester.pumpWidget(f.app());
+        await pumps(tester);
+        expect(f.sink.checks, 1);
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+        f.sink.permissionResult = !initiallyGranted;
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        );
+        await pumps(tester);
+        final explicitSend = f.notifications.sendTestNotification(
+          title: 'test',
+          body: 'test',
+        );
+        await pumps(tester);
+        f.sink.permissionCheck!.complete();
+        await pumps(tester);
+        final sent = await explicitSend;
+        final observed = f.notifications.permissionGranted;
+        final promptCount = f.sink.permissionRequestCount;
+        await f.close(tester);
+        expect(promptCount, 1);
+        expect(
+          (observed, sent),
+          (!initiallyGranted, !initiallyGranted),
+          reason:
+              'Resume and explicit Send test must observe the external OS change, not a stale read started before pause',
+        );
+      },
+    );
+  }
+
+  for (final push in [false, true]) {
+    testWidgets(
+      'REGRESSION CONTROL held ${push ? 'push' : 'normal'} lookup completes after pause and resume once',
+      (tester) async {
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        );
+        final f = _RootFixture();
+        await f.initialize();
+        await f.normal();
+        if (push) f.seedPush();
+        f.detail = Completer<http.Response>();
+        await tester.pumpWidget(f.app());
+        if (!push) notificationResponseHandler!(f.tap());
+        await pumps(tester);
+        expect(f.lookups, hasLength(1));
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        );
+        await pumps(tester);
+        expect(f.lookups, hasLength(1));
+        f.detail!.complete(f.response());
+        await pumps(tester);
+        expect(find.byType(ChatScreen, skipOffstage: false), findsOneWidget);
+        await pumps(tester);
+        expect(f.lookups, hasLength(1));
+        expect(f.submissions, 0);
+        await f.close(tester);
+      },
+    );
+  }
+
+  testWidgets(
+    'REGRESSION CONTROL root rejects credential replacement during initial native authority',
+    (tester) async {
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      final f = _RootFixture();
+      await f.initialize();
+      await f.normal();
+      f.seedPush();
+      await f.push.initialize(f.manager);
+      final route = await f.push.takePendingNotificationRoute();
+      expect(route, isNotNull);
+      final held = _HeldRoutePush(f.push);
+      held.route.complete(route);
+      f.snapshot = Completer<Map<String, dynamic>>();
+      await tester.pumpWidget(f.app(routingPush: held));
+      await pumps(tester);
+      expect(f.lookups, isEmpty);
+      await f.manager.updateApiKey(
+        f.connection.id,
+        'changed-before-native-answer',
+      );
+      f.snapshot!.complete(Map<String, dynamic>.from(f.native));
+      await pumps(tester);
+      expect(f.lookups, isEmpty);
+      expect(find.byType(ChatScreen, skipOffstage: false), findsNothing);
+      await f.close(tester);
+      held.dispose();
+    },
+  );
 
   testWidgets('SPEC A-B-A taps reuse the earlier canonical route', (
     tester,

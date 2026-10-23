@@ -218,6 +218,29 @@ void main() {
     },
   );
 
+  for (final initiallyGranted in [false, true]) {
+    test(
+      'new passive demand coalesces one fresh trailing read $initiallyGranted',
+      () async {
+        sink.permissionResult = initiallyGranted;
+        sink.permissionCheckGate = Completer<void>();
+        final first = service.refreshAuthorization();
+        await pumpEventQueue();
+        expect(sink.permissionCheckCount, 1);
+        sink.permissionResult = !initiallyGranted;
+        final second = service.refreshAuthorization();
+        final third = service.refreshAuthorization();
+        await pumpEventQueue();
+        expect(sink.permissionCheckCount, 1);
+        sink.permissionCheckGate!.complete();
+        await Future.wait([first, second, third]);
+        expect(sink.permissionCheckCount, 2);
+        expect(service.permissionGranted, !initiallyGranted);
+        expect(sink.permissionRequestCount, 0);
+      },
+    );
+  }
+
   test(
     'quiet ongoing updates retain identity through stored binding, rename and new turn',
     () async {

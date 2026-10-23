@@ -465,6 +465,8 @@ class TurnNotificationService {
   Future<void>? _requestingPermission;
   Future<void>? _refreshingAuthorization;
   int _permissionRevision = 0;
+  int _authorizationDemand = 0;
+  int _authorizationSatisfied = 0;
 
   TurnNotificationService({
     TurnNotificationSink? sink,
@@ -532,21 +534,30 @@ class TurnNotificationService {
   /// denial never causes repeated dialogs, and headless initialization does
   /// neither. Join an active prompt and fence older passive results behind it.
   Future<void> refreshAuthorization() async {
+    // Register demand before initialization awaits. Joining an older platform
+    // read is not evidence about an OS change observed by a later caller.
+    ++_authorizationDemand;
     await ensureInitialized();
     if (!_initialized) return;
     final request = _requestingPermission;
     if (request != null) await request;
-    final flight = _refreshingAuthorization ??= _refreshAuthorization();
-    try {
-      await flight;
-    } finally {
-      if (identical(_refreshingAuthorization, flight)) {
-        _refreshingAuthorization = null;
+    // Coalesce callers before each read, but drain a fresh trailing read when
+    // demand arrives after its snapshot. The watermark also covers callers
+    // joining a completed flight before its finalizer has cleared the slot.
+    while (_authorizationSatisfied < _authorizationDemand) {
+      final flight = _refreshingAuthorization ??= _refreshAuthorization();
+      try {
+        await flight;
+      } finally {
+        if (identical(_refreshingAuthorization, flight)) {
+          _refreshingAuthorization = null;
+        }
       }
     }
   }
 
   Future<void> _refreshAuthorization() async {
+    final demand = _authorizationDemand;
     final revision = _permissionRevision;
     var granted = false;
     try {
@@ -554,7 +565,14 @@ class TurnNotificationService {
     } catch (_) {
       // An unavailable permission read is not a grant.
     }
-    if (revision == _permissionRevision) _permissionGranted = granted;
+    if (revision == _permissionRevision && demand == _authorizationDemand) {
+      _permissionGranted = granted;
+    }
+    // A newer explicit prompt owns permission; do not let this passive caller
+    // finish against the old cache while that prompt is still unresolved.
+    final request = _requestingPermission;
+    if (request != null) await request;
+    _authorizationSatisfied = demand;
   }
 
   /// Posts a notification when a gateway turn completes while the app is

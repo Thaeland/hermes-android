@@ -297,7 +297,8 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
   late final TurnNotificationService _notifications;
   late final MobilePushService _mobilePush;
   late final void Function(NotificationResponse) _notificationHandler;
-  bool _backgroundPolicyReady = false;
+  bool? _confirmedBackgroundPolicy;
+  bool get _backgroundPolicyReady => _confirmedBackgroundPolicy != null;
   bool _rootFrameReady = false;
   bool _pushRouting = false;
   bool _pushDirty = false;
@@ -356,6 +357,9 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
     _keepAliveTurnActivityToken = _turnApplicationController
         .addTurnActivityListener(_onTurnActivityChanged);
     backgroundWorkEnabled.addListener(_onBackgroundWorkPolicyChanged);
+    BackgroundWorkPrefsStore.pendingChoice.addListener(
+      _onBackgroundWorkPolicyChanged,
+    );
     BackgroundWorkPrefsStore.confirmedChanges.addListener(
       _onBackgroundWorkPolicyConfirmed,
     );
@@ -394,7 +398,7 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
       await (widget.loadBackgroundPolicy?.call() ??
           BackgroundWorkPrefsStore.load());
       if (!mounted || _closingTurnOwner) return;
-      _backgroundPolicyReady = true;
+      _confirmedBackgroundPolicy = BackgroundWorkPrefsStore.confirmedEnabled;
       _onBackgroundWorkPolicyChanged();
     } catch (_) {
       // Failure leaves protection disabled, not at a speculative default.
@@ -402,7 +406,9 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
   }
 
   bool get _protectBackgroundWork =>
-      _backgroundPolicyReady && backgroundWorkEnabled.value;
+      _confirmedBackgroundPolicy == true &&
+      !BackgroundWorkPrefsStore.pendingChoice.value &&
+      backgroundWorkEnabled.value;
 
   Future<void> _initializeForegroundNotifications() async {
     await _notifications.ensureInitialized();
@@ -471,7 +477,7 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
 
   void _onBackgroundWorkPolicyConfirmed() {
     if (!mounted || _closingTurnOwner) return;
-    _backgroundPolicyReady = true;
+    _confirmedBackgroundPolicy = BackgroundWorkPrefsStore.confirmedEnabled;
     _onBackgroundWorkPolicyChanged();
   }
 
@@ -1009,6 +1015,9 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
       notificationResponseHandler = null;
     }
     backgroundWorkEnabled.removeListener(_onBackgroundWorkPolicyChanged);
+    BackgroundWorkPrefsStore.pendingChoice.removeListener(
+      _onBackgroundWorkPolicyChanged,
+    );
     BackgroundWorkPrefsStore.confirmedChanges.removeListener(
       _onBackgroundWorkPolicyConfirmed,
     );
