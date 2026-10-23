@@ -13,6 +13,7 @@ import 'package:hermes_android/core/screens/chat_screen.dart';
 import 'package:hermes_android/core/services/connection_keepalive_service.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
 import 'package:hermes_android/core/services/gateway_turn_application_controller.dart';
+import 'package:hermes_android/core/services/ws_client.dart';
 import 'package:hermes_android/l10n/app_localizations.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -93,6 +94,12 @@ void main() {
               onSent();
               submitted = true;
               await submitGate.future;
+              onEvent(
+                StreamEvent(
+                  type: 'turn.end',
+                  data: const {'status': 'completed'},
+                ),
+              );
             },
       );
 
@@ -144,11 +151,10 @@ void main() {
   );
 
   testWidgets(
-    'a throwing stock-gateway send while backgrounded releases the service',
+    'a post-wire stock-gateway loss remains unresolved while backgrounded',
     (tester) async {
-      // Reviewer gap: the socket-death analogue — the send itself fails.
-      // The finally-release must drop the signal so the backgrounded
-      // service stops instead of pinning on a dead turn.
+      // A dead socket is not a dead server turn. Keep the active receipt and
+      // foreground service until authoritative terminal evidence arrives.
       SharedPreferences.setMockInitialValues({'verbose_mode': false});
       final controller = GatewayTurnApplicationController(
         sessionFactory: (_) =>
@@ -200,10 +206,15 @@ void main() {
       expect(calls, contains('start'));
 
       submitGate.completeError(StateError('socket died mid-reply'));
-      await tester.pumpAndSettle();
-      expect(controller.hasActiveTurn, isFalse);
-      expect(calls, containsAllInOrder(['start', 'stop']));
-      expect(keepAlive.isActive, isFalse);
+      await tester.pump();
+      await tester.pump();
+      expect(controller.hasActiveTurn, isTrue);
+      expect(calls, isNot(contains('stop')));
+      expect(keepAlive.isActive, isTrue);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      await controller.close();
+      await tester.pump();
     },
   );
 }

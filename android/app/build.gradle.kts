@@ -100,5 +100,13 @@ android.applicationVariants.configureEach {
 }
 
 dependencies {
+   implementation("org.unifiedpush.android:connector:3.3.5") {
+       // flutter_secure_storage already uses tink-android. The JVM artifact
+       // contains the same classes and cannot coexist in an APK.
+       exclude(group = "com.google.crypto.tink", module = "tink")
+   }
+   implementation("com.google.crypto.tink:tink-android:1.23.0")
+   testImplementation("junit:junit:4.13.2")
+   testImplementation("org.robolectric:robolectric:4.16")
    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }

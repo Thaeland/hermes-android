@@ -1,4 +1,4 @@
-# Hermes Android — v2.1.30
+# Hermes Android v2.1.32
 
 Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — chat with your Hermes sessions from a phone or tablet over local Wi-Fi or a private Tailscale network.
 
@@ -14,15 +14,16 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
 
 ## Current release
 
-- Version: **2.1.30** (build 2173)
+- Version: **2.1.32** (build 2175)
 - Package: `com.hermesagent.hermes_android`
 - Recommended APK for modern phones: ARM64 release build from the
   [Releases](https://github.com/rusty4444/hermes-android/releases) page.
 - Production builds are signed with a private release keystore. Debug APKs
   signed with the Android debug certificate remain available for testing
   under the `com.hermesagent.hermes_android.dev` package ID.
-- v2.1.30 restores Return/newline on the keyboard and keeps the composer
-  editable during message setup and replies. See the [changelog](CHANGELOG.md).
+- v2.1.32 keeps tool sections collapsed on each chat visit and shows only
+  the current or latest tool call until you expand the group.
+  See the [changelog](CHANGELOG.md) for features, fixes and delivery limits.
 - The app checks [GitHub Releases](https://github.com/rusty4444/hermes-android/releases)
   on ordinary launches. An answered check limits network requests to once
   every 12 hours; offline attempts may retry at the next launch. A newer build
@@ -68,25 +69,74 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
   tool cards show a time for each call, and a collapsed card shows the latest
   known activity. Live events use the phone's observation time; persisted
   results use the server's recorded time. Unknown times are not guessed.
+- Tap a delegated task to inspect its recorded messages, tool arguments/results
+  and exposed reasoning in a read-only sheet or dialog above the parent chat.
+  Missing durable references show an unavailable explanation; omitted compression
+  segments show **Partial history**. See [Task timelines](#inspect-a-delegated-task).
+- Follow text, exposed reasoning and consecutive tool groups in receipt order
+  across REST/SSE and Remote Gateway replies. Expanding a card keeps that choice
+  while its contents update. Tool sections start collapsed on each chat visit,
+  showing only the current call (or the latest call when none are running).
+  Tap to view the full group; leaving and reopening the chat resets that choice.
+  Verbose mode explicitly opens tool details by default.
 - Persistent reconnect/session resume and defensive retry handling.
-- **Background turn notifications** — Android notifications fire when a
-  gateway turn completes while the app is backgrounded, mirroring the
-  Hermes Desktop tray notification behaviour. Notifications are
-  automatically cleared when returning to the app.
+- App-owned stock Gateway turns outlive an open chat route. Reopen a chat to
+  reattach, including while other chats run. Pending markers survive process
+  restart; the app checks server history without resubmitting uncertain prompts.
+- Background protection uses one foreground service with a required disclosure
+  and quiet per-chat ongoing entries. Notification taps open the relevant chat;
+  permission, preferences and Android lifecycle restrictions still apply.
+- Optional native UnifiedPush can notify you without an active app socket. It
+  requires a distributor, a separate server companion, explicit
+  consent and a selected durable-session allowlist. See
+  [Background work and push](#background-work-and-notifications).
 
 ### Gateway transport compatibility
 
-Stock Hermes Agent releases do not currently advertise the experimental
-`capabilities.turn_recovery` contract in `gateway.ready`. Against those releases,
-the app intentionally uses the legacy Desktop Gateway transport and displays
-**Background recovery unavailable — legacy transport**. If a legacy turn finishes
-while Android is backgrounded, the app re-syncs that session's server-side
-history on resume. The durable exactly-once recovery path activates only when a
-gateway explicitly advertises the compatible recovery contract.
+Stock Hermes Agent releases do not advertise the experimental
+`capabilities.turn_recovery` v2 contract in `gateway.ready`. The app uses the
+stock Desktop Gateway transport for those connections. Its app-owned session
+keeps user-started turns across chat navigation and reconciles persisted history
+after reconnect or process restart. It does not resubmit an uncertain prompt.
+After an outage, the app keeps recovery pending until it can verify the server's
+state. A proven-idle turn with no recorded terminal outcome becomes inactive
+with an outcome-unknown status. It does not generate a completion alert.
+
+When a received reply has no verified history baseline, the app preserves it
+and known older messages. Unverified saved rows remain cached outside the
+combined transcript. The app does not match turns by message text.
+
+The experimental v2 path adds a separate durable exactly-once recovery contract
+when the gateway advertises support. A legacy-transport capability notice refers
+to that contract; it does not mean stock chat reattachment is unavailable. Neither
+transport guarantees an Android background connection or delivery after Force stop.
 
 See [CHANGELOG.md](CHANGELOG.md) for the complete release history and
 [docs/HERMESAPK_DEVELOPMENT_LOG.md](docs/HERMESAPK_DEVELOPMENT_LOG.md) for the
 sanitized implementation and validation record.
+
+## What's new in v2.1.32
+
+- Tool sections start collapsed when opening or returning to a chat, including
+  while work is running. The header previews the newest running call, or the
+  latest call when none are running, while retaining group status and timing.
+- Expand a section to inspect every call. Your choice survives incoming events
+  and scrolling within the visit; leaving and reopening resets it. Verbose
+  mode remains an explicit open default.
+
+## What's new in v2.1.31
+
+- Tap a delegated task for a read-only timeline above the parent chat. Inspect
+  recorded tools and exposed reasoning, refresh or load older rows. Missing
+  references and partial compression history carry explicit explanations.
+- Read live commentary, exposed reasoning and tool groups in receipt order.
+  Preview completion preserves their positions and expansion choices.
+- Leave and reopen stock Gateway chats without tying a turn to its screen.
+  Background work settings, one service disclosure and quiet per-chat entries
+  cover active chats; uncertain reconnects do not resubmit prompts.
+- Opt in to Google-free UnifiedPush for selected sessions with an installed
+  distributor and the separate server companion. Setup and Android delivery
+  limits appear in [Background work and notifications](#background-work-and-notifications).
 
 ## What's new in v2.1.30
 
@@ -97,35 +147,25 @@ sanitized implementation and validation record.
   Newer text and deliberately cleared drafts are left alone. Sending another
   turn remains blocked while the current turn or recovery is active.
 
-## What's new in v2.1.29
-
-- Move a chat into a Project or between Projects from the Chats row's action
-  menu. Choose the destination before the app changes its server working folder.
-- After a move, Chats shows the new Project and Unassigned no longer lists
-  the conversation. Cancel or a failed move leaves its placement unchanged.
-  See [Moving chats between Projects](docs/moving-chats.md).
-
-## What's new in v2.1.28
-
-- Rename chats from the Chats list or the open-chat menu. Both Remote Gateway
-  and REST-only connections save the title to Hermes. Returning from a renamed
-  chat refreshes the Chats list; search and exports use the saved name.
-- Blank names cannot submit. Cancelling leaves the title unchanged, and a
-  failed save keeps the previous title and shows the error.
-
 ## Features
 
 - **Hermes chat on Android** — browse sessions, create new chats, and send prompts to your Hermes Agent.
-- **Streaming responses** — chat uses the Hermes Gateway OpenAI-compatible streaming endpoint: `POST /v1/chat/completions`. Tokens appear in real-time with smooth auto-scroll.
+- **Streaming responses:** Remote Gateway chat uses JSON-RPC over WebSocket;
+  REST chat uses `POST /v1/chat/completions` with SSE. Live text, exposed reasoning
+  and tool activity keep their receipt order without changing request history.
 - **Messaging-style UI** — dark/light/system themes, gold Hermes accent color (`#D4AF37`), markdown rendering, relative timestamps, and responsive phone/tablet layouts.
 - **Gold/black Hermes branding** — distinctive gold accent on black background, custom app icon with mipmap densities, agent messages use grey bubbles.
 - **Gateway API integration** — sessions and chat run through the Hermes Gateway API Server, normally on port `8642`, with HTTP and HTTPS endpoints supported. Reverse-proxy deployments can set a gateway path prefix that is applied before `/api` and `/v1` routes.
-- **Dashboard integrations** — Memory, Cron Jobs, Skills, and Settings screens use the Hermes dashboard API (default port `9119`, configurable per connection) on the same host. Works with open (`--insecure`) dashboards, **password-protected dashboards** via the built-in login, and proxied dashboards where auth is injected upstream.
+- **Dashboard integrations:** Memory, Cron Jobs, Skills, Settings and Remote Gateway chat use the authenticated Hermes dashboard (default port `9119`, configurable per connection). Use the built-in password login or a trusted reverse proxy. Current Hermes requires an authentication provider before the dashboard can bind to a non-loopback address; `--insecure` no longer bypasses this requirement.
 - **Model settings** — view and change the configured Hermes model where the dashboard exposes model settings.
 - **Cron management** — list, trigger, pause/resume, create, edit, and delete scheduled Hermes cron jobs.
 - **Skills browser** — view available Hermes skills with descriptions and trigger conditions.
 - **Memory viewer** — inspect conversation memory across sessions.
 - **Verbose mode toggle** — show raw message metadata (role, tool calls, timestamps) in chat.
+- **Task inspection:** read recorded delegated-task history without joining or
+  controlling the child runtime. The viewer preserves the parent chat and draft.
+- **Background work:** keep active stock Gateway turns above chat routes, review
+  device-local battery/notification settings and opt in to separate UnifiedPush.
 - **Three-way theme toggle** — Dark / Light / System default.
 - **Keyboard handling** — Enter inserts a new line; use the on-screen Send button to submit. The composer stays editable during setup and replies, so you can draft a follow-up without waiting. A failed submission restores its prompt only if you have not edited the cleared composer. FAB to scroll to bottom.
 - **Voice chat** — microphone dictation sends recognised speech to Hermes, with optional text-to-speech replies.
@@ -172,7 +212,7 @@ Download the latest APK from this repository's
 For most Android phones, install the ARM64 APK:
 
 ```bash
-adb install Hermes-Android-2.0.1-arm64-release.apk
+adb install -r app-arm64-v8a-release.apk
 ```
 
 If sideloading directly on Android, enable **Install unknown apps** for your browser or file manager, then open the downloaded APK.
@@ -191,15 +231,24 @@ Use your normal Hermes gateway/API-server startup command and confirm:
 
 Memory, Cron Jobs, Skills, and Settings use the Hermes dashboard API (default port `9119`).
 
-Open dashboard (no login):
+Configure a dashboard authentication provider before exposing it to your LAN or
+tailnet. For password login, Hermes uses `dashboard.basic_auth.username`, a
+scrypt `dashboard.basic_auth.password_hash`, the bundled `basic` auth plugin,
+and a separate session-signing secret. Follow the current
+[Hermes documentation](https://hermes-agent.nousresearch.com/docs) for setup;
+keep passwords and signing secrets out of commands, chat and committed files.
+
+Start the configured dashboard:
 
 ```bash
-hermes dashboard --insecure --host 0.0.0.0 --tui --port 9119
+hermes dashboard --host 0.0.0.0 --port 9119 --no-open
 ```
 
-Password-protected dashboard (recommended on shared networks) — start it with a
-basic-auth provider instead of `--insecure`, then enter the username/password in
-the app's **Dashboard / Proxy Settings** dialog (see [Dashboard access](#4-optional-configure-dashboard-access)).
+Enter its username/password in the app's **Dashboard / Proxy Settings** dialog
+(see [Dashboard access](#4-optional-configure-dashboard-access)). An existing
+trusted reverse proxy can supply identity instead. A public `/api/status`
+response proves reachability, not successful login: validate a protected route
+after authenticating.
 
 > `--host 0.0.0.0` is required when connecting from another device. A localhost-only dashboard cannot be reached from Android.
 
@@ -247,8 +296,9 @@ afterwards:
    - **Dashboard Port** — leave blank to use the default (`9119` for HTTP, or the
      same external port for HTTPS deployments), or set an explicit port if your
      dashboard is exposed elsewhere.
-   - **Username / Password** — only for a password-protected dashboard. Leave
-     both blank for an open (`--insecure`) dashboard.
+   - **Username / Password** — the dashboard's password-login credentials.
+     Leave both blank only when a trusted proxy supplies identity or for a
+     local loopback dashboard. `--insecure` is not a remote-auth bypass.
    - **Hermes profile** — only when the dashboard is a *machine-level* one
      (`hermes dashboard` / `hermes serve` without `--isolated`) that hosts
      several profiles. Hermes scopes each JSON-RPC call on that socket by a
@@ -360,19 +410,89 @@ Android app (Flutter)
    ├─ /api/memory
    ├─ /api/cron/jobs
    ├─ /api/skills
-   └─ /api/model/*
+   ├─ /api/model/*
+   ├─ /api/auth/ws-ticket → /api/ws  (Remote Gateway JSON-RPC)
+   └─ /api/sessions/{id}/messages  (richer dashboard transcript)
 ```
 
 ## Using the app
 
 ### Chat screen
 
-- **Send messages** — Type in the input field and tap the send button or press Enter.
-- **Streaming responses** — The agent's response appears token-by-token in real-time. The chat auto-scrolls to the bottom as new tokens arrive.
+- **Send messages:** Type in the input field and tap Send. Enter/Return inserts a new line.
+- **Streaming responses:** Replies arrive through Remote Gateway JSON-RPC or legacy REST/SSE. The chat follows new content while you are at the end; scrolling up lets you read earlier messages.
 - **Tool progress** — When the agent uses tools, inline progress messages show the tool name, status, and progress.
 - **Verbose mode** — Toggle in the app settings to show raw message metadata (role, tool call IDs, timestamps).
 - **Markdown rendering** — Assistant messages render markdown (code blocks, tables, lists, links).
 - **Relative timestamps** — Messages show "2m ago", "3h ago", etc.
+
+### Inspect a delegated task
+
+1. Tap a task row in the parent chat's delegated-task card. The app opens
+   **Task timeline** above the chat, as a phone sheet or a wider-screen dialog.
+2. Expand recorded tool calls for the server's arguments and results, or expand
+   exposed reasoning. **Refresh task history** checks for saved rows;
+   **Load older** requests another bounded page. Live previews carry a separate
+   label and do not count as recorded transcript rows.
+3. Close the viewer or press Back to return to the parent's draft and scroll
+   position. The viewer cannot send, steer, stop or watch the child runtime.
+
+Configure authenticated dashboard access for that saved connection first. The
+API-server key alone cannot read the richer task transcript. Old tasks without a
+durable child-session reference show **Task transcript unavailable**. A gateway
+may omit a newer compression segment or older ancestors; **Partial history**
+identifies that gap. Refresh can retry, but reopening does not prove complete
+history. See [Delegated-task timeline](docs/DELEGATED_TASK_TIMELINE.md) for the
+read-only API, identity checks and backend limits.
+
+### Background work and notifications
+
+In the connection's **Settings → Background work**, use **Keep chats active in
+the background** to control device-local connection protection. Turning it off
+does not stop server work. Use **Battery optimisation settings** to review
+Android's restrictions; the app does not request an exemption on startup.
+
+While protection is active, Android requires a foreground-service disclosure.
+Hermes uses one service for active chats and separate quiet ongoing entries for
+their status. **Settings → Notifications** controls optional alerts. Returning
+to the app does not mean all chat notifications should disappear: ongoing work
+and other chats retain their own state. Grant or revoke OS notification permission
+in Android settings; the app refreshes that status on return without another
+startup prompt.
+
+Reopening a stock Gateway chat reattaches to its app-owned turn. After a network
+drop or process restart, the app reconciles pending markers with saved server
+history. An acknowledgement or a lost connection does not prove completion;
+uncertain work remains unresolved and the app does not resubmit its prompt.
+
+For notifications without a live app socket, configure the optional push path:
+
+1. Install and configure a compatible UnifiedPush distributor on Android.
+2. Ask the server operator to install and enable `server/mobile-push` in the
+   intended Hermes profile, configure its VAPID key and grant your verified
+   dashboard login access to the exact durable session IDs. Installing this APK
+   does not install or enable the companion. Follow
+   [Server companion setup](docs/mobile-push-server.md).
+3. Open the connection's **Settings → Android UnifiedPush (optional)**. Select
+   the installed distributor, enter durable session IDs one per line, check
+   consent, then tap **Enable for selected sessions**. One Android installation
+   binds one saved connection; it does not subscribe all chats or profiles.
+4. Allow notification permission when asked and keep or reopen Hermes until the
+   status is **Active**. The server's encrypted challenge and authenticated
+   confirmation establish registration. **Pending** does not mean active.
+   Use **Reconcile / retry** after a lost reply or connection failure.
+5. Use **Disable and revoke** to withdraw consent. Local delivery stops before
+   server revocation; a failed remote revocation remains pending for retry.
+
+The native connector uses no Firebase/FCM SDK. Push hints and notifications omit
+chat text; a tap resolves its destination through the authenticated server feed.
+Push cannot approve an action or resubmit a prompt. See
+[Android UnifiedPush setup and privacy](docs/mobile-push-android.md).
+
+Delivery remains best-effort. Force stop, OEM battery controls, Doze, offline
+devices, distributor availability and notification permissions can prevent or
+delay it. A foreground service or battery exemption does not guarantee a live
+connection, and push requires its own working server/distributor setup.
 
 ### Voice chat
 
@@ -470,7 +590,7 @@ cp build/app/outputs/flutter-apk/app-*-release.apk release-apks/
 block in `android/app/build.gradle.kts` derives per-ABI codes as
 `base * 10 + ABI code` (armeabi-v7a = 1, arm64-v8a = 2, x86_64 = 3), so the
 codes stay ordered armeabi-v7a < arm64-v8a < x86_64 as fdroiddata requires.
-For v2.1.30, base `2173` therefore produces codes `21731`/`21732`/`21733`.
+For v2.1.32, base `2175` therefore produces codes `21751`/`21752`/`21753`.
 CI reads the completed arm64 APK with `aapt` and fails if that relationship
 drifts. Release-floor checks continue to apply to the base value and must not
 be weakened to rely on the ABI code.
@@ -516,12 +636,12 @@ Check that the Android connection's API key matches `API_SERVER_KEY` from the He
 ### Streaming stops or messages don't appear
 
 - The SSE connection may have timed out. Pull to refresh the session list and re-enter the chat.
-- Check that the Gateway API Server is running and responsive: `curl http://<host>:8642/api/sessions`.
+- Check reachability with `curl http://<host>:8642/health`. This public endpoint does not validate the API key; session/model reads require Bearer authentication.
 - If using a reverse proxy, ensure it supports long-lived SSE connections (no aggressive timeouts).
 
 ### Dashboard screens show empty or error
 
-- Verify the dashboard is running with `--host 0.0.0.0` (an open dashboard also needs `--insecure`).
+- Verify the dashboard is running with `--host 0.0.0.0` and a configured password/OAuth authentication provider or trusted proxy. Current Hermes ignores the deprecated `--insecure` flag rather than disabling authentication.
 - If the dashboard is password-protected, set the username/password under **⋮ → Dashboard / Proxy Settings** (or **Custom proxy and dashboard details** when adding the connection). A 401 here means the credentials are wrong.
 - If the dashboard sits behind a reverse-proxy path, set **Dashboard path prefix**. If the proxy injects dashboard auth, enable **Dashboard behind proxy** so the app sends clean requests.
 - Check the dashboard port matches the connection (default `9119` for local/Tailscale, same HTTPS port for hosted; override it in Dashboard / Proxy Settings if needed).
@@ -563,7 +683,7 @@ lib/
 │   │   └── session.dart                # Session model
 │   ├── screens/
 │   │   ├── session_list_screen.dart   # Session browser
-│   │   ├── chat_screen.dart           # Chat with SSE streaming
+│   │   ├── chat_screen.dart           # Remote Gateway and legacy REST/SSE chat
 │   │   ├── settings_screen.dart       # Model/theme/app settings
 │   │   ├── memory_screen.dart         # Memory viewer
 │   │   ├── skills_screen.dart         # Skills browser
@@ -571,7 +691,7 @@ lib/
 │   ├── services/
 │   │   ├── attachment_draft_service.dart # Cache, sanitization, limits, upload order
 │   │   ├── connection_manager.dart    # Saved connections, Gateway API, Dashboard API
-│   │   └── ws_client.dart             # JSON-RPC WebSocket client for future dashboard/TUI use
+│   │   └── ws_client.dart             # Active Remote Gateway JSON-RPC transport
 │   └── utils/
 │       └── responsive.dart            # Phone/tablet breakpoints
 └── assets/
@@ -580,6 +700,11 @@ lib/
 ```
 
 ## Credits
+
+**AI assistance:** Hermes Agent assists with implementation, research, code
+review and regression tests, including the tool-section behaviour in v2.1.32.
+Automated checks do not substitute for device validation; release notes list
+the checks performed.
 
 - **krotname** (Andrei Ovcharenko) — fixed duplicate final answers after
   Gateway interim previews, including late reasoning and widget regressions

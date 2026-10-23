@@ -14,6 +14,7 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/fake_voice_composer_adapter.dart';
+import 'support/completed_stock_turn.dart';
 
 const _composerKey = Key('chat-message-composer');
 
@@ -73,7 +74,7 @@ Future<void> _pumpChat(
               MockClient((_) async => http.Response('{"data":[]}', 200)),
         ),
         testVoiceComposerAdapter: FakeVoiceComposerAdapter(),
-        testRemotePromptSubmit: remoteSubmit,
+        testRemotePromptSubmit: completedStockTurn(remoteSubmit),
         testLegacyProjectSessionEnsure: ensureProject,
         testRemoteAttachmentUpload: upload,
       ),
@@ -281,7 +282,8 @@ void main() {
       _expectEditable(tester);
       await tester.enterText(find.byKey(_composerKey), 'Keep new draft');
       turn.completeError(StateError('socket closed'));
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump();
       expect(_draft(tester), 'Keep new draft');
     },
   );

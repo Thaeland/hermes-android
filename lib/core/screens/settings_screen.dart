@@ -8,8 +8,10 @@ import '../services/config_backup_io.dart';
 import '../services/config_backup_service.dart';
 import '../services/connection_manager.dart';
 import '../services/notification_prefs.dart';
+import '../widgets/background_work_settings.dart';
 import '../services/turn_notification_service.dart';
 import '../widgets/config_backup_card.dart';
+import '../widgets/mobile_push_settings.dart';
 import '../widgets/chat_density_settings_card.dart';
 import '../widgets/text_size_settings_card.dart';
 import '../../main.dart';
@@ -225,8 +227,22 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _buildSectionHeader(context.l10n.appearance),
           _buildChatDensityCard(),
           const SizedBox(height: 16),
+          MobilePushSettings(
+            connection: widget.connection,
+            connectionManager: context
+                .findAncestorStateOfType<HermesAppState>()!
+                .widget
+                .connManager,
+          ),
+          const SizedBox(height: 16),
           _buildSectionHeader(context.l10n.about),
           _AboutCard(),
+          const SizedBox(height: 16),
+          _buildSectionHeader(context.l10n.background_work),
+          const BackgroundWorkSettings(),
+          const SizedBox(height: 16),
+          _buildSectionHeader(context.l10n.notifications),
+          const _NotificationSettings(),
         ],
       );
     }
@@ -391,8 +407,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
         // ---- Section: Notifications ----
         _buildSectionHeader(context.l10n.notifications),
         const _NotificationSettings(),
+        MobilePushSettings(
+          connection: widget.connection,
+          connectionManager: context
+              .findAncestorStateOfType<HermesAppState>()!
+              .widget
+              .connManager,
+        ),
         const SizedBox(height: 16),
-
+        _buildSectionHeader(context.l10n.background_work),
+        const BackgroundWorkSettings(),
         const SizedBox(height: 16),
 
         // ---- Section: Voice ----
@@ -999,16 +1023,35 @@ class _NotificationSettings extends StatefulWidget {
   State<_NotificationSettings> createState() => _NotificationSettingsState();
 }
 
-class _NotificationSettingsState extends State<_NotificationSettings> {
+class _NotificationSettingsState extends State<_NotificationSettings>
+    with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
-    // Resolve the Android 13+ permission state so a denied app shows the hint
-    // instead of looking silently broken.
+    WidgetsBinding.instance.addObserver(this);
+    _refreshPermission(requestPermission: true);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _refreshPermission();
+  }
+
+  void _refreshPermission({bool requestPermission = false}) {
+    // Keep the visible hint in sync after returning from OS Settings without
+    // asking again. Only the initial foreground visit may request permission.
     unawaited(
-      TurnNotificationService.shared.ensureInitialized().then((_) {
-        if (mounted) setState(() {});
-      }),
+      TurnNotificationService.shared
+          .ensureInitialized(requestPermission: requestPermission)
+          .then((_) {
+            if (mounted) setState(() {});
+          }),
     );
   }
 
@@ -1047,6 +1090,7 @@ class _NotificationSettingsState extends State<_NotificationSettings> {
       body: context.l10n.test_notification_body,
     );
     if (!mounted) return;
+    setState(() {});
     final messenger = ScaffoldMessenger.of(context);
     messenger
       ..hideCurrentSnackBar()
@@ -1073,8 +1117,12 @@ class _NotificationSettingsState extends State<_NotificationSettings> {
               title: Text(context.l10n.enable_notifications),
               subtitle: Text(context.l10n.enable_notifications_description),
               value: prefs.enabled,
-              onChanged: (on) =>
-                  unawaited(NotificationPrefsStore.setEnabled(on)),
+              onChanged: (on) async {
+                await NotificationPrefsStore.setEnabled(on);
+                if (!on) {
+                  await TurnNotificationService.shared.cancelAllOngoingChats();
+                }
+              },
             ),
             for (final kind in HermesNotificationKind.values) ...[
               const Divider(height: 1),

@@ -28,10 +28,26 @@ class MainActivity : FlutterActivity() {
         initialShareIntent = intent.takeIf(::isShareIntent)
         initialLaunchAction = launchActionFor(intent)
         super.onCreate(savedInstanceState)
+        runCatching { MobilePushBridge.captureTap(this, intent) }
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        BackgroundWorkPlatform.install(this, flutterEngine.dartExecutor.binaryMessenger)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, MobilePushBridge.CHANNEL).also { channel ->
+            MobilePushBridge.attach(channel)
+            channel.setMethodCallHandler { call, result ->
+                if (call.method == "permission") {
+                    MobilePushBridge.permission(this, result)
+                } else {
+                    try {
+                        result.success(MobilePushBridge.command(this, call.method, call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()))
+                    } catch (_: Exception) {
+                        result.error("mobile_push", "Mobile push operation failed safely. Check consent, permission and distributor.", null)
+                    }
+                }
+            }
+        }
         shareChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, shareChannelName).apply {
             setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -79,6 +95,7 @@ class MainActivity : FlutterActivity() {
         if (isFinishing) {
             stopService(Intent(this, ConnectionKeepAliveService::class.java))
         }
+        MobilePushBridge.detach()
         super.onDestroy()
     }
 
@@ -100,6 +117,7 @@ class MainActivity : FlutterActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        runCatching { MobilePushBridge.captureTap(this, intent) }
         launchActionFor(intent)?.let { action ->
             launchChannel?.invokeMethod("launchAction", action)
             return
@@ -108,6 +126,11 @@ class MainActivity : FlutterActivity() {
         processShareIntent(intent) { payload ->
             if (payload != null) shareChannel?.invokeMethod("sharePayload", payload)
         }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == MobilePushBridge.PERMISSION_REQUEST) MobilePushBridge.permissionReturned(this)
     }
 
     private fun launchActionFor(intent: Intent?): String? =

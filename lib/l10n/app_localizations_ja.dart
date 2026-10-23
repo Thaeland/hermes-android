@@ -2512,4 +2512,215 @@ class AppLocalizationsJa extends AppLocalizations {
   @override
   String get certificate_import_failed =>
       'That certificate could not be loaded.';
+
+  @override
+  String get background_work => 'バックグラウンド動作';
+
+  @override
+  String get keep_chats_active_in_background => 'バックグラウンドでもチャットを接続';
+
+  @override
+  String get background_work_description =>
+      'ユーザーが開始したチャットの接続を、アプリがバックグラウンドにある間も維持します。待機中の接続は切断される場合があります。バッテリーと通信量を多く使います。オフにしてもサーバー上の処理は停止しません。';
+
+  @override
+  String get background_work_limits =>
+      'Android は Doze 中に接続を休止したり、アプリのプロセスを終了したりする場合があります。プロセス終了後の通知には、別途プッシュ設定が必要です。強制停止には対応していません。';
+
+  @override
+  String get background_work_disclosure =>
+      'バックグラウンド保護が有効な間は、任意のチャット通知がオフでも、必須のサービス通知が表示されます。';
+
+  @override
+  String get battery_optimisation_settings => 'バッテリー最適化の設定';
+
+  @override
+  String get battery_optimisation_description =>
+      'Android の設定を開き、バッテリー制限を確認します。最適化の除外を自動では要求しません。設定を変更しても通知の到達は保証されません。';
+
+  @override
+  String get battery_settings_unavailable => 'この端末ではバッテリー設定を開けませんでした。';
+
+  @override
+  String get background_work_save_failed => 'バックグラウンド動作の設定を保存できませんでした。';
+
+  @override
+  String get ongoing_chat_channel_name => '進行中のチャット';
+
+  @override
+  String get ongoing_chat_channel_description => 'ユーザーが開始した未完了のチャットの静かな状態通知';
+
+  @override
+  String get task_timeline => 'Task timeline';
+
+  @override
+  String get task_refresh_history => 'Refresh task history';
+
+  @override
+  String get task_live_preview => 'Live preview from parent events';
+
+  @override
+  String get task_preview_explanation =>
+      'Latest exposed preview only; not a recorded transcript row.';
+
+  @override
+  String get task_preview => 'Preview';
+
+  @override
+  String get task_recorded_history => 'Recorded task history';
+
+  @override
+  String get task_loading_history => 'Loading task history…';
+
+  @override
+  String get task_empty_history =>
+      'No recorded messages yet. The task may not have flushed its history; this does not mean it produced no work.';
+
+  @override
+  String get task_load_older => 'Load older';
+
+  @override
+  String get task_default_goal => 'Delegated task';
+
+  @override
+  String task_status(Object status) {
+    return 'Status: $status';
+  }
+
+  @override
+  String task_identity(Object id) {
+    return 'Task: $id';
+  }
+
+  @override
+  String task_stored_session(Object id) {
+    return 'Stored session: $id';
+  }
+
+  @override
+  String task_delegation(Object id) {
+    return 'Delegation: $id';
+  }
+
+  @override
+  String get task_read_only_notice =>
+      'Read-only · recorded history may appear after the task flushes. Refresh to check again.';
+
+  @override
+  String task_row_label(Object id, Object role) {
+    return '$role · row $id';
+  }
+
+  @override
+  String get task_role_assistant => 'Assistant';
+
+  @override
+  String get task_role_user => 'User';
+
+  @override
+  String get task_role_tool => 'Tool';
+
+  @override
+  String task_tool_call(Object name) {
+    return 'Tool call · $name';
+  }
+
+  @override
+  String task_tool_result(Object name) {
+    return 'Tool result · $name';
+  }
+
+  @override
+  String task_call_details(Object arguments, Object id) {
+    return 'Call ID: $id\nArguments\n$arguments';
+  }
+
+  @override
+  String task_result_details(Object id, Object result) {
+    return 'Call ID: $id\nResult\n$result';
+  }
+
+  @override
+  String get task_not_supplied => 'Not supplied';
+
+  @override
+  String get task_missing_arguments => 'Arguments not retained by the server.';
+
+  @override
+  String get task_image_placeholder => '[image]';
+
+  @override
+  String get task_invalid_reference =>
+      'Task transcript unavailable: invalid stored session reference.';
+
+  @override
+  String get task_auth_required =>
+      'Task transcript unavailable: configure Dashboard authentication for this gateway. The API-server key cannot read task reasoning.';
+
+  @override
+  String get task_auth_rejected =>
+      'Task transcript unavailable: Dashboard authentication was rejected. Check this gateway’s Dashboard settings.';
+
+  @override
+  String get task_incompatible_history =>
+      'Task transcript unavailable: this Dashboard does not provide compatible bounded raw history for the selected profile.';
+
+  @override
+  String get task_identity_unproven =>
+      'Task transcript unavailable: the Dashboard could not prove the exact stored session or its compression lineage. No transcript from another session is shown.';
+
+  @override
+  String get task_partial_compression =>
+      'Partial history: this task continued after compression, but this gateway has not exposed a verifiable newer reference. The final reply may be missing. Automatic refresh is paused; use Refresh to retry.';
+
+  @override
+  String get task_partial_ancestors =>
+      'Partial history: this gateway omits compression ancestors for this task. Earlier task segments may be missing. Known rows are retained; use Refresh to retry.';
+
+  @override
+  String get task_missing_reference =>
+      'Task transcript unavailable: this server did not retain its session reference.';
+
+  @override
+  String get task_missing_row_identity =>
+      'Task transcript unavailable: this server did not supply durable message row identities.';
+
+  @override
+  String get task_history_not_ready =>
+      'Task history is not available yet (HTTP 404). The task may not have flushed, or this Dashboard may not support task history. Retry to check again.';
+
+  @override
+  String get task_refresh_failed =>
+      'Could not refresh task history. Check the connection and retry.';
+
+  @override
+  String get task_status_interrupted => 'Interrupted';
+
+  @override
+  String get task_status_cancelled => 'Cancelled';
+
+  @override
+  String get task_status_requested => 'Requested';
+
+  @override
+  String get task_status_thinking => 'Thinking';
+
+  @override
+  String get task_status_tool => 'Using a tool';
+
+  @override
+  String get task_status_pending => 'Pending';
+
+  @override
+  String get task_status_dispatched => 'Dispatched';
+
+  @override
+  String task_status_unknown(Object status) {
+    return 'Unknown status: $status';
+  }
+
+  @override
+  String task_tasks_finished(Object count) {
+    return '$count delegated task(s) finished';
+  }
 }
