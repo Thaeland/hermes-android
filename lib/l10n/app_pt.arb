@@ -755,5 +755,17 @@
   "task_status_pending": "Pending",
   "task_status_dispatched": "Dispatched",
   "task_status_unknown": "Unknown status: {status}",
-  "task_tasks_finished": "{count} delegated task(s) finished"
+  "task_tasks_finished": "{count} delegated task(s) finished",
+  "activity_status_unconfirmed": "Estado não confirmado",
+  "activity_recently_updated": "Atualizado recentemente",
+  "activity_reconnecting": "A restabelecer ligação — a verificar o estado do turno",
+  "activity_outcome_unknown": "Não foi possível confirmar o resultado do turno. Abra o chat para verificar.",
+  "activity_chat_updated_detail": "Atividade do chat registada pelo Gateway; o estado do turno em tempo real não está disponível.",
+  "activity_updated": "Atualizado",
+  "activity_empty_title": "Sem atividade recente",
+  "activity_empty_detail": "Aqui aparecem os turnos iniciados nesta app e os chats do Gateway atualizados nos últimos 7 dias.",
+  "activity_read_error": "A Atividade não conseguiu ler os registos dos turnos ou os chats do Gateway. Verifique a ligação e tente novamente.",
+  "activity_chat_unavailable": "Este chat já não está disponível ou não foi possível contactar o Gateway.",
+  "activity_partial_title": "Atividade parcialmente carregada",
+  "activity_partial_detail": "É apresentado um intervalo limitado da atividade do gateway. Podem existir mais conversas; puxe para atualizar."
 }

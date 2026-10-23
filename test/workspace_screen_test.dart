@@ -12,6 +12,8 @@ import 'package:hermes_android/core/services/android_share_intent_service.dart';
 import 'package:hermes_android/core/services/chat_space_store.dart';
 import 'package:hermes_android/core/services/gateway_turn_application_controller.dart';
 import 'package:hermes_android/core/services/gateway_turn_coordinator.dart';
+import 'package:hermes_android/core/services/ws_client.dart';
+import 'package:hermes_android/core/services/normal_gateway_application_session.dart';
 import 'package:hermes_android/core/services/projects_gateway_client.dart';
 import 'package:hermes_android/core/services/projects_repository.dart';
 import 'package:hermes_android/core/theme/hermes_theme.dart';
@@ -188,6 +190,7 @@ Future<void> _pump(
   List<String>? openedSessions,
   List<Session>? sessions,
   Object? sessionsError,
+  VoidCallback? onSessionsLoad,
   WorkspaceSessionScreenBuilder? sessionScreenBuilder,
   WorkspaceFilesScreenBuilder? filesScreenBuilder,
   WorkspaceTurnSignalsLoader? turnSignalsLoader,
@@ -220,6 +223,7 @@ Future<void> _pump(
         sessionsLoader: sessions == null && sessionsError == null
             ? null
             : () async {
+                onSessionsLoad?.call();
                 if (sessionsError != null) throw sessionsError;
                 return sessions ?? const <Session>[];
               },
@@ -677,6 +681,160 @@ void main() {
     expect(find.byType(ProjectsPane), findsNothing);
   });
 
+  testWidgets(
+    'Activity uses real gateway sessions on a REST connection without a v2 journal',
+    (tester) async {
+      final opened = <String>[];
+      await _pump(
+        tester,
+        connection: _connection(),
+        sessions: [_session(id: 'real-chat', title: 'Actual gateway activity')],
+        openedSessions: opened,
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(HermesDestination.activity.label(l10n)).last);
+      await tester.pumpAndSettle();
+      expect(find.text('Recently updated'), findsOneWidget);
+      expect(find.text('Actual gateway activity'), findsOneWidget);
+      expect(find.text('No recent activity'), findsNothing);
+      expect(find.text('Running now'), findsNothing);
+      expect(find.text('Completed'), findsNothing);
+      await tester.tap(find.text('Actual gateway activity'));
+      await tester.pumpAndSettle();
+      expect(opened, ['real-chat']);
+    },
+  );
+
+  testWidgets(
+    'Activity observes a real stock owner and updates blocked work without a list request',
+    (tester) async {
+      final connection = _connection();
+      final controller = GatewayTurnApplicationController();
+      var listReads = 0;
+      final sent = Completer<void>();
+      final finish = Completer<void>();
+      late NormalGatewayApplicationSession session;
+      late Future<void> sending;
+      session = controller.normalSessionFor(
+        connection,
+        submit:
+            ({
+              required sessionId,
+              required text,
+              required onEvent,
+              required onSent,
+            }) async {
+              onSent();
+              sent.complete();
+              await finish.future;
+            },
+      );
+      await session.ready;
+      final owner = session.chatFor(
+        'local-chat',
+        storedSessionId: 'stored-chat',
+        title: 'Tracked chat',
+      );
+      sending = owner.submitPrepared(
+        reservation: owner.reserve()!,
+        text: 'Do work',
+        localContent: 'Do work',
+      );
+      await sent.future;
+      await controller.readActivityRecords(connection);
+      await _pump(
+        tester,
+        connection: connection,
+        turnApplicationController: controller,
+        onSessionsLoad: () => listReads++,
+        sessions: [_session(id: 'stored-chat', title: 'Tracked chat')],
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(HermesDestination.activity.label(l10n)).last);
+      await tester.pumpAndSettle();
+      expect(find.text('Running now'), findsOneWidget);
+      expect(find.text('Tracked chat'), findsOneWidget);
+      expect(find.text('Recently updated'), findsNothing);
+      final readsBeforeEvent = listReads;
+      session.receiveEvent(
+        'local-chat',
+        StreamEvent(
+          type: 'approval.request',
+          data: {'request_id': 'request-1', 'command': 'private command'},
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 250));
+      await tester.pumpAndSettle();
+      expect(find.text('Waiting for your input'), findsOneWidget);
+      expect(find.text('Running now'), findsNothing);
+      expect(find.text('private command'), findsNothing);
+      expect(listReads, readsBeforeEvent);
+      await tester.pumpWidget(const SizedBox());
+      finish.complete();
+      await sending;
+      await controller.close();
+    },
+  );
+
+  testWidgets(
+    'retained hidden Activity still updates the badge without a list read',
+    (tester) async {
+      final controller = GatewayTurnApplicationController();
+      var blocked = 0;
+      var listReads = 0;
+      var feedReads = 0;
+      await _pump(
+        tester,
+        connection: _connection(),
+        turnApplicationController: controller,
+        sessions: [_session(id: 'chat', title: 'Known chat')],
+        onSessionsLoad: () => listReads++,
+        activityFeedLoader: (_, _) async {
+          feedReads++;
+          return ActivityFeed(
+            groups: [],
+            blockedCount: blocked,
+            runningCount: 0,
+          );
+        },
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(HermesDestination.activity.label(l10n)).last);
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<ActivityPane>(find.byType(ActivityPane)).active,
+        isTrue,
+      );
+      await tester.tap(find.text(HermesDestination.more.label(l10n)).last);
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<ActivityPane>(
+              find.byType(ActivityPane, skipOffstage: false),
+            )
+            .active,
+        isFalse,
+      );
+      final listsBefore = listReads;
+      final feedsBefore = feedReads;
+      blocked = 1;
+      final token = controller.beginLegacyTurn();
+      await tester.pump(const Duration(milliseconds: 250));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<HermesShell>(find.byType(HermesShell))
+            .badges[HermesDestination.activity],
+        1,
+      );
+      expect(listReads, listsBefore);
+      expect(feedReads, feedsBefore + 1);
+      await tester.pumpWidget(const SizedBox());
+      controller.endLegacyTurn(token);
+      await controller.close();
+    },
+  );
+
   testWidgets('Activity no longer ships a placeholder', (tester) async {
     await _pump(
       tester,
@@ -694,7 +852,7 @@ void main() {
     expect(find.byType(ActivityPane), findsOneWidget);
     expect(find.textContaining('Coming'), findsNothing);
     // The empty timeline is a designed calm state, not a placeholder.
-    expect(find.text('Nothing is running'), findsOneWidget);
+    expect(find.text('No recent activity'), findsOneWidget);
   });
 
   testWidgets('Home renders the attention digest instead of a placeholder', (

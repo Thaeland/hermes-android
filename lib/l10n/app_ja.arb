@@ -755,5 +755,17 @@
   "task_status_pending": "Pending",
   "task_status_dispatched": "Dispatched",
   "task_status_unknown": "Unknown status: {status}",
-  "task_tasks_finished": "{count} delegated task(s) finished"
+  "task_tasks_finished": "{count} delegated task(s) finished",
+  "activity_status_unconfirmed": "状態未確認",
+  "activity_recently_updated": "最近更新",
+  "activity_reconnecting": "再接続中 — ターンの状態を確認しています",
+  "activity_outcome_unknown": "ターンの結果を確認できませんでした。チャットを開いて確認してください。",
+  "activity_chat_updated_detail": "ゲートウェイが記録したチャットのアクティビティです。ターンの現在の状態は確認できません。",
+  "activity_updated": "更新済み",
+  "activity_empty_title": "最近のアクティビティはありません",
+  "activity_empty_detail": "このアプリで開始したターンと、過去7日間に更新されたゲートウェイのチャットがここに表示されます。",
+  "activity_read_error": "アクティビティでターンの記録またはゲートウェイのチャットを読み取れませんでした。接続を確認して、もう一度お試しください。",
+  "activity_chat_unavailable": "このチャットは利用できなくなったか、ゲートウェイに接続できませんでした。",
+  "activity_partial_title": "アクティビティは一部のみ読み込まれています",
+  "activity_partial_detail": "ゲートウェイのアクティビティを限られた範囲で表示しています。他にもチャットがある可能性があります。下に引いて更新してください。"
 }

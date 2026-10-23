@@ -2715,4 +2715,45 @@ class AppLocalizationsJa extends AppLocalizations {
   String task_tasks_finished(Object count) {
     return '$count delegated task(s) finished';
   }
+
+  @override
+  String get activity_status_unconfirmed => '状態未確認';
+
+  @override
+  String get activity_recently_updated => '最近更新';
+
+  @override
+  String get activity_reconnecting => '再接続中 — ターンの状態を確認しています';
+
+  @override
+  String get activity_outcome_unknown => 'ターンの結果を確認できませんでした。チャットを開いて確認してください。';
+
+  @override
+  String get activity_chat_updated_detail =>
+      'ゲートウェイが記録したチャットのアクティビティです。ターンの現在の状態は確認できません。';
+
+  @override
+  String get activity_updated => '更新済み';
+
+  @override
+  String get activity_empty_title => '最近のアクティビティはありません';
+
+  @override
+  String get activity_empty_detail =>
+      'このアプリで開始したターンと、過去7日間に更新されたゲートウェイのチャットがここに表示されます。';
+
+  @override
+  String get activity_read_error =>
+      'アクティビティでターンの記録またはゲートウェイのチャットを読み取れませんでした。接続を確認して、もう一度お試しください。';
+
+  @override
+  String get activity_chat_unavailable =>
+      'このチャットは利用できなくなったか、ゲートウェイに接続できませんでした。';
+
+  @override
+  String get activity_partial_title => 'アクティビティは一部のみ読み込まれています';
+
+  @override
+  String get activity_partial_detail =>
+      'ゲートウェイのアクティビティを限られた範囲で表示しています。他にもチャットがある可能性があります。下に引いて更新してください。';
 }

@@ -79,6 +79,18 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
   showing only the current call (or the latest call when none are running).
   Tap to view the full group; leaving and reopening the chat resets that choice.
   Verbose mode explicitly opens tool details by default.
+- **Activity** shows app-observed Remote Gateway turns: waiting for input,
+  running, failed and completed, plus an explicit unconfirmed state during
+  recovery or when an outcome cannot be proven. Recent turn metadata survives
+  app restarts; no prompt, response, title or approval content is stored there.
+  It also lists gateway chats updated within seven days, including REST-only
+  connections and chats started elsewhere. These are labelled **Updated**, not
+  assumed to be running or completed. The tab refreshes while visible,
+  pauses beneath other tabs/chat routes and in the background, supports
+  pull-to-refresh and opens the relevant chat. A bounded gateway scan is
+  labelled partially loaded rather than claiming no activity or an exhaustive
+  count. This is not a complete server audit log: live outcomes from other
+  clients and historic per-turn outcomes predating this build are unavailable.
 - Persistent reconnect/session resume and defensive retry handling.
 - App-owned stock Gateway turns outlive an open chat route. Reopen a chat to
   reattach, including while other chats run. Pending markers survive process

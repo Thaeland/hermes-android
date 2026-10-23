@@ -755,5 +755,17 @@
   "task_status_pending": "Pending",
   "task_status_dispatched": "Dispatched",
   "task_status_unknown": "Unknown status: {status}",
-  "task_tasks_finished": "{count} delegated task(s) finished"
+  "task_tasks_finished": "{count} delegated task(s) finished",
+  "activity_status_unconfirmed": "Estado sin confirmar",
+  "activity_recently_updated": "Actualizado recientemente",
+  "activity_reconnecting": "Reconectando — comprobando el estado del turno",
+  "activity_outcome_unknown": "No se pudo confirmar el resultado del turno. Abre el chat para comprobarlo.",
+  "activity_chat_updated_detail": "Actividad del chat registrada por el Gateway; el estado del turno en tiempo real no está disponible.",
+  "activity_updated": "Actualizado",
+  "activity_empty_title": "No hay actividad reciente",
+  "activity_empty_detail": "Aquí aparecen los turnos iniciados en esta app y los chats del Gateway actualizados en los últimos 7 días.",
+  "activity_read_error": "Actividad no pudo leer sus registros de turnos o los chats del Gateway. Comprueba la conexión y vuelve a intentarlo.",
+  "activity_chat_unavailable": "Este chat ya no está disponible o no se pudo acceder al Gateway.",
+  "activity_partial_title": "Actividad cargada parcialmente",
+  "activity_partial_detail": "Se muestra un intervalo limitado de actividad de la pasarela. Puede haber más chats; desliza hacia abajo para actualizar."
 }

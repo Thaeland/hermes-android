@@ -2790,4 +2790,46 @@ class AppLocalizationsRu extends AppLocalizations {
   String task_tasks_finished(Object count) {
     return '$count delegated task(s) finished';
   }
+
+  @override
+  String get activity_status_unconfirmed => 'Статус не подтверждён';
+
+  @override
+  String get activity_recently_updated => 'Недавно обновлено';
+
+  @override
+  String get activity_reconnecting => 'Переподключение — проверка статуса хода';
+
+  @override
+  String get activity_outcome_unknown =>
+      'Не удалось подтвердить результат хода. Откройте чат для проверки.';
+
+  @override
+  String get activity_chat_updated_detail =>
+      'Активность чата записана шлюзом; текущий статус хода недоступен.';
+
+  @override
+  String get activity_updated => 'Обновлено';
+
+  @override
+  String get activity_empty_title => 'Нет недавней активности';
+
+  @override
+  String get activity_empty_detail =>
+      'Здесь отображаются ходы, начатые в этом приложении, и чаты шлюза, обновлённые за последние 7 дней.';
+
+  @override
+  String get activity_read_error =>
+      'Раздел «Активность» не смог прочитать записи ходов или чаты шлюза. Проверьте подключение и повторите попытку.';
+
+  @override
+  String get activity_chat_unavailable =>
+      'Этот чат больше недоступен или не удалось связаться со шлюзом.';
+
+  @override
+  String get activity_partial_title => 'Активность загружена частично';
+
+  @override
+  String get activity_partial_detail =>
+      'Показана ограниченная часть активности шлюза. Могут существовать другие чаты; потяните вниз для обновления.';
 }
