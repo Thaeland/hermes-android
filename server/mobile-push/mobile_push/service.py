@@ -10,6 +10,7 @@ import threading
 
 from .config import Rejected, identifier
 from .inbox import Inbox
+from .scope import SessionScope
 from .store import Store
 from .transport import Sender
 
@@ -132,16 +133,15 @@ class Runtime:
         principal = (registration["provider"], registration["user_id"])
         if not policy.admitted(principal):
             return False
+        scope = SessionScope.from_registration(registration)
         if event["kind"] == "challenge":
-            return registration["status"] == "pending" and all(
-                policy.allowed(principal, sid) and self.profile.durable(sid)
-                for sid in json.loads(registration["sessions_json"])
+            return registration["status"] == "pending" and scope.ready(
+                principal, policy, self.profile.durable
             )
         return (
             registration["status"] == "active"
             and event["kind"] in json.loads(registration["kinds_json"])
-            and event["session_id"] in json.loads(registration["sessions_json"])
-            and policy.allowed(principal, event["session_id"])
+            and scope.allows(principal, event["session_id"], policy)
             and self.profile.durable(event["session_id"])
         )
 

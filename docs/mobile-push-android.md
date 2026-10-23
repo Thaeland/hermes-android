@@ -1,36 +1,46 @@
-# Optional Android UnifiedPush
+# Automatic Android background notifications
 
-This transport is **off by default**, uses **no Firebase/FCM SDK**, and is separate
-from local notifications and active-turn background connection handling. It binds
-one explicitly chosen saved connection per Android installation. It does not
-subscribe other connections, all users, or every session automatically.
+Background notifications are **off until you enable them** and are separate from
+local notifications and active-turn background connection handling. One saved
+Hermes connection can be enrolled per Android installation. Starting the app does
+not enrol it or silently broaden an existing selected-session subscription.
 
-## Setup
+## Setup on the phone
 
-1. Install/configure a UnifiedPush distributor on the phone yourself (for example
-   ntfy or Sunup). Hermes does not install one or create an external account.
-2. The operator separately installs/enables the `mobile-push` dashboard plugin and
-   authorizes your dashboard principal plus the durable session IDs you select.
-   Default operator/session ACLs deny registration. A stock server without the
-   plugin is shown as unavailable, not as successfully registered.
-3. Open this connection's Settings → Android UnifiedPush. Choose the installed
-   distributor, paste durable session IDs from your server session browser (one
-   per line), check explicit consent, then Enable. IDs are not titles or local
-   temporary chat IDs. No wildcard/all-users subscription is offered. Select
-   1–128 IDs of 1–200 ASCII letters, digits or `_ . : @ -`; invalid/blank IDs are
-   rejected before HTTP, permission or native enable, never silently trimmed/dropped.
-   LF, CRLF and commas separate entries; CRLF is one separator, a lone CR is
-   invalid. Leading/trailing/consecutive separators preserve blank entries and
-   are rejected. IDs themselves are never normalised.
-4. Android notification permission is requested only on that explicit action.
-   An endpoint from the distributor is registered over the connection's existing
-   authenticated DashboardClient. Subscriber `p256dh` and `auth` come from the
-   connector; they are **not** the server's VAPID public key.
-5. Keep/reopen Hermes until **Active**. The server sends an encrypted challenge;
-   receiving it proves possession of the subscriber private key. The native
-   service queues that proof even if the Activity/Flutter engine is absent or the
-   authenticated PUT has not returned its generation yet. Only an authenticated
-   confirmation response activates the installation.
+1. Open the saved connection's Settings and enable **Background notifications**.
+2. Accept Android's notification permission prompt if requested.
+3. Keep/reopen Hermes until the status is **Active**. No push-server URL, key,
+   chat ID, Firebase project or separate distributor app is required on a device
+   with functioning Google Play Services. Registration is handled by the app.
+
+The automatic transport uses an existing valid distributor choice when present,
+otherwise the built-in Google-backed distributor when available. External
+UnifiedPush remains an optional advanced alternative, including for Google-free
+phones. If neither transport is available, Hermes reports that limitation; it
+cannot provide background push merely by hiding the settings. Installing ntfy or
+another compatible distributor remains an option, not a requirement on ordinary
+Google-enabled phones. Multiple external distributors without a default may need
+an explicit advanced selection.
+
+## Server prerequisite
+
+The operator must install/enable the paired `mobile-push` companion and authorise
+your verified dashboard login. The automatic subscription covers current and future
+durable chats **only as permitted by that login's live server policy**. For a personal
+server, an operator's explicit `owner_all_sessions: true` grant allows new chats
+without maintaining IDs. Restricted accounts stay restricted. No wildcard, other
+profile or all-users permission is inferred. See [the server runbook](mobile-push-server.md).
+A stock, disabled, unauthorised or outdated server is reported as unavailable or
+requiring an update, before permission or device registration. This app change does
+not install or reconfigure a live server.
+
+The app registers its endpoint using the existing authenticated DashboardClient.
+Subscriber `p256dh` and `auth` come from the connector, not the server VAPID key.
+The server sends an encrypted challenge; receiving it proves possession of the
+subscriber private key. The native service queues the proof even without the
+Activity/Flutter engine or before registration PUT returns. Only an authenticated
+confirmation for that exact generation activates the installation. **Pending is
+not Active.**
 
 Pending is not active. Before each registration PUT and confirmation POST,
 Hermes writes an attempt journal into the native encrypted store. If the server
@@ -90,7 +100,7 @@ server-side. Local authority remains off regardless.
   messages from the connector are discarded.
 * The connector manages subscription key generation and encrypted private-key
   storage. Hermes stores its endpoint/auth material, consent, installation nonce,
-  generation, session allowlist, pending challenge/revocation/tap queues and a
+  generation, explicit allowlist or authorised scope, pending challenge/revocation/tap queues and a
   bounded 256-event dedup window in an AES-GCM envelope, using a non-exportable
   Android Keystore key. SharedPreferences contains ciphertext only. Backups are
   disabled in the app manifest. Neither endpoints, auth secrets, proofs nor
@@ -166,8 +176,8 @@ authority before saved-account edits/import/removal.
 
 The Settings widget can also be embedded directly:
 `MobilePushSettings(connection: selected, connectionManager: manager)`.
-It only exposes manual allowlisted durable IDs, distributor availability, explicit
-consent, Pending/Active/Error, reconcile/retry and revoke controls. It remains
+It exposes one opt-in switch, Pending/Active/Error, retry/revoke and optional
+advanced transport controls. No manual chat IDs are needed. It remains
 accessible in the Settings fallback when model settings fail to load.
 
 ## Frozen server API
@@ -180,16 +190,22 @@ dashboard's launch home. The operator must separately enable the lifecycle
 hooks/worker in that profile; API selection cannot start them.
 
 * `GET /api/plugins/mobile-push/capabilities` → schema 1, registration_fence 1, enabled, transports
-  containing `webpush`, VAPID public key.
+  containing `webpush`, VAPID public key and `session_scope_modes` containing `authorized`.
 * `PUT /api/plugins/mobile-push/registrations/{installation_id}` → endpoint,
-  keys `{p256dh, auth}`, registration_nonce, registration_revision, explicit event_kinds and session_ids;
+  keys `{p256dh, auth}`, registration_nonce, registration_revision and explicit event_kinds.
+  Automatic enrolment sends `session_scope: authorized` and omits `session_ids`;
+  legacy explicit enrolment retains its validated `session_ids`;
   response `{generation, status: pending, registration_nonce, registration_revision}`.
 * `POST .../registrations/{id}/confirm` → `{generation, challenge}`;
   response must contain `status: active` and the exact `generation` before local activation.
 * `DELETE .../registrations/{id}` revokes.
-* `GET .../events?after=<cursor>&limit=100` → events, next_cursor, has_more.
+* Automatic mode uses `GET .../events?installation_id=<id>&generation=<generation>&after=<cursor>&limit=100`
+  → events, next_cursor, has_more and matching installation/generation/scope.
   Cursor pages are read to exhaustion (safety cap fails honestly rather than
-  returning partial reconciliation). Only unexpired allowlisted events route.
+  returning partial reconciliation). Every page is bound to current consent;
+  only unexpired, currently authorised events route. Legacy explicit mode also
+  retains its local allowlist. An old explicit subscription never becomes broad
+  automatically: disable it and opt in again to select authorised scope.
 
 ## Dependency/build compatibility and verification
 
@@ -201,11 +217,19 @@ already depends on `tink-android`: bundling both creates duplicate classes.
 The app excludes connector's `tink` and explicitly uses the published
 `tink-android:1.23.0`. This cryptographic library is not Firebase messaging.
 
+The optional built-in transport adds `embedded-fcm-distributor:3.1.0`, which uses
+device Play Services IPC without a bundled Firebase/GMS SDK or Google credentials.
+Its published POM and tagged source disagree on licensing. See the
+[retained licence, source and rebuild notice](../third_party/embedded-push-notice.md).
+Resolve that discrepancy or meet the applicable obligations before distributing
+a release; this PR does not claim F-Droid acceptance or physical Google delivery.
+
 Run from the repository (Flutter 3.44 / Dart 3.12):
 
 ```sh
 export TMPDIR=/Users/sam.russell/.hermes/cache/scratch
-export JAVA_HOME=/opt/homebrew/opt/openjdk@17
+export JAVA_HOME=/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home
+export PATH="$JAVA_HOME/bin:$PATH"
 export ANDROID_HOME="$HOME/Library/Android/sdk"
 flutter pub get
 flutter analyze lib/core/services/mobile_push_api.dart \
@@ -228,8 +252,8 @@ production controllers, failed local commits, persisted expiry/missing-proof
 waits, retry single-flight, renewal handoff, and 128-ID/200-character ASCII scope
 boundaries. It also holds an old PUT before commit across controller replacement,
 activates recovery/endpoint revision, then releases the old handler and rechecks
-retry/restart authority. Actual Settings widget tests cover every empty separator,
-whitespace, CRLF policy and exact count/length/ASCII boundaries before effects. Native JVM
+retry/restart authority. Legacy explicit-scope service tests retain exact
+count/length/ASCII validation; the automatic Settings flow needs no ID entry. Native JVM
 Robolectric tests exercise the real headless service/bridge with the connector's
 decrypted flag controlled, durable encrypted storage with a test-injected AES
 key (not AndroidKeystore acquisition), generic notifications, bounded dedup,

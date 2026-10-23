@@ -52,12 +52,16 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
   bool _dirty = false;
   bool _closed = false;
   int _epoch = 0;
+  String? _enablingConnection;
+  bool get enabling => _enablingConnection != null;
+  String get pendingConnectionId => _enablingConnection ?? '';
   String status = 'Off';
   String? error;
   List<Map<String, dynamic>> events = [];
   String get connectionId => _state['connection'] as String? ?? '';
   bool get enabled => _state['enabled'] == true;
   bool get active => enabled && _state['active'] == true;
+  String get sessionScope => _state['session_scope'] as String? ?? 'explicit';
   List<String> get sessionIds =>
       List<String>.from(_state['sessions'] as List? ?? []);
   bool get hasPendingTap => _tap != null;
@@ -155,6 +159,22 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
     );
   }
 
+  Future<List<Map<String, dynamic>>> transportOptions() async {
+    if (!supported) return [];
+    final options =
+        await _channel.invokeListMethod<dynamic>('transportOptions') ?? [];
+    return options
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .toList();
+  }
+
+  /// Explicit consent to the server's continuously authorized sessions. Never
+  /// broadens persisted legacy allowlists or enrolls on startup.
+  Future<void> enableAutomatic(
+    SavedConnection connection, {
+    String? distributor,
+  }) => _enable(connection, distributor ?? 'automatic', const [], 'authorized');
+
   Future<void> enable(
     SavedConnection connection,
     String distributor,
@@ -170,10 +190,17 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
       if (!_closed) notifyListeners();
       rethrow;
     }
+    return _enable(connection, distributor, ids, 'explicit');
+  }
+
+  Future<void> _enable(
+    SavedConnection connection,
+    String distributor,
+    List<String> ids,
+    String scope,
+  ) async {
     if (!supported || _manager == null) {
-      throw StateError(
-        'Choose durable session IDs and an Android distributor first.',
-      );
+      throw StateError('Choose a saved connection on Android first.');
     }
     final epoch = ++_epoch;
     final mutationEpoch = ConnectionMutationBarrier.capture(connection.id);
@@ -187,6 +214,7 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
     // A new opt-in started during an edit must not queue old consent to run
     // after that edit, even if the saved metadata still looks unchanged.
     if (!current()) return;
+    _enablingConnection = connection.id;
     final client = _clientFactory(connection);
     error = null;
     status = 'Checking server authorization';
@@ -198,7 +226,9 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
         'connection': connection.id,
       });
       if (!current()) return;
-      final caps = await MobilePushApi(client).capabilities();
+      final caps = await MobilePushApi(
+        client,
+      ).capabilities(authorized: scope == 'authorized');
       if (!current()) return;
       final permission =
           await _channel.invokeMethod<bool>('permission') == true;
@@ -215,6 +245,7 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
         'binding': fingerprint,
         'distributor': distributor,
         'sessions': ids,
+        'session_scope': scope,
         'vapid': caps['vapid_public_key'],
         'master': prefs.enabled,
         'kinds': [
@@ -247,6 +278,10 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
       rethrow;
     } finally {
       client.close();
+      if (epoch == _epoch) {
+        _enablingConnection = null;
+        if (!_closed) notifyListeners();
+      }
     }
     if (current()) await refresh();
   }
@@ -255,9 +290,11 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
   /// hints and notifications are revoked before attempting authenticated DELETE.
   Future<void> disable() async {
     ++_epoch;
+    _enablingConnection = null;
     _tap = null;
     events = [];
     status = 'Off';
+    error = null;
     notifyListeners();
     if (!supported || _closed) return;
     try {
@@ -273,10 +310,20 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> retry() async {
     if (!supported || _closed) return;
-    if (enabled && (_state['endpoint'] == null || _state['error'] != null)) {
-      await _call('retryDistributor');
+    final epoch = _epoch;
+    try {
+      if (enabled && (_state['endpoint'] == null || _state['error'] != null)) {
+        await _call('retryDistributor');
+      }
+      await refresh();
+    } catch (e) {
+      if (!_closed && epoch == _epoch) {
+        error = _message(e);
+        status = 'Error';
+        notifyListeners();
+      }
+      rethrow;
     }
-    await refresh();
   }
 
   /// Single flight with a dirty tail: a challenge arriving during PUT is not
@@ -335,6 +382,12 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
     if (_closed || epoch != _epoch) return false;
     final live = await _call('snapshot');
     if (_closed || epoch != _epoch) return false;
+    if (live['enabled'] != true) return false;
+    try {
+      MobilePushApi.sessionScope(live);
+    } on FormatException {
+      return false;
+    }
     final c = _connection(expected['connection'] as String? ?? '');
     return c != null &&
         !ConnectionMutationBarrier.isPending(c.id) &&
@@ -343,6 +396,8 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
         live['installation'] == expected['installation'] &&
         live['nonce'] == expected['nonce'] &&
         live['generation'] == expected['generation'] &&
+        (live['session_scope'] ?? 'explicit') ==
+            (expected['session_scope'] ?? 'explicit') &&
         live['revision'] == expected['revision'];
   }
 
@@ -401,6 +456,7 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
     final api = MobilePushApi(client);
     var state = snapshot;
     try {
+      MobilePushApi.sessionScope(state);
       if (state['error'] != null) throw StateError(state['error'] as String);
       if (state['endpoint'] == null) {
         status = 'Pending distributor endpoint';
@@ -479,7 +535,16 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
           : 'Pending encrypted challenge (open Hermes to confirm)';
       error = null;
       if (state['active'] == true) {
-        final reconciled = await _events(api, state, epoch);
+        // Discard old routable data before fetching; a bad later page must not
+        // leave a previous authenticated reconciliation usable for stale taps.
+        events = [];
+        final List<Map<String, dynamic>> reconciled;
+        try {
+          reconciled = await _events(api, state, epoch);
+        } catch (_) {
+          _tap = null;
+          rethrow;
+        }
         if (!await _current(state, epoch)) return;
         events = reconciled;
         final rawTap = await _channel.invokeMapMethod<String, dynamic>(
@@ -534,7 +599,7 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
       if (!visited.add(cursor)) {
         throw const FormatException('Event cursor did not advance.');
       }
-      final response = await api.events(cursor);
+      final response = await api.events(cursor, state: state);
       if (!await _current(state, epoch)) return [];
       if (response['events'] is! List || response['has_more'] is! bool) {
         throw const FormatException('Invalid events response.');
@@ -542,9 +607,10 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
       for (final raw in response['events'] as List) {
         if (raw is! Map) continue;
         final event = Map<String, dynamic>.from(raw);
-        if (event['event_id'] is! String ||
-            event['session_id'] is! String ||
-            !(state['sessions'] as List).contains(event['session_id']) ||
+        if (!MobilePushApi.validIdentifier(event['event_id'], maxLength: 256) ||
+            !MobilePushApi.validIdentifier(event['session_id']) ||
+            (MobilePushApi.sessionScope(state) == 'explicit' &&
+                !(state['sessions'] as List).contains(event['session_id'])) ||
             !const [
               'turn_done',
               'turn_error',
@@ -605,6 +671,7 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
           'nonce',
           'generation',
           'revision',
+          'session_scope',
         ])
           key: state[key],
         'route_kind': event['kind'],
@@ -635,6 +702,25 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   static String _message(Object error) {
+    if (error is StateError &&
+        error.message ==
+            'Allow Android notifications before enabling mobile push.') {
+      return 'Allow Android notifications in system settings, then retry.';
+    }
+    if (error is FormatException) {
+      return 'The server mobile-push plugin is unavailable, outdated, or returned an invalid subscription response. Ask the operator to update it, then retry.';
+    }
+    if (error is PlatformException) {
+      if (error.code == 'push_transport_unavailable') {
+        return 'No push transport is available. Built-in delivery needs working Google Play Services; alternatively install a UnifiedPush distributor and retry.';
+      }
+      if (error.code == 'push_transport_choice') {
+        return 'Several UnifiedPush distributors are available. Choose one in Advanced transport, then retry.';
+      }
+      if (error.code == 'push_transport_missing') {
+        return 'The selected UnifiedPush distributor is unavailable. Restore it or choose another in Advanced transport.';
+      }
+    }
     if (error is DashboardHttpException) {
       if (error.statusCode == 404) {
         return 'Optional mobile-push server plugin is not installed.';

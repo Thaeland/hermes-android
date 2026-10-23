@@ -55,8 +55,15 @@ internal object MobilePushBridge {
     }
 
     @Synchronized fun command(context: Context, method: String, args: Map<*, *>): Any? {
-        if (method == "distributors") return UnifiedPush.getDistributors(context)
+        if (method == "distributors") return MobilePushTransport.discover(context)
+        if (method == "transportOptions") return MobilePushTransport.options(context)
         val state = MobilePushStore.read(context)
+        if (!state.has("session_scope")) {
+            // No scope ever meant more than the old exact allowlist. Persist
+            // the default without rotating/re-enrolling or widening consent.
+            state.put("session_scope", "explicit")
+            MobilePushStore.write(context, state)
+        }
         // Upgrade old sealed consent without resetting its installation/revision.
         // Legacy delivery/proofs cannot remain active across a server migration.
         if (state.optBoolean("enabled") && state.optInt("registration_fence") != 1 &&
@@ -102,7 +109,11 @@ internal object MobilePushBridge {
             "enable" -> {
                 check(!state.optBoolean("enabled")) { "Disable the existing binding first" }
                 val sessions = JSONArray(args["sessions"] as List<*>)
-                check(MobilePushPolicy.validSessions(sessions)) { "Select 1-128 session IDs of 1-200 ASCII letters, digits, _ . : @ or -" }
+                val scope = args["session_scope"] ?: "explicit"
+                check(scope == "explicit" || scope == "authorized") { "Unknown session scope" }
+                check(if (scope == "authorized") sessions.length() == 0 else MobilePushPolicy.validSessions(sessions)) {
+                    "Select 1-128 session IDs of 1-200 ASCII letters, digits, _ . : @ or -; authorized scope requires no IDs"
+                }
                 val id = args["connection"] as String
                 check(connectionChanges.values.none { id in it } &&
                     connectionFences[id] != null && connectionFences[id] == args["connection_fence"]) { "Stale account consent" }
@@ -110,19 +121,17 @@ internal object MobilePushBridge {
                 // consent after disable or a subsequent valid account enable.
                 connectionFences.remove(id)
                 check(allowed(context)) { "Notification permission required" }
-                val distributor = args["distributor"] as String
-                check(distributor in UnifiedPush.getDistributors(context))
+                val distributor = MobilePushTransport.select(context, args["distributor"] as String)
                 val revoke = state.optJSONArray("revocations") ?: JSONArray()
                 val fresh = JSONObject().put("enabled", true).put("active", false)
                     .put("installation", UUID.randomUUID().toString()).put("nonce", UUID.randomUUID().toString())
                     .put("registration_fence", 1).put("revision", 1).put("generation", 0).put("connection", args["connection"])
-                    .put("binding", args["binding"]).put("sessions", sessions)
+                    .put("binding", args["binding"]).put("sessions", sessions).put("session_scope", scope)
                     .put("distributor", distributor).put("vapid", args["vapid"])
                     .put("revocations", revoke).put("master", args["master"])
                     .put("kinds", JSONArray(args["kinds"] as List<*>))
                 MobilePushStore.write(context, fresh) // consent before connector registration
-                UnifiedPush.saveDistributor(context, distributor)
-                UnifiedPush.register(context, instance = fresh.getString("installation"), messageForDistributor = "Hermes private hints", vapid = fresh.getString("vapid"))
+                MobilePushTransport.register(context, distributor, fresh.getString("installation"), fresh.getString("vapid"))
                 changed()
                 return map(fresh)
             }
@@ -224,11 +233,10 @@ internal object MobilePushBridge {
         val state = MobilePushStore.read(context)
         check(state.optBoolean("enabled"))
         val distributor = state.getString("distributor")
-        check(distributor in UnifiedPush.getDistributors(context))
+        MobilePushTransport.select(context, distributor) // never silently change the sealed transport
         state.remove("error")
         MobilePushStore.write(context, state)
-        UnifiedPush.saveDistributor(context, distributor)
-        UnifiedPush.register(context, instance = state.getString("installation"), messageForDistributor = "Hermes private hints", vapid = state.getString("vapid"))
+        MobilePushTransport.register(context, distributor, state.getString("installation"), state.getString("vapid"))
     }
 
     @Synchronized fun endpoint(context: Context, endpoint: PushEndpoint, instance: String) {

@@ -42,6 +42,8 @@ class MainActivity : FlutterActivity() {
                 } else {
                     try {
                         result.success(MobilePushBridge.command(this, call.method, call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()))
+                    } catch (failure: MobilePushTransport.Failure) {
+                        result.error(failure.code, "Push transport selection requires attention.", null)
                     } catch (_: Exception) {
                         result.error("mobile_push", "Mobile push operation failed safely. Check consent, permission and distributor.", null)
                     }

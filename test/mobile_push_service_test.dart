@@ -48,7 +48,12 @@ class Fixture {
   int capsStatus = 200;
   int? registrationFence = 1;
   bool capsEnabled = true;
+  List<String>? scopeModes = ['explicit', 'authorized'];
   bool permission = true;
+  String? enableFailureCode;
+  List<Map<String, String>> options = [
+    {'id': 'test.distributor', 'label': 'Test distributor'},
+  ];
   bool failRevoke = false;
   String? failCommand;
   final connectionFences = <String, String>{};
@@ -58,6 +63,7 @@ class Fixture {
   Future<http.Response> Function(http.Request)? onPut;
   Future<http.Response> Function(http.Request)? onCapabilities;
   Future<http.Response> Function(http.Request)? onConfirm;
+  Future<http.Response> Function(http.Request)? onEvents;
   List<Map<String, dynamic>> feed = [];
   int eventPageSize = 100;
   final int expiry = DateTime.now().millisecondsSinceEpoch ~/ 1000 + 3600;
@@ -121,12 +127,17 @@ class Fixture {
               return permission;
             case 'distributors':
               return ['test.distributor'];
+            case 'transportOptions':
+              return options;
             case 'snapshot':
               return clone(native);
             case 'preferences':
               native.addAll(args);
               return clone(native);
             case 'enable':
+              if (enableFailureCode != null) {
+                throw PlatformException(code: enableFailureCode!);
+              }
               final id = args['connection'] as String;
               if (connectionChanges.values.any((ids) => ids.contains(id)) ||
                   connectionFences[id] == null ||
@@ -253,6 +264,7 @@ class Fixture {
             jsonEncode({
               'schema': 1,
               'registration_fence': registrationFence,
+              'session_scope_modes': scopeModes,
               'enabled': capsEnabled,
               'transports': ['webpush'],
               'vapid_public_key': base64Url
@@ -274,6 +286,7 @@ class Fixture {
           return http.Response('{}', failRevoke ? 503 : 200);
         }
         if (request.url.path.endsWith('/events')) {
+          if (onEvents != null) return onEvents!(request);
           final after = int.parse(request.url.queryParameters['after']!);
           final page = feed.skip(after).take(eventPageSize).toList();
           final next = after + page.length;
@@ -282,6 +295,11 @@ class Fixture {
               'events': page,
               'next_cursor': next,
               'has_more': next < feed.length,
+              if (native['session_scope'] == 'authorized') ...{
+                'installation_id': native['installation'],
+                'generation': native['generation'],
+                'session_scope': 'authorized',
+              },
             }),
             200,
           );
@@ -441,7 +459,7 @@ void main() {
     },
   );
   testWidgets(
-    'settings requires explicit consent, durable IDs and enable before requesting permission',
+    'settings one toggle explicitly enables authorized hints without manual IDs',
     (tester) async {
       await tester.runAsync(() => f.service.initialize(f.manager));
       await tester.pumpWidget(
@@ -463,23 +481,18 @@ void main() {
         await f.service.distributors();
       });
       await tester.pumpAndSettle();
-      expect(find.text('Android UnifiedPush (optional)'), findsOneWidget);
-      expect(find.text('test.distributor'), findsOneWidget);
-      final enable = find.widgetWithText(
-        FilledButton,
-        'Enable for selected sessions',
-      );
-      expect(tester.widget<FilledButton>(enable).onPressed, isNull);
+      expect(find.text('Background notifications'), findsOneWidget);
+      expect(find.byType(TextField), findsNothing);
+      expect(find.byType(Checkbox), findsNothing);
+      final enable = find.byType(Switch);
       expect(f.methods, isNot(contains('permission')));
-      await tester.enterText(find.byType(TextField), 'durable-session');
-      await tester.tap(find.byType(Checkbox));
-      await tester.pumpAndSettle();
-      expect(tester.widget<FilledButton>(enable).onPressed, isNotNull);
       await tester.ensureVisible(enable);
       await tester.tap(enable);
       await tester.pumpAndSettle();
       expect(f.methods, contains('permission'));
-      expect(f.native['sessions'], ['durable-session']);
+      expect(f.native['sessions'], isEmpty);
+      expect(f.native['session_scope'], 'authorized');
+      expect(f.native['distributor'], 'automatic');
       expect(find.text('Disable and revoke'), findsOneWidget);
       await tester.pumpWidget(const SizedBox.shrink());
     },

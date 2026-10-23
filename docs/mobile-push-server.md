@@ -1,4 +1,4 @@
-# Encrypted UnifiedPush server companion
+# Encrypted mobile-push server companion
 
 `server/mobile-push` is a distributable, opt-in Hermes plugin named **mobile-push**.
 It is shipped with this Android repository but must be installed separately on the
@@ -36,9 +36,12 @@ operator's session database for writing or registers a real push endpoint.
 - Lifecycle hooks must load in every process that executes the subscribed turns.
   The dashboard API alone does not run turns or start the sender. Separate dashboard
   and gateway processes must use the same profile home and local SQLite files.
-- Android must explicitly opt in, have a compatible UnifiedPush distributor, provide
+- Android must explicitly opt in, use the built-in Google-backed or an external
+  compatible UnifiedPush distributor, provide
   genuine Web Push `p256dh`/`auth` keys and decrypt RFC8291 `aes128gcm` messages. An
-  endpoint URL alone is not an encrypted subscription. This is not an FCM service.
+  endpoint URL alone is not an encrypted subscription. The built-in distributor
+  uses standard VAPID Web Push against Google FCM without a Firebase-admin sender,
+  Firebase project or separate Google credentials on this server.
 - Outbound HTTPS/DNS and a valid trusted certificate at the push service. The mobile
   device also needs authenticated access to this API for confirmation/reconciliation.
   Local/LAN services need the exact operator exception described below. Production
@@ -104,10 +107,23 @@ Use principal values from the **trusted authentication provider**, not values
 claimed by a client. Session IDs must be exact durable `sessions.id` values in this
 profile's `state.db`; the plugin checks that database read-only. Missing grants deny
 access. `"*"` is not accepted in `session_ids`. Only an explicit operator
-`"owner_all_sessions": true` grants that principal owner-wide eligibility; clients
-must still submit a non-empty explicit list of durable session IDs. There is no
-automatic parent/child lineage, runtime-alias or sibling-profile inheritance.
-A new/rotated durable identity requires an updated operator grant and registration.
+`"owner_all_sessions": true` grants that principal owner-wide eligibility.
+Automatic clients enrol with `session_scope: "authorized"` and no `session_ids`:
+the live policy then covers current and future durable sessions without typing IDs
+on the phone. Restricted grants remain restricted, including after ACL changes.
+Legacy explicit subscriptions retain their fixed list and are never widened by
+migration. There is no automatic parent/child lineage, runtime-alias or
+sibling-profile inheritance. Under a restricted grant, a new durable identity
+still needs an operator ACL update; owner-wide authorised subscriptions include it
+automatically. An authorised subscription can be created before the first chat.
+
+For a personal-server owner, the principal entry can instead be:
+
+```json
+{"provider":"actual-verified-provider","user_id":"actual-verified-user-id","owner_all_sessions":true}
+```
+
+This is an explicit operator decision, not a permission the Android app grants itself.
 
 After review, set this file's `enabled` to true and explicitly enable `mobile-push`
 in the same profile's `plugins.enabled` (for example `hermes --profile default plugins
@@ -213,7 +229,7 @@ Mutating JSON bodies are strict (extra fields denied), at most 32 KiB.
 ### `GET /api/plugins/mobile-push/capabilities`
 
 ```json
-{"schema":1,"registration_fence":1,"transports":["webpush"],"vapid_public_key":"base64url-uncompressed-P256-public-key","enabled":true}
+{"schema":1,"registration_fence":1,"session_scope_modes":["explicit","authorized"],"transports":["webpush"],"vapid_public_key":"base64url-uncompressed-P256-public-key","enabled":true}
 ```
 
 Missing/disabled config or an ungranted verified principal yields `enabled:false`
@@ -221,6 +237,25 @@ and an empty public key. No verified session yields 401 even on this endpoint.
 Invalid private config/key yields generic 503 rather than leaking secret details.
 
 ### `PUT /api/plugins/mobile-push/registrations/{installation_id}`
+
+Automatic clients send the following body. `authorized` is an explicit consent to
+the authenticated principal's current and future server-authorised durable chats;
+it does not grant access or override operator policy.
+
+```json
+{
+  "endpoint":"https://push-service.example.org/opaque-subscription-path",
+  "keys":{"p256dh":"real-base64url-65-byte-P256-public-key","auth":"real-base64url-16-byte-auth-secret"},
+  "registration_nonce":"fresh-client-base64url-random-nonce",
+  "registration_revision":1,
+  "event_kinds":["turn_done","turn_error","input","input_resolved"],
+  "session_scope":"authorized"
+}
+```
+
+Do not send `session_ids` with authorised scope, even an empty/null list. Conflicting
+fields and unknown modes are rejected. Legacy explicit clients omit `session_scope`
+(or set it to `explicit`) and retain the required non-empty list:
 
 ```json
 {
@@ -242,7 +277,7 @@ Returns HTTP 200:
 `installation_id` and session IDs are 1–200 ASCII characters from
 `A-Z a-z 0-9 _ . : @ -`. Use a globally unique random installation ID. The nonce is
 16–128 base64url characters; use fresh cryptographic randomness on **every** update.
-`event_kinds` has 1–4 entries from exactly the four values above; `session_ids` has
+`event_kinds` has 1–4 entries from exactly the four values above; explicit-mode `session_ids` has
 1–128 exact durable IDs; duplicate scopes are rejected. Keys are validated as a real
 P-256 point and a 16-byte auth secret, not merely plausible strings.
 
@@ -311,6 +346,14 @@ Android must immediately revoke local consent and reject old generation/nonce hi
 
 ### `GET /api/plugins/mobile-push/events?after=0&limit=100`
 
+Automatic clients must additionally send `installation_id` and its current active
+`generation`. These fields are required together. The server checks ownership,
+active generation, live ACL, durability, event kinds and stored registration scope;
+it echoes `installation_id`, integer `generation` and `session_scope` on every page.
+The client rejects any mismatched/missing echo before accepting that page. Pending,
+superseded or revoked generations cannot authorise event routing. Legacy unbound
+queries remain supported for older explicit clients, which retain their local list.
+
 ```json
 {
   "events":[
@@ -341,6 +384,12 @@ transcript or a proof that an old attention request still exists. After a retent
 window, missed hooks or connectivity loss, reconcile current authenticated chat state.
 
 ## Push payload, hooks and delivery semantics
+
+Database upgrades add a scope column defaulting to `explicit`; existing consent is
+never broadened to `authorized`. Scope changes require a new user opt-in, fresh
+installation and encrypted handshake. Endpoint renewal/recovery retains the selected
+scope. Live ACL removal and durable-session deletion suppress future sends and
+reconciliation; messages already accepted by a push service cannot be recalled.
 
 The JSON plaintext encrypted using RFC8291 `aes128gcm`, with RFC8292 VAPID auth:
 

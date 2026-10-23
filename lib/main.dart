@@ -373,7 +373,11 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
       while (mounted && !_closingTurnOwner && _mobilePush.hasPendingTap) {
         final route = await _mobilePush.takePendingNotificationRoute();
         if (!mounted || _closingTurnOwner) return;
-        if (route == null || !await _mobilePush.isRouteCurrent(route)) continue;
+        if (route == null ||
+            !await _mobilePush.isRouteCurrent(route) ||
+            _mobilePush.hasPendingTap) {
+          continue;
+        }
         if (!mounted || _closingTurnOwner) return;
         await _openNotificationSession(
           route.connection,
@@ -591,7 +595,9 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
       final normal = _turnApplicationController.normalSessionFor(connection);
       await normal.ready.catchError((Object _) {});
       if (!mounted || _closingTurnOwner) return;
-      if (pushRoute != null && !await _mobilePush.isRouteCurrent(pushRoute)) {
+      if (pushRoute != null &&
+          (!await _mobilePush.isRouteCurrent(pushRoute) ||
+              _mobilePush.hasPendingTap)) {
         return;
       }
       if (!mounted || _closingTurnOwner) return;
@@ -632,7 +638,11 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
       }
     }
     if (pushRoute != null) {
-      if (!await _mobilePush.isRouteCurrent(pushRoute)) return;
+      // A newer tap owns focus even when this older lookup was already in flight.
+      if (!await _mobilePush.isRouteCurrent(pushRoute) ||
+          _mobilePush.hasPendingTap) {
+        return;
+      }
       // Reject prefix resolution or a local alias without durable identity proof.
       if (session?.id != pushRoute.sessionId) session = null;
     }

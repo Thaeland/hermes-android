@@ -459,3 +459,106 @@ def test_real_lifecycle_workers_share_only_their_vetted_dashboard_store(env, mou
         for manager in managers:
             manager.unload()
     assert all(not runtime.thread.is_alive() for runtime in runtimes)
+
+
+@pytest.mark.parametrize("held_index", [0, 1])
+def test_once_mounted_authorized_bound_feed_isolates_profiles_during_sibling_renewal(
+    env, mounted, monkeypatch, held_index
+):
+    body = {key: value for key, value in env.body.items() if key != "session_ids"}
+    body["session_scope"] = "authorized"
+    proofs = []
+    for index, profile in enumerate(mounted.profiles):
+        with sqlite3.connect(profile.home / "state.db") as db:
+            db.execute("DELETE FROM sessions")
+        grant = mounted.configs[index]["principals"][0]
+        grant["session_ids"] = []
+        grant["owner_all_sessions"] = index == 0
+        save(profile, mounted.configs[index])
+        assert request(mounted, index, "PUT", "/registrations/phone", json=body).status_code == 200
+        with Store(profile.database).connection() as db:
+            hint = json.loads(db.execute("SELECT payload FROM outbox").fetchone()[0])
+        proofs.append({"generation": 1, "challenge": hint["challenge"]})
+    for index, profile in enumerate(mounted.profiles):
+        assert (
+            request(
+                mounted, index, "POST", "/registrations/phone/confirm", json=proofs[1 - index]
+            ).status_code
+            == 409
+        )
+        assert (
+            request(
+                mounted, index, "POST", "/registrations/phone/confirm", json=proofs[index]
+            ).status_code
+            == 200
+        )
+        with sqlite3.connect(profile.home / "state.db") as db:
+            db.execute("INSERT INTO sessions VALUES('new-durable',NULL)")
+        if index == 1:
+            mounted.configs[index]["principals"][0]["session_ids"] = ["new-durable"]
+            save(profile, mounted.configs[index])
+        runtime = Runtime(profile)
+        runtime.initialise()
+        try:
+            runtime.session_end(
+                session_id="new-durable",
+                turn_id=f"profile-{index}",
+                completed=True,
+                failed=False,
+                interrupted=False,
+                turn_exit_reason="stop",
+            )
+        finally:
+            runtime.stop()
+
+    def feed(index, generation=1):
+        params = {"installation_id": "phone", "generation": generation, "after": 0, "limit": 100}
+        if mounted.names[index]:
+            params["profile"] = mounted.names[index]
+        return mounted.client.get(PREFIX + "/events", params=params)
+
+    entered, release = threading.Event(), threading.Event()
+    original = mounted.loaded._config.Profile.policy
+
+    def held(profile):
+        if profile.home == mounted.profiles[held_index].home:
+            entered.set()
+            assert release.wait(10)
+        return original(profile)
+
+    monkeypatch.setattr(mounted.loaded._config.Profile, "policy", held)
+    held_before = snapshot(mounted.profiles[held_index])
+    sibling = 1 - held_index
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        flight = executor.submit(feed, held_index)
+        try:
+            assert entered.wait(5)
+            assert [event["turn_id"] for event in feed(sibling).json()["events"]] == [
+                f"profile-{sibling}"
+            ]
+            renewal = {
+                **body,
+                "registration_revision": 2,
+                "registration_nonce": "sibling_renewal_nonce_0123456789",
+            }
+            assert (
+                request(mounted, sibling, "PUT", "/registrations/phone", json=renewal).status_code
+                == 200
+            )
+            assert feed(sibling).status_code == 409
+            sibling_after = snapshot(mounted.profiles[sibling])
+        finally:
+            release.set()
+        response = flight.result(5)
+        assert response.status_code == 200
+        page = response.json()
+        assert page["installation_id"] == "phone" and page["generation"] == 1
+        assert page["session_scope"] == "authorized"
+        assert [event["turn_id"] for event in page["events"]] == [f"profile-{held_index}"]
+    assert snapshot(mounted.profiles[held_index]) == held_before
+    assert snapshot(mounted.profiles[sibling]) == sibling_after
+    grant = mounted.configs[held_index]["principals"][0]
+    grant["session_ids"] = []
+    grant["owner_all_sessions"] = False
+    save(mounted.profiles[held_index], mounted.configs[held_index])
+    assert feed(held_index).json()["events"] == []

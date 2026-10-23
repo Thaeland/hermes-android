@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import sqlite3
 from typing import Annotated, Literal
 
@@ -10,6 +11,7 @@ from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field
 
 from .config import Profile, Rejected, identifier, validate_keys
+from .scope import SessionScope
 from .store import Store
 from .transport import validate_endpoint
 
@@ -48,7 +50,8 @@ class Registration(StrictModel):
     event_kinds: list[Literal["turn_done", "turn_error", "input", "input_resolved"]] = Field(
         min_length=1, max_length=4
     )
-    session_ids: list[str] = Field(min_length=1, max_length=128)
+    session_scope: Literal["explicit", "authorized"] = "explicit"
+    session_ids: list[str] | None = Field(default=None, min_length=1, max_length=128)
 
 
 class Confirmation(StrictModel):
@@ -102,6 +105,7 @@ def create_router(profile_source):
             return {
                 "schema": 1,
                 "registration_fence": 1,
+                "session_scope_modes": ["explicit", "authorized"],
                 "transports": ["webpush"],
                 "enabled": enabled,
                 "vapid_public_key": policy.public_key() if enabled else "",
@@ -118,23 +122,18 @@ def create_router(profile_source):
     ):
         def update():
             policy = policy_for(profile, identity)
-            if not identifier(installation_id) or not all(
-                identifier(sid) for sid in body.session_ids
-            ):
-                raise Rejected(422, "Invalid installation/session ID")
-            if len(set(body.event_kinds)) != len(body.event_kinds) or len(
-                set(body.session_ids)
-            ) != len(body.session_ids):
+            registration = body.model_dump(exclude_unset=True)
+            scope = SessionScope.from_body(registration)
+            if not identifier(installation_id):
+                raise Rejected(422, "Invalid installation ID")
+            if len(set(body.event_kinds)) != len(body.event_kinds):
                 raise Rejected(422, "Duplicate subscription scope")
             # Authorisation before DNS: unauthorised callers cannot use this as a lookup oracle.
-            if any(
-                not policy.allowed(identity, sid) or not profile.durable(sid)
-                for sid in body.session_ids
-            ):
+            if not scope.ready(identity, policy, profile.durable):
                 raise Rejected(403, "Session scope not authorised or not durable")
             validate_keys(body.keys.model_dump())
             validate_endpoint(body.endpoint, policy)
-            return Store(profile.database).put(identity, installation_id, body.model_dump(), policy)
+            return Store(profile.database).put(identity, installation_id, registration, policy)
 
         return guarded(update)
 
@@ -148,7 +147,7 @@ def create_router(profile_source):
         def activate():
             policy = policy_for(profile, identity)
             return Store(profile.database).confirm(
-                identity, installation_id, body.generation, body.challenge, policy
+                identity, installation_id, body.generation, body.challenge, policy, profile.durable
             )
 
         return guarded(activate)
@@ -169,14 +168,33 @@ def create_router(profile_source):
 
     @router.get("/events")
     def events(
+        request: Request,
         identity: Identity,
         profile: Profile = Depends(profile_for_request),
         after: int = Query(default=0, ge=0, le=9223372036854775807),
         limit: int = Query(default=100, ge=1, le=200),
+        installation_id: str | None = Query(default=None),
+        generation: str | None = Query(default=None),
     ):
         def read():
             policy = policy_for(profile, identity)
-            return Store(profile.database).events(identity, after, limit, policy, profile.durable)
+            bound_generation = None
+            if installation_id is not None or generation is not None:
+                if (
+                    not identifier(installation_id)
+                    or generation is None
+                    or not re.fullmatch(r"[1-9][0-9]{0,18}", generation)
+                    or int(generation) > 9223372036854775807
+                    or len(request.query_params.getlist("installation_id")) != 1
+                    or len(request.query_params.getlist("generation")) != 1
+                ):
+                    raise Rejected(
+                        422, "Exact installation_id and positive generation required together"
+                    )
+                bound_generation = int(generation)
+            return Store(profile.database).events(
+                identity, after, limit, policy, profile.durable, installation_id, bound_generation
+            )
 
         return guarded(read)
 

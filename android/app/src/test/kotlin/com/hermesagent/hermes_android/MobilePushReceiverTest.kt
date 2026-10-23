@@ -68,6 +68,21 @@ class MobilePushReceiverTest {
         assertEquals(0, manager.activeNotifications.size)
         assertFalse(MobilePushStore.read(context).has("seen"))
     }
+    @Test fun authorizedSealedHeadlessAuthorityStillRequiresEncryptionAndCurrentConsent() {
+        val state = MobilePushStore.read(context).put("session_scope", "authorized").put("sessions", JSONArray())
+        MobilePushStore.write(context, state)
+        MobilePushBridge.detach()
+        deliver(decrypted = false)
+        assertEquals(0, manager.activeNotifications.size)
+        deliver()
+        assertEquals(1, manager.activeNotifications.size)
+        assertEquals("authorized", MobilePushStore.read(context).getString("session_scope"))
+        assertEquals(0, MobilePushStore.read(context).getJSONArray("sessions").length())
+        MobilePushBridge.command(context, "disable", emptyMap<Any, Any>())
+        MobilePushBridge.detach()
+        deliver(payload().put("event_id", "late-authorized"))
+        assertEquals(0, manager.activeNotifications.size)
+    }
     @Test fun envelopeContainsNoRawEndpointAuthNonceOrChallenge() {
         save(active = false)
         deliver(payload("challenge").put("challenge", "private-challenge"))

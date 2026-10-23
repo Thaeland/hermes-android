@@ -100,6 +100,8 @@ android.applicationVariants.configureEach {
 }
 
 dependencies {
+   // Open-source C2DM IPC transport, not Firebase SDK/GMS client libraries.
+   implementation("org.unifiedpush.android:embedded-fcm-distributor:3.1.0")
    implementation("org.unifiedpush.android:connector:3.3.5") {
        // flutter_secure_storage already uses tink-android. The JVM artifact
        // contains the same classes and cannot coexist in an APK.
