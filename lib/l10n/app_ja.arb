@@ -33,7 +33,7 @@
   "archive_2": "{projectName}をアーカイブしますか？",
   "archive_3": "{name}をアーカイブしますか？",
   "archived": "アーカイブ済み",
-  "archived_conversations_appear_here": "アーカイブした会話がここに表示されます。",
+  "archived_conversations_appear_here": "アーカイブした会話のみがここに表示されます。古いチャットは「すべてのチャット」に残ります。",
   "archived_quick_chats": "アーカイブ済みクイックチャット",
   "artifacts_attachments_and_generated_media": "成果物、添付ファイル、生成メディア",
   "ask_ai_to_find_a_conversation": "AIに会話を探させる",

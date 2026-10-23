@@ -122,7 +122,7 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get archived_conversations_appear_here =>
-      'Las conversaciones archivadas aparecen aquí.';
+      'Aquí solo aparecen conversaciones archivadas. Los chats antiguos siguen en Todos los chats.';
 
   @override
   String get archived_quick_chats => 'Chats rápidos archivados';

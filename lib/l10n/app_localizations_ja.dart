@@ -119,7 +119,8 @@ class AppLocalizationsJa extends AppLocalizations {
   String get archived => 'アーカイブ済み';
 
   @override
-  String get archived_conversations_appear_here => 'アーカイブした会話がここに表示されます。';
+  String get archived_conversations_appear_here =>
+      'アーカイブした会話のみがここに表示されます。古いチャットは「すべてのチャット」に残ります。';
 
   @override
   String get archived_quick_chats => 'アーカイブ済みクイックチャット';

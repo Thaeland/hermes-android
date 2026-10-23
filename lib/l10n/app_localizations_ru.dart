@@ -122,7 +122,7 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get archived_conversations_appear_here =>
-      'Архивированные диалоги появятся здесь.';
+      'Здесь отображаются только архивированные диалоги. Старые чаты остаются в разделе «Все чаты».';
 
   @override
   String get archived_quick_chats => 'Архивированные быстрые чаты';

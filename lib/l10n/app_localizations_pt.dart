@@ -122,7 +122,7 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get archived_conversations_appear_here =>
-      'Conversas arquivadas aparecem aqui.';
+      'Só as conversas arquivadas aparecem aqui. Os chats antigos continuam em Todos os chats.';
 
   @override
   String get archived_quick_chats => 'Chats rápidos arquivados';
@@ -2874,7 +2874,7 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get archived_conversations_appear_here =>
-      'Conversas arquivadas aparecem aqui.';
+      'Só as conversas arquivadas aparecem aqui. Os chats antigos continuam em Todos os chats.';
 
   @override
   String get archived_quick_chats => 'Chats rápidos arquivados';

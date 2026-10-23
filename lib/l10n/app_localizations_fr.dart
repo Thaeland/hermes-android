@@ -122,7 +122,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get archived_conversations_appear_here =>
-      'Les discussions archivées apparaissent ici.';
+      'Seules les discussions archivées apparaissent ici. Les anciennes restent dans Toutes les discussions.';
 
   @override
   String get archived_quick_chats => 'Discussions rapides archivées';

@@ -33,7 +33,7 @@
   "archive_2": "Arquivar {projectName}?",
   "archive_3": "Arquivar {name}?",
   "archived": "Arquivado",
-  "archived_conversations_appear_here": "Conversas arquivadas aparecem aqui.",
+  "archived_conversations_appear_here": "Só as conversas arquivadas aparecem aqui. Os chats antigos continuam em Todos os chats.",
   "archived_quick_chats": "Chats rápidos arquivados",
   "artifacts_attachments_and_generated_media": "Artefatos, anexos e mídia gerada",
   "ask_ai_to_find_a_conversation": "Pedir à IA para encontrar uma conversa",

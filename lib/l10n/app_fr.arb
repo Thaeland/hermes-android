@@ -33,7 +33,7 @@
   "archive_2": "Archiver {projectName} ?",
   "archive_3": "Archiver {name} ?",
   "archived": "Archivé",
-  "archived_conversations_appear_here": "Les discussions archivées apparaissent ici.",
+  "archived_conversations_appear_here": "Seules les discussions archivées apparaissent ici. Les anciennes restent dans Toutes les discussions.",
   "archived_quick_chats": "Discussions rapides archivées",
   "artifacts_attachments_and_generated_media": "Artefacts, pièces jointes et médias générés",
   "ask_ai_to_find_a_conversation": "Demander à l'IA de trouver une discussion",

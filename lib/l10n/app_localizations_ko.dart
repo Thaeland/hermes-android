@@ -118,7 +118,8 @@ class AppLocalizationsKo extends AppLocalizations {
   String get archived => '보관됨';
 
   @override
-  String get archived_conversations_appear_here => '보관된 대화가 여기에 표시됩니다.';
+  String get archived_conversations_appear_here =>
+      '보관한 대화만 여기에 표시됩니다. 이전 채팅은 모든 채팅에 남아 있습니다.';
 
   @override
   String get archived_quick_chats => '보관된 빠른 채팅';

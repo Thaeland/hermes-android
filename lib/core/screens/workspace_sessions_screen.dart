@@ -164,6 +164,9 @@ List<MapEntry<ChatDateBucket, List<Session>>> groupChatsByDate(
 class WorkspaceSessionsData {
   final List<Session> sessions;
 
+  /// False while the active-history read is pending or failed.
+  final bool sessionsKnown;
+
   /// A provisional list while a complete scan or additive metadata loads.
   final bool isPartial;
   final Set<String> claimedSessionIds;
@@ -172,9 +175,13 @@ class WorkspaceSessionsData {
   /// Server-archived sessions, fetched from the dashboard's
   /// `archived=only` router. The gateway chat transport never returns
   /// archived rows, so without this the Archived chip only ever showed
-  /// quick-chat expiries. Empty when the dashboard is unreachable — the
-  /// chip then degrades to quick-chat-only rather than lying.
+  /// quick-chat expiries. May contain only the pages read before a failure;
+  /// [archivesKnown] distinguishes that from a confirmed complete archive.
   final List<Session> archivedSessions;
+
+  /// False while the archive read is pending, or when it failed. An empty
+  /// archive is not authoritative until this is true.
+  final bool archivesKnown;
 
   /// Best-effort session id → project label mapping.
   ///
@@ -190,16 +197,26 @@ class WorkspaceSessionsData {
 
   const WorkspaceSessionsData({
     this.sessions = const [],
+    bool? sessionsKnown,
     this.isPartial = false,
     this.claimedSessionIds = const {},
     this.archivedQuickChatIds = const {},
     this.archivedSessions = const [],
+    bool? archivesKnown,
     this.projectLabels = const {},
     this.projectsKnown = true,
-  });
+  }) : sessionsKnown = sessionsKnown ?? !isPartial,
+       archivesKnown = archivesKnown ?? !isPartial;
 }
 
 typedef WorkspaceSessionsLoader = Future<WorkspaceSessionsData> Function();
+
+/// Emits cumulative provisional snapshots and returns the final snapshot.
+/// The screen ignores emissions after this future settles or it is disposed.
+typedef WorkspaceProgressiveSessionsLoader =
+    Future<WorkspaceSessionsData> Function(
+      void Function(WorkspaceSessionsData) onProgress,
+    );
 
 /// Saves a title remotely and returns the authoritative saved title.
 /// Failures throw without changing the visible conversation.
@@ -235,11 +252,12 @@ List<Session> filterWorkspaceSessions({
             // bucket.
             WorkspaceSessionView.unassigned =>
               projectsKnown &&
+                  !session.archived &&
                   !isMachineSession(session) &&
                   !claimedSessionIds.contains(session.id),
-            WorkspaceSessionView.archivedQuick => archivedQuickChatIds.contains(
-              session.id,
-            ),
+            WorkspaceSessionView.archivedQuick =>
+              !isMachineSession(session) &&
+                  archivedQuickChatIds.contains(session.id),
             // Machine sessions stay out of every human-facing list, the
             // archived view included — an archived cron run is still
             // cron noise. Quick-chat archives are human rows and stay.
@@ -259,6 +277,7 @@ class WorkspaceSessionsScreen extends StatefulWidget {
   final String title;
   final WorkspaceSessionView view;
   final WorkspaceSessionsLoader load;
+  final WorkspaceProgressiveSessionsLoader? loadProgressively;
   final WorkspaceSessionsData? initialData;
   final ValueChanged<Session> onOpenSession;
   final WorkspaceSessionPromoter? onPromote;
@@ -279,6 +298,7 @@ class WorkspaceSessionsScreen extends StatefulWidget {
     required this.title,
     required this.view,
     required this.load,
+    this.loadProgressively,
     this.initialData,
     required this.onOpenSession,
     this.onPromote,
@@ -322,6 +342,15 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
   /// after it so a return from chat cannot lose a rename behind an old load.
   Future<void>? _loadInFlight;
   Future<void>? _queuedRefresh;
+  int _loadGeneration = 0;
+  bool _loading = false;
+  bool _hasLoaderData = false;
+  bool _hasSettledLoad = false;
+  bool _coldPreview = true;
+
+  /// Keep refresh rows until a complete read replaces them. Unknown metadata
+  /// may reuse *only* previously classified rows, never classify new ones.
+  WorkspaceSessionsData? _retainedData;
 
   /// The active chip filter in the embedded Chats browser.
   WorkspaceChatsFilter _filter = WorkspaceChatsFilter.all;
@@ -335,10 +364,15 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
       widget.view == WorkspaceSessionView.unassigned ||
       (widget.embedded && _filter == WorkspaceChatsFilter.unassigned);
 
+  bool get _isArchivedSurface =>
+      widget.view == WorkspaceSessionView.archivedQuick ||
+      (widget.embedded && _filter == WorkspaceChatsFilter.archived);
+
   @override
   void initState() {
     super.initState();
     _data = widget.initialData;
+    _coldPreview = _data == null || _data!.isPartial;
     WidgetsBinding.instance.addObserver(this);
     unawaited(_load());
   }
@@ -349,7 +383,10 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
     // Home can deliver its first five (or more human rows from the first
     // background page) after Chats has already mounted. Never replace a
     // completed metadata read with provisional data from a parent rebuild.
-    if ((_data == null || _data!.isPartial) && widget.initialData != null) {
+    if (!_hasLoaderData &&
+        (_data == null || _data!.isPartial) &&
+        widget.initialData != null &&
+        !identical(oldWidget.initialData, widget.initialData)) {
       _data = _withProjectMoves(
         _withSessionTitles(widget.initialData!, {
           for (final entry in _savedTitles.entries)
@@ -360,6 +397,7 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
             entry.key: entry.value.label,
         },
       );
+      if (!_data!.isPartial) _coldPreview = false;
     }
   }
 
@@ -413,6 +451,7 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
 
   @override
   void dispose() {
+    ++_loadGeneration;
     WidgetsBinding.instance.removeObserver(this);
     _refreshTimer?.cancel();
     super.dispose();
@@ -437,34 +476,112 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
   }
 
   Future<void> _loadOnce() async {
+    final generation = ++_loadGeneration;
     final titleRevision = _titleRevision;
     final projectRevision = _projectRevision;
+    if (_hasSettledLoad && _data != null) _coldPreview = false;
+    _retainedData = _coldPreview
+        ? null
+        : (_data!.projectsKnown ? _data : (_retainedData ?? _data));
+    var settled = false;
+    bool ownsLoad() => mounted && generation == _loadGeneration;
+
+    WorkspaceSessionsData guarded(WorkspaceSessionsData data) =>
+        _withProjectMoves(
+          _withSessionTitles(data, {
+            for (final entry in _savedTitles.entries)
+              if (entry.value.revision > titleRevision)
+                entry.key: entry.value.title,
+          }),
+          {
+            for (final entry in _movedProjects.entries)
+              if (entry.value.revision > projectRevision)
+                entry.key: entry.value.label,
+          },
+        );
+
+    void progress(WorkspaceSessionsData data) {
+      if (settled || !ownsLoad()) return;
+      setState(() {
+        _hasLoaderData = true;
+        _data = guarded(_mergeLoadingData(data, partial: true));
+        _error = null;
+      });
+    }
+
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     try {
-      final data = await widget.load();
-      if (!mounted) return;
+      final progressive = widget.loadProgressively;
+      final data = await (progressive == null
+          ? widget.load()
+          : progressive(progress));
+      settled = true;
+      if (!ownsLoad()) return;
       final pins = await widget.pinStore?.load() ?? const <String>[];
-      if (mounted) {
+      if (ownsLoad()) {
         setState(() {
-          _data = _withProjectMoves(
-            _withSessionTitles(data, {
-              for (final entry in _savedTitles.entries)
-                if (entry.value.revision > titleRevision)
-                  entry.key: entry.value.title,
-            }),
-            {
-              for (final entry in _movedProjects.entries)
-                if (entry.value.revision > projectRevision)
-                  entry.key: entry.value.label,
-            },
-          );
+          _hasLoaderData = true;
+          _data = guarded(_mergeLoadingData(data, partial: data.isPartial));
+          if (!data.isPartial) _coldPreview = false;
           _pinnedIds = pins;
           _error = null;
         });
       }
     } catch (error) {
       debugPrint('[workspace-sessions] load failed: $error');
-      if (mounted) setState(() => _error = error);
+      if (ownsLoad()) setState(() => _error = error);
+    } finally {
+      settled = true;
+      if (ownsLoad()) {
+        setState(() {
+          _loading = false;
+          _hasSettledLoad = true;
+        });
+      }
     }
+  }
+
+  WorkspaceSessionsData _mergeLoadingData(
+    WorkspaceSessionsData incoming, {
+    required bool partial,
+  }) {
+    final previous = _data;
+    final retainRows = partial && _retainedData != null;
+    List<Session> merge(List<Session> oldRows, List<Session> newRows) => {
+      for (final session in oldRows) session.id: session,
+      for (final session in newRows) session.id: session,
+    }.values.toList();
+
+    return WorkspaceSessionsData(
+      sessionsKnown: incoming.sessionsKnown,
+      sessions: retainRows || !incoming.sessionsKnown
+          ? merge(previous?.sessions ?? const [], incoming.sessions)
+          : incoming.sessions,
+      isPartial: partial,
+      claimedSessionIds: incoming.projectsKnown
+          ? incoming.claimedSessionIds
+          : {...?previous?.claimedSessionIds, ...incoming.claimedSessionIds},
+      archivedQuickChatIds: retainRows || !incoming.archivesKnown
+          ? {
+              ...?previous?.archivedQuickChatIds,
+              ...incoming.archivedQuickChatIds,
+            }
+          : incoming.archivedQuickChatIds,
+      archivedSessions: retainRows || !incoming.archivesKnown
+          ? merge(
+              previous?.archivedSessions ?? const [],
+              incoming.archivedSessions,
+            )
+          : incoming.archivedSessions,
+      archivesKnown: incoming.archivesKnown,
+      projectLabels: incoming.projectsKnown
+          ? incoming.projectLabels
+          : {...?previous?.projectLabels, ...incoming.projectLabels},
+      projectsKnown: incoming.projectsKnown,
+    );
   }
 
   WorkspaceSessionsData _withSessionTitles(
@@ -479,7 +596,9 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
 
     return WorkspaceSessionsData(
       sessions: data.sessions.map(renamed).toList(),
+      sessionsKnown: data.sessionsKnown,
       archivedSessions: data.archivedSessions.map(renamed).toList(),
+      archivesKnown: data.archivesKnown,
       isPartial: data.isPartial,
       claimedSessionIds: data.claimedSessionIds,
       archivedQuickChatIds: data.archivedQuickChatIds,
@@ -558,7 +677,9 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
     if (moves.isEmpty) return data;
     return WorkspaceSessionsData(
       sessions: data.sessions,
+      sessionsKnown: data.sessionsKnown,
       archivedSessions: data.archivedSessions,
+      archivesKnown: data.archivesKnown,
       isPartial: data.isPartial,
       claimedSessionIds: {...data.claimedSessionIds, ...moves.keys},
       archivedQuickChatIds: data.archivedQuickChatIds.difference(
@@ -670,26 +791,65 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
         if (!archivedIds.contains(s.id)) s,
       ...data.archivedSessions,
     ];
+    final retainedClaims = _retainedData;
+    final reuseClaims =
+        _isUnassignedSurface &&
+        !data.projectsKnown &&
+        (retainedClaims?.projectsKnown ?? false);
+    final retainedIds = reuseClaims
+        ? retainedClaims!.sessions.map((session) => session.id).toSet()
+        : const <String>{};
+    List<Session> classified(List<Session> rows) => reuseClaims
+        ? rows.where((s) => retainedIds.contains(s.id)).toList()
+        : rows;
     final sessions = widget.embedded
         ? filterChats(
-            sessions: unionSessions,
+            sessions: classified(unionSessions),
             filter: _filter,
             claimedSessionIds: data.claimedSessionIds,
             archivedQuickChatIds: data.archivedQuickChatIds,
             query: _query,
             now: _now,
-            projectsKnown: data.projectsKnown,
+            projectsKnown: data.projectsKnown || reuseClaims,
           )
         : filterWorkspaceSessions(
-            sessions: data.sessions,
+            sessions: classified(data.sessions),
             view: widget.view,
             claimedSessionIds: data.claimedSessionIds,
             archivedQuickChatIds: data.archivedQuickChatIds,
             query: _query,
-            projectsKnown: data.projectsKnown,
+            projectsKnown: data.projectsKnown || reuseClaims,
           );
 
-    final ordered = orderLocalPinnedChats(sessions, _pinnedIds);
+    final matching = orderLocalPinnedChats(sessions, _pinnedIds);
+    // Cap *after* chip, search, metadata and local-pin ordering. A first
+    // machine-only or claimed page must not consume the human-chat preview.
+    // A refresh never shrinks a previously rendered complete list to five.
+    final scopeComplete = widget.embedded && _isArchivedSurface
+        ? data.archivesKnown
+        : data.sessionsKnown &&
+              (!_isUnassignedSurface || data.projectsKnown) &&
+              (widget.view != WorkspaceSessionView.archivedQuick ||
+                  !data.isPartial);
+    final scopePartial = data.isPartial && !scopeComplete;
+    final ordered = _coldPreview && scopePartial
+        ? matching.take(5).toList()
+        : matching;
+    final needsActiveSessions =
+        !_isArchivedSurface ||
+        widget.view == WorkspaceSessionView.archivedQuick;
+    final metadataUnknown =
+        (needsActiveSessions && !data.sessionsKnown) ||
+        (_isUnassignedSurface && !data.projectsKnown) ||
+        (_isArchivedSurface && !data.archivesKnown);
+    // Legacy periodic refreshes stay silent over a complete, usable list.
+    final showLoading =
+        _error == null &&
+        (scopePartial ||
+            (_loading &&
+                !scopeComplete &&
+                (widget.loadProgressively != null || metadataUnknown)));
+    final showError = _error != null || (metadataUnknown && !showLoading);
     final pinnedSessions = ordered
         .where((session) => localPinIdForSession(session, _pinnedIds) != null)
         .toList();
@@ -715,10 +875,10 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
           HermesSpacing.xl,
         ),
         children: [
-          if (data.isPartial)
+          if (showLoading || showError)
             Padding(
               padding: const EdgeInsets.only(bottom: HermesSpacing.md),
-              child: _error == null
+              child: !showError
                   ? Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -734,7 +894,7 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
                           ),
                         ),
                         TextButton(
-                          onPressed: () => unawaited(_load()),
+                          onPressed: () => unawaited(refresh()),
                           child: Text(context.l10n.retry),
                         ),
                       ],
@@ -761,7 +921,11 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
             _buildChips(),
           ],
           const SizedBox(height: HermesSpacing.lg),
-          if (sessions.isEmpty && !data.isPartial)
+          if (sessions.isEmpty &&
+              !_loading &&
+              !showLoading &&
+              !showError &&
+              !metadataUnknown)
             EmptyState(
               icon: _emptyIcon,
               title: _query.isEmpty

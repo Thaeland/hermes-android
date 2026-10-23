@@ -315,7 +315,7 @@ abstract class AppLocalizations {
   /// No description provided for @archived_conversations_appear_here.
   ///
   /// In en, this message translates to:
-  /// **'Archived conversations appear here.'**
+  /// **'Only archived conversations appear here. Older chats remain in All chats.'**
   String get archived_conversations_appear_here;
 
   /// No description provided for @archived_quick_chats.

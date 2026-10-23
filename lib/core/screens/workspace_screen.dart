@@ -157,6 +157,9 @@ class WorkspaceScreen extends StatefulWidget {
   /// [sessionsLoader] is set.
   final http.Client? testSessionsHttpClient;
 
+  /// Injects the dashboard archive transport in loader regression tests.
+  final http.Client? testArchivedSessionsHttpClient;
+
   /// Overrides the screen a Home row opens.
   final WorkspaceSessionScreenBuilder? sessionScreenBuilder;
 
@@ -209,6 +212,7 @@ class WorkspaceScreen extends StatefulWidget {
     this.turnApplicationController,
     this.sessionsLoader,
     this.testSessionsHttpClient,
+    this.testArchivedSessionsHttpClient,
     this.sessionScreenBuilder,
     this.filesScreenBuilder,
     this.turnSignalsLoader,
@@ -288,6 +292,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   int _homeGeneration = 0;
   Future<SessionListPage>? _homeFirstPageScan;
   Future<List<Session>>? _homeFullScan;
+  List<Session>? _homeScanSessions;
+  final _sessionScanListeners = <void Function(List<Session>)>{};
   List<Session>? _homeFirstPageSessions;
   List<Session>? _chatPreviewSessions;
   List<Session>? _completeHomeSessions;
@@ -332,9 +338,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     // Page through the whole visible list. The gateway serves newest-first
     // in a capped window; a single first-page request truncated the
     // Unassigned bucket (older unfiled chats never reached the device).
-    // Bounded at 20 pages x 100 so a chatty store can't fan out forever.
+    // Allow large personal histories without silently dropping older chats.
+    // A broken/non-paging server still has a finite request budget.
     const pageSize = 100;
-    const maxPages = 20;
+    const maxPages = 200;
+    var exhausted = false;
     final all = <Session>[];
     final seenIds = <String>{};
     var offset = 0;
@@ -344,7 +352,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     // Consecutive pages that contributed zero unseen ids (see below).
     var zeroNewPages = 0;
     for (var page = 0; page < maxPages; page++) {
+      if (!mounted) throw StateError('Session read cancelled');
       final result = await api.getSessionsPage(limit: pageSize, offset: offset);
+      if (!mounted) throw StateError('Session read cancelled');
       // The stock gateway back-fills pinned sessions past `limit` and
       // repeats them on later pages, so the returned row count is NOT
       // the window size: advance by the requested pageSize or window
@@ -377,11 +387,17 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       if (newRows == 0) {
         zeroNewPages++;
         final required = pinBound == 0 ? 1 : pinBound ~/ pageSize + 1;
-        if (zeroNewPages >= required) break;
+        if (zeroNewPages >= required) {
+          exhausted = true;
+          break;
+        }
       } else {
         zeroNewPages = 0;
       }
       offset += pageSize;
+    }
+    if (!exhausted) {
+      throw StateError('Session list exceeded the $maxPages-page safety cap');
     }
     final pins = await _pinStore?.load() ?? const <String>[];
     if (pins.isNotEmpty) {
@@ -517,8 +533,15 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   Future<List<Session>> _loadFullHomeSessions() {
     final pending = _homeFullScan;
     if (pending != null) return pending;
+    _homeScanSessions = null;
     final scan = _loadSessionsFromGateway(
-      onProgress: _updateChatPreviewFromScan,
+      onProgress: (sessions) {
+        _homeScanSessions = sessions;
+        _updateChatPreviewFromScan(sessions);
+        for (final listener in _sessionScanListeners.toList()) {
+          listener(sessions);
+        }
+      },
     );
     _homeFullScan = scan;
     void clear() {
@@ -974,6 +997,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           pinStore: _pinStore,
           refreshInterval: widget.sessionsRefreshInterval,
           load: _loadChatsSessionsData,
+          loadProgressively: (onProgress) =>
+              _loadChatsSessionsData(onProgress: onProgress),
           onOpenSession: (session) => unawaited(
             _openSession(session, projectName: _chatProjectLabels[session.id]),
           ),
@@ -1361,129 +1386,210 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     );
   }
 
-  Future<WorkspaceSessionsData> _loadChatsSessionsData() {
+  Future<WorkspaceSessionsData> _loadChatsSessionsData({
+    void Function(WorkspaceSessionsData)? onProgress,
+  }) {
     final firstLoad = !_chatsInitialLoadConsumed;
     _chatsInitialLoadConsumed = true;
-    // Reuse Home's complete list or its in-flight scan on first entry. Later
-    // refreshes read afresh so a new chat or title cannot stay stale forever.
-    final cached = firstLoad ? _completeHomeSessions : null;
-    final pending = firstLoad
-        ? (_homeFullScan ??
-              (cached == null && widget.sessionsLoader == null
-                  ? _loadFullHomeSessions()
-                  : null))
-        : null;
     return _loadWorkspaceSessionsData(
-      sessionsFuture: pending ?? (cached == null ? null : Future.value(cached)),
+      onProgress: onProgress,
+      reuseHome: firstLoad,
     );
   }
 
   Future<WorkspaceSessionsData> _loadWorkspaceSessionsData({
-    Future<List<Session>>? sessionsFuture,
+    void Function(WorkspaceSessionsData)? onProgress,
+    bool reuseHome = false,
   }) async {
     final placementRevision = _placementRevision;
     final placementRead = ++_placementRead;
-    final sessions = await (sessionsFuture ?? _loadSessions());
-    _cacheSessionTitles(sessions);
-
+    var sessions = reuseHome
+        ? (_completeHomeSessions ??
+              _chatPreviewSessions ??
+              _homeFirstPageSessions ??
+              const <Session>[])
+        : const <Session>[];
     Set<String> claimed = const {};
     Map<String, String> projectLabels = const {};
-    var projectsKnown = true;
-    final repository = _repository;
-    if (repository != null) {
-      try {
-        // The session list is the primary surface and must never wait on the
-        // Projects transport: a wedged Desktop Gateway (unreachable host,
-        // slow connect) would otherwise hide every conversation behind an
-        // infinite skeleton. Bounded, best-effort, additive metadata only.
-        final overview = await repository
-            .overview(refresh: true)
-            .timeout(const Duration(seconds: 8));
-        claimed = {
-          // scoped_session_ids is server-computed over EVERY tier including
-          // the synthetic Home bucket, so it names unfiled chats too —
-          // using it raw would make the Unassigned filter permanently
-          // empty. A chat is claimed only when its owner is a real
-          // project, not the Home bucket.
-          for (final entry in overview.sessionProjects.entries)
-            if (entry.value != ProjectsTreeOverview.noProjectId) entry.key,
-        };
-        // Best-effort session → project label from the server's full placement
-        // map (every claimed chat names its owner, not just the top-N
-        // previews). A conversation the map does not name stays honest as
-        // "Unassigned" in the Chats row.
-        projectLabels = {
-          for (final entry in overview.sessionProjects.entries)
-            if (overview.ownerLabelOf(entry.key) != null)
-              entry.key: overview.ownerLabelOf(entry.key)!,
-        };
-      } catch (_) {
-        // A gateway without projects.tree still gets All chats and Search.
-        // But the claim map is UNKNOWN, not empty: the Unassigned chip
-        // must not present every chat as unfiled on a timeout.
-        projectsKnown = false;
-      }
-    }
-
     Set<String> archived = const {};
-    try {
-      final store = await _quickChatStore();
-      archived = (await store.load()).archivedAt(DateTime.now());
-    } catch (_) {
-      // Quick-chat metadata is additive; session access must survive its loss.
+    List<Session> archivedSessions = const [];
+    var sessionsKnown = false;
+    var projectsKnown = false;
+    var archivesKnown = false;
+    var finished = false;
+
+    WorkspaceSessionsData snapshot({required bool partial}) {
+      // Reconcile confirmed moves on every emission, not only the final read:
+      // a held page or metadata request may predate a successful filing.
+      final moved = {
+        for (final entry in _savedPlacements.entries)
+          if (!projectsKnown || entry.value.revision > placementRevision)
+            entry.key: entry.value,
+      };
+      final labels = {
+        ...projectLabels,
+        for (final entry in moved.entries) entry.key: entry.value.label,
+      };
+      if (mounted && placementRead == _placementRead) {
+        _chatProjectLabels = Map.unmodifiable(labels);
+      }
+      return WorkspaceSessionsData(
+        sessions: List.unmodifiable(sessions),
+        sessionsKnown: sessionsKnown,
+        isPartial: partial,
+        claimedSessionIds: Set.unmodifiable({...claimed, ...moved.keys}),
+        archivedQuickChatIds: Set.unmodifiable(
+          archived.difference(moved.keys.toSet()),
+        ),
+        archivedSessions: List.unmodifiable(archivedSessions),
+        projectLabels: Map.unmodifiable(labels),
+        projectsKnown: projectsKnown,
+        archivesKnown: archivesKnown,
+      );
     }
 
-    // Server-archived chats come from the dashboard, not the gateway: the
-    // api_server behind the chat transport ignores `archived` and never
-    // returns archived rows (live-verified). Best-effort like the reads
-    // above — a connection without dashboard credentials keeps the
-    // Archived chip on quick-chat expiries only.
-    List<Session> archivedSessions = const [];
-    if (_dashboardReachable) {
+    void publish() {
+      if (mounted && !finished) onProgress?.call(snapshot(partial: true));
+    }
+
+    void sessionProgress(List<Session> rows) {
+      sessions = rows;
+      publish();
+    }
+
+    Future<void> readSessions() async {
+      final cached = reuseHome ? _completeHomeSessions : null;
+      if (cached != null) {
+        sessions = cached;
+      } else if (widget.sessionsLoader != null) {
+        sessions = await _loadSessions();
+      } else {
+        // Share Home's ongoing walk, including its intermediate pages. With
+        // no walk available, request five first instead of blocking the view
+        // behind a complete history scan.
+        final pending = reuseHome ? _homeFullScan : null;
+        if (pending == null) {
+          final first = await (reuseHome
+              ? _loadFirstHomePage()
+              : _sessionClient.getSessionsPage(limit: 5));
+          sessionProgress(first.sessions);
+        }
+        if (reuseHome) {
+          // Replay pages fetched before this view subscribed. A later page
+          // can fail without erasing matching Unassigned rows already read.
+          final scanned = _homeScanSessions;
+          if (pending != null && scanned != null) sessionProgress(scanned);
+          _sessionScanListeners.add(sessionProgress);
+          try {
+            sessions = await (pending ?? _loadFullHomeSessions());
+          } finally {
+            _sessionScanListeners.remove(sessionProgress);
+          }
+        } else {
+          // A refresh started after a confirmed mutation must not join an
+          // older Home transport snapshot with a pre-mutation authority epoch.
+          sessions = await _loadSessionsFromGateway(
+            onProgress: sessionProgress,
+          );
+        }
+      }
+      sessionsKnown = true;
+      if (mounted) _cacheSessionTitles(sessions);
+      publish();
+    }
+
+    Future<void> readProjects() async {
+      await _initialization;
+      if (!mounted) return;
+      final repository = _repository;
+      if (repository == null) {
+        projectsKnown = true;
+      } else {
+        try {
+          final overview = await repository
+              .overview(refresh: true)
+              .timeout(const Duration(seconds: 8));
+          claimed = {
+            for (final entry in overview.sessionProjects.entries)
+              if (entry.value != ProjectsTreeOverview.noProjectId) entry.key,
+          };
+          projectLabels = {
+            for (final entry in overview.sessionProjects.entries)
+              if (overview.ownerLabelOf(entry.key) != null)
+                entry.key: overview.ownerLabelOf(entry.key)!,
+          };
+          projectsKnown = true;
+        } catch (_) {
+          // Unknown placement must not label every chat as Unassigned.
+        }
+      }
+      publish();
+    }
+
+    Future<void> readQuickChats() async {
       try {
+        final store = await _quickChatStore();
+        archived = (await store.load()).archivedAt(DateTime.now());
+      } catch (_) {
+        // Device-local expiries remain additive to the server archive.
+      }
+      publish();
+    }
+
+    Future<void> readArchive() async {
+      if (!_dashboardReachable) return;
+      try {
+        // Resolve the same authenticated origin as the Desktop connection,
+        // including an explicit gateway host, HTTPS port and path prefix.
+        final origin = Uri.parse(
+          DesktopGatewayClient.normalizedGatewayBaseUrl(widget.connection),
+        );
         final dashboard = _archivedSessionsClient ??= DashboardClient(
-          host: widget.connection.host,
-          port: widget.connection.dashboardPort,
-          useHttps: widget.connection.useHttps,
-          pathPrefix: widget.connection.dashboardPrefix ?? '',
+          host: origin.host,
+          port: origin.port,
+          useHttps: origin.scheme == 'https',
+          pathPrefix: origin.path == '/' ? '' : origin.path,
           proxied: widget.connection.dashboardProxied,
           username: widget.connection.dashboardUsername,
           password: widget.connection.dashboardPassword,
+          gatewayProfile: widget.connection.gatewayProfile,
+          httpClient: widget.testArchivedSessionsHttpClient,
         );
-        archivedSessions = await dashboard
-            .getArchivedSessions(
-              gatewayProfile: widget.connection.gatewayProfile,
-            )
-            .timeout(const Duration(seconds: 8));
+        archivedSessions = await dashboard.getArchivedSessions(
+          firstPageSize: 5,
+          gatewayProfile: widget.connection.gatewayProfile,
+          shouldContinue: () => mounted,
+          onProgress: (rows) {
+            archivedSessions = rows;
+            publish();
+          },
+        );
+        archivesKnown = true;
       } catch (_) {
-        // Same additive contract: no dashboard, no server-archived rows.
+        // Keep already fetched archive pages and report unknown/failed in the
+        // view. Never convert auth, timeout or paging-cap failures to empty.
       }
+      publish();
     }
 
-    // A pre-move read may finish after the remote write (including after an
-    // archived/Quick metadata await). Reconcile only those moved identities.
-    final moved = {
-      for (final entry in _savedPlacements.entries)
-        if (!projectsKnown || entry.value.revision > placementRevision)
-          entry.key: entry.value,
-    };
-    claimed = {...claimed, ...moved.keys};
-    projectLabels = {
-      ...projectLabels,
-      for (final entry in moved.entries) entry.key: entry.value.label,
-    };
-    archived = archived.difference(moved.keys.toSet());
-    if (mounted && placementRead == _placementRead) {
-      _chatProjectLabels = Map.unmodifiable(projectLabels);
+    publish();
+    try {
+      // Independent authorities load concurrently. A slow active-history walk
+      // must not delay Archived; slow archive auth must not hide Unassigned.
+      await Future.wait([
+        readSessions().catchError((Object _) {
+          // The API and dashboard are independent transports. An active-list
+          // failure must not discard a successfully loaded server archive.
+          publish();
+        }),
+        readProjects(),
+        readQuickChats(),
+        readArchive(),
+      ]);
+      return snapshot(partial: false);
+    } finally {
+      finished = true;
     }
-    return WorkspaceSessionsData(
-      sessions: sessions,
-      claimedSessionIds: Set.unmodifiable(claimed),
-      archivedQuickChatIds: Set.unmodifiable(archived),
-      archivedSessions: List.unmodifiable(archivedSessions),
-      projectLabels: Map.unmodifiable(projectLabels),
-      projectsKnown: projectsKnown,
-    );
   }
 
   Future<String> _renameSession(Session session, String title) async {
@@ -1509,6 +1615,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       WorkspaceSessionView.archivedQuick => context.l10n.archived_quick_chats,
       WorkspaceSessionView.search => context.l10n.search,
     };
+    // Home's cache is only a first-open seed, never a refresh authority.
+    var firstLoad = true;
     _push(
       WorkspaceSessionsScreen(
         key: key,
@@ -1517,6 +1625,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         pinStore: _pinStore,
         refreshInterval: widget.sessionsRefreshInterval,
         load: _loadWorkspaceSessionsData,
+        loadProgressively: (onProgress) {
+          final reuseHome = firstLoad;
+          firstLoad = false;
+          return _loadWorkspaceSessionsData(
+            onProgress: onProgress,
+            reuseHome: reuseHome,
+          );
+        },
         onOpenSession: (session) => unawaited(_openSession(session)),
         onRename: _renameSession,
         onPromote: (session) =>

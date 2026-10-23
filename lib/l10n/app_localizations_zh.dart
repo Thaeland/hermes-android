@@ -119,7 +119,8 @@ class AppLocalizationsZh extends AppLocalizations {
   String get archived => '已归档';
 
   @override
-  String get archived_conversations_appear_here => '已归档的对话将显示在这里。';
+  String get archived_conversations_appear_here =>
+      '这里只显示已归档的对话。旧聊天仍保留在“所有聊天”中。';
 
   @override
   String get archived_quick_chats => '已归档的快速聊天';
@@ -2780,7 +2781,8 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get archived => '已归档';
 
   @override
-  String get archived_conversations_appear_here => '已归档的对话将显示在这里。';
+  String get archived_conversations_appear_here =>
+      '这里只显示已归档的对话。旧聊天仍保留在“所有聊天”中。';
 
   @override
   String get archived_quick_chats => '已归档的快速聊天';

@@ -33,7 +33,7 @@
   "archive_2": "归档 {projectName}？",
   "archive_3": "归档 {name}？",
   "archived": "已归档",
-  "archived_conversations_appear_here": "已归档的对话将显示在这里。",
+  "archived_conversations_appear_here": "这里只显示已归档的对话。旧聊天仍保留在“所有聊天”中。",
   "archived_quick_chats": "已归档的快速聊天",
   "artifacts_attachments_and_generated_media": "构件、附件和生成的内容",
   "ask_ai_to_find_a_conversation": "让 AI 查找对话",

@@ -1666,9 +1666,18 @@ class DashboardClient {
   /// a truncated list as complete.
   Future<List<Session>> getArchivedSessions({
     int pageSize = 100,
-    int maxPages = 20,
+    int maxPages = 200,
+    int? firstPageSize,
     String? gatewayProfile,
+    void Function(List<Session>)? onProgress,
+    bool Function()? shouldContinue,
   }) async {
+    if (pageSize < 1 ||
+        pageSize > 100 ||
+        maxPages < 1 ||
+        (firstPageSize != null && (firstPageSize < 1 || firstPageSize > 100))) {
+      throw ArgumentError('Invalid archived session paging limits');
+    }
     final all = <Session>[];
     final seenIds = <String>{};
     var offset = 0;
@@ -1678,14 +1687,18 @@ class DashboardClient {
     // (see the loop comment): max pins on any page bounds the pin set, and
     // k consecutive zero-new windows consume k*pageSize disjoint pins.
     var pinBound = 0;
-    var zeroNewPages = 0;
+    var zeroNewWindowRows = 0;
     for (var page = 0; page < maxPages; page++) {
+      if (shouldContinue?.call() == false) {
+        throw StateError('Archived session read cancelled');
+      }
+      final limit = page == 0 ? (firstPageSize ?? pageSize) : pageSize;
       final data = await apiGet(
         'sessions',
         queryParameters: {
           'archived': 'only',
           'order': 'recent',
-          'limit': '$pageSize',
+          'limit': '$limit',
           'offset': '$offset',
           if (gatewayProfile != null && gatewayProfile.isNotEmpty)
             'profile': gatewayProfile,
@@ -1712,7 +1725,11 @@ class DashboardClient {
           newRows++;
         }
       }
-      offset += pageSize;
+      if (shouldContinue?.call() == false) {
+        throw StateError('Archived session read cancelled');
+      }
+      if (newRows > 0) onProgress?.call(List.unmodifiable(all));
+      offset += limit;
       if (total != null) {
         if (offset >= total) {
           exhausted = true;
@@ -1727,14 +1744,13 @@ class DashboardClient {
       final pinsOnPage = rows.where((row) => row.pinned).length;
       if (pinsOnPage > pinBound) pinBound = pinsOnPage;
       if (rows.isEmpty || newRows == 0) {
-        zeroNewPages++;
-        final required = pinBound == 0 ? 1 : pinBound ~/ pageSize + 1;
-        if (zeroNewPages >= required) {
+        zeroNewWindowRows += limit;
+        if (zeroNewWindowRows > pinBound) {
           exhausted = true;
           break;
         }
       } else {
-        zeroNewPages = 0;
+        zeroNewWindowRows = 0;
       }
     }
     if (!exhausted) {

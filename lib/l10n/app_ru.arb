@@ -33,7 +33,7 @@
   "archive_2": "Архивировать {projectName}?",
   "archive_3": "Архивировать {name}?",
   "archived": "В архиве",
-  "archived_conversations_appear_here": "Архивированные диалоги появятся здесь.",
+  "archived_conversations_appear_here": "Здесь отображаются только архивированные диалоги. Старые чаты остаются в разделе «Все чаты».",
   "archived_quick_chats": "Архивированные быстрые чаты",
   "artifacts_attachments_and_generated_media": "Артефакты, вложения и созданные медиа",
   "ask_ai_to_find_a_conversation": "Попросить ИИ найти диалог",

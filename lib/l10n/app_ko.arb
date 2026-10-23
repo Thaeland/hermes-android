@@ -33,7 +33,7 @@
   "archive_2": "{projectName}을(를) 보관하시겠습니까?",
   "archive_3": "{name}을(를) 보관하시겠습니까?",
   "archived": "보관됨",
-  "archived_conversations_appear_here": "보관된 대화가 여기에 표시됩니다.",
+  "archived_conversations_appear_here": "보관한 대화만 여기에 표시됩니다. 이전 채팅은 모든 채팅에 남아 있습니다.",
   "archived_quick_chats": "보관된 빠른 채팅",
   "artifacts_attachments_and_generated_media": "아티팩트, 첨부 파일, 생성된 미디어",
   "ask_ai_to_find_a_conversation": "AI에게 대화 찾기 요청",

@@ -33,7 +33,7 @@
   "archive_2": "{projectName} archivieren?",
   "archive_3": "{name} archivieren?",
   "archived": "Archiviert",
-  "archived_conversations_appear_here": "Archivierte Unterhaltungen erscheinen hier.",
+  "archived_conversations_appear_here": "Hier erscheinen nur archivierte Unterhaltungen. Ältere Chats bleiben unter „Alle Chats“.",
   "archived_quick_chats": "Archivierte Schnellchats",
   "artifacts_attachments_and_generated_media": "Artefakte, Anhänge und generierte Medien",
   "ask_ai_to_find_a_conversation": "KI bitten, eine Unterhaltung zu finden",
