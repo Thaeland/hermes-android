@@ -1,3 +1,7 @@
+// UNRECONCILED POLICY (second adaptation layer; original case IDs retained).
+// Raw: p2a-unreconciled-_flkt2h9/raw/base.tar::test/normal_gateway_unknown_floor_route_test.dart
+// Base 4a53e32 blob be33f661499f257c2542a027ce6fbb91a1a52096; SHA256 28b6bbeca4ae016fab22f9773ed61069cacd284d347f3e056a95274ebef335af.
+// See docs/unreconciled-output/ORACLE_MIGRATION.md; unchanged safety remains binding.
 import 'dart:async';
 import 'dart:convert';
 
@@ -14,6 +18,8 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/fake_voice_composer_adapter.dart';
+import 'support/unreconciled_policy.dart';
+import 'package:hermes_android/core/utils/chat_display_items.dart';
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({'verbose_mode': false}));
@@ -73,6 +79,13 @@ void main() {
               }
               return http.Response(jsonEncode({'data': []}), 200);
             }
+            if (submissions == 0 &&
+                const {
+                  'stored-held-initial',
+                  'local-initial-404',
+                }.contains(mode)) {
+              return http.Response('admission unavailable', 503);
+            }
             return http.Response(jsonEncode({'data': canonical}), 200);
           }),
         );
@@ -130,11 +143,26 @@ void main() {
           mode == 'known-empty-control' ? 0 : isNull,
         );
         emit(
-          StreamEvent(type: 'message.delta', data: {'text': 'Early answer'}),
+          StreamEvent(
+            type: 'message.delta',
+            data: {'text': 'Early answer'},
+            turnId: 'owned-turn',
+          ),
         );
         await tester.pump();
         emit(
-          StreamEvent(type: 'message.complete', data: {'text': 'Early answer'}),
+          StreamEvent(
+            type: 'message.complete',
+            data: {'text': 'Early answer'},
+            turnId: 'owned-turn',
+          ),
+        );
+        emit(
+          StreamEvent(
+            type: 'turn.end',
+            data: const {'status': 'completed'},
+            turnId: 'owned-turn',
+          ),
         );
         rpc.complete();
         for (var i = 0; i < 10; i++) {
@@ -147,7 +175,12 @@ void main() {
         }
         await tester.pumpAndSettle();
         final bubbles = tester
-            .widgetList<MessageBubble>(find.byType(MessageBubble))
+            .widgetList<MessageBubble>(
+              inChatSource(
+                find.byType(MessageBubble),
+                ChatDisplaySource.received,
+              ),
+            )
             .map(
               (b) => {
                 'role': b.isUser ? 'user' : 'assistant',
@@ -156,15 +189,24 @@ void main() {
             )
             .toList();
 
+        expect(owner.snapshot.historyRows, canonical);
+        expect(
+          tester
+              .widgetList<MessageBubble>(
+                inChatSource(
+                  find.byType(MessageBubble),
+                  ChatDisplaySource.canonical,
+                ),
+              )
+              .map((b) => b.content),
+          ['Early prompt', 'Early answer'],
+        );
         if (mode == 'known-context-unknown-floor') {
           expect(
             bubbles.where((b) => b['content'] == 'Older known context'),
-            hasLength(1),
+            isEmpty,
           );
-          expect(
-            owner.snapshot.presentationHistoryRows!.single['id'],
-            'legacy',
-          );
+          expect(owner.snapshot.historyRows, canonical);
         }
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.pump();

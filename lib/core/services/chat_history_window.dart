@@ -111,6 +111,13 @@ class ChatHistoryWindow {
     rows = _merge(older, rows);
   }
 
+  /// An app-owner observation supplies usable rows, not a physical route page.
+  /// In particular it must not reset/advance an in-flight older-page cursor or
+  /// mark a cold route scan initialized. Physical batches retain that authority.
+  void mergeObservedRows(List<Map<String, dynamic>> latest) {
+    rows = _merge(rows, latest);
+  }
+
   static List<Map<String, dynamic>> _merge(
     List<Map<String, dynamic>> older,
     List<Map<String, dynamic>> newer,

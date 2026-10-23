@@ -10,7 +10,9 @@ import 'gateway_turn_journal.dart';
 import 'gateway_turn_recovery.dart';
 import 'normal_gateway_application_session.dart';
 import 'connection_manager.dart';
+import 'chat_presentation_state.dart';
 import 'turn_notification_service.dart';
+import 'connection_mutation_barrier.dart';
 
 typedef GatewayTurnApplicationSessionFactory =
     GatewayTurnApplicationSession Function(SavedConnection connection);
@@ -28,6 +30,8 @@ abstract interface class GatewayTurnApplicationSession {
     DesktopAsyncEventCallback listener,
   );
 
+  /// Detaches only this owner's exact registration. Safe after [close], even
+  /// while asynchronous cleanup is pending; it never acquires a new owner.
   void removeAsyncEventListener(String localSessionId, Object registration);
 
   /// Registers the mounted owner of one local session's terminal callbacks.
@@ -134,8 +138,11 @@ class GatewayTurnApplicationController {
   static final standalone = GatewayTurnApplicationController();
   final GatewayTurnApplicationSessionFactory _sessionFactory;
   final Map<String, GatewayTurnApplicationSession> _sessions = {};
+  final Map<String, Object?> _sessionMutations = {};
   final Map<String, NormalGatewayApplicationSession> _normalSessions = {};
   final Map<String, String> _normalScopeByConnection = {};
+  final Map<String, ChatPresentationRegistry> _presentations = {};
+  final Map<String, String> _presentationScopes = {};
   bool _background = false;
   bool _backgroundWorkEnabled = true;
   final Map<Object, void Function()> _activityListeners = {};
@@ -156,6 +163,18 @@ class GatewayTurnApplicationController {
   GatewayTurnApplicationSession sessionFor(SavedConnection connection) {
     if (_closed) throw StateError('Gateway turn application owner is closed.');
     final key = _connectionScopeKey(connection);
+    if (_sessionMutations.containsKey(key) &&
+        !ConnectionMutationBarrier.isCurrent(
+          connection.id,
+          _sessionMutations[key],
+        )) {
+      final previous = _sessions.remove(key);
+      if (previous != null) {
+        _forwardedSessions.remove(previous);
+        unawaited(previous.close());
+      }
+    }
+    _sessionMutations[key] = ConnectionMutationBarrier.capture(connection.id);
     final session = _sessions.putIfAbsent(
       key,
       () => _sessionFactory(connection),
@@ -164,6 +183,20 @@ class GatewayTurnApplicationController {
       _forwardActivityFrom(session);
     }
     return session;
+  }
+
+  ChatPresentationRegistry presentationFor(SavedConnection connection) {
+    if (_closed) throw StateError('Gateway turn application owner is closed.');
+    final key = _connectionScopeKey(connection);
+    final previous = _presentationScopes[connection.id];
+    if (previous != null && previous != key) {
+      _presentations.remove(previous)?.close();
+    }
+    _presentationScopes[connection.id] = key;
+    return _presentations.putIfAbsent(
+      key,
+      () => ChatPresentationRegistry(connection.id),
+    );
   }
 
   /// Stock and recovery-v2 lifetimes are separate; existing v2 callers keep
@@ -178,7 +211,8 @@ class GatewayTurnApplicationController {
     if (_closed) throw StateError('Gateway turn application owner is closed.');
     final key = _connectionScopeKey(connection);
     final old = _normalScopeByConnection[connection.id];
-    if (old != null && old != key) {
+    if (old != null &&
+        (old != key || _normalSessions[old]?.hasCurrentAccount == false)) {
       final previous = _normalSessions.remove(old);
       if (previous != null) unawaited(previous.close());
       _notifyActivityListeners();
@@ -189,11 +223,13 @@ class GatewayTurnApplicationController {
           ? NormalGatewayApplicationSession.fromConnection(
               connection,
               scope: key,
+              presentation: presentationFor(connection),
               onActivityChanged: _notifyActivityListeners,
             )
           : NormalGatewayApplicationSession(
               connection: connection,
               scope: key,
+              presentation: presentationFor(connection),
               submit: submit,
               resume:
                   resume ??
@@ -229,6 +265,7 @@ class GatewayTurnApplicationController {
   }
 
   void revokeConnection(String connectionId) {
+    _presentations.remove(_presentationScopes.remove(connectionId))?.close();
     final scope = _normalScopeByConnection.remove(connectionId);
     final session = _normalSessions.remove(scope);
     if (session != null) unawaited(session.close());
@@ -236,6 +273,9 @@ class GatewayTurnApplicationController {
   }
 
   void retainConnections(Set<String> connectionIds) {
+    for (final id in _presentationScopes.keys.toList(growable: false)) {
+      if (!connectionIds.contains(id)) revokeConnection(id);
+    }
     for (final id in _normalScopeByConnection.keys.toList(growable: false)) {
       if (!connectionIds.contains(id)) revokeConnection(id);
     }
@@ -311,12 +351,18 @@ class GatewayTurnApplicationController {
     if (_closed) return;
     _closed = true;
     final hadTrackedTurns = hasActiveTurn;
+    for (final presentation in _presentations.values) {
+      presentation.close();
+    }
+    _presentations.clear();
+    _presentationScopes.clear();
     final sessions = _sessions.values.toList(growable: false);
     final normalSessions = _normalSessions.values.toList(growable: false);
     _normalSessions.clear();
     _normalScopeByConnection.clear();
     _legacyTurns.clear();
     _sessions.clear();
+    _sessionMutations.clear();
     // Listeners must observe the true→false flip even when both a legacy
     // send and a retained recovery session were active at shutdown.
     if (hadTrackedTurns) _notifyActivityListeners();
@@ -391,7 +437,10 @@ class _CoordinatorGatewayTurnApplicationSession
 
   @override
   void removeAsyncEventListener(String localSessionId, Object registration) {
-    _requireOpen();
+    // close() synchronously clears this owner's registrations/dispatcher.
+    // A retained route may detach later, including during registry shutdown.
+    // Cleanup is not admission and must not touch a replacement's requests.
+    if (_closed) return;
     final current = _asyncEventListeners[localSessionId];
     if (current == null || !identical(current.token, registration)) return;
     _asyncEventListeners.remove(localSessionId);

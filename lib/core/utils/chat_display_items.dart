@@ -1,7 +1,124 @@
+import '../models/background_report.dart';
 import '../models/chat_timeline.dart';
+import '../models/received_scope_outcome.dart';
 import '../models/gateway_activity.dart';
 import '../models/gateway_insight.dart';
 import 'message_content.dart';
+
+/// UI provenance only. These sections never enter history, wire payloads or WAL.
+enum ChatDisplaySource { canonical, received, auxiliary }
+
+class ChatDisplaySection {
+  ChatDisplaySection({
+    required this.source,
+    required List<dynamic> items,
+    Map<Object, ReceivedScopeOutcome> outcomes = const {},
+  }) : items = List<dynamic>.unmodifiable(items),
+       outcomes = Map.unmodifiable(outcomes);
+
+  final ChatDisplaySource source;
+  final List<dynamic> items;
+  final Map<Object, ReceivedScopeOutcome> outcomes;
+
+  ChatDisplaySection withReceivedOutcomes(
+    ChatTimeline timeline,
+    List<ReceivedScopeOutcome> facts,
+  ) => ChatDisplaySection(
+    source: source,
+    items: items,
+    outcomes: _receivedOutcomeAnchors(items, timeline, facts),
+  );
+}
+
+/// Two independent source-local projections, not a cross-channel chronology.
+List<ChatDisplaySection> buildNormalChatDisplaySections({
+  required List<Map<String, dynamic>> canonicalRows,
+  required List<Map<String, dynamic>> receivedRows,
+  List<GatewayToolActivity> canonicalTools = const [],
+  List<GatewayToolActivity> receivedTools = const [],
+  required ChatTimeline receivedTimeline,
+  List<ReceivedScopeOutcome> receivedOutcomes = const [],
+  List<GatewaySubagentActivity> subagentActivities = const [],
+  List<GatewayNotice> notices = const [],
+  bool verbose = false,
+}) => List<ChatDisplaySection>.unmodifiable([
+  for (final section in [
+    ChatDisplaySection(
+      source: ChatDisplaySource.canonical,
+      items: buildChatDisplayItems(
+        messages: canonicalRows,
+        toolActivities: canonicalTools,
+        verbose: verbose,
+      ),
+    ),
+    ChatDisplaySection(
+      source: ChatDisplaySource.received,
+      items: buildChatDisplayItems(
+        messages: receivedRows,
+        toolActivities: receivedTools,
+        timeline: receivedTimeline,
+        verbose: verbose,
+      ),
+    ).withReceivedOutcomes(receivedTimeline, receivedOutcomes),
+    ChatDisplaySection(
+      source: ChatDisplaySource.auxiliary,
+      items: [
+        if (subagentActivities.isNotEmpty)
+          List<GatewaySubagentActivity>.unmodifiable(subagentActivities),
+        ...notices,
+      ],
+    ),
+  ])
+    if (section.items.isNotEmpty) section,
+]);
+
+Map<Object, ReceivedScopeOutcome> _receivedOutcomeAnchors(
+  List<dynamic> items,
+  ChatTimeline timeline,
+  List<ReceivedScopeOutcome> outcomes,
+) {
+  final runScopes = {for (final run in timeline.runs) run.id: run.scope};
+  // Imported reducers can reuse public tool IDs. The projected card contains
+  // these exact activity objects; sibling string IDs are not scope authority.
+  final toolScopes = Map<GatewayToolActivity, Object>.identity();
+  for (final run in timeline.runs) {
+    if (run.activity != null) toolScopes[run.activity!] = run.scope;
+  }
+  final emitted = <String>{};
+  return {
+    for (final item in items)
+      for (final fact in outcomes)
+        if (!emitted.contains(fact.id) &&
+            (item is Map<String, dynamic> &&
+                    fact.scopes.contains(item['_normal_projection_id']) ||
+                item is ChatReasoningItem &&
+                    fact.scopes.contains(runScopes[item.id]) ||
+                item is ChatToolActivityGroup &&
+                    item.activities.any(
+                      (tool) => fact.scopes.contains(toolScopes[tool]),
+                    )) &&
+            emitted.add(fact.id))
+          chatDisplayItemIdentity(item): fact,
+  };
+}
+
+/// Stable within its source; anonymous saved rows deliberately have no inferred
+/// correspondence across physical observations. Inner card/pin IDs are unchanged.
+Object chatDisplayItemIdentity(dynamic item) {
+  if (item is ChatToolActivityGroup) return ('tool', item.id);
+  if (item is ChatReasoningItem) return ('reasoning', item.id);
+  if (item is GatewayNotice) return ('notice', item.identity);
+  if (item is List<GatewaySubagentActivity>) return 'tasks';
+  final row = item as Map<String, dynamic>;
+  return (
+    'row',
+    row['_timeline_id'] ??
+        row['_normal_projection_id'] ??
+        row['id'] ??
+        row['message_id'] ??
+        identityHashCode(row),
+  );
+}
 
 /// Assistant reasoning rendered as its own collapsible item in the chat list.
 class ChatReasoningItem {
@@ -59,7 +176,9 @@ List<dynamic> buildChatDisplayItems({
   bool verbose = false,
   ChatTimeline? timeline,
 }) {
-  final toolQueue = List<GatewayToolActivity>.from(toolActivities);
+  final toolQueue = toolActivities
+      .where((a) => timeline?.excludesTool(a) != true)
+      .toList();
   // A turn can contain several canonical interim rows. Project their receipt
   // runs together at the first live anchor so consuming an earlier preview
   // cannot pull later tools/reasoning ahead of intervening commentary.
@@ -77,7 +196,9 @@ List<dynamic> buildChatDisplayItems({
   final liveRuns =
       timeline?.runs.where((r) => scopeTurns.containsKey(r.scope)).toList() ??
       const <ChatTimelineRun>[];
-  final liveScopes = liveRuns.map((r) => r.scope).toSet();
+  // Ownership survives full eviction of a scope's runs. Otherwise its canonical
+  // assistant accumulator would silently re-render all the evicted prose.
+  final liveScopes = timeline?.scopes ?? const <Object>{};
   final anchors = <int, Object>{};
   for (final message in messages) {
     final scope = scopeFor(message);
@@ -122,6 +243,14 @@ List<dynamic> buildChatDisplayItems({
   for (final msg in messages) {
     final rawRole = (msg['role'] as String?) ?? 'assistant';
     final role = rawRole == 'agent' ? 'assistant' : rawRole;
+    if ((role == 'user' || role == 'assistant') &&
+        BackgroundReport.fromMessage(msg) != null) {
+      // Reports may consist entirely of tool-looking output. Preserve the raw
+      // row before the ordinary bubble/tool text filters can discard it.
+      flushToolGroup();
+      displayItems.add({...msg, 'role': role});
+      continue;
+    }
     if (isToolResultMessage(msg)) {
       final callId = msg['tool_call_id'] ?? msg['toolCallId'];
       final match = callId == null || callId == ''
@@ -149,7 +278,7 @@ List<dynamic> buildChatDisplayItems({
       continue;
     }
     final runs = anchoredRuns[scope] ?? const <ChatTimelineRun>[];
-    if (role == 'assistant' && runs.isNotEmpty) {
+    if (role == 'assistant' && liveScopes.contains(scope)) {
       for (final run in runs) {
         if (run.kind == ChatTimelineKind.tool) {
           currentGroupId ??= run.activity!.identity;
@@ -203,9 +332,10 @@ List<dynamic> buildChatDisplayItems({
   }
   flushToolGroup();
 
-  // Tools from gateway events that arrived during streaming but were never
-  // matched to a stored message — show them as a trailing card.
-  if (toolQueue.isNotEmpty) {
+  // An active receipt projection is authoritative even after eviction. Only
+  // legacy snapshots without receipt ownership get an unmatched trailing card;
+  // otherwise this queue could resurrect tools removed by the live budget.
+  if (toolQueue.isNotEmpty && (timeline == null || timeline.scopes.isEmpty)) {
     displayItems.add(
       ChatToolActivityGroup(
         id: toolQueue.first.identity,

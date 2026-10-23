@@ -9,6 +9,42 @@ class AppLocalizationsKo extends AppLocalizations {
   AppLocalizationsKo([String locale = 'ko']) : super(locale);
 
   @override
+  String get background_task_report => '백그라운드 작업';
+
+  @override
+  String get background_process_report => '백그라운드 프로세스';
+
+  @override
+  String get background_report_issues => '문제가 보고되었습니다. 펼쳐서 자세히 확인하세요.';
+
+  @override
+  String get background_report_expand => '보고서 펼치기';
+
+  @override
+  String get background_report_collapse => '보고서 접기';
+
+  @override
+  String get saved_history_heading => 'Saved history';
+
+  @override
+  String get received_output_heading =>
+      'Received output — match to saved history unconfirmed';
+
+  @override
+  String get received_output_explanation =>
+      'This may also appear in saved history. The app cannot confirm a match.';
+
+  @override
+  String get local_prompt_context => 'Local prompt context';
+
+  @override
+  String get received_output_badge => 'Received · match unconfirmed';
+
+  @override
+  String get received_output_lifetime =>
+      'Received output is kept temporarily in this app session and may be shortened or removed as limits are reached. It may not be available after the app or connection is closed.';
+
+  @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
       '일회성 질문입니다. 72시간 후에 자동으로 보관 처리되며, 보관할 가치가 있는 내용은 기억에 유지됩니다.';
 
@@ -1863,6 +1899,9 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get trigger_now => '지금 트리거';
+
+  @override
+  String get received_outcome_unknown => '턴 종료 — 결과 미확인';
 
   @override
   String get turn_completed => '턴 완료';
