@@ -1646,28 +1646,34 @@ void main() {
     },
   );
 
-  testWidgets('normal and push taps single-flight the same canonical chat', (
-    tester,
-  ) async {
-    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
-    final f = _RootFixture();
-    await f.initialize();
-    await f.normal();
-    f.detail = Completer<http.Response>();
-    await tester.pumpWidget(f.app());
-    notificationResponseHandler!(f.tap(id: 'local'));
-    await pumps(tester);
-    f.seedPush();
-    await f.push.refresh();
-    await pumps(tester);
-    expect(f.lookups, hasLength(1));
-    f.detail!.complete(f.response());
-    await pumps(tester);
-    expect(find.byType(ChatScreen, skipOffstage: false), findsOneWidget);
-    expect(f.submissions, 0);
-    expect(pendingNotificationApprovals.value, isEmpty);
-    await f.close(tester);
-  });
+  testWidgets(
+    'ordinary taps single-flight but push re-owns the same canonical chat',
+    (tester) async {
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      final f = _RootFixture();
+      await f.initialize();
+      await f.normal();
+      f.detail = Completer<http.Response>();
+      await tester.pumpWidget(f.app());
+      notificationResponseHandler!(f.tap(id: 'local'));
+      await pumps(tester);
+      notificationResponseHandler!(f.tap(id: 'local'));
+      await pumps(tester);
+      expect(f.lookups, hasLength(1));
+      f.seedPush();
+      await f.push.refresh();
+      await pumps(tester);
+      // Same target is not equivalent authority: the newer push must validate
+      // its own proof instead of inheriting the ordinary worker's authority.
+      expect(f.lookups, hasLength(2));
+      f.detail!.complete(f.response());
+      await pumps(tester);
+      expect(find.byType(ChatScreen, skipOffstage: false), findsOneWidget);
+      expect(f.submissions, 0);
+      expect(pendingNotificationApprovals.value, isEmpty);
+      await f.close(tester);
+    },
+  );
 
   testWidgets('late cold launch response cannot override a newer warm tap', (
     tester,

@@ -289,12 +289,25 @@ class _NotificationNavigationIntent {
   final MobilePushRoute? pushRoute;
   final int generation;
 
-  const _NotificationNavigationIntent(
+  _NotificationNavigationIntent(
     this.connection,
     this.sessionId,
-    this.pushRoute,
+    MobilePushRoute? pushRoute,
     this.generation,
-  );
+  ) : pushRoute = pushRoute == null
+          ? null
+          : MobilePushRoute(
+              pushRoute.connection,
+              pushRoute.sessionId,
+              pushRoute.eventId,
+              Map<String, dynamic>.unmodifiable(pushRoute.authority),
+            );
+
+  bool canCoalesceAuthority(MobilePushRoute? incomingPush) {
+    // Ordinary taps share account authority. Push proofs can differ in event,
+    // consent revision or expiry; target equality cannot establish equivalence.
+    return pushRoute == null && incomingPush == null;
+  }
 }
 
 class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
@@ -310,7 +323,7 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
   String? _pushHintsSignature;
   int _notificationGeneration = 0;
   String? _routingIdentity;
-  int? _routingGeneration;
+  _NotificationNavigationIntent? _routingIntent;
   final _notificationChatRoutes =
       <
         ({
@@ -832,7 +845,7 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
 
   void _resumeNotificationNavigation() {
     final intent = _pendingNavigation;
-    if (intent != null && _routingGeneration == null) {
+    if (intent != null && _routingIntent == null) {
       unawaited(_runNotificationNavigation(intent).catchError((Object _) {}));
     }
   }
@@ -848,8 +861,11 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
       return;
     }
     final identity = _notificationChatIdentity(connection, sessionId);
+    final activeIntent = _routingIntent;
     if (_routingIdentity == identity &&
-        _routingGeneration == _notificationGeneration) {
+        activeIntent != null &&
+        activeIntent.generation == _notificationGeneration &&
+        activeIntent.canCoalesceAuthority(pushRoute)) {
       return;
     }
     if (pushRoute == null &&
@@ -888,7 +904,7 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
     final generation = intent.generation;
     final normal = _turnApplicationController.normalSessionFor(connection);
     _routingIdentity = _notificationChatIdentity(connection, sessionId);
-    _routingGeneration = generation;
+    _routingIntent = intent;
     var deferred = false;
     bool currentSync() {
       if (!mounted ||
@@ -1016,9 +1032,9 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
       if (!deferred && identical(_pendingNavigation, intent)) {
         _pendingNavigation = null;
       }
-      if (_routingGeneration == generation) {
+      if (identical(_routingIntent, intent)) {
         _routingIdentity = null;
-        _routingGeneration = null;
+        _routingIntent = null;
       }
       if (deferred && mounted && !_closingTurnOwner && !_background) {
         _resumeNotificationNavigation();
