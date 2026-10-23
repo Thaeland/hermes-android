@@ -48,6 +48,11 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <service android:name=".MobilePushService" android:exported="false">
+            <intent-filter>
+                <action android:name="org.unifiedpush.android.connector.PUSH_EVENT" />
+            </intent-filter>
+        </service>
         <!-- Holds the process at foreground priority while backgrounded so
              the gateway WebSocket heartbeat keeps running (see
              ConnectionKeepAliveService.kt). Started from Dart only while an

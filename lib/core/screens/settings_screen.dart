@@ -10,6 +10,7 @@ import '../services/connection_manager.dart';
 import '../services/notification_prefs.dart';
 import '../services/turn_notification_service.dart';
 import '../widgets/config_backup_card.dart';
+import '../widgets/mobile_push_settings.dart';
 import '../widgets/chat_density_settings_card.dart';
 import '../widgets/text_size_settings_card.dart';
 import '../../main.dart';
@@ -224,6 +225,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
           _buildSectionHeader(context.l10n.appearance),
           _buildChatDensityCard(),
           const SizedBox(height: 16),
+          MobilePushSettings(
+            connection: widget.connection,
+            connectionManager: context
+                .findAncestorStateOfType<HermesAppState>()!
+                .widget
+                .connManager,
+          ),
+          const SizedBox(height: 16),
           _buildSectionHeader(context.l10n.about),
           _AboutCard(),
         ],
@@ -390,6 +399,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
         // ---- Section: Notifications ----
         _buildSectionHeader(context.l10n.notifications),
         const _NotificationSettings(),
+        MobilePushSettings(
+          connection: widget.connection,
+          connectionManager: context
+              .findAncestorStateOfType<HermesAppState>()!
+              .widget
+              .connManager,
+        ),
         const SizedBox(height: 16),
 
         const SizedBox(height: 16),
