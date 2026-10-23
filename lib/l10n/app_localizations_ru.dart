@@ -2542,4 +2542,45 @@ class AppLocalizationsRu extends AppLocalizations {
   String
   get compact_removes_the_you_and_hermes_labels_and_trims_bubble_padding_spacing_and_side_margins =>
       'Компактный режим убирает подписи You и Hermes и уменьшает внутренние отступы, промежутки и боковые поля пузырей.';
+
+  @override
+  String get background_work => 'Фоновая работа';
+
+  @override
+  String get keep_chats_active_in_background =>
+      'Поддерживать чаты в фоновом режиме';
+
+  @override
+  String get background_work_description =>
+      'Поддерживает соединение в начатых вами чатах, пока приложение работает в фоне. Неактивные соединения могут отключаться. Увеличивает расход батареи и трафика. Отключение не останавливает работу на сервере.';
+
+  @override
+  String get background_work_limits =>
+      'Android всё равно может приостановить соединения в режиме Doze или завершить процесс приложения. Для уведомлений после завершения процесса нужна отдельная настройка push. Принудительная остановка не поддерживается.';
+
+  @override
+  String get background_work_disclosure =>
+      'Пока фоновая защита активна, обязательное уведомление службы остаётся видимым, даже если необязательные уведомления чатов отключены.';
+
+  @override
+  String get battery_optimisation_settings => 'Настройки оптимизации батареи';
+
+  @override
+  String get battery_optimisation_description =>
+      'Открывает настройки Android для проверки ограничений батареи. Исключение не запрашивается автоматически, а изменение настроек не гарантирует доставку.';
+
+  @override
+  String get battery_settings_unavailable =>
+      'Не удалось открыть настройки батареи на этом устройстве.';
+
+  @override
+  String get background_work_save_failed =>
+      'Не удалось сохранить настройку фоновой работы.';
+
+  @override
+  String get ongoing_chat_channel_name => 'Активные чаты';
+
+  @override
+  String get ongoing_chat_channel_description =>
+      'Тихие обновления состояния незавершённых чатов, начатых вами';
 }

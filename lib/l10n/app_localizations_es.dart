@@ -2538,4 +2538,46 @@ class AppLocalizationsEs extends AppLocalizations {
   String
   get compact_removes_the_you_and_hermes_labels_and_trims_bubble_padding_spacing_and_side_margins =>
       'Compacta quita las etiquetas «You» y «Hermes» y reduce el relleno, el espaciado y los márgenes laterales de las burbujas.';
+
+  @override
+  String get background_work => 'Trabajo en segundo plano';
+
+  @override
+  String get keep_chats_active_in_background =>
+      'Mantener los chats activos en segundo plano';
+
+  @override
+  String get background_work_description =>
+      'Mantiene conectados los chats iniciados por el usuario mientras la app está en segundo plano. Las conexiones inactivas pueden desconectarse. Consume más batería y datos. Desactivarlo no detiene el trabajo en el servidor.';
+
+  @override
+  String get background_work_limits =>
+      'Android aún puede suspender las conexiones durante Doze o finalizar el proceso de la app. Las notificaciones tras finalizar el proceso requieren configurar push por separado. No se admite Forzar detención.';
+
+  @override
+  String get background_work_disclosure =>
+      'Mientras la protección en segundo plano esté activa, se muestra una notificación obligatoria del servicio, aunque las notificaciones opcionales de chat estén desactivadas.';
+
+  @override
+  String get battery_optimisation_settings =>
+      'Ajustes de optimización de batería';
+
+  @override
+  String get battery_optimisation_description =>
+      'Abre los ajustes de Android para revisar las restricciones de batería. No se solicita ninguna excepción automáticamente y cambiar los ajustes no garantiza la entrega.';
+
+  @override
+  String get battery_settings_unavailable =>
+      'No se pudieron abrir los ajustes de batería en este dispositivo.';
+
+  @override
+  String get background_work_save_failed =>
+      'No se pudo guardar el ajuste de trabajo en segundo plano.';
+
+  @override
+  String get ongoing_chat_channel_name => 'Chats activos';
+
+  @override
+  String get ongoing_chat_channel_description =>
+      'Actualizaciones silenciosas de chats iniciados por el usuario aún sin resolver';
 }

@@ -691,5 +691,16 @@
   "chat_density_comfortable_description": "Roomier bubbles with a sender label above each message.",
   "chat_density_compact_description": "Tighter, unlabelled bubbles so more messages fit on screen.",
   "chat_density_label_description": "{label} — {description}",
-  "compact_removes_the_you_and_hermes_labels_and_trims_bubble_padding_spacing_and_side_margins": "Compact removes the You and Hermes labels and trims bubble padding, spacing, and side margins."
+  "compact_removes_the_you_and_hermes_labels_and_trims_bubble_padding_spacing_and_side_margins": "Compact removes the You and Hermes labels and trims bubble padding, spacing, and side margins.",
+  "background_work": "Background work",
+  "keep_chats_active_in_background": "Keep chats active in the background",
+  "background_work_description": "Keep user-started chats connected while this app is in the background. Idle connections may disconnect. Uses more battery and network data. Turning this off does not stop work on the server.",
+  "background_work_limits": "Android may still suspend connections during Doze or end the app process. Notifications after process death require the separate push setup. Force stop is not supported.",
+  "background_work_disclosure": "A required service notification stays visible while background protection is active, even when optional chat notifications are off.",
+  "battery_optimisation_settings": "Battery optimisation settings",
+  "battery_optimisation_description": "Open Android settings to review battery restrictions. No exemption is requested automatically, and changing settings does not guarantee delivery.",
+  "battery_settings_unavailable": "Battery settings could not be opened on this device.",
+  "background_work_save_failed": "Could not save the background work setting.",
+  "ongoing_chat_channel_name": "Active chats",
+  "ongoing_chat_channel_description": "Quiet status updates for unresolved user-started chats"
 }

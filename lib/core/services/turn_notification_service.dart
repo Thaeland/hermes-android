@@ -2,7 +2,10 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
+import '../../l10n/app_localizations.dart';
+import '../l10n/l10n.dart' show resolvePreferredLocale;
 import 'notification_prefs.dart';
 
 /// Delivered to the app root when the user taps a notification body or one of
@@ -51,6 +54,9 @@ class TurnNotification {
   final TurnNotificationChannel channel;
   final List<TurnNotificationAction> actions;
   final TurnNotificationImportance importance;
+  final bool ongoing;
+  final bool silent;
+  final bool onlyAlertOnce;
 
   const TurnNotification({
     required this.id,
@@ -60,6 +66,9 @@ class TurnNotification {
     required this.channel,
     this.actions = const [],
     this.importance = TurnNotificationImportance.defaultImportance,
+    this.ongoing = false,
+    this.silent = false,
+    this.onlyAlertOnce = false,
   });
 }
 
@@ -102,9 +111,9 @@ class PluginTurnNotificationSink implements TurnNotificationSink {
       '@mipmap/ic_launcher',
     );
     const iosSettings = DarwinInitializationSettings(
-      requestAlertPermission: true,
-      requestBadgePermission: true,
-      requestSoundPermission: true,
+      requestAlertPermission: false,
+      requestBadgePermission: false,
+      requestSoundPermission: false,
     );
     const settings = InitializationSettings(
       android: androidSettings,
@@ -164,7 +173,12 @@ class PluginTurnNotificationSink implements TurnNotificationSink {
       channelDescription: notification.channel.description,
       importance: importance,
       priority: priority,
-      autoCancel: true,
+      autoCancel: !notification.ongoing,
+      ongoing: notification.ongoing,
+      silent: notification.silent,
+      onlyAlertOnce: notification.onlyAlertOnce,
+      playSound: !notification.silent,
+      enableVibration: !notification.silent,
       actions: [
         for (final action in notification.actions)
           AndroidNotificationAction(
@@ -174,10 +188,10 @@ class PluginTurnNotificationSink implements TurnNotificationSink {
           ),
       ],
     );
-    const iosDetails = DarwinNotificationDetails(
-      presentAlert: true,
-      presentBadge: true,
-      presentSound: true,
+    final iosDetails = DarwinNotificationDetails(
+      presentAlert: !notification.silent,
+      presentBadge: !notification.silent,
+      presentSound: !notification.silent,
     );
     final details = NotificationDetails(
       android: androidDetails,
@@ -203,9 +217,9 @@ class PluginTurnNotificationSink implements TurnNotificationSink {
 /// Delivers Android notifications when a gateway turn completes while the app
 /// is backgrounded, mirroring the Hermes Desktop tray notification behaviour.
 ///
-/// The service owns a single notification channel ("Hermes Turns") and exposes
-/// one idempotent [ensureInitialized] method safe to call from any lifecycle
-/// point (including before the Flutter engine binding is ready).
+/// One app-wide sink owns terminal/attention channels and optional ongoing
+/// per-chat status entries. Initialization is headless-safe; only foreground
+/// callers explicitly opt in to requesting notification permission.
 class TurnNotificationService {
   static const turnChannel = TurnNotificationChannel(
     id: 'hermes_turn_notifications',
@@ -242,6 +256,163 @@ class TurnNotificationService {
   static TurnNotificationService get shared =>
       _shared ??= TurnNotificationService();
 
+  static TurnNotificationChannel get ongoingChannel {
+    final locale = resolvePreferredLocale(
+      PlatformDispatcher.instance.locales,
+      AppLocalizations.supportedLocales,
+    );
+    final strings = lookupAppLocalizations(locale);
+    return TurnNotificationChannel(
+      id: 'hermes_ongoing_chats',
+      name: strings.ongoing_chat_channel_name,
+      description: strings.ongoing_chat_channel_description,
+    );
+  }
+
+  /// Numeric IDs only: no titles, chat contents, credentials or routing data.
+  /// Not included in configuration backups.
+  static const ongoingIdsStorageKey = 'hermes_ongoing_chat_notification_ids';
+  final Set<int> _ongoingIds = {};
+  SharedPreferences? _ongoingPrefs;
+  Future<void>? _ongoingTail;
+
+  Future<void> _queueOngoing(Future<void> Function() operation) {
+    final previous = _ongoingTail;
+    final result = previous == null
+        ? operation()
+        : previous.then((_) => operation());
+    late final Future<void> tail;
+    void release() {
+      if (identical(_ongoingTail, tail)) _ongoingTail = null;
+    }
+
+    tail = result.then<void>(
+      (_) => release(),
+      onError: (Object _, StackTrace _) => release(),
+    );
+    _ongoingTail = tail;
+    return result;
+  }
+
+  Future<void> _persistOngoingIds() async {
+    final prefs = _ongoingPrefs;
+    if (prefs == null ||
+        !await prefs.setStringList(
+          ongoingIdsStorageKey,
+          _ongoingIds.map((id) => id.toString()).toList()..sort(),
+        )) {
+      throw StateError('Ongoing notification bookkeeping unavailable');
+    }
+  }
+
+  Future<void> _cleanOrphanedOngoingChats() async {
+    SharedPreferences prefs;
+    try {
+      prefs = await SharedPreferences.getInstance();
+    } catch (_) {
+      // Optional ongoing entries need durable bookkeeping. Other notification
+      // kinds remain usable if this store is unavailable.
+      return;
+    }
+    _ongoingPrefs = prefs;
+    final raw = prefs.get(ongoingIdsStorageKey);
+    if (raw is List) {
+      for (final value in raw) {
+        final id = value is String ? int.tryParse(value) : null;
+        // Never cancel native 4705, push or terminal entries, even if a
+        // corrupt/imported preference names them.
+        if (id != null && id >= 0x20000000 && id <= 0x2fffffff) {
+          _ongoingIds.add(id);
+        }
+      }
+    }
+    for (final id in _ongoingIds.toList()) {
+      await _sink.cancel(id);
+      _ongoingIds.remove(id);
+    }
+    if (raw != null) await _persistOngoingIds();
+  }
+
+  /// One replaceable, quiet entry per local chat, independent of turn/stored
+  /// identity changes. The native service's mandatory disclosure is separate.
+  Future<void> showOngoingChat({
+    required String connectionId,
+    required String localSessionId,
+    String? storedSessionId,
+    required String title,
+    required String turnId,
+    required String status,
+  }) => _queueOngoing(() async {
+    await ensureInitialized();
+    if (!_initialized) return;
+    final id = ongoingChatNotificationIdFor(
+      connectionId: connectionId,
+      localSessionId: localSessionId,
+    );
+    if (!notificationPrefs.value.enabled || !_permissionGranted) {
+      await _cancelOngoingId(id);
+      return;
+    }
+    // If bookkeeping cannot be saved, do not create an uncleanable orphan.
+    if (_ongoingPrefs == null) return;
+    _ongoingIds.add(id);
+    await _persistOngoingIds();
+    if (!notificationPrefs.value.enabled || !_permissionGranted) {
+      await _cancelOngoingId(id);
+      return;
+    }
+    await _sink.show(
+      TurnNotification(
+        id: id,
+        title: title,
+        body: status,
+        payload: jsonEncode({
+          'connectionId': connectionId,
+          'sessionId': storedSessionId?.isNotEmpty == true
+              ? storedSessionId
+              : localSessionId,
+          'localSessionId': localSessionId,
+          'turnId': turnId,
+        }),
+        channel: ongoingChannel,
+        importance: TurnNotificationImportance.low,
+        ongoing: true,
+        silent: true,
+        onlyAlertOnce: true,
+      ),
+    );
+  });
+
+  Future<void> cancelOngoingChat({
+    required String connectionId,
+    required String localSessionId,
+  }) => _queueOngoing(() async {
+    await ensureInitialized();
+    if (!_initialized) return;
+    await _cancelOngoingId(
+      ongoingChatNotificationIdFor(
+        connectionId: connectionId,
+        localSessionId: localSessionId,
+      ),
+    );
+  });
+
+  Future<void> _cancelOngoingId(int id) async {
+    await _sink.cancel(id);
+    _ongoingIds.remove(id);
+    if (_ongoingPrefs != null) await _persistOngoingIds();
+  }
+
+  /// Targeted cleanup only. Never calls the plugin's broad cancelAll, which
+  /// could remove the foreground-service disclosure or attention notifications.
+  Future<void> cancelAllOngoingChats() => _queueOngoing(() async {
+    await ensureInitialized();
+    if (!_initialized) return;
+    for (final id in _ongoingIds.toList()) {
+      await _cancelOngoingId(id);
+    }
+  });
+
   /// The channel a [kind] posts on.
   static TurnNotificationChannel channelFor(HermesNotificationKind kind) =>
       switch (kind) {
@@ -268,6 +439,9 @@ class TurnNotificationService {
 
   bool _initialized = false;
   bool _permissionGranted = true;
+  bool _permissionRequested = false;
+  Future<void>? _initializing;
+  Future<void>? _requestingPermission;
 
   TurnNotificationService({
     TurnNotificationSink? sink,
@@ -286,28 +460,46 @@ class TurnNotificationService {
   /// Safe to call repeatedly — once it has succeeded, subsequent calls are
   /// no-ops. A failed attempt (platform channel unavailable, e.g. in tests)
   /// degrades to a silent no-op and may be retried later.
-  Future<void> ensureInitialized() async {
-    if (_initialized) return;
+  Future<void> ensureInitialized({bool requestPermission = false}) async {
+    if (!_initialized) {
+      final flight = _initializing ??= _initialize();
+      try {
+        await flight;
+      } finally {
+        if (identical(_initializing, flight)) _initializing = null;
+      }
+    }
+    // Background/headless callers never ask for UI permission. The foreground
+    // app root or Settings explicitly opts in, even after headless init.
+    if (_initialized && requestPermission && !_permissionRequested) {
+      final flight = _requestingPermission ??= _requestPermission();
+      try {
+        await flight;
+      } finally {
+        if (identical(_requestingPermission, flight)) {
+          _requestingPermission = null;
+        }
+      }
+    }
+  }
 
+  Future<void> _initialize() async {
     try {
       await _sink.initialize();
+      await _cleanOrphanedOngoingChats();
       _initialized = true;
     } catch (_) {
-      // Platform not available (e.g. test environment) — notifications
-      // silently degrade to no-op.
-      return;
+      // Missing plugins must not break startup; a later call may retry.
     }
+  }
 
-    // Android 13+ denies POST_NOTIFICATIONS until it is requested at runtime,
-    // even though the manifest declares it. Without this, every notification
-    // is dropped by the OS with no error surfaced anywhere.
+  Future<void> _requestPermission() async {
     try {
-      final granted = await _sink.requestPermission();
-      _permissionGranted = granted ?? true;
+      _permissionGranted = await _sink.requestPermission() ?? true;
+      _permissionRequested = true;
     } catch (_) {
-      // A failing permission channel must not break the app; assume the
-      // platform imposes no runtime gate rather than blocking notifications.
-      _permissionGranted = true;
+      // Unknown is not a grant. Allow an explicit foreground retry later.
+      _permissionGranted = false;
     }
   }
 
@@ -325,7 +517,10 @@ class TurnNotificationService {
     String? sessionId,
     String? connectionId,
   }) async {
-    if (!_initialized) return;
+    if (!_initialized ||
+        !notificationKindEnabled(HermesNotificationKind.turnDone)) {
+      return;
+    }
     final identity = _turnIdentity(
       turnId: turnId,
       sessionId: sessionId,
@@ -378,7 +573,10 @@ class TurnNotificationService {
     String? sessionId,
     String? connectionId,
   }) async {
-    if (!_initialized) return;
+    if (!_initialized ||
+        !notificationKindEnabled(HermesNotificationKind.turnError)) {
+      return;
+    }
     final identity = _turnIdentity(
       turnId: turnId,
       sessionId: sessionId,
@@ -483,10 +681,8 @@ class TurnNotificationService {
     required String title,
     required String body,
   }) async {
-    if (!_initialized) {
-      await ensureInitialized();
-      if (!_initialized) return false;
-    }
+    await ensureInitialized(requestPermission: true);
+    if (!_initialized || !_permissionGranted) return false;
 
     try {
       await _sink.show(
@@ -529,7 +725,24 @@ class TurnNotificationService {
   /// Masking instead of negating keeps the id inside the 31-bit range Android
   /// accepts, and keeps one turn mapped to exactly one notification so a turn
   /// replaces its own notification instead of stacking duplicates.
-  static int notificationIdFor(String turnId) => turnId.hashCode & 0x7fffffff;
+  static int notificationIdFor(String turnId) =>
+      0x10000000 | _stableHash(turnId);
+
+  /// The local id remains stable when a draft gains its canonical stored id.
+  static int ongoingChatNotificationIdFor({
+    required String connectionId,
+    required String localSessionId,
+  }) => 0x20000000 | _stableHash(jsonEncode([connectionId, localSessionId]));
+
+  // FNV-1a over UTF-8, explicitly bounded on every multiplication. Do not use
+  // String.hashCode: the language does not guarantee it across processes.
+  static int _stableHash(String identity) {
+    var hash = 0x811c9dc5;
+    for (final byte in utf8.encode(identity)) {
+      hash = ((hash ^ byte) * 0x01000193) & 0xffffffff;
+    }
+    return hash & 0x0fffffff;
+  }
 }
 
 /// A notification tap or action, parsed from the platform response payload.
@@ -543,18 +756,24 @@ class NotificationRoute {
   final String? connectionId;
   final String? requestId;
   final String? actionId;
+  final String? localSessionId;
+  final String? turnId;
 
   const NotificationRoute({
     this.sessionId,
     this.connectionId,
     this.requestId,
     this.actionId,
+    this.localSessionId,
+    this.turnId,
   });
 
   static NotificationRoute fromResponse(NotificationResponse response) {
     String? sessionId;
     String? connectionId;
     String? requestId;
+    String? localSessionId;
+    String? turnId;
     final raw = response.payload;
     if (raw != null && raw.isNotEmpty) {
       try {
@@ -563,6 +782,8 @@ class NotificationRoute {
           sessionId = decoded['sessionId']?.toString();
           connectionId = decoded['connectionId']?.toString();
           requestId = decoded['requestId']?.toString();
+          localSessionId = decoded['localSessionId']?.toString();
+          turnId = decoded['turnId']?.toString();
         }
       } catch (_) {
         // A plain-string payload (older turns) carries only the turn id.
@@ -573,6 +794,8 @@ class NotificationRoute {
       connectionId: connectionId,
       requestId: requestId,
       actionId: response.actionId,
+      localSessionId: localSessionId,
+      turnId: turnId,
     );
   }
 

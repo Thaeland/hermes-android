@@ -4287,6 +4287,72 @@ abstract class AppLocalizations {
   /// **'Compact removes the You and Hermes labels and trims bubble padding, spacing, and side margins.'**
   String
   get compact_removes_the_you_and_hermes_labels_and_trims_bubble_padding_spacing_and_side_margins;
+
+  /// No description provided for @background_work.
+  ///
+  /// In en, this message translates to:
+  /// **'Background work'**
+  String get background_work;
+
+  /// No description provided for @keep_chats_active_in_background.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep chats active in the background'**
+  String get keep_chats_active_in_background;
+
+  /// No description provided for @background_work_description.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep user-started chats connected while this app is in the background. Idle connections may disconnect. Uses more battery and network data. Turning this off does not stop work on the server.'**
+  String get background_work_description;
+
+  /// No description provided for @background_work_limits.
+  ///
+  /// In en, this message translates to:
+  /// **'Android may still suspend connections during Doze or end the app process. Notifications after process death require the separate push setup. Force stop is not supported.'**
+  String get background_work_limits;
+
+  /// No description provided for @background_work_disclosure.
+  ///
+  /// In en, this message translates to:
+  /// **'A required service notification stays visible while background protection is active, even when optional chat notifications are off.'**
+  String get background_work_disclosure;
+
+  /// No description provided for @battery_optimisation_settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Battery optimisation settings'**
+  String get battery_optimisation_settings;
+
+  /// No description provided for @battery_optimisation_description.
+  ///
+  /// In en, this message translates to:
+  /// **'Open Android settings to review battery restrictions. No exemption is requested automatically, and changing settings does not guarantee delivery.'**
+  String get battery_optimisation_description;
+
+  /// No description provided for @battery_settings_unavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Battery settings could not be opened on this device.'**
+  String get battery_settings_unavailable;
+
+  /// No description provided for @background_work_save_failed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not save the background work setting.'**
+  String get background_work_save_failed;
+
+  /// No description provided for @ongoing_chat_channel_name.
+  ///
+  /// In en, this message translates to:
+  /// **'Active chats'**
+  String get ongoing_chat_channel_name;
+
+  /// No description provided for @ongoing_chat_channel_description.
+  ///
+  /// In en, this message translates to:
+  /// **'Quiet status updates for unresolved user-started chats'**
+  String get ongoing_chat_channel_description;
 }
 
 class _AppLocalizationsDelegate

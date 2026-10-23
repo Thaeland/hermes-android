@@ -689,5 +689,16 @@
   "chat_density_comfortable_description": "Geräumigere Blasen mit Absenderbeschriftung über jeder Nachricht.",
   "chat_density_compact_description": "Engere Blasen ohne Beschriftung, damit mehr Nachrichten auf den Bildschirm passen.",
   "chat_density_label_description": "{label} — {description}",
-  "compact_removes_the_you_and_hermes_labels_and_trims_bubble_padding_spacing_and_side_margins": "Kompakt entfernt die Beschriftungen „You“ und „Hermes“ und verringert Blasenabstand, Abstände und Seitenränder."
+  "compact_removes_the_you_and_hermes_labels_and_trims_bubble_padding_spacing_and_side_margins": "Kompakt entfernt die Beschriftungen „You“ und „Hermes“ und verringert Blasenabstand, Abstände und Seitenränder.",
+  "background_work": "Hintergrundaktivität",
+  "keep_chats_active_in_background": "Chats im Hintergrund aktiv halten",
+  "background_work_description": "Vom Nutzer gestartete Chats bleiben verbunden, während diese App im Hintergrund ist. Inaktive Verbindungen dürfen getrennt werden. Benötigt mehr Akku und Daten. Das Ausschalten stoppt keine Arbeit auf dem Server.",
+  "background_work_limits": "Android kann Verbindungen im Doze-Modus dennoch unterbrechen oder den App-Prozess beenden. Benachrichtigungen nach dem Prozessende erfordern die separate Push-Einrichtung. „Beenden erzwingen“ wird nicht unterstützt.",
+  "background_work_disclosure": "Bei aktivem Hintergrundschutz bleibt eine erforderliche Dienstbenachrichtigung sichtbar, auch wenn optionale Chat-Benachrichtigungen ausgeschaltet sind.",
+  "battery_optimisation_settings": "Einstellungen zur Akkuoptimierung",
+  "battery_optimisation_description": "Android-Einstellungen öffnen, um Akkubeschränkungen zu prüfen. Es wird keine Ausnahme automatisch beantragt; Änderungen garantieren keine Zustellung.",
+  "battery_settings_unavailable": "Die Akkueinstellungen konnten auf diesem Gerät nicht geöffnet werden.",
+  "background_work_save_failed": "Die Einstellung zur Hintergrundaktivität konnte nicht gespeichert werden.",
+  "ongoing_chat_channel_name": "Aktive Chats",
+  "ongoing_chat_channel_description": "Stille Statusmeldungen für noch offene, vom Nutzer gestartete Chats"
 }

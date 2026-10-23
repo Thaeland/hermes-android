@@ -2544,4 +2544,46 @@ class AppLocalizationsDe extends AppLocalizations {
   String
   get compact_removes_the_you_and_hermes_labels_and_trims_bubble_padding_spacing_and_side_margins =>
       'Kompakt entfernt die Beschriftungen „You“ und „Hermes“ und verringert Blasenabstand, Abstände und Seitenränder.';
+
+  @override
+  String get background_work => 'Hintergrundaktivität';
+
+  @override
+  String get keep_chats_active_in_background =>
+      'Chats im Hintergrund aktiv halten';
+
+  @override
+  String get background_work_description =>
+      'Vom Nutzer gestartete Chats bleiben verbunden, während diese App im Hintergrund ist. Inaktive Verbindungen dürfen getrennt werden. Benötigt mehr Akku und Daten. Das Ausschalten stoppt keine Arbeit auf dem Server.';
+
+  @override
+  String get background_work_limits =>
+      'Android kann Verbindungen im Doze-Modus dennoch unterbrechen oder den App-Prozess beenden. Benachrichtigungen nach dem Prozessende erfordern die separate Push-Einrichtung. „Beenden erzwingen“ wird nicht unterstützt.';
+
+  @override
+  String get background_work_disclosure =>
+      'Bei aktivem Hintergrundschutz bleibt eine erforderliche Dienstbenachrichtigung sichtbar, auch wenn optionale Chat-Benachrichtigungen ausgeschaltet sind.';
+
+  @override
+  String get battery_optimisation_settings =>
+      'Einstellungen zur Akkuoptimierung';
+
+  @override
+  String get battery_optimisation_description =>
+      'Android-Einstellungen öffnen, um Akkubeschränkungen zu prüfen. Es wird keine Ausnahme automatisch beantragt; Änderungen garantieren keine Zustellung.';
+
+  @override
+  String get battery_settings_unavailable =>
+      'Die Akkueinstellungen konnten auf diesem Gerät nicht geöffnet werden.';
+
+  @override
+  String get background_work_save_failed =>
+      'Die Einstellung zur Hintergrundaktivität konnte nicht gespeichert werden.';
+
+  @override
+  String get ongoing_chat_channel_name => 'Aktive Chats';
+
+  @override
+  String get ongoing_chat_channel_description =>
+      'Stille Statusmeldungen für noch offene, vom Nutzer gestartete Chats';
 }
