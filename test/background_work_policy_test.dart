@@ -7,6 +7,16 @@ import 'package:hermes_android/core/services/background_work_prefs.dart';
 import 'package:hermes_android/core/services/config_backup_service.dart';
 import 'package:hermes_android/core/services/connection_keepalive_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
+
+class _FailingPreferences extends InMemorySharedPreferencesStore {
+  _FailingPreferences() : super.empty();
+  @override
+  Future<Map<String, Object>> getAll() async => throw StateError('unavailable');
+  @override
+  Future<bool> setValue(String valueType, String key, Object value) async =>
+      false;
+}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -73,6 +83,31 @@ void main() {
     });
     backgroundWorkEnabled.value = false;
     await BackgroundWorkPrefsStore.load();
+    expect(backgroundWorkEnabled.value, isTrue);
+  });
+
+  test(
+    'unavailable policy load reports failure instead of establishing a default',
+    () async {
+      await SharedPreferences.getInstance();
+      final original = SharedPreferencesStorePlatform.instance;
+      SharedPreferencesStorePlatform.instance = _FailingPreferences();
+      addTearDown(() => SharedPreferencesStorePlatform.instance = original);
+      await expectLater(BackgroundWorkPrefsStore.load(), throwsStateError);
+    },
+  );
+
+  test('failed explicit write does not establish policy authority', () async {
+    await BackgroundWorkPrefsStore.load();
+    final confirmed = BackgroundWorkPrefsStore.confirmedChanges.value;
+    final original = SharedPreferencesStorePlatform.instance;
+    SharedPreferencesStorePlatform.instance = _FailingPreferences();
+    addTearDown(() => SharedPreferencesStorePlatform.instance = original);
+    await expectLater(
+      BackgroundWorkPrefsStore.setEnabled(false),
+      throwsStateError,
+    );
+    expect(BackgroundWorkPrefsStore.confirmedChanges.value, confirmed);
     expect(backgroundWorkEnabled.value, isTrue);
   });
 

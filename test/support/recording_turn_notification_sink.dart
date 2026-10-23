@@ -10,6 +10,7 @@ class RecordingTurnNotificationSink implements TurnNotificationSink {
   int initializeCount = 0;
   int cancelAllCount = 0;
   int permissionRequestCount = 0;
+  int permissionCheckCount = 0;
 
   /// The cold-start response [takeInitialLaunchResponse] returns, if any.
   NotificationResponse? initialLaunchResponse;
@@ -24,6 +25,15 @@ class RecordingTurnNotificationSink implements TurnNotificationSink {
 
   /// When set, [requestPermission] throws it.
   Object? permissionError;
+  Object? permissionCheckError;
+
+  @override
+  Future<bool?> checkPermission() async {
+    permissionCheckCount++;
+    final error = permissionCheckError;
+    if (error != null) throw error;
+    return permissionResult;
+  }
 
   /// When set, [initialize] throws it — mirroring a platform channel that is
   /// unavailable (test environment, missing plugin registration).

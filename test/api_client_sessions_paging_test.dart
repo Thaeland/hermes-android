@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -134,6 +135,66 @@ void main() {
   });
 
   group('ApiClient.getSessionById', () {
+    test(
+      'revocation while asynchronous authority is held prevents even the first read',
+      () async {
+        var current = true;
+        var reads = 0;
+        final authority = Completer<bool>();
+        final api = ApiClient(
+          baseUrl: 'https://fixture.invalid',
+          apiKey: 'test',
+          httpClient: _RecordingJsonClient(
+            bodyFor: (_) {
+              reads++;
+              return jsonEncode({
+                'data': [_row('target')],
+                'has_more': false,
+              });
+            },
+          ),
+        );
+        final lookup = api.getSessionById(
+          'target',
+          canContinue: () => authority.future,
+          isCurrent: () => current,
+        );
+        current = false;
+        authority.complete(true);
+        expect(await lookup, isNull);
+        expect(reads, 0);
+        api.close();
+      },
+    );
+
+    test(
+      'revoked response is rejected even when it contains the exact session',
+      () async {
+        var current = true;
+        var reads = 0;
+        final api = ApiClient(
+          baseUrl: 'https://fixture.invalid',
+          apiKey: 'test',
+          httpClient: _RecordingJsonClient(
+            bodyFor: (_) {
+              reads++;
+              current = false;
+              return jsonEncode({
+                'data': [_row('target')],
+                'has_more': true,
+              });
+            },
+          ),
+        );
+        expect(
+          await api.getSessionById('target', isCurrent: () => current),
+          isNull,
+        );
+        expect(reads, 1);
+        api.close();
+      },
+    );
+
     test('pages until the exact id is found', () async {
       final uris = <Uri>[];
       final client = _RecordingJsonClient(

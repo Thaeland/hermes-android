@@ -15,6 +15,7 @@ import 'support/recording_turn_notification_sink.dart';
 class HeldNotificationSink extends RecordingTurnNotificationSink {
   Completer<void>? initializationGate;
   Completer<void>? permissionGate;
+  Completer<void>? permissionCheckGate;
   Completer<void>? showGate;
   bool failCancel = false;
 
@@ -28,6 +29,13 @@ class HeldNotificationSink extends RecordingTurnNotificationSink {
   Future<bool?> requestPermission() async {
     final result = await super.requestPermission();
     await permissionGate?.future;
+    return result;
+  }
+
+  @override
+  Future<bool?> checkPermission() async {
+    final result = await super.checkPermission();
+    await permissionCheckGate?.future;
     return result;
   }
 
@@ -120,7 +128,92 @@ void main() {
     () async {
       await show();
       expect(sink.permissionRequestCount, 0);
+      expect(sink.permissionCheckCount, 0);
       await service.ensureInitialized(requestPermission: true);
+      expect(sink.permissionRequestCount, 1);
+    },
+  );
+
+  test(
+    'passive authorization observes external grant and revocation without another prompt',
+    () async {
+      sink.permissionResult = false;
+      await service.ensureInitialized(requestPermission: true);
+      await show();
+      expect(sink.shown, isEmpty);
+      sink.permissionResult = true;
+      await service.refreshAuthorization();
+      await show();
+      expect(sink.shown.single.ongoing, isTrue);
+      expect(
+        await service.sendTestNotification(title: 'test', body: 'test'),
+        isTrue,
+      );
+      sink.permissionResult = false;
+      await service.refreshAuthorization();
+      final before = sink.shown.length;
+      await show();
+      expect(
+        await service.sendTestNotification(title: 'test', body: 'test'),
+        isFalse,
+      );
+      expect(sink.shown, hasLength(before));
+      expect(sink.cancelled, contains(sink.shown.first.id));
+      expect(sink.permissionRequestCount, 1);
+      expect(sink.permissionCheckCount, 4);
+    },
+  );
+
+  test(
+    'explicit foreground test passively discovers an external grant without resume',
+    () async {
+      sink.permissionResult = false;
+      expect(
+        await service.sendTestNotification(title: 'test', body: 'test'),
+        isFalse,
+      );
+      sink.permissionResult = true;
+      expect(
+        await service.sendTestNotification(title: 'test', body: 'test'),
+        isTrue,
+      );
+      expect(sink.permissionRequestCount, 1);
+    },
+  );
+
+  test(
+    'passive authorization reads are singleflight and fail closed without prompting',
+    () async {
+      sink.permissionCheckGate = Completer<void>();
+      sink.permissionResult = false;
+      final first = service.refreshAuthorization();
+      final second = service.refreshAuthorization();
+      await pumpEventQueue();
+      expect(sink.permissionCheckCount, 1);
+      sink.permissionCheckGate!.complete();
+      await Future.wait([first, second]);
+      expect(service.permissionGranted, isFalse);
+      sink.permissionCheckError = StateError('platform unavailable');
+      await service.refreshAuthorization();
+      expect(service.permissionGranted, isFalse);
+      expect(sink.permissionRequestCount, 0);
+    },
+  );
+
+  test(
+    'passive read cannot overwrite the result of a newer explicit prompt',
+    () async {
+      sink.permissionResult = false;
+      sink.permissionCheckGate = Completer<void>();
+      final passive = service.refreshAuthorization();
+      await pumpEventQueue();
+      expect(sink.permissionCheckCount, 1);
+      sink.permissionResult = true;
+      await service.ensureInitialized(requestPermission: true);
+      expect(service.permissionGranted, isTrue);
+      sink.permissionCheckGate!.complete();
+      await passive;
+      expect(service.permissionGranted, isTrue);
       expect(sink.permissionRequestCount, 1);
     },
   );
@@ -380,6 +473,31 @@ void main() {
     expect(notice.silent, isFalse);
     expect(notice.onlyAlertOnce, isFalse);
   });
+
+  test(
+    'Android passive authorization uses only areNotificationsEnabled, never a prompt',
+    () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      AndroidFlutterLocalNotificationsPlugin.registerWith();
+      const channel = MethodChannel(
+        'dexterous.com/flutter/local_notifications',
+      );
+      final calls = <String>[];
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call.method);
+        return true;
+      });
+      addTearDown(() {
+        messenger.setMockMethodCallHandler(channel, null);
+        debugDefaultTargetPlatformOverride = null;
+      });
+      final pluginSink = PluginTurnNotificationSink();
+      expect(await pluginSink.checkPermission(), isTrue);
+      expect(calls, ['areNotificationsEnabled']);
+    },
+  );
 
   test('plugin sink maps ongoing flags to real Android arguments', () async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;

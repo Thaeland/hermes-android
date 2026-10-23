@@ -22,8 +22,16 @@ import 'package:hermes_android/main.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
 
 import 'support/recording_turn_notification_sink.dart';
+
+class _FailedReloadStore extends InMemorySharedPreferencesStore {
+  _FailedReloadStore() : super.empty();
+  @override
+  Future<Map<String, Object>> getAll() async =>
+      throw StateError('Held policy store unavailable');
+}
 
 class _Secrets implements CredentialStore {
   final values = <String, String>{};
@@ -35,6 +43,21 @@ class _Secrets implements CredentialStore {
   Future<void> write(String key, String value) async => values[key] = value;
   @override
   Future<void> delete(String key) async => values.remove(key);
+}
+
+class _HeldRoutePush extends MobilePushService {
+  _HeldRoutePush(this.delegate) : super(supported: false);
+  final MobilePushService delegate;
+  final route = Completer<MobilePushRoute?>();
+  int takes = 0;
+  @override
+  Future<MobilePushRoute?> takePendingNotificationRoute() {
+    return ++takes == 1 ? route.future : Future.value();
+  }
+
+  @override
+  Future<bool> isRouteCurrent(MobilePushRoute route) =>
+      delegate.isRouteCurrent(route);
 }
 
 class _HeldSink extends RecordingTurnNotificationSink {
@@ -156,7 +179,7 @@ class _RootFixture {
     httpClient: MockClient((request) async {
       lookups.add(request);
       expectSync(request.method, 'GET');
-      expectSync(request.headers['Authorization'], 'Bearer root-api-key');
+      expectSync(request.headers['Authorization'], 'Bearer ${c.apiKey}');
       expectSync(request.url.path, '/gateway/api/sessions');
       return detail?.future ?? response();
     }),
@@ -218,10 +241,11 @@ class _RootFixture {
   HermesApp app({
     Future<void> Function()? loadPolicy,
     GatewayTurnApplicationController? owner,
+    MobilePushService? routingPush,
   }) => HermesApp(
     connManager: manager,
     notifications: notifications,
-    mobilePush: push,
+    mobilePush: routingPush ?? push,
     turnApplicationController: owner ?? controller,
     notificationClientFactory: client,
     loadBackgroundPolicy: loadPolicy,
@@ -325,6 +349,460 @@ void main() {
     notificationResponseHandler = null;
     pendingNotificationApprovals.value = const [];
   });
+
+  testWidgets('SPEC A-B-A taps reuse the earlier canonical route', (
+    tester,
+  ) async {
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    final f = _RootFixture();
+    await f.initialize();
+    final normal = await f.normal();
+    normal.chatFor('local-b', storedSessionId: 'stored-b', title: 'Chat B');
+    await tester.pumpWidget(f.app());
+    notificationResponseHandler!(f.tap());
+    await pumps(tester);
+    expect(find.byType(ChatScreen, skipOffstage: false), findsOneWidget);
+    final originalContext = tester.element(find.byType(ChatScreen));
+    final originalRoute = ModalRoute.of(originalContext)!;
+    f.detail = Completer<http.Response>()..complete(f.response(id: 'stored-b'));
+    notificationResponseHandler!(f.tap(id: 'stored-b'));
+    await pumps(tester);
+    expect(find.byType(ChatScreen, skipOffstage: false), findsNWidgets(2));
+    f.detail = null;
+    notificationResponseHandler!(f.tap(id: 'local'));
+    await pumps(tester);
+    final count = find
+        .byType(ChatScreen, skipOffstage: false)
+        .evaluate()
+        .length;
+    expect(originalContext.mounted, isTrue);
+    expect(originalRoute.isCurrent, isTrue);
+    expect(ModalRoute.of(originalContext), same(originalRoute));
+    await f.close(tester);
+    expect(
+      count,
+      2,
+      reason: 'A route must be raised, not constructed a second time',
+    );
+  });
+
+  testWidgets('SPEC tap raises an active chat hidden behind another route', (
+    tester,
+  ) async {
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    final f = _RootFixture();
+    await f.initialize();
+    await f.normal();
+    await tester.pumpWidget(f.app());
+    notificationResponseHandler!(f.tap());
+    await pumps(tester);
+    final chatContext = tester.element(find.byType(ChatScreen));
+    Navigator.of(chatContext).push(
+      MaterialPageRoute<void>(
+        builder: (_) => const Scaffold(body: Text('Other page')),
+      ),
+    );
+    await pumps(tester);
+    expect(find.text('Other page'), findsOneWidget);
+    notificationResponseHandler!(f.tap(id: 'local'));
+    await pumps(tester);
+    final current = ModalRoute.of(chatContext)!.isCurrent;
+    await f.close(tester);
+    expect(
+      current,
+      isTrue,
+      reason: 'isActive does not mean this chat is the visible route',
+    );
+  });
+
+  testWidgets('SPEC connection edit fences every detail page', (tester) async {
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    final f = _RootFixture();
+    await f.initialize();
+    await f.normal();
+    f.detail = Completer<http.Response>();
+    await tester.pumpWidget(f.app());
+    notificationResponseHandler!(f.tap());
+    await pumps(tester);
+    expect(f.lookups, hasLength(1));
+    await f.manager.updateApiKey(f.connection.id, 'replacement-key');
+    final held = f.detail!;
+    f.detail = null;
+    held.complete(
+      http.Response(
+        jsonEncode({
+          'data': [
+            {
+              'id': 'unrelated',
+              'title': 'Other',
+              'message_count': 2,
+              'started_at': 1,
+            },
+          ],
+          'has_more': true,
+        }),
+        200,
+      ),
+    );
+    await pumps(tester);
+    final requests = f.lookups.toList();
+    await f.close(tester);
+    expect(
+      requests,
+      hasLength(1),
+      reason: 'No second request may use the revoked saved-account credentials',
+    );
+  });
+
+  for (final push in [false, true]) {
+    testWidgets(
+      'SPEC ${push ? 'push' : 'normal'} tap finishing paused survives resume',
+      (tester) async {
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        );
+        final f = _RootFixture();
+        await f.initialize();
+        await f.normal();
+        if (push) f.seedPush();
+        f.detail = Completer<http.Response>();
+        await tester.pumpWidget(f.app());
+        if (!push) notificationResponseHandler!(f.tap());
+        await pumps(tester);
+        expect(f.lookups, hasLength(1));
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+        f.detail!.complete(f.response());
+        await pumps(tester);
+        expect(find.byType(ChatScreen), findsNothing);
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        );
+        await pumps(tester);
+        final count = find.byType(ChatScreen).evaluate().length;
+        await f.close(tester);
+        expect(
+          count,
+          1,
+          reason:
+              'Consumed validated tap must wait for foreground, not be lost',
+        );
+      },
+    );
+  }
+
+  testWidgets('SPEC failed policy hydration does not enable protection', (
+    tester,
+  ) async {
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    final f = _RootFixture();
+    await f.initialize();
+    final normal = await f.normal();
+    final chat = normal.findChat('local')!;
+    final turn = chat.submitPrepared(
+      reservation: chat.reserve()!,
+      text: 'test',
+      localContent: 'test',
+    );
+    turn.ignore();
+    await pumps(tester);
+    await f.manager.prefs.setBool(BackgroundWorkPrefsStore.storageKey, false);
+    final originalStore = SharedPreferencesStorePlatform.instance;
+    var loadCalled = false;
+    final loadDone = Completer<void>();
+    await tester.pumpWidget(
+      f.app(
+        loadPolicy: () async {
+          loadCalled = true;
+          SharedPreferencesStorePlatform.instance = _FailedReloadStore();
+          try {
+            await BackgroundWorkPrefsStore.load();
+          } finally {
+            SharedPreferencesStorePlatform.instance = originalStore;
+            loadDone.complete();
+          }
+        },
+      ),
+    );
+    await pumps(tester);
+    expect(loadCalled, isTrue);
+    expect(loadDone.isCompleted, isTrue);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await pumps(tester);
+    final starts = f.keepalive.where((m) => m == 'start').length;
+    await f.close(tester);
+    await turn;
+    expect(starts, 0, reason: 'No successful load established enabled policy');
+  });
+
+  testWidgets('SPEC OS permission granted after denial is observed on resume', (
+    tester,
+  ) async {
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    final f = _RootFixture();
+    await f.initialize();
+    f.sink.permissionResult = false;
+    await tester.pumpWidget(f.app());
+    await pumps(tester);
+    expect(f.notifications.permissionGranted, isFalse);
+    f.sink.permissionResult = true;
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await pumps(tester);
+    final sent = await f.notifications.sendTestNotification(
+      title: 'Test',
+      body: 'Test',
+    );
+    expect(f.sink.permissionRequestCount, 1);
+    expect(f.sink.permissionCheckCount, greaterThanOrEqualTo(2));
+    await f.close(tester);
+    expect(sent, isTrue);
+  });
+
+  for (final push in [false, true]) {
+    testWidgets(
+      'deferred ${push ? 'push' : 'normal'} tap rejects credential edit on resume',
+      (tester) async {
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        );
+        final f = _RootFixture();
+        await f.initialize();
+        await f.normal();
+        if (push) f.seedPush();
+        f.detail = Completer<http.Response>();
+        await tester.pumpWidget(f.app());
+        if (!push) notificationResponseHandler!(f.tap());
+        await pumps(tester);
+        expect(f.lookups, hasLength(1));
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+        f.detail!.complete(f.response());
+        await pumps(tester);
+        await f.manager.updateApiKey(f.connection.id, 'revoked-while-paused');
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        );
+        await pumps(tester);
+        expect(find.byType(ChatScreen, skipOffstage: false), findsNothing);
+        expect(find.byType(WorkspaceScreen), findsNothing);
+        expect(f.lookups, hasLength(1));
+        expect(f.submissions, 0);
+        await f.close(tester);
+      },
+    );
+  }
+
+  testWidgets('deferred push tap revalidates revoked consent on resume', (
+    tester,
+  ) async {
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    final f = _RootFixture();
+    await f.initialize();
+    await f.normal();
+    f.seedPush();
+    f.detail = Completer<http.Response>();
+    await tester.pumpWidget(f.app());
+    await pumps(tester);
+    expect(f.lookups, hasLength(1));
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    f.detail!.complete(f.response());
+    await pumps(tester);
+    await f.push.disable();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await pumps(tester);
+    expect(find.byType(ChatScreen, skipOffstage: false), findsNothing);
+    expect(f.lookups, hasLength(1));
+    await f.close(tester);
+  });
+
+  testWidgets(
+    'push consumed during held route resolution is retained before background check',
+    (tester) async {
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      final f = _RootFixture();
+      await f.initialize();
+      await f.normal();
+      f.seedPush();
+      await f.push.initialize(f.manager);
+      final route = await f.push.takePendingNotificationRoute();
+      expect(route, isNotNull);
+      final held = _HeldRoutePush(f.push);
+      await tester.pumpWidget(f.app(routingPush: held));
+      await pumps(tester);
+      expect(held.takes, 1);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      held.route.complete(route);
+      await pumps(tester);
+      expect(f.lookups, isEmpty);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await pumps(tester);
+      expect(find.byType(ChatScreen), findsOneWidget);
+      expect(f.lookups, hasLength(1));
+      final takes = held.takes;
+      await pumps(tester);
+      expect(
+        held.takes,
+        takes,
+        reason: 'No drain spin after the tap is consumed',
+      );
+      await f.close(tester);
+      held.dispose();
+    },
+  );
+
+  testWidgets(
+    'newer normal intent replaces deferred navigation without a duplicate open',
+    (tester) async {
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      final f = _RootFixture();
+      await f.initialize();
+      await f.normal();
+      f.detail = Completer<http.Response>();
+      await tester.pumpWidget(f.app());
+      notificationResponseHandler!(f.tap());
+      await pumps(tester);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      f.detail!.complete(f.response());
+      await pumps(tester);
+      f.detail = Completer<http.Response>()..complete(f.response(id: 'newer'));
+      notificationResponseHandler!(f.tap(id: 'newer'));
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await pumps(tester);
+      expect(
+        tester.widget<ChatScreen>(find.byType(ChatScreen)).session.id,
+        'newer',
+      );
+      expect(find.byType(ChatScreen, skipOffstage: false), findsOneWidget);
+      expect(f.lookups, hasLength(2));
+      await pumps(tester);
+      expect(f.lookups, hasLength(2));
+      await f.close(tester);
+    },
+  );
+
+  for (final revoke in [false, true]) {
+    testWidgets(
+      'push pagination stops before another request after ${revoke ? 'revocation' : 'credential edit'}',
+      (tester) async {
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        );
+        final f = _RootFixture();
+        await f.initialize();
+        await f.normal();
+        f.seedPush();
+        f.detail = Completer<http.Response>();
+        await tester.pumpWidget(f.app());
+        await pumps(tester);
+        expect(f.lookups, hasLength(1));
+        if (revoke) {
+          await f.push.disable();
+        } else {
+          await f.manager.updateApiKey(f.connection.id, 'replacement-key');
+        }
+        f.detail!.complete(
+          http.Response(
+            jsonEncode({
+              'data': [
+                {
+                  'id': 'unrelated',
+                  'title': 'Other',
+                  'message_count': 2,
+                  'started_at': 1,
+                },
+              ],
+              'has_more': true,
+            }),
+            200,
+          ),
+        );
+        await pumps(tester);
+        expect(f.lookups, hasLength(1));
+        expect(find.byType(ChatScreen), findsNothing);
+        await f.close(tester);
+      },
+    );
+  }
+
+  testWidgets('popped canonical routes are removed and can be opened again', (
+    tester,
+  ) async {
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    final f = _RootFixture();
+    await f.initialize();
+    await f.normal();
+    await tester.pumpWidget(f.app());
+    notificationResponseHandler!(f.tap());
+    await pumps(tester);
+    final context = tester.element(find.byType(ChatScreen));
+    final firstRoute = ModalRoute.of(context)!;
+    Navigator.of(context).pop();
+    await pumps(tester);
+    await tester.pump();
+    notificationResponseHandler!(f.tap(id: 'local'));
+    await pumps(tester);
+    final nextRoute = ModalRoute.of(tester.element(find.byType(ChatScreen)))!;
+    expect(nextRoute, isNot(same(firstRoute)));
+    expect(f.lookups, hasLength(2));
+    expect(find.byType(ChatScreen, skipOffstage: false), findsOneWidget);
+    await f.close(tester);
+  });
+
+  testWidgets('credential edit cannot focus an old canonical route', (
+    tester,
+  ) async {
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    final f = _RootFixture();
+    await f.initialize();
+    await f.normal();
+    await tester.pumpWidget(f.app());
+    notificationResponseHandler!(f.tap());
+    await pumps(tester);
+    final firstRoute = ModalRoute.of(tester.element(find.byType(ChatScreen)))!;
+    await f.manager.updateApiKey(f.connection.id, 'replacement-key');
+    notificationResponseHandler!(f.tap());
+    await pumps(tester);
+    final currentFinder = find.byWidgetPredicate(
+      (widget) =>
+          widget is ChatScreen && widget.connection.apiKey == 'replacement-key',
+    );
+    final current = tester.widget<ChatScreen>(currentFinder);
+    expect(current.connection.apiKey, 'replacement-key');
+    expect(
+      ModalRoute.of(tester.element(currentFinder)),
+      isNot(same(firstRoute)),
+    );
+    expect(f.lookups, hasLength(2));
+    await f.close(tester);
+  });
+
+  testWidgets(
+    'explicit durable user choice establishes policy after failed hydration',
+    (tester) async {
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      final f = _RootFixture();
+      await f.initialize();
+      final normal = await f.normal();
+      final chat = normal.findChat('local')!;
+      final turn = chat.submitPrepared(
+        reservation: chat.reserve()!,
+        text: 'test',
+        localContent: 'test',
+      );
+      turn.ignore();
+      await tester.pumpWidget(
+        f.app(loadPolicy: () async => throw StateError('unavailable')),
+      );
+      await pumps(tester);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await pumps(tester);
+      expect(f.keepalive.where((m) => m == 'start'), isEmpty);
+      await BackgroundWorkPrefsStore.setEnabled(true);
+      await pumps(tester);
+      expect(f.keepalive.where((m) => m == 'start'), hasLength(1));
+      await f.close(tester);
+      await turn;
+    },
+  );
 
   for (final cold in [true, false]) {
     for (final ongoing in [true, false]) {
@@ -783,9 +1261,19 @@ void main() {
       await NotificationPrefsStore.setEnabled(true);
       await pumps(tester);
       expect(f.sink.shown.length, greaterThan(before));
+      // Model an owned lifecycle terminal, not stock's uncorrelated completion
+      // bookend (which must reconcile before declaring success).
       normal.receiveEvent(
         'local',
-        StreamEvent(type: 'turn.end', data: {'status': 'completed'}),
+        StreamEvent(type: 'message.start', data: const {}, turnId: 'root-turn'),
+      );
+      normal.receiveEvent(
+        'local',
+        StreamEvent(
+          type: 'turn.end',
+          data: {'status': 'completed'},
+          turnId: 'root-turn',
+        ),
       );
       f.rpc.complete();
       await pumps(tester);

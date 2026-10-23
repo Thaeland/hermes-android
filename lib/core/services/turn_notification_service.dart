@@ -87,6 +87,10 @@ abstract class TurnNotificationSink {
   /// is already allowed.
   Future<bool?> requestPermission();
 
+  /// Reads OS authorization without ever presenting a permission dialog.
+  /// Null means this platform has no posting gate.
+  Future<bool?> checkPermission();
+
   /// The tap or action that launched a terminated app, when the platform
   /// reports one. Consumed once by the service so a cold start still routes.
   Future<NotificationResponse?> takeInitialLaunchResponse();
@@ -155,6 +159,23 @@ class PluginTurnNotificationSink implements TurnNotificationSink {
     final details = await _plugin.getNotificationAppLaunchDetails();
     if (details?.didNotificationLaunchApp != true) return null;
     return details?.notificationResponse;
+  }
+
+  @override
+  Future<bool?> checkPermission() async {
+    final android = _plugin
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >();
+    if (android != null) {
+      return await android.areNotificationsEnabled() ?? false;
+    }
+    final ios = _plugin
+        .resolvePlatformSpecificImplementation<
+          IOSFlutterLocalNotificationsPlugin
+        >();
+    if (ios != null) return (await ios.checkPermissions())?.isEnabled ?? false;
+    return null;
   }
 
   @override
@@ -442,6 +463,8 @@ class TurnNotificationService {
   bool _permissionRequested = false;
   Future<void>? _initializing;
   Future<void>? _requestingPermission;
+  Future<void>? _refreshingAuthorization;
+  int _permissionRevision = 0;
 
   TurnNotificationService({
     TurnNotificationSink? sink,
@@ -494,6 +517,7 @@ class TurnNotificationService {
   }
 
   Future<void> _requestPermission() async {
+    ++_permissionRevision;
     try {
       _permissionGranted = await _sink.requestPermission() ?? true;
       _permissionRequested = true;
@@ -501,6 +525,36 @@ class TurnNotificationService {
       // Unknown is not a grant. Allow an explicit foreground retry later.
       _permissionGranted = false;
     }
+  }
+
+  /// Foreground resume/Settings may observe grants or revocations made in OS
+  /// settings. Refreshing is separate from the one-shot permission prompt:
+  /// denial never causes repeated dialogs, and headless initialization does
+  /// neither. Join an active prompt and fence older passive results behind it.
+  Future<void> refreshAuthorization() async {
+    await ensureInitialized();
+    if (!_initialized) return;
+    final request = _requestingPermission;
+    if (request != null) await request;
+    final flight = _refreshingAuthorization ??= _refreshAuthorization();
+    try {
+      await flight;
+    } finally {
+      if (identical(_refreshingAuthorization, flight)) {
+        _refreshingAuthorization = null;
+      }
+    }
+  }
+
+  Future<void> _refreshAuthorization() async {
+    final revision = _permissionRevision;
+    var granted = false;
+    try {
+      granted = await _sink.checkPermission() ?? true;
+    } catch (_) {
+      // An unavailable permission read is not a grant.
+    }
+    if (revision == _permissionRevision) _permissionGranted = granted;
   }
 
   /// Posts a notification when a gateway turn completes while the app is
@@ -682,6 +736,7 @@ class TurnNotificationService {
     required String body,
   }) async {
     await ensureInitialized(requestPermission: true);
+    await refreshAuthorization();
     if (!_initialized || !_permissionGranted) return false;
 
     try {
