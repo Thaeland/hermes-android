@@ -70,10 +70,6 @@ class NormalGatewayChatSnapshot {
   final List<Map<String, dynamic>> displayRows;
   final List<Map<String, dynamic>> historyRows;
 
-  /// When history cannot be correlated with received output, present only the
-  /// base known before admission. Later canonical rows remain in historyRows,
-  /// but are not claimed to be either duplicates or independent new turns.
-  final List<Map<String, dynamic>>? presentationHistoryRows;
   final List<GatewayToolActivity> tools;
   final List<GatewaySubagentActivity> subagents;
   final List<StreamEvent> pendingInput;
@@ -92,7 +88,6 @@ class NormalGatewayChatSnapshot {
     required this.rowFloor,
     required this.displayRows,
     required this.historyRows,
-    this.presentationHistoryRows,
     required this.tools,
     required this.subagents,
     required this.pendingInput,
@@ -111,30 +106,6 @@ class NormalGatewayChatSnapshot {
     NormalGatewayTurnPhase.reconciling,
   }.contains(phase);
   bool get reconciling => phase == NormalGatewayTurnPhase.reconciling;
-
-  List<Map<String, dynamic>> historyForPresentation(
-    List<Map<String, dynamic>> retainedHistory,
-  ) {
-    final base = presentationHistoryRows;
-    if (base == null) return retainedHistory;
-    // Keep already paged older context too. Durable rows below the earliest
-    // known pre-admission row cannot belong to the uncorrelated live tail.
-    int? oldestKnownId;
-    for (final row in base) {
-      final id = int.tryParse(row['id']?.toString() ?? '');
-      if (id != null && (oldestKnownId == null || id < oldestKnownId)) {
-        oldestKnownId = id;
-      }
-    }
-    return [
-      if (oldestKnownId != null)
-        ...retainedHistory.where((row) {
-          final id = int.tryParse(row['id']?.toString() ?? '');
-          return id != null && id < oldestKnownId!;
-        }),
-      ...base,
-    ];
-  }
 }
 
 /// One stock client and independent history client per configuration scope.
@@ -348,6 +319,15 @@ class NormalGatewayApplicationSession {
     final rejection = loser._rejectForHandoff();
     winner._adoptPreWireHistory(loser, stored);
     winner._adoptChildObservers(loser);
+    // Ownership transferred, not copied into a second retained body owner.
+    // External immutable snapshots may still exist; these losing buffers no
+    // longer own presentation and must not survive a later terminal close.
+    loser._display.clear();
+    loser._priorDisplay.clear();
+    loser._timeline = loser._timeline.clear();
+    loser._tools.clear();
+    loser._subagents.clear();
+    loser._observedSubagents.clear();
     final settledIds = {
       ...loser._settledWireTurnIds,
       ...winner._settledWireTurnIds,
@@ -603,16 +583,11 @@ class NormalGatewayChatOwner {
   final List<Map<String, dynamic>> _display = [];
   final List<Map<String, dynamic>> _priorDisplay = [];
   final List<_SettledGatewayPresentation> _settledPresentation = [];
-  final List<Map<String, dynamic>> _hydratedPresentation = [];
-  // Presentation-only seam, never the current admission/WAL watermark. Once
-  // established, each accepted latest snapshot replaces the whole suffix.
-  int? _hydratedPresentationFloor;
   int? _receivedObservation;
   List<Map<String, dynamic>> _history = [];
   bool _historyKnown = false;
   int _historyObservation = 0;
   String? _createdEmptySessionId;
-  List<Map<String, dynamic>> _presentationBase = [];
   final List<GatewayToolActivity> _tools = [];
   final List<GatewaySubagentActivity> _subagents = [];
   bool _hasTurnSubagentPresentation = false;
@@ -668,7 +643,6 @@ class NormalGatewayChatOwner {
           displayRows:
               [
                     for (final settled in _settledPresentation) ...settled.rows,
-                    ..._hydratedPresentation,
                     ..._priorDisplay,
                     ..._display,
                   ]
@@ -677,17 +651,6 @@ class NormalGatewayChatOwner {
           historyRows: _history
               .map((row) => Map<String, dynamic>.unmodifiable(row))
               .toList(growable: false),
-          presentationHistoryRows: _settledPresentation.isNotEmpty
-              ? _settledPresentation.first.base
-                    .map((row) => Map<String, dynamic>.unmodifiable(row))
-                    .toList(growable: false)
-              : _floor == null &&
-                    (_display.isNotEmpty || _priorDisplay.isNotEmpty) &&
-                    _hasReceivedPresentation
-              ? _presentationBase
-                    .map((row) => Map<String, dynamic>.unmodifiable(row))
-                    .toList(growable: false)
-              : null,
           tools: List.unmodifiable([
             for (final settled in _settledPresentation) ...settled.tools,
             ..._tools,
@@ -773,8 +736,7 @@ class NormalGatewayChatOwner {
         !_acceptHistory(_GatewayHistoryObservation(rows, captured))) {
       return false;
     }
-    _retireSettledPresentation(rows);
-    _retireCompletedPresentation(rows);
+    _cleanCompletedEmptySubmission(rows);
     _notify();
     return captured.isCurrent;
   }
@@ -792,45 +754,26 @@ class NormalGatewayChatOwner {
     _history = fresh.rows.map((row) => Map<String, dynamic>.from(row)).toList();
     _historyKnown = true;
     _historyObservation = fresh.observation;
-    _refreshHydratedPresentation();
     _boundSettledPresentation();
     return true;
   }
 
   void _adoptSettledPresentation(NormalGatewayChatOwner other) {
     _settledPresentation.addAll(other._settledPresentation);
-    final otherFloor = other._hydratedPresentationFloor;
-    if (otherFloor != null &&
-        (_hydratedPresentationFloor == null ||
-            otherFloor < _hydratedPresentationFloor!)) {
-      _hydratedPresentationFloor = otherFloor;
-    }
-    _hydratedPresentation.addAll(
-      other._hydratedPresentation.map(Map<String, dynamic>.from),
-    );
-    other._hydratedPresentation.clear();
-    other._hydratedPresentationFloor = null;
-    if (!other.snapshot.hasActiveTurn && other._hasReceivedPresentation) {
-      final floor = other._floor;
+    if (other._hasReceivedPresentation) {
+      final retainedRows = [
+        ...other._priorDisplay,
+        // A submitting loser has only an unsent current scaffold. Preparing
+        // has not yet moved the previous received turn into priorDisplay.
+        if (!other.snapshot.hasActiveTurn ||
+            other.phase == NormalGatewayTurnPhase.preparing)
+          ...other._display,
+      ];
       _settledPresentation.add(
         _SettledGatewayPresentation(
           observation:
               other._receivedObservation ?? ++_session._presentationObservation,
-          floor: floor,
-          completed: other.phase == NormalGatewayTurnPhase.completed,
-          rows: [
-            ...other._priorDisplay,
-            ...other._display,
-          ].map(Map<String, dynamic>.from).toList(),
-          base:
-              (floor == null
-                      ? other._presentationBase
-                      : other._history.where((row) {
-                          final id = int.tryParse(row['id']?.toString() ?? '');
-                          return id == null || id <= floor;
-                        }))
-                  .map(Map<String, dynamic>.from)
-                  .toList(),
+          rows: retainedRows.map(Map<String, dynamic>.from).toList(),
           tools: List.of(other._tools),
           timeline: other._timeline,
         ),
@@ -839,21 +782,6 @@ class NormalGatewayChatOwner {
     other._settledPresentation.clear();
     _settledPresentation.sort((a, b) => a.observation.compareTo(b.observation));
     _boundSettledPresentation();
-  }
-
-  bool _retireSettledPresentation(List<Map<String, dynamic>> fresh) {
-    final count = _settledPresentation.length;
-    _settledPresentation.removeWhere(
-      (settled) =>
-          settled.completed &&
-          settled.floor != null &&
-          fresh.any((row) => _responseRow(row, settled.floor!)),
-    );
-    if (_settledPresentation.isEmpty) {
-      _hydratedPresentation.clear();
-      _hydratedPresentationFloor = null;
-    }
-    return count != _settledPresentation.length;
   }
 
   void _boundSettledPresentation() {
@@ -865,7 +793,6 @@ class NormalGatewayChatOwner {
         _timeline,
       ];
       final rows =
-          _hydratedPresentation.length +
           _priorDisplay.length +
           _display.length +
           _settledPresentation.fold<int>(0, (sum, p) => sum + p.rows.length);
@@ -891,8 +818,6 @@ class NormalGatewayChatOwner {
       }
       _settledPresentation.removeAt(0);
     }
-    _hydratedPresentation.clear();
-    _hydratedPresentationFloor = null;
   }
 
   void _adoptPreWireHistory(NormalGatewayChatOwner other, String stored) {
@@ -910,10 +835,6 @@ class NormalGatewayChatOwner {
     _historyKnown = true;
     _historyObservation = other._historyObservation;
     _createdEmptySessionId = null;
-    if (!_hasReceivedPresentation) {
-      _presentationBase = _history.map(Map<String, dynamic>.from).toList();
-    }
-    _refreshHydratedPresentation();
     _boundSettledPresentation();
   }
 
@@ -1014,11 +935,6 @@ class NormalGatewayChatOwner {
       return null;
     }
     _generation++;
-    if (_display.isEmpty && _priorDisplay.isEmpty) {
-      _presentationBase = _history
-          .map((row) => Map<String, dynamic>.from(row))
-          .toList();
-    }
     turnId = const Uuid().v4();
     _reservation = Object();
     phase = NormalGatewayTurnPhase.preparing;
@@ -1097,7 +1013,11 @@ class NormalGatewayChatOwner {
     _tools.clear();
     _subagents.clear();
     _pendingInput.clear();
-    _display.add({'role': 'user', 'content': localContent});
+    _display.add({
+      'role': 'user',
+      'content': localContent,
+      '_normal_projection_id': const Uuid().v4(),
+    });
     _display.add({
       'role': 'assistant',
       'content': '',
@@ -1807,15 +1727,8 @@ class NormalGatewayChatOwner {
               .whereType<String>(),
         );
       }
-      final boundary = _canonicalPresentationBoundary();
-      final canonical =
-          completed != false &&
-          boundary != null &&
-          _history.any((row) => _responseRow(row, boundary));
-      if (canonical) {
-        _clearTransientPresentation();
-      }
-      _retireSettledPresentation(_history);
+      // Successful lifecycle settlement cannot establish an HTTP row match.
+      _cleanCompletedEmptySubmission(_history);
       _error = error;
       _status = completed == null
           ? const GatewayTurnStatus(
@@ -1836,7 +1749,14 @@ class NormalGatewayChatOwner {
       _terminalReceipt = null;
       _settling = false;
       _notify();
-      if (!canonical && wireEmitted) unawaited(_refreshSettledHistory(owned));
+      // Avoid a redundant physical read when recovery already accepted a
+      // post-admission page. This is a fetch decision only, never retirement or
+      // proof of correspondence between any saved row and a received scope.
+      if (wireEmitted &&
+          !(_floor != null &&
+              _history.any((row) => _responseRow(row, _floor!)))) {
+        unawaited(_refreshSettledHistory(owned));
+      }
       if (settledWireEmitted &&
           completed != null &&
           _session._background &&
@@ -1947,41 +1867,32 @@ class NormalGatewayChatOwner {
       final fresh = await _readLatestHistory(stored);
       if (!_current(generation) || snapshot.hasActiveTurn) return;
       if (!_acceptHistory(fresh)) return;
-      _retireSettledPresentation(fresh.rows);
-      _retireCompletedPresentation(fresh.rows);
+      _cleanCompletedEmptySubmission(fresh.rows);
       _notify();
     } catch (_) {
       /* keep the received final response */
     }
   }
 
-  bool _retireCompletedPresentation(List<Map<String, dynamic>> fresh) {
-    // Settlement's first GET can lag persistence. A later latest read may
-    // replace the projection, but only durable identity beyond the known
-    // admission floor proves freshness of a received response. A completed
-    // submission scaffold has no received response to protect; it may hand
-    // presentation to a successful latest transcript containing a full turn.
-    // Neither path correlates turns by matching prompt or response text.
+  bool _cleanCompletedEmptySubmission(List<Map<String, dynamic>> fresh) {
+    // Optional local prompt/empty-assistant scaffolds are not received output.
+    // Never erase materialized scopes, imported scopes or child observers here.
     if (phase != NormalGatewayTurnPhase.completed ||
-        (_display.isEmpty &&
-            _priorDisplay.isEmpty &&
-            _timeline.runs.isEmpty &&
-            _tools.isEmpty)) {
+        !_canCleanEmptySubmission(fresh)) {
       return false;
     }
-    final boundary = _canonicalPresentationBoundary();
-    final hasFreshResponse =
-        boundary != null && fresh.any((row) => _responseRow(row, boundary));
-    if (!hasFreshResponse && !_canHandOffSubmissionScaffolds(fresh)) {
-      return false;
-    }
-    _clearTransientPresentation();
+    _display.clear();
+    _priorDisplay.clear();
     return true;
   }
 
-  bool _canHandOffSubmissionScaffolds(List<Map<String, dynamic>> fresh) {
-    if (_floor != null ||
-        _timeline.runs.isNotEmpty ||
+  bool _canCleanEmptySubmission(List<Map<String, dynamic>> fresh) {
+    // A stale page cannot clean even empty scaffolds. The floor is a read
+    // eligibility guard here, never correlation for materialized receipts.
+    if (_floor != null && !fresh.any((row) => _responseRow(row, _floor!))) {
+      return false;
+    }
+    if (_timeline.runs.isNotEmpty ||
         _tools.isNotEmpty ||
         _hasTurnSubagentPresentation) {
       return false;
@@ -1991,67 +1902,13 @@ class NormalGatewayChatOwner {
     for (var i = 0; i < rows.length; i += 2) {
       if (rows[i]['role'] != 'user' ||
           rows[i + 1]['role'] != 'assistant' ||
-          (rows[i + 1]['content']?.toString().isNotEmpty ?? false)) {
+          (rows[i + 1]['content']?.toString().isNotEmpty ?? false) ||
+          (rows[i + 1]['_gateway_reasoning']?.toString().isNotEmpty ?? false)) {
         return false;
       }
     }
     final user = fresh.lastIndexWhere((row) => row['role'] == 'user');
     return user >= 0 && fresh.skip(user + 1).any(_displayableResponseRow);
-  }
-
-  int? _canonicalPresentationBoundary() {
-    final admissionFloor = _floor;
-    if (admissionFloor == null) return null;
-    var boundary = admissionFloor;
-    // A retained donor is an independent received interval, not a successful
-    // current turn. Leave its first canonical response interval unclaimed. Only
-    // the suffix beyond those ordered intervals may replace current receipts.
-    // No prompt/text matching or last-user selection establishes this seam.
-    for (final settled in _settledPresentation) {
-      final floor = settled.floor;
-      if (floor == null) return null;
-      if (floor < admissionFloor) continue;
-      if (floor > boundary) boundary = floor;
-      final response = _history.where((row) => _responseRow(row, boundary));
-      if (response.isEmpty) return null;
-      boundary = int.parse(response.first['id'].toString());
-    }
-    return boundary;
-  }
-
-  void _refreshHydratedPresentation() {
-    final floor = _hydratedPresentationFloor;
-    if (floor == null) return;
-    _hydratedPresentation
-      ..clear()
-      ..addAll(
-        _history
-            .where((row) {
-              final id = int.tryParse(row['id']?.toString() ?? '');
-              return id != null && id > floor;
-            })
-            .map(Map<String, dynamic>.from),
-      );
-  }
-
-  void _clearTransientPresentation() {
-    if (_settledPresentation.isNotEmpty) {
-      final boundary = _canonicalPresentationBoundary();
-      if (boundary != null &&
-          (_hydratedPresentationFloor == null ||
-              boundary < _hydratedPresentationFloor!)) {
-        _hydratedPresentationFloor = boundary;
-      }
-      _refreshHydratedPresentation();
-    }
-    _presentationBase = [];
-    _display.clear();
-    _priorDisplay.clear();
-    _timeline = _timeline.clear();
-    _tools.clear();
-    _subagents.clear();
-    _hasTurnSubagentPresentation = false;
-    _boundSettledPresentation();
   }
 
   NormalGatewayChatSnapshot? _rejectForHandoff() {
@@ -2099,6 +1956,16 @@ class NormalGatewayChatOwner {
     if (baseline != null && !baseline.isCompleted) baseline.complete(null);
     _listeners.clear();
     _pendingInput.clear();
+    _display.clear();
+    _priorDisplay.clear();
+    _settledPresentation.clear();
+    _timeline = _timeline.clear();
+    _tools.clear();
+    _subagents.clear();
+    _observedSubagents.clear();
+    _inputUpdates.clear();
+    _auxiliaryEvents.clear();
+    _hasTurnSubagentPresentation = false;
   }
 
   Future<void> _restoreDraft(
@@ -2154,23 +2021,16 @@ class _GatewayHistoryObservation {
 }
 
 /// Received historical output, not a second admission or canonical transcript.
-/// Each donor keeps its own boundary and outcome; the next turn cannot rebase
-/// unknown/failed output or clear it by hydrating an unrelated successful turn.
+/// Observation order belongs to receipts, never a guessed HTTP interval.
 class _SettledGatewayPresentation {
   const _SettledGatewayPresentation({
     required this.observation,
-    required this.floor,
-    required this.completed,
     required this.rows,
-    required this.base,
     required this.tools,
     required this.timeline,
   });
   final int observation;
-  final int? floor;
-  final bool completed;
   final List<Map<String, dynamic>> rows;
-  final List<Map<String, dynamic>> base;
   final List<GatewayToolActivity> tools;
   final ChatTimeline timeline;
 }

@@ -1,3 +1,7 @@
+// UNRECONCILED POLICY (second adaptation layer; original case IDs retained).
+// Raw: p2a-unreconciled-_flkt2h9/raw/base.tar::test/chat_history_widget_test.dart
+// Base 4a53e32 blob d9ab33d2ecc9b84ed810f8d6da3ec2e4e6918cbb; SHA256 1c6a3e4307b3ec1cd87d4f34f5da73a4811de1af67f7ea2e08fd35e83837b8b1.
+// See docs/unreconciled-output/ORACLE_MIGRATION.md; unchanged safety remains binding.
 import 'dart:async';
 import 'dart:convert';
 
@@ -291,8 +295,18 @@ void main() {
       ),
       isTrue,
     );
+    await tester.scrollUntilVisible(
+      find.text('Earlier question'),
+      -300,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.text('Earlier question'), findsOneWidget);
     expect(find.text('Earlier answer'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Detached final reply'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.text('Detached final reply'), findsOneWidget);
   });
 }

@@ -1,3 +1,7 @@
+// UNRECONCILED POLICY (second adaptation layer; original case IDs retained).
+// Raw: p2a-unreconciled-_flkt2h9/raw/base.tar::test/normal_gateway_application_session_test.dart
+// Base 4a53e32 blob 95ccf5c12f79e9915b0e68c56621dc133caa3c43; SHA256 b365a27d4551f13da243eedf4e08d8f9fcc4ee97abdb64594089350518d5715d.
+// See docs/unreconciled-output/ORACLE_MIGRATION.md; unchanged safety remains binding.
 import 'dart:async';
 import 'dart:convert';
 
@@ -6,6 +10,7 @@ import 'package:flutter_test/flutter_test.dart';
 // ignore: depend_on_referenced_packages
 import 'package:fake_async/fake_async.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
+import 'package:hermes_android/core/services/chat_history_window.dart';
 import 'package:hermes_android/core/services/desktop_gateway_client.dart';
 import 'package:hermes_android/core/services/gateway_turn_application_controller.dart';
 import 'package:hermes_android/core/services/normal_gateway_application_session.dart';
@@ -143,10 +148,10 @@ void main() {
         expect(observations, hasLength(1));
         final hydrated = observations.single;
         expect(hydrated.historyRows.last['content'], 'Canonical final');
-        expect(hydrated.displayRows, isEmpty);
-        expect(hydrated.timeline.runs, isEmpty);
-        expect(hydrated.tools, isEmpty);
-        expect(hydrated.subagents, isEmpty);
+        expect(hydrated.displayRows, isNotEmpty);
+        expect(hydrated.timeline.runs, isNotEmpty);
+        expect(hydrated.tools, isNotEmpty);
+        expect(hydrated.subagents, isNotEmpty);
         expect(hydrated.phase, NormalGatewayTurnPhase.completed);
         expect(hydrated.turnId, retained.turnId);
         expect(identical(f.session.findChat('stored'), f.owner), isTrue);
@@ -164,7 +169,7 @@ void main() {
         expect(child.goal, 'Inspect');
         expect(child.failed, isTrue);
         expect(f.owner.snapshot.hasActiveTurn, isFalse);
-        expect(f.owner.snapshot.displayRows, isEmpty);
+        expect(f.owner.snapshot.displayRows, retained.displayRows);
         f.owner.observeHistory(hydrated.historyRows);
         expect(f.owner.snapshot.subagents.single.childSessionId, 'child-root');
         expect(f.owner.snapshot.subagents.single.failed, isTrue);
@@ -538,8 +543,11 @@ void main() {
       f.owner.observeHistory([
         {'id': 20, 'role': 'assistant', 'content': 'Latest canonical response'},
       ]);
-      expect(f.owner.snapshot.displayRows, isEmpty);
-      expect(f.owner.snapshot.timeline.runs, isEmpty);
+      expect(
+        f.owner.snapshot.displayRows.map((row) => row['content']),
+        containsAll(['First wire response', 'Second wire response']),
+      );
+      expect(f.owner.snapshot.timeline.runs, isNotEmpty);
       expect(f.owner.snapshot.historyRows.single['id'], 20);
       expect(f.submissions, 2);
     },
@@ -563,7 +571,7 @@ void main() {
       await f.start(seedHistory: false, unavailableAdmission: true);
       expect(f.owner.snapshot.rowFloor, isNull);
       f.emit('message.delta', {'text': 'Received response'});
-      expect(f.owner.snapshot.presentationHistoryRows, before);
+      expect(f.owner.snapshot.historyRows, before);
       f.finish('message.complete', {'text': 'Received response'});
       await _flush();
       const canonical = [
@@ -576,16 +584,17 @@ void main() {
       ];
       f.owner.observeHistory(canonical);
       expect(f.owner.snapshot.historyRows, canonical);
-      expect(f.owner.snapshot.presentationHistoryRows, before);
+      expect(f.owner.snapshot.historyRows, canonical);
       const older = {
         'id': 1,
         'role': 'assistant',
         'content': 'Paged older context',
       };
-      expect(f.owner.snapshot.historyForPresentation([older, ...canonical]), [
-        older,
-        ...before,
-      ]);
+      final window = ChatHistoryWindow();
+      window.acceptRecent(const ChatHistoryPageBatch(before, 2, false));
+      window.acceptOlder([older]);
+      window.acceptRecent(const ChatHistoryPageBatch(canonical, 2, false));
+      expect(window.rows, [older, before.first, ...canonical]);
       expect(f.owner.snapshot.displayRows.last['content'], 'Received response');
       expect(f.owner.snapshot.timeline.runs, isNotEmpty);
     },
@@ -618,7 +627,10 @@ void main() {
           'Second received response',
         ]),
       );
-      expect(f.owner.snapshot.presentationHistoryRows, isEmpty);
+      expect(
+        f.owner.snapshot.historyRows.single['content'],
+        'New canonical response',
+      );
     },
   );
 
@@ -692,10 +704,10 @@ void main() {
       f.owner.observeHistory([
         {'id': 20, 'role': 'agent', 'content': 'Canonical different reply'},
       ]);
-      expect(f.owner.snapshot.displayRows, isEmpty);
-      expect(f.owner.snapshot.timeline.runs, isEmpty);
-      expect(f.owner.snapshot.tools, isEmpty);
-      expect(f.owner.snapshot.subagents, isEmpty);
+      expect(f.owner.snapshot.displayRows.last['content'], 'Wire reply');
+      expect(f.owner.snapshot.timeline.runs.map((run) => run.id), runs);
+      expect(f.owner.snapshot.tools.single.toolId, 'optimistic');
+      expect(f.owner.snapshot.subagents, isNotEmpty);
       expect(f.owner.snapshot.historyRows.single['id'], 20);
     },
   );

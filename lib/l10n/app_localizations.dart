@@ -114,6 +114,42 @@ abstract class AppLocalizations {
     Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
   ];
 
+  /// No description provided for @saved_history_heading.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved history'**
+  String get saved_history_heading;
+
+  /// No description provided for @received_output_heading.
+  ///
+  /// In en, this message translates to:
+  /// **'Received output — match to saved history unconfirmed'**
+  String get received_output_heading;
+
+  /// No description provided for @received_output_explanation.
+  ///
+  /// In en, this message translates to:
+  /// **'This may also appear in saved history. The app cannot confirm a match.'**
+  String get received_output_explanation;
+
+  /// No description provided for @local_prompt_context.
+  ///
+  /// In en, this message translates to:
+  /// **'Local prompt context'**
+  String get local_prompt_context;
+
+  /// No description provided for @received_output_badge.
+  ///
+  /// In en, this message translates to:
+  /// **'Received · match unconfirmed'**
+  String get received_output_badge;
+
+  /// No description provided for @received_output_lifetime.
+  ///
+  /// In en, this message translates to:
+  /// **'Received output is kept temporarily in this app session and may be shortened or removed as limits are reached. It may not be available after the app or connection is closed.'**
+  String get received_output_lifetime;
+
   /// No description provided for @a_one_off_question_archives_itself_after_72_hours_anything.
   ///
   /// In en, this message translates to:

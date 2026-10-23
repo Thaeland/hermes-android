@@ -1,3 +1,7 @@
+// UNRECONCILED POLICY (second adaptation layer; original case IDs retained).
+// Raw: p2a-unreconciled-_flkt2h9/raw/base.tar::test/normal_gateway_alias_viewer_wire_test.dart
+// Base 4a53e32 blob e505c50f645f0224fe693bbaf2bc48fcb9787dbf; SHA256 0f94dc78acce0aa82e6f6cf5b5f5a63c45e1b102355d7183b27c69a5a3788dd9.
+// See docs/unreconciled-output/ORACLE_MIGRATION.md; unchanged safety remains binding.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -183,9 +187,11 @@ void main() {
           tester,
           () =>
               !local.snapshot.hasActiveTurn &&
-              local.snapshot.displayRows.isEmpty,
+              local.snapshot.historyRows.any(
+                (row) => row['content'] == 'Current parent final',
+              ),
         );
-        // Canonical hydration retires parent UI, not the child's retained anchor.
+        // Canonical hydration retains both parent receipts and the child anchor.
         canonical.observeHistory(local.snapshot.historyRows);
         canonical.observeHistory(local.snapshot.historyRows);
         server.childFinal = true;

@@ -1,3 +1,7 @@
+// UNRECONCILED POLICY (second adaptation layer; original case IDs retained).
+// Raw: p2a-unreconciled-_flkt2h9/raw/base.tar::test/normal_gateway_presentation_authority_test.dart
+// Base 4a53e32 blob 98b486dbfdf396e5089ba6ecddb9eb03038bf5fb; SHA256 fccd1be4a2c01696446e2776c378d2f26aaa7e0fe029057c2b5dd2d365ceeed1.
+// See docs/unreconciled-output/ORACLE_MIGRATION.md; unchanged safety remains binding.
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -36,24 +40,32 @@ void main() {
         expect(_presented(fixture.current), [
           'Old context',
           'Donor prompt',
-          'Donor received',
+          'Donor stored partial',
           'Current prompt',
           'Current canonical',
           if (laterAtSettlement) ...['Later prompt', 'Later answer'],
+          'Donor prompt',
+          'Donor received',
+          'Current prompt',
+          'Current received',
         ]);
         expect(
           fixture.current.snapshot.timeline.forScope(receivedScope),
-          isEmpty,
+          isNotEmpty,
         );
         fixture.current.observeHistory(_canonical(later: true));
         expect(_presented(fixture.current), [
           'Old context',
           'Donor prompt',
-          'Donor received',
+          'Donor stored partial',
           'Current prompt',
           'Current canonical',
           'Later prompt',
           'Later answer',
+          'Donor prompt',
+          'Donor received',
+          'Current prompt',
+          'Current received',
         ]);
         expect(fixture.current.snapshot.rowFloor, receipt.rowFloor);
         expect(fixture.current.snapshot.historyRows, _canonical(later: true));
@@ -113,7 +125,14 @@ void main() {
     fixture.current.observeHistory(_canonical(later: true));
     held.completeError(StateError('read unavailable'));
     await pumpEventQueue();
-    expect(_presented(fixture.current).last, 'Later answer');
+    expect(
+      fixture.current.snapshot.historyRows.last['content'],
+      'Later answer',
+    );
+    expect(
+      fixture.current.snapshot.displayRows.last['content'],
+      'Current received',
+    );
     expect(fixture.current.snapshot.historyRows, _canonical(later: true));
   });
 
@@ -135,7 +154,8 @@ void main() {
       _presented(fixture.current),
       containsAll(['Donor received', 'Current received']),
     );
-    expect(_presented(fixture.current), isNot(contains('Current canonical')));
+    expect(fixture.current.snapshot.historyRows, _canonical(later: true));
+    expect(_presented(fixture.current), contains('Current canonical'));
   });
 
   for (final (canonicalWins, expanded) in [
@@ -226,7 +246,7 @@ void main() {
 List<String> _presented(NormalGatewayChatOwner owner) {
   final snapshot = owner.snapshot;
   return [
-    ...snapshot.historyForPresentation(snapshot.historyRows),
+    ...snapshot.historyRows,
     ...snapshot.displayRows,
   ].map((row) => row['content'] as String).toList();
 }

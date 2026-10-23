@@ -3,6 +3,76 @@ import '../models/gateway_activity.dart';
 import '../models/gateway_insight.dart';
 import 'message_content.dart';
 
+/// UI provenance only. These sections never enter history, wire payloads or WAL.
+enum ChatDisplaySource { canonical, received, auxiliary }
+
+class ChatDisplaySection {
+  ChatDisplaySection({required this.source, required List<dynamic> items})
+    : items = List<dynamic>.unmodifiable(items);
+
+  final ChatDisplaySource source;
+  final List<dynamic> items;
+}
+
+/// Two independent source-local projections, not a cross-channel chronology.
+List<ChatDisplaySection> buildNormalChatDisplaySections({
+  required List<Map<String, dynamic>> canonicalRows,
+  required List<Map<String, dynamic>> receivedRows,
+  List<GatewayToolActivity> canonicalTools = const [],
+  List<GatewayToolActivity> receivedTools = const [],
+  required ChatTimeline receivedTimeline,
+  List<GatewaySubagentActivity> subagentActivities = const [],
+  List<GatewayNotice> notices = const [],
+  bool verbose = false,
+}) => List<ChatDisplaySection>.unmodifiable([
+  for (final section in [
+    ChatDisplaySection(
+      source: ChatDisplaySource.canonical,
+      items: buildChatDisplayItems(
+        messages: canonicalRows,
+        toolActivities: canonicalTools,
+        verbose: verbose,
+      ),
+    ),
+    ChatDisplaySection(
+      source: ChatDisplaySource.received,
+      items: buildChatDisplayItems(
+        messages: receivedRows,
+        toolActivities: receivedTools,
+        timeline: receivedTimeline,
+        verbose: verbose,
+      ),
+    ),
+    ChatDisplaySection(
+      source: ChatDisplaySource.auxiliary,
+      items: [
+        if (subagentActivities.isNotEmpty)
+          List<GatewaySubagentActivity>.unmodifiable(subagentActivities),
+        ...notices,
+      ],
+    ),
+  ])
+    if (section.items.isNotEmpty) section,
+]);
+
+/// Stable within its source; anonymous saved rows deliberately have no inferred
+/// correspondence across physical observations. Inner card/pin IDs are unchanged.
+Object chatDisplayItemIdentity(dynamic item) {
+  if (item is ChatToolActivityGroup) return ('tool', item.id);
+  if (item is ChatReasoningItem) return ('reasoning', item.id);
+  if (item is GatewayNotice) return ('notice', item.identity);
+  if (item is List<GatewaySubagentActivity>) return 'tasks';
+  final row = item as Map<String, dynamic>;
+  return (
+    'row',
+    row['_timeline_id'] ??
+        row['_normal_projection_id'] ??
+        row['id'] ??
+        row['message_id'] ??
+        identityHashCode(row),
+  );
+}
+
 /// Assistant reasoning rendered as its own collapsible item in the chat list.
 class ChatReasoningItem {
   final String text;

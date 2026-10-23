@@ -1,3 +1,7 @@
+// UNRECONCILED POLICY (second adaptation layer; original case IDs retained).
+// Raw: p2a-unreconciled-_flkt2h9/raw/base.tar::test/late_identity_stock_test.dart
+// Base 4a53e32 blob e846a11cc25978eaea68b11448a30df3fb79a384; SHA256 201faa2f60d0ce5837af14e8a7c8f0f489f2670c596d83c3f66ddd82ab17f819.
+// See docs/unreconciled-output/ORACLE_MIGRATION.md; unchanged safety remains binding.
 import 'dart:async';
 import 'dart:convert';
 
@@ -15,6 +19,8 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/fake_voice_composer_adapter.dart';
+import 'support/unreconciled_policy.dart';
+import 'package:hermes_android/core/utils/chat_display_items.dart';
 import 'support/completed_stock_turn.dart';
 
 void main() {
@@ -106,22 +112,48 @@ void main() {
             if (!lateId) 'tool_id': 'hydrated-tool',
           });
           await tester.pump();
+          final receivedKey = tester
+              .widget<GatewayActivityCard>(
+                inChatSource(
+                  find.byType(GatewayActivityCard),
+                  ChatDisplaySource.received,
+                ),
+              )
+              .key;
           bool expanded() => tester
               .widget<ExpansionTile>(
                 find.descendant(
-                  of: find.byType(GatewayActivityCard),
+                  of: inChatSource(
+                    find.byType(GatewayActivityCard),
+                    ChatDisplaySource.received,
+                  ),
                   matching: find.byType(ExpansionTile),
                 ),
               )
               .controller!
               .isExpanded;
           expect(expanded(), isFalse);
-          await tester.tap(find.text('Tool activity'));
+          await tester.tap(
+            inChatSource(
+              find.text('Tool activity'),
+              ChatDisplaySource.received,
+            ),
+          );
           await tester.pump(const Duration(milliseconds: 300));
           expect(expanded(), isTrue);
-          await tester.tap(find.text('Tool activity'));
+          await tester.tap(
+            inChatSource(
+              find.text('Tool activity'),
+              ChatDisplaySource.received,
+            ),
+          );
           await tester.pump(const Duration(milliseconds: 300));
-          await tester.tap(find.text('Tool activity'));
+          await tester.tap(
+            inChatSource(
+              find.text('Tool activity'),
+              ChatDisplaySource.received,
+            ),
+          );
           await tester.pump(const Duration(milliseconds: 300));
           expect(expanded(), isTrue);
           if (detached) {
@@ -167,12 +199,40 @@ void main() {
               isTrue,
             );
             expect(expanded(), isTrue);
-            expect(find.text('Completed'), findsOneWidget);
+            final savedCard = inChatSource(
+              find.byType(GatewayActivityCard),
+              ChatDisplaySource.canonical,
+            );
+            expect(
+              tester.widget<GatewayActivityCard>(savedCard).key,
+              const ValueKey('tool-activity-message:2'),
+            );
             expect(
               tester
-                  .widget<GatewayActivityCard>(find.byType(GatewayActivityCard))
+                  .widget<ExpansionTile>(
+                    find.descendant(
+                      of: savedCard,
+                      matching: find.byType(ExpansionTile),
+                    ),
+                  )
+                  .controller!
+                  .isExpanded,
+              isTrue,
+            );
+            expect(
+              inChatSource(find.text('Completed'), ChatDisplaySource.received),
+              findsOneWidget,
+            );
+            expect(
+              tester
+                  .widget<GatewayActivityCard>(
+                    inChatSource(
+                      find.byType(GatewayActivityCard),
+                      ChatDisplaySource.received,
+                    ),
+                  )
                   .key,
-              const ValueKey('tool-activity-message:2'),
+              receivedKey,
             );
           }
           await tester.pumpWidget(const SizedBox.shrink());
@@ -186,14 +246,30 @@ void main() {
           );
           await tester.pump(const Duration(milliseconds: 300));
           final actual = expanded();
-          expect(find.text('Completed'), findsNothing);
-          await tester.tap(find.text('Tool activity'));
+          expect(
+            inChatSource(find.text('Completed'), ChatDisplaySource.received),
+            findsNothing,
+          );
+          await tester.tap(
+            inChatSource(
+              find.text('Tool activity'),
+              ChatDisplaySource.received,
+            ),
+          );
           await tester.pump(const Duration(milliseconds: 300));
           expect(expanded(), isTrue);
-          expect(find.text('Completed'), findsOneWidget);
+          expect(
+            inChatSource(find.text('Completed'), ChatDisplaySource.received),
+            findsOneWidget,
+          );
           expect(
             tester
-                .widget<GatewayActivityCard>(find.byType(GatewayActivityCard))
+                .widget<GatewayActivityCard>(
+                  inChatSource(
+                    find.byType(GatewayActivityCard),
+                    ChatDisplaySource.received,
+                  ),
+                )
                 .activities
                 .single
                 .toolId,
@@ -202,7 +278,7 @@ void main() {
           expect(find.text('Canonical reply'), findsOneWidget);
           expect(remote.submissions, 1);
           debugPrint(
-            'SPEC hydration lateId=$lateId pinnedExpanded=true actual=$actual key=${tester.widget<GatewayActivityCard>(find.byType(GatewayActivityCard)).key}',
+            'SPEC hydration lateId=$lateId pinnedExpanded=true actual=$actual key=${tester.widget<GatewayActivityCard>(inChatSource(find.byType(GatewayActivityCard), ChatDisplaySource.received)).key}',
           );
           await tester.pumpWidget(const SizedBox.shrink());
           await tester.pump();
@@ -425,7 +501,7 @@ List<Widget> _allRows(WidgetTester tester) {
   final context = tester.element(finder);
   return [
     for (var i = 0; i < delegate.childCount!; i++)
-      delegate.builder(context, i)!,
+      unwrapChatSourceCell(delegate.builder(context, i)!),
   ];
 }
 

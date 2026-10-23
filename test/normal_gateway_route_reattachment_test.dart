@@ -1,3 +1,7 @@
+// UNRECONCILED POLICY (second adaptation layer; original case IDs retained).
+// Raw: p2a-unreconciled-_flkt2h9/raw/base.tar::test/normal_gateway_route_reattachment_test.dart
+// Base 4a53e32 blob baa0e1c4f79d32480b3f7a370ee73d12e1878bae; SHA256 4651fb0e02e0edf581f4cba43b50d36639d333a26fbf02b5c89aae3703b3dc82.
+// See docs/unreconciled-output/ORACLE_MIGRATION.md; unchanged safety remains binding.
 import 'dart:async';
 import 'dart:convert';
 
@@ -17,6 +21,8 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/fake_voice_composer_adapter.dart';
+import 'support/unreconciled_policy.dart';
+import 'package:hermes_android/core/utils/chat_display_items.dart';
 import 'support/recording_turn_notification_sink.dart';
 import 'package:hermes_android/core/services/turn_notification_service.dart';
 import 'package:hermes_android/core/services/notification_prefs.dart';
@@ -537,13 +543,26 @@ void main() {
       );
       await tester.pump();
       expect(remote.historyRequests, greaterThan(before));
-      expect(find.text('One prompt'), findsOneWidget);
+      expect(
+        inChatSource(find.text('One prompt'), ChatDisplaySource.canonical),
+        findsOneWidget,
+      );
+      expect(
+        inChatSource(find.text('One prompt'), ChatDisplaySource.received),
+        findsOneWidget,
+      );
       expect(find.text('Canonical reply'), findsOneWidget);
-      expect(find.text('Wire reply'), findsNothing);
-      expect(find.byType(GatewayActivityCard), findsNothing);
-      expect(owner.snapshot.displayRows, isEmpty);
-      expect(owner.snapshot.tools, isEmpty);
-      expect(owner.snapshot.timeline.runs, isEmpty);
+      expect(find.text('Wire reply'), findsOneWidget);
+      expect(
+        inChatSource(
+          find.byType(GatewayActivityCard),
+          ChatDisplaySource.received,
+        ),
+        findsOneWidget,
+      );
+      expect(owner.snapshot.displayRows, isNotEmpty);
+      expect(owner.snapshot.tools, isNotEmpty);
+      expect(owner.snapshot.timeline.runs, isNotEmpty);
       expect(remote.submissions, 1);
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
@@ -604,15 +623,33 @@ void main() {
       await tester.pumpAndSettle();
       expect(session.findChat('stored-chat'), same(owner));
       expect(owner.snapshot.historyRows.last['content'], 'Canonical final');
-      expect(owner.snapshot.displayRows, isEmpty);
-      expect(owner.snapshot.timeline.runs, isEmpty);
+      await tester.scrollUntilVisible(
+        find.text('Previous question'),
+        -200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(owner.snapshot.displayRows.last['content'], 'Wire preview');
+      expect(owner.snapshot.timeline.runs, isNotEmpty);
       expect(
         tester
-            .widgetList<MessageBubble>(find.byType(MessageBubble))
+            .widgetList<MessageBubble>(
+              inChatSource(
+                find.byType(MessageBubble),
+                ChatDisplaySource.canonical,
+              ),
+            )
             .map((bubble) => bubble.content),
         ['Previous question', 'Previous answer', 'Ask', 'Canonical final'],
       );
-      expect(find.text('Wire preview'), findsNothing);
+      await tester.scrollUntilVisible(
+        inChatSource(find.text('Wire preview'), ChatDisplaySource.received),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
+      expect(
+        inChatSource(find.text('Wire preview'), ChatDisplaySource.received),
+        findsOneWidget,
+      );
       expect(find.byTooltip('Stop response'), findsNothing);
       expect(remote.submissions, 1);
       await tester.pumpWidget(const SizedBox.shrink());
@@ -702,6 +739,12 @@ void main() {
     expect(find.text('Older answer'), findsOneWidget);
     parentScroll.jumpTo(parentScroll.maxScrollExtent);
     await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('After tool'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.pumpAndSettle();
     final labels = tester
         .widgetList(
           find.byWidgetPredicate(
@@ -783,8 +826,11 @@ void main() {
         }
         final owner = session.findChat('stored-chat')!;
         expect(owner.phase, NormalGatewayTurnPhase.completed);
-        expect(owner.snapshot.displayRows, isEmpty);
-        expect(owner.snapshot.subagents, isEmpty);
+        expect(
+          owner.snapshot.displayRows.last['content'],
+          'Wire parent preview',
+        );
+        expect(owner.snapshot.subagents, isNotEmpty);
         remote.event('subagent.complete', {
           'subagent_id': 'new-runtime-alias',
           'child_session_id': 'child-tip',
@@ -795,7 +841,10 @@ void main() {
         expect(overlay.controller.task.childSessionId, 'child-root');
         expect(overlay.controller.task.latestChildSessionId, 'child-tip');
         expect(owner.snapshot.subagents.single.childSessionId, 'child-root');
-        expect(owner.snapshot.displayRows, isEmpty);
+        expect(
+          owner.snapshot.displayRows.last['content'],
+          'Wire parent preview',
+        );
         expect(owner.snapshot.hasActiveTurn, isFalse);
         expect(remote.submissions, 1);
         await tester.tap(find.widgetWithText(TextButton, 'Close'));
@@ -806,7 +855,7 @@ void main() {
           'Keep draft',
         );
         expect(find.text('Canonical parent final'), findsOneWidget);
-        expect(find.text('Wire parent preview'), findsNothing);
+        expect(find.text('Wire parent preview'), findsOneWidget);
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.pump();
       },

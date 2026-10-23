@@ -1,3 +1,7 @@
+// UNRECONCILED POLICY (second adaptation layer; original case IDs retained).
+// Raw: p2a-unreconciled-_flkt2h9/raw/base.tar::test/normal_gateway_alias_received_history_test.dart
+// Base 4a53e32 blob 8ef1e1555fa9a3ec6fa59792fb12be487b51729e; SHA256 3e63c936b39f3215fc3b67113c75ac4220e02fda95979fac6e9c36daabc00a84.
+// See docs/unreconciled-output/ORACLE_MIGRATION.md; unchanged safety remains binding.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -103,16 +107,16 @@ void main() {
           await until(() => !f.source.snapshot.hasActiveTurn);
           await f.flights.last;
           await pumpEventQueue();
-          // Current authoritative hydration cannot discard independent failed or
-          // unknown donor output. Known successful donor projections may retire.
-          final keepDonor = failed || history == 'unavailable';
+          // No stock HTTP row proves a match to any materialized donor,
+          // including successful donors. Keep C and R independently complete.
+          const keepDonor = true;
           expect(
             _contents(f.source.snapshot).contains('Donor answer'),
             keepDonor,
           );
           if (failed && history == 'known') {
             expect(
-              _contents(f.source.snapshot),
+              f.source.snapshot.historyRows.map((row) => row['content']),
               contains('Canonical current answer'),
             );
             expect(

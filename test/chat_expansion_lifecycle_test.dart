@@ -1,3 +1,7 @@
+// UNRECONCILED POLICY (second adaptation layer; original case IDs retained).
+// Raw: p2a-unreconciled-_flkt2h9/raw/base.tar::test/chat_expansion_lifecycle_test.dart
+// Base 4a53e32 blob 12f02b99926a1cb1ec196b0ed255978acdd32f53; SHA256 dd3f38d78b6b3604164b6d2ee6196353a88fef23fff661f6aac7bf128cca3c3e.
+// See docs/unreconciled-output/ORACLE_MIGRATION.md; unchanged safety remains binding.
 import 'dart:async';
 import 'dart:convert';
 
@@ -202,9 +206,15 @@ void main() {
       await tester.pump();
       expect(
         after,
-        ['One prompt', 'Canonical reply'],
+        [
+          'One prompt',
+          'Canonical reply',
+          'One prompt',
+          'Wire reply',
+          'optimistic-only',
+        ],
         reason:
-            'A latest authoritative history must atomically replace optimistic rows, tools and timeline.',
+            'Full C precedes R; a later saved reply cannot prove materialized R can retire.',
       );
     },
   );

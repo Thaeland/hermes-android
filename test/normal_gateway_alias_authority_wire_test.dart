@@ -1,3 +1,7 @@
+// UNRECONCILED POLICY (second adaptation layer; original case IDs retained).
+// Raw: p2a-unreconciled-_flkt2h9/raw/base.tar::test/normal_gateway_alias_authority_wire_test.dart
+// Base 4a53e32 blob f158bd50c74c11e13e574a07170610299fe43442; SHA256 2b5a78af681c84f15c39987f78f5a19703722499d0eb4aa4a9d5ae3327ee1474.
+// See docs/unreconciled-output/ORACLE_MIGRATION.md; unchanged safety remains binding.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -145,15 +149,19 @@ void main() {
         'Current exposed reasoning',
       );
       expect(local.snapshot.timeline.runs, isNotEmpty);
-      // A genuinely newer canonical response still retires all parent UI.
+      // A later canonical response does not prove any parent received match.
       local.observeHistory([
         ...f.rows,
         _row(100, 'New prompt', role: 'user'),
         _row(101, 'Canonical new answer'),
       ]);
-      expect(local.snapshot.displayRows, isEmpty);
-      expect(local.snapshot.tools, isEmpty);
-      expect(local.snapshot.timeline.runs, isEmpty);
+      expect(
+        local.snapshot.historyRows.last['content'],
+        'Canonical new answer',
+      );
+      expect(local.snapshot.displayRows.last['content'], 'New received answer');
+      expect(local.snapshot.tools.single.toolId, 'current-tool');
+      expect(local.snapshot.timeline.runs, isNotEmpty);
     },
   );
 

@@ -1,3 +1,7 @@
+// UNRECONCILED POLICY (second adaptation layer; original case IDs retained).
+// Raw: p2a-unreconciled-_flkt2h9/raw/base.tar::test/normal_gateway_fresh_chat_test.dart
+// Base 4a53e32 blob 527864ae1f9eee6c806933d8304110694e64d2a6; SHA256 b94b5f02e0626b4e17f6ff27c3b76221970a9e9d50cf6759d7a2d00e4268caf0.
+// See docs/unreconciled-output/ORACLE_MIGRATION.md; unchanged safety remains binding.
 import 'dart:async';
 import 'dart:convert';
 
@@ -14,11 +18,15 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/fake_voice_composer_adapter.dart';
+import 'support/unreconciled_policy.dart';
+import 'package:hermes_android/core/utils/chat_display_items.dart';
 
 void main() {
   testWidgets(
     'fresh local ChatScreen settles stock message-complete-only turn after initial 404',
     (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1000, 1600));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
       SharedPreferences.setMockInitialValues({'verbose_mode': false});
       final connection = SavedConnection(
         id: 'new-stock-probe',
@@ -139,8 +147,13 @@ void main() {
       }
       final active = owner.snapshot.hasActiveTurn;
       expect(owner.snapshot.phase, NormalGatewayTurnPhase.completed);
-      expect(find.text('Final answer'), findsOneWidget);
-      expect(find.text('First prompt'), findsOneWidget);
+      for (final source in [
+        ChatDisplaySource.canonical,
+        ChatDisplaySource.received,
+      ]) {
+        expect(inChatSource(find.text('Final answer'), source), findsOneWidget);
+        expect(inChatSource(find.text('First prompt'), source), findsOneWidget);
+      }
       expect(find.byTooltip('Stop response'), findsNothing);
       await tester.enterText(find.byType(TextField), 'Next prompt');
       expect(
