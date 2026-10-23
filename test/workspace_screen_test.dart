@@ -6,10 +6,12 @@ import 'package:hermes_android/core/models/attachment_draft.dart';
 import 'package:hermes_android/core/models/connection.dart';
 import 'package:hermes_android/core/models/session.dart';
 import 'package:hermes_android/core/screens/chat_screen.dart';
+import 'package:hermes_android/core/screens/assets_screen.dart';
 import 'package:hermes_android/core/screens/workspace_screen.dart';
 import 'package:hermes_android/core/screens/workspace_sessions_screen.dart';
 import 'package:hermes_android/core/services/android_share_intent_service.dart';
 import 'package:hermes_android/core/services/chat_space_store.dart';
+import 'package:hermes_android/core/services/chat_assets_client.dart';
 import 'package:hermes_android/core/services/gateway_turn_application_controller.dart';
 import 'package:hermes_android/core/services/gateway_turn_coordinator.dart';
 import 'package:hermes_android/core/services/projects_gateway_client.dart';
@@ -56,6 +58,37 @@ SavedConnection _connection({
     port: 8642,
     apiKey: 'key',
     desktopGatewayUrl: desktopGatewayUrl,
+  );
+}
+
+class _WorkspaceAssetsSource implements ChatAssetsDataSource {
+  @override
+  Future<ChatAssetsSessionPage> listSessions({
+    int offset = 0,
+    int limit = 10,
+  }) async => ChatAssetsSessionPage(
+    sessions: [_session(id: 'asset-source', title: 'Asset source')],
+    nextOffset: 10,
+    hasMore: false,
+    partial: false,
+  );
+
+  @override
+  Future<ChatAssetsMessagePage> getMessages(
+    Session session, {
+    int offset = 0,
+    int limit = 100,
+  }) async => ChatAssetsMessagePage(
+    messages: const [
+      {
+        'id': 1,
+        'role': 'assistant',
+        'content': 'MEDIA:/out/chart.png',
+        'timestamp': 10,
+      },
+    ],
+    nextOffset: 100,
+    hasMore: false,
   );
 }
 
@@ -190,6 +223,7 @@ Future<void> _pump(
   Object? sessionsError,
   WorkspaceSessionScreenBuilder? sessionScreenBuilder,
   WorkspaceFilesScreenBuilder? filesScreenBuilder,
+  ChatAssetsDataSource Function(SavedConnection)? assetsSourceFactory,
   WorkspaceTurnSignalsLoader? turnSignalsLoader,
   WorkspaceActivityFeedLoader? activityFeedLoader,
   ValueChanged<NewChatDraft>? onNewChat,
@@ -225,6 +259,7 @@ Future<void> _pump(
               },
         sessionScreenBuilder: sessionScreenBuilder,
         filesScreenBuilder: filesScreenBuilder,
+        assetsSourceFactory: assetsSourceFactory,
         turnSignalsLoader: turnSignalsLoader,
         activityFeedLoader: activityFeedLoader,
         onNewChat: onNewChat,
@@ -1153,6 +1188,48 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Native files ready'), findsOneWidget);
+  });
+
+  testWidgets('More opens real Assets, opens its source chat and returns', (
+    tester,
+  ) async {
+    final opened = <String>[];
+    await _pump(
+      tester,
+      connection: _connection(desktopGatewayUrl: 'https://host:8642'),
+      repository: await _repository([]),
+      sessions: const [],
+      assetsSourceFactory: (_) => _WorkspaceAssetsSource(),
+      sessionScreenBuilder: (session) {
+        opened.add(session.id);
+        return Scaffold(
+          appBar: AppBar(title: Text(session.title)),
+          body: Text('Opened source ${session.id}'),
+        );
+      },
+      size: const Size(600, 1400),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(HermesDestination.more.label(l10n)).last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Assets'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AssetsScreen), findsOneWidget);
+    expect(find.text('chart.png'), findsOneWidget);
+    await tester.tap(find.text('Open chat: Asset source'));
+    await tester.pumpAndSettle();
+    expect(find.text('Opened source asset-source'), findsOneWidget);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.text('chart.png'), findsOneWidget);
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.byType(MorePane), findsOneWidget);
+    await tester.tap(find.text('Assets'));
+    await tester.pumpAndSettle();
+    expect(find.text('chart.png'), findsOneWidget);
+    expect(opened, ['asset-source']);
   });
 
   testWidgets('More offers the embedded dashboard fallback', (tester) async {

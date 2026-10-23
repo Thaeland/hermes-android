@@ -8,8 +8,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../services/remote_files_client.dart';
-import 'hermes_system_ui.dart';
+import '../services/connection_manager.dart' show DownloadSizeLimitException;
 import '../utils/media_tags.dart';
+import 'hermes_system_ui.dart';
 
 /// Download a gateway path and hand it to the system share sheet. Shared by
 /// [MediaArtifactCard] and inline `media-artifact://` markdown links.
@@ -57,6 +58,20 @@ class _MediaArtifactCardState extends State<MediaArtifactCard> {
   Future<Uint8List?>? _inFlight;
   String? _error;
   int _downloadGeneration = 0;
+  RemoteFilesClient? _activeDownloadClient;
+
+  void _cancelDownload() {
+    final client = _activeDownloadClient;
+    _activeDownloadClient = null;
+    client?.close();
+  }
+
+  @override
+  void dispose() {
+    _downloadGeneration++;
+    _cancelDownload();
+    super.dispose();
+  }
 
   @override
   void didUpdateWidget(MediaArtifactCard oldWidget) {
@@ -66,6 +81,7 @@ class _MediaArtifactCardState extends State<MediaArtifactCard> {
     // filename (wrong file shared, wrong image previewed).
     if (oldWidget.ref.path != widget.ref.path) {
       _downloadGeneration += 1;
+      _cancelDownload();
       _bytes = null;
       _inFlight = null;
       _error = null;
@@ -98,11 +114,16 @@ class _MediaArtifactCardState extends State<MediaArtifactCard> {
     setState(() => _error = null);
     try {
       final client = widget.filesClient();
+      if (client is RemoteFilesClient) _activeDownloadClient = client;
       final Uint8List bytes;
       try {
         bytes = (await client.download(path)).bytes;
       } finally {
-        if (client is RemoteFilesClient) client.close();
+        if (client is RemoteFilesClient &&
+            identical(_activeDownloadClient, client)) {
+          _activeDownloadClient = null;
+          client.close();
+        }
       }
       if (!mounted ||
           generation != _downloadGeneration ||
@@ -113,7 +134,11 @@ class _MediaArtifactCardState extends State<MediaArtifactCard> {
       return bytes;
     } catch (e) {
       if (mounted && generation == _downloadGeneration) {
-        setState(() => _error = e.toString());
+        setState(
+          () => _error = e is DownloadSizeLimitException
+              ? context.l10n.assets_file_too_large
+              : e.toString(),
+        );
       }
       return null;
     }

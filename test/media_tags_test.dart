@@ -245,6 +245,110 @@ void main() {
     });
   });
 
+  group('extractMediaTagRefs', () {
+    test(
+      'quoted fenced examples and nested blockquotes are not deliveries',
+      () {
+        for (final example in [
+          '> ~~~text\n> MEDIA:/out/example.pdf\n> ~~~',
+          '> ```text\n> MEDIA:/out/example.pdf\n> ```',
+          '  > > MEDIA:/out/example.pdf',
+          '> MEDIA:`/out/example.pdf`',
+        ]) {
+          final content = '$example\n\nMEDIA:/out/real.pdf';
+          expect(extractMediaTagRefs(content).map((ref) => ref.path), [
+            '/out/real.pdf',
+          ]);
+          expect(inlineMediaTagsAsLinks(example), example);
+          expect(
+            splitMediaTags(example).every((segment) => !segment.isMedia),
+            isTrue,
+          );
+        }
+      },
+    );
+
+    test('collects inline and standalone references in source order', () {
+      final refs = extractMediaTagRefs(
+        'See MEDIA:/out/inline.png now.\n'
+        'MEDIA:/out/standalone.pdf\n'
+        '- download MEDIA:/out/inline.png again',
+      );
+      expect(refs.map((ref) => ref.path), [
+        '/out/inline.png',
+        '/out/standalone.pdf',
+        '/out/inline.png',
+      ]);
+    });
+
+    test('shares quoting and punctuation rules without normalising paths', () {
+      final refs = extractMediaTagRefs(
+        'MEDIA:"/out/a #100%?.pdf"\n'
+        "MEDIA:'/out/stop!.md'\n"
+        'MEDIA:`/out/backtick file.png`\n'
+        r'MEDIA:C:\new\image.PNG'
+        '\nMEDIA:~/docs/note.md\n'
+        'MEDIA:/out/bare.pdf.',
+      );
+      expect(refs.map((ref) => ref.path), [
+        '/out/a #100%?.pdf',
+        '/out/stop!.md',
+        '/out/backtick file.png',
+        r'C:\new\image.PNG',
+        '~/docs/note.md',
+        '/out/bare.pdf',
+      ]);
+      expect(refs.map((ref) => ref.quoted), [
+        true,
+        true,
+        true,
+        false,
+        false,
+        false,
+      ]);
+    });
+
+    test('ignores inline, fenced, indented and unclosed code examples', () {
+      for (final code in [
+        '`MEDIA:/out/example.png`',
+        '``MEDIA:/out/inline`tick.png``',
+        '~~~md\nMEDIA:/out/example.png\n~~~',
+        '````md\nMEDIA:/out/example.png\n````',
+        '```dart title="example"\nMEDIA:/out/example.png\n```',
+        '    MEDIA:/out/example.png',
+        '\tMEDIA:/out/example.png',
+      ]) {
+        expect(
+          extractMediaTagRefs(
+            '$code\nMEDIA:/out/real.png',
+          ).map((ref) => ref.path),
+          ['/out/real.png'],
+          reason: code,
+        );
+      }
+      expect(extractMediaTagRefs('~~~md\nMEDIA:/out/unclosed.png'), isEmpty);
+    });
+
+    test('final extensionless/unknown-extension deliveries are retained', () {
+      for (final path in ['/out/Caddyfile', '/out/script.py']) {
+        expect(extractMediaTagRefs('MEDIA:$path').single.path, path);
+      }
+    });
+
+    test(
+      'ordinary links and malformed or degenerate tags are not references',
+      () {
+        expect(
+          extractMediaTagRefs(
+            '[link](/out/a.pdf) ![image](/out/b.png)\n'
+            "MEDIA:... MEDIA:word MEDIA:'",
+          ),
+          isEmpty,
+        );
+      },
+    );
+  });
+
   group('MessageBubble media rendering', () {
     Future<void> pumpBubble(
       WidgetTester tester, {

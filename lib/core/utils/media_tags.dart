@@ -200,6 +200,13 @@ List<_SourceRange> _markdownCodeRanges(String text, {required bool isFinal}) {
       contentEnd -= 1;
     }
     final line = text.substring(lineStart, contentEnd);
+    // Quoted examples are not deliveries, including quote-prefixed tilde
+    // fences that the ordinary line-fence scanner cannot otherwise see.
+    if (RegExp(r'^ {0,3}>').hasMatch(line)) {
+      blockRanges.add(_SourceRange(lineStart, lineEnd));
+      lineStart = lineEnd;
+      continue;
+    }
     final fence = _lineFence(line);
 
     if (fenceStart != null) {
@@ -384,6 +391,26 @@ String? mediaPathFromArtifactHref(String href) {
   } on ArgumentError {
     return null;
   }
+}
+
+/// Extract all explicit `MEDIA:` refs from final text, including inline refs.
+///
+/// Shares the rendering parser's quoting, punctuation and Markdown-code rules.
+/// Keeps source order and repeated occurrences; consumers can dedupe by their
+/// own session/path identity. Paths are never decoded or normalised.
+List<MediaTagRef> extractMediaTagRefs(String text) {
+  final refs = <MediaTagRef>[];
+  final codeRanges = _markdownCodeRanges(text, isFinal: true);
+  for (final match in _mediaTagPattern.allMatches(text)) {
+    if (_mediaMatchIsCode(text, codeRanges, match)) continue;
+    final parsed = _parseMediaTag(
+      match,
+      textLength: text.length,
+      isFinal: true,
+    );
+    if (parsed != null) refs.add(parsed.ref);
+  }
+  return refs;
 }
 
 /// Rewrite inline (mid-line) `MEDIA:` refs as markdown links so prose

@@ -119,11 +119,10 @@ List<MoreSection> buildMoreSections({
         MoreEntry(
           id: 'assets',
           title: l10n.assets,
-          subtitle: l10n.artifacts_attachments_and_generated_media,
+          subtitle: l10n.assets_recent_subtitle,
           icon: Icons.image_outlined,
-          availability: MoreEntryAvailability.unavailable,
-          unavailableReason: l10n
-              .needs_a_server_authoritative_assets_index_in_the_hermes_gateway,
+          availability: dashboardBacked(),
+          unavailableReason: dashboardReason(),
         ),
       ],
     ),

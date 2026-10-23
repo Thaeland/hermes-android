@@ -42,6 +42,77 @@ class AppLocalizationsEn extends AppLocalizations {
   String get theme_palette_cyan => 'Cyan';
 
   @override
+  String get assets_recent_subtitle =>
+      'Find files shared by Hermes in saved chats';
+
+  @override
+  String get assets_scope_notice =>
+      'Generated files explicitly shared by Hermes in saved replies. This is a partial view of chat history, not a complete file or attachment catalogue. Referenced files may no longer exist.';
+
+  @override
+  String get assets_download_limit =>
+      'Files are loaded only when tapped. Previews and downloads are limited to 25 MiB each; use the dashboard for larger files.';
+
+  @override
+  String get assets_search_hint => 'Search found files or source chats';
+
+  @override
+  String get assets_all => 'All';
+
+  @override
+  String get assets_images => 'Images';
+
+  @override
+  String get assets_audio => 'Audio';
+
+  @override
+  String get assets_video => 'Video';
+
+  @override
+  String get assets_documents => 'Documents and other files';
+
+  @override
+  String get assets_empty => 'No assets found in scanned messages';
+
+  @override
+  String get assets_empty_detail =>
+      'Scan more chats or older messages to look further back. Ordinary attachments and unlinked files are not indexed here.';
+
+  @override
+  String get assets_no_matches => 'No matching assets';
+
+  @override
+  String get assets_load_more_chats => 'Scan more chats';
+
+  @override
+  String get assets_load_older_messages => 'Scan older messages';
+
+  @override
+  String get assets_load_failed =>
+      'Some history could not be read. Results are incomplete. Check the dashboard connection and retry.';
+
+  @override
+  String get assets_retry_failed => 'Retry failed history reads';
+
+  @override
+  String get assets_partial =>
+      'The server reported incomplete history. Refresh after checking the dashboard.';
+
+  @override
+  String assets_scan_summary(int files, int chats) {
+    return '$files file references found across $chats scanned chats';
+  }
+
+  @override
+  String assets_open_chat(String title) {
+    return 'Open chat: $title';
+  }
+
+  @override
+  String get assets_file_too_large =>
+      'This file exceeds the download limit. Open the dashboard to download it.';
+
+  @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
       'A one-off question. Archives itself after 72 hours; anything worth keeping is still remembered.';
 

@@ -42,6 +42,75 @@ class AppLocalizationsKo extends AppLocalizations {
   String get theme_palette_cyan => '시안';
 
   @override
+  String get assets_recent_subtitle => '저장된 채팅에서 Hermes가 공유한 파일 찾기';
+
+  @override
+  String get assets_scope_notice =>
+      '저장된 답변에서 Hermes가 명시적으로 공유한 생성된 파일입니다. 채팅 기록의 일부만 보여 주며, 모든 파일이나 첨부 파일을 망라한 목록은 아닙니다. 참조된 파일이 더 이상 존재하지 않을 수 있습니다.';
+
+  @override
+  String get assets_download_limit =>
+      '파일은 탭할 때만 불러옵니다. 미리보기와 다운로드는 각각 파일당 25 MiB로 제한됩니다. 더 큰 파일은 대시보드를 이용하세요.';
+
+  @override
+  String get assets_search_hint => '찾은 파일이나 원본 채팅 검색';
+
+  @override
+  String get assets_all => '전체';
+
+  @override
+  String get assets_images => '이미지';
+
+  @override
+  String get assets_audio => '오디오';
+
+  @override
+  String get assets_video => '동영상';
+
+  @override
+  String get assets_documents => '문서 및 기타 파일';
+
+  @override
+  String get assets_empty => '살펴본 메시지에서 에셋을 찾지 못했습니다';
+
+  @override
+  String get assets_empty_detail =>
+      '채팅을 더 살펴보거나 이전 메시지를 살펴보면 더 오래된 기록을 확인할 수 있습니다. 일반 첨부 파일과 링크가 없는 파일은 여기에 색인되지 않습니다.';
+
+  @override
+  String get assets_no_matches => '일치하는 에셋 없음';
+
+  @override
+  String get assets_load_more_chats => '채팅 더 살펴보기';
+
+  @override
+  String get assets_load_older_messages => '이전 메시지 살펴보기';
+
+  @override
+  String get assets_load_failed =>
+      '일부 기록을 읽지 못했습니다. 결과가 불완전합니다. 대시보드 연결을 확인하고 다시 시도하세요.';
+
+  @override
+  String get assets_retry_failed => '읽지 못한 기록 다시 불러오기';
+
+  @override
+  String get assets_partial => '서버에서 기록이 불완전하다고 보고했습니다. 대시보드를 확인한 후 새로고침하세요.';
+
+  @override
+  String assets_scan_summary(int files, int chats) {
+    return '살펴본 채팅 $chats개에서 파일 참조 $files개 발견';
+  }
+
+  @override
+  String assets_open_chat(String title) {
+    return '채팅 열기: $title';
+  }
+
+  @override
+  String get assets_file_too_large =>
+      '이 파일은 다운로드 크기 제한을 초과합니다. 대시보드를 열어 다운로드하세요.';
+
+  @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
       '일회성 질문입니다. 72시간 후에 자동으로 보관 처리되며, 보관할 가치가 있는 내용은 기억에 유지됩니다.';
 

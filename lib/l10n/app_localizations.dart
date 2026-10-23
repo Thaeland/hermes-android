@@ -180,6 +180,126 @@ abstract class AppLocalizations {
   /// **'Cyan'**
   String get theme_palette_cyan;
 
+  /// No description provided for @assets_recent_subtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Find files shared by Hermes in saved chats'**
+  String get assets_recent_subtitle;
+
+  /// No description provided for @assets_scope_notice.
+  ///
+  /// In en, this message translates to:
+  /// **'Generated files explicitly shared by Hermes in saved replies. This is a partial view of chat history, not a complete file or attachment catalogue. Referenced files may no longer exist.'**
+  String get assets_scope_notice;
+
+  /// No description provided for @assets_download_limit.
+  ///
+  /// In en, this message translates to:
+  /// **'Files are loaded only when tapped. Previews and downloads are limited to 25 MiB each; use the dashboard for larger files.'**
+  String get assets_download_limit;
+
+  /// No description provided for @assets_search_hint.
+  ///
+  /// In en, this message translates to:
+  /// **'Search found files or source chats'**
+  String get assets_search_hint;
+
+  /// No description provided for @assets_all.
+  ///
+  /// In en, this message translates to:
+  /// **'All'**
+  String get assets_all;
+
+  /// No description provided for @assets_images.
+  ///
+  /// In en, this message translates to:
+  /// **'Images'**
+  String get assets_images;
+
+  /// No description provided for @assets_audio.
+  ///
+  /// In en, this message translates to:
+  /// **'Audio'**
+  String get assets_audio;
+
+  /// No description provided for @assets_video.
+  ///
+  /// In en, this message translates to:
+  /// **'Video'**
+  String get assets_video;
+
+  /// No description provided for @assets_documents.
+  ///
+  /// In en, this message translates to:
+  /// **'Documents and other files'**
+  String get assets_documents;
+
+  /// No description provided for @assets_empty.
+  ///
+  /// In en, this message translates to:
+  /// **'No assets found in scanned messages'**
+  String get assets_empty;
+
+  /// No description provided for @assets_empty_detail.
+  ///
+  /// In en, this message translates to:
+  /// **'Scan more chats or older messages to look further back. Ordinary attachments and unlinked files are not indexed here.'**
+  String get assets_empty_detail;
+
+  /// No description provided for @assets_no_matches.
+  ///
+  /// In en, this message translates to:
+  /// **'No matching assets'**
+  String get assets_no_matches;
+
+  /// No description provided for @assets_load_more_chats.
+  ///
+  /// In en, this message translates to:
+  /// **'Scan more chats'**
+  String get assets_load_more_chats;
+
+  /// No description provided for @assets_load_older_messages.
+  ///
+  /// In en, this message translates to:
+  /// **'Scan older messages'**
+  String get assets_load_older_messages;
+
+  /// No description provided for @assets_load_failed.
+  ///
+  /// In en, this message translates to:
+  /// **'Some history could not be read. Results are incomplete. Check the dashboard connection and retry.'**
+  String get assets_load_failed;
+
+  /// No description provided for @assets_retry_failed.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry failed history reads'**
+  String get assets_retry_failed;
+
+  /// No description provided for @assets_partial.
+  ///
+  /// In en, this message translates to:
+  /// **'The server reported incomplete history. Refresh after checking the dashboard.'**
+  String get assets_partial;
+
+  /// No description provided for @assets_scan_summary.
+  ///
+  /// In en, this message translates to:
+  /// **'{files} file references found across {chats} scanned chats'**
+  String assets_scan_summary(int files, int chats);
+
+  /// No description provided for @assets_open_chat.
+  ///
+  /// In en, this message translates to:
+  /// **'Open chat: {title}'**
+  String assets_open_chat(String title);
+
+  /// No description provided for @assets_file_too_large.
+  ///
+  /// In en, this message translates to:
+  /// **'This file exceeds the download limit. Open the dashboard to download it.'**
+  String get assets_file_too_large;
+
   /// No description provided for @a_one_off_question_archives_itself_after_72_hours_anything.
   ///
   /// In en, this message translates to:
