@@ -28,12 +28,17 @@ class ChatPresentationRegistry {
   void bind(String local, String stored) {
     final source = chatFor(local);
     final target = _aliases[stored]?._root;
+    final writers = [
+      source._writer,
+      target?._writer,
+    ].whereType<ComposerDraftHandle>().toList();
     if (target != null && !identical(source, target)) {
       // Existing leases follow the redirect. The most recent explicit intent
       // wins, not whichever asynchronous migration/read happens to finish last.
       if (source._edit > target._edit) {
         target
-          .._text = source._text
+          .._text = source._text ?? source._intentText
+          .._intentText = source._intentText
           .._edit = source._edit;
       }
       if (source._authority > target._authority) {
@@ -41,7 +46,8 @@ class ChatPresentationRegistry {
           .._writer = source._writer
           .._onBindingChanged = source._onBindingChanged
           .._authority = source._authority
-          .._writerClosed = source._writerClosed;
+          .._writerClosed = source._writerClosed
+          .._writerEdited = source._writerEdited;
       }
       target._reasoningPins.mergeMissingFrom(source._reasoningPins);
       target._toolPins.mergeMissingFrom(source._toolPins);
@@ -64,12 +70,22 @@ class ChatPresentationRegistry {
               isCurrent: () => !_closed,
             )
             .then((_) async {
-              await state._persist();
               final root = state._root;
-              if (!_closed && root._edit == 0) {
+              final writer = root._writer;
+              if (writer != null) {
+                // Move an existing lease, not a new edit. A separate newer
+                // storage writer must not be reclaimed by this migration.
+                await writer.handoffFrom(
+                  writers,
+                  canonicalSessionId: stored,
+                  isCurrent: () => !_closed && identical(root._writer, writer),
+                );
+              }
+              await state._persist();
+              if (!_closed && !root._writerEdited) {
                 // The canonical composer may already have read an empty key.
                 // Invalidate that read, then offer migration to its live lease.
-                root._text = null;
+                if (root._edit == 0) root._text = null;
                 root._binding++;
                 root._onBindingChanged?.call();
               }
@@ -77,6 +93,35 @@ class ChatPresentationRegistry {
             .whenComplete(() => state._pendingWrites--),
       );
     }
+  }
+
+  /// Rejection uses the admitted lease, never a new edit or mount. Keep the
+  /// cached projection and the queued physical write in the same transition.
+  Future<void> restoreRejectedDraft({
+    required ComposerDraftHandle handle,
+    required String text,
+    required bool Function() isCurrent,
+  }) {
+    final state = _aliases[handle.sessionId]?._root;
+    if (_closed ||
+        state == null ||
+        !identical(state._writer, handle) ||
+        !isCurrent()) {
+      return Future.value();
+    }
+    final edit = state._edit;
+    state
+      .._text = text
+      .._intentText = text;
+    return handle.save(
+      text,
+      isCurrent: () =>
+          !_closed &&
+          isCurrent() &&
+          identical(state._root._writer, handle) &&
+          state._root._edit == edit &&
+          state._root._text == text,
+    );
   }
 
   void close() {
@@ -97,12 +142,16 @@ class ChatPresentationState {
   ToolActivityGroupPins get reasoningPins => _root._reasoningPins;
   ToolActivityGroupPins get toolPins => _root._toolPins;
   String? _text;
+  // The last explicitly owned value survives a cold read on remount. An alias
+  // may arrive before that read, so its chronology must retain a value too.
+  String? _intentText;
   int _edit = 0;
   int _authority = 0;
   int _binding = 0;
-  Object? _writer;
+  ComposerDraftHandle? _writer;
   void Function()? _onBindingChanged;
   bool _writerClosed = true;
+  bool _writerEdited = false;
   int _pendingWrites = 0;
 
   ComposerDraftWriter openWriter({void Function()? onBindingChanged}) {
@@ -111,7 +160,8 @@ class ChatPresentationState {
     // the next mount, including writes made by another application embedder.
     if (state._writerClosed && state._pendingWrites == 0) {
       state._text = null;
-      state._edit = 0;
+      // Hydration invalidates the cached value, not the chronology of the
+      // user's last edit/clear. A late alias still compares that intent.
     }
     final token = ComposerDraftStore.open(
       connectionId: _registry.connectionId,
@@ -120,6 +170,7 @@ class ChatPresentationState {
     state._writer = token;
     state._onBindingChanged = onBindingChanged;
     state._writerClosed = false;
+    state._writerEdited = false;
     state._authority = ++_registry._intent;
     return ComposerDraftWriter._(this, token, onBindingChanged);
   }
@@ -133,13 +184,14 @@ class ChatPresentationState {
     final edit = state._edit;
     final binding = state._binding;
     state._pendingWrites++;
-    return (state._writer! as ComposerDraftHandle)
+    return state._writer!
         .save(
           text,
           isCurrent: () =>
               !_registry._closed &&
               identical(state, _root) &&
               edit == state._edit &&
+              text == state._text &&
               binding == state._binding,
         )
         .whenComplete(() => state._pendingWrites--);
@@ -186,8 +238,10 @@ class ComposerDraftWriter {
       .._writer = _token
       .._onBindingChanged = _onBindingChanged
       .._writerClosed = false
+      .._writerEdited = true
       .._edit = ++state._registry._intent
       .._authority = state._registry._intent
+      .._intentText = text
       .._text = text;
   }
 
@@ -197,10 +251,10 @@ class ComposerDraftWriter {
     // An untouched route leaving before hydration is not an explicit clear.
     if (state._text == null) return Future.value();
     if (state._text != text) {
-      state
-        .._edit = ++state._registry._intent
-        .._authority = state._registry._intent
-        .._text = text;
+      // Checkpoint/submit-clear/rejection restoration changes the value of
+      // this existing lease, not the chronology of explicit user edits.
+      state._text = text;
+      if (state._edit != 0) state._intentText = text;
     }
     return state._persist();
   }

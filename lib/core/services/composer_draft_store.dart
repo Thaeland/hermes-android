@@ -16,6 +16,29 @@ class ComposerDraftHandle {
   /// An explicit edit may take ownership back, including a deliberate clear.
   void edited() => ComposerDraftStore._claim(this);
 
+  /// Transfer only a participating lease after a verified durable alias. This
+  /// does not manufacture user intent or reclaim an unrelated newer writer.
+  Future<void> handoffFrom(
+    Iterable<ComposerDraftHandle> participants, {
+    required String canonicalSessionId,
+    required bool Function() isCurrent,
+  }) => ComposerDraftStore._serialized((prefs) async {
+    if (!isCurrent()) return;
+    final key = ComposerDraftStore._resolve(prefs, connectionId, sessionId);
+    final canonical = ComposerDraftStore._resolve(
+      prefs,
+      connectionId,
+      canonicalSessionId,
+    );
+    if (key != canonical) return; // failed alias publication is not a handoff
+    final owner = ComposerDraftStore._owners[key];
+    if (participants.any(
+      (handle) => handle.connectionId == connectionId && handle._owner == owner,
+    )) {
+      ComposerDraftStore._owners[key] = _owner;
+    }
+  }).catchError((Object _) {});
+
   Future<void> save(String text, {bool Function()? isCurrent}) =>
       ComposerDraftStore._save(
         connectionId: connectionId,
