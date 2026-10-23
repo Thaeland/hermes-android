@@ -95,8 +95,9 @@ Stock Hermes Agent releases do not advertise the experimental
 stock Desktop Gateway transport for those connections. Its app-owned session
 keeps user-started turns across chat navigation and reconciles persisted history
 after reconnect or process restart. It does not resubmit an uncertain prompt.
-Offline, missing or inconclusive status remains unresolved rather than reporting
-success or claiming the server is idle.
+After an outage, the app keeps recovery pending until it can verify the server's
+state. A proven-idle turn with no recorded terminal outcome becomes inactive
+with an outcome-unknown status. It does not generate a completion alert.
 
 The experimental v2 path adds a separate durable exactly-once recovery contract
 when the gateway advertises support. A legacy-transport capability notice refers
