@@ -451,6 +451,14 @@ void main() {
       controller,
       remote,
       historyClient: MockClient((request) async {
+        if (request.url.path == '/api/sessions/stored-chat') {
+          return http.Response(
+            jsonEncode({
+              'session': {'id': 'stored-chat', 'archived': false},
+            }),
+            200,
+          );
+        }
         final offset = int.parse(request.url.queryParameters['offset'] ?? '0');
         offsets.add(offset);
         return http.Response(

@@ -1,5 +1,10 @@
 {
   "@@locale": "ko",
+  "archive_chat": "채팅 보관",
+  "unarchive_chat": "채팅 보관 해제",
+  "chat_archived": "채팅이 보관되었습니다",
+  "chat_unarchived": "채팅 보관이 해제되었습니다",
+  "could_not_update_chat_archive": "채팅 보관 상태를 변경할 수 없습니다: {error}",
   "quick_chat_description": "일회성 질문입니다.",
   "ai_full_text": "AI + 전문 검색",
   "ai_search_model": "AI 검색 모델",

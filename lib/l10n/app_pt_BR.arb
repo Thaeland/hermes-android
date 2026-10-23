@@ -1,5 +1,10 @@
 {
   "@@locale": "pt_BR",
+  "archive_chat": "Arquivar chat",
+  "unarchive_chat": "Desarquivar chat",
+  "chat_archived": "Chat arquivado",
+  "chat_unarchived": "Chat desarquivado",
+  "could_not_update_chat_archive": "Não foi possível alterar o arquivo do chat: {error}",
   "quick_chat_description": "Uma pergunta pontual.",
   "ai_full_text": "IA + texto completo",
   "ai_search_model": "Modelo de busca com IA",

@@ -782,6 +782,43 @@ class ApiClient {
     return saved['title'] as String;
   }
 
+  /// Persists a server-owned archive flag and verifies the exact target.
+  /// Neither a sparse/mismatched PATCH response nor a failed read-back is
+  /// reported as success; callers keep their current rows and offer retry.
+  Future<bool> setSessionArchived({
+    required String sessionId,
+    required bool archived,
+  }) async {
+    if (sessionId.trim().isEmpty) {
+      throw ArgumentError.value(sessionId, 'sessionId', 'must not be blank');
+    }
+    final encodedId = Uri.encodeComponent(sessionId);
+    final response = await _http
+        .patch(
+          Uri.parse('$baseUrl/api/sessions/$encodedId'),
+          headers: _headers,
+          body: jsonEncode({'archived': archived}),
+        )
+        .timeout(requestTimeout);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('HTTP ${response.statusCode}: ${response.body}');
+    }
+    final data = jsonDecode(response.body);
+    final saved = data is Map ? data['session'] : null;
+    if (saved is! Map ||
+        saved['id'] != sessionId ||
+        saved['archived'] != archived) {
+      throw const FormatException(
+        'Gateway returned no confirmed archive state',
+      );
+    }
+    final confirmed = await getSession(sessionId);
+    if (confirmed['id'] != sessionId || confirmed['archived'] != archived) {
+      throw const FormatException('Gateway archive read-back did not match');
+    }
+    return archived;
+  }
+
   // ── Messages ─────────────────────────────────────────────────────────
 
   Future<List<Map<String, dynamic>>> getMessages(

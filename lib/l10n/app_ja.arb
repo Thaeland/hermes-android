@@ -1,5 +1,10 @@
 {
   "@@locale": "ja",
+  "archive_chat": "チャットをアーカイブ",
+  "unarchive_chat": "チャットのアーカイブを解除",
+  "chat_archived": "チャットをアーカイブしました",
+  "chat_unarchived": "チャットのアーカイブを解除しました",
+  "could_not_update_chat_archive": "チャットのアーカイブ状態を更新できませんでした: {error}",
   "quick_chat_description": "単発の質問用。",
   "ai_full_text": "AI + 全文",
   "ai_search_model": "AI検索モデル",

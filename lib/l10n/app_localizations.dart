@@ -114,6 +114,36 @@ abstract class AppLocalizations {
     Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
   ];
 
+  /// No description provided for @archive_chat.
+  ///
+  /// In en, this message translates to:
+  /// **'Archive chat'**
+  String get archive_chat;
+
+  /// No description provided for @unarchive_chat.
+  ///
+  /// In en, this message translates to:
+  /// **'Unarchive chat'**
+  String get unarchive_chat;
+
+  /// No description provided for @chat_archived.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat archived'**
+  String get chat_archived;
+
+  /// No description provided for @chat_unarchived.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat unarchived'**
+  String get chat_unarchived;
+
+  /// No description provided for @could_not_update_chat_archive.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not update chat archive: {error}'**
+  String could_not_update_chat_archive(Object error);
+
   /// No description provided for @quick_chat_description.
   ///
   /// In en, this message translates to:

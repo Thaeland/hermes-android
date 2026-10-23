@@ -1,5 +1,11 @@
 {
   "@@locale": "en",
+  "archive_chat": "Archive chat",
+  "unarchive_chat": "Unarchive chat",
+  "chat_archived": "Chat archived",
+  "chat_unarchived": "Chat unarchived",
+  "could_not_update_chat_archive": "Could not update chat archive: {error}",
+  "@could_not_update_chat_archive": {"placeholders": {"error": {"type": "Object"}}},
   "quick_chat_description": "A one-off question.",
   "ai_full_text": "AI + full-text",
   "ai_search_model": "AI search model",

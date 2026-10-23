@@ -1,5 +1,10 @@
 {
   "@@locale": "ru",
+  "archive_chat": "Архивировать чат",
+  "unarchive_chat": "Разархивировать чат",
+  "chat_archived": "Чат архивирован",
+  "chat_unarchived": "Чат разархивирован",
+  "could_not_update_chat_archive": "Не удалось изменить статус архивации чата: {error}",
   "quick_chat_description": "Разовый вопрос.",
   "ai_full_text": "ИИ + полный текст",
   "ai_search_model": "Модель ИИ-поиска",

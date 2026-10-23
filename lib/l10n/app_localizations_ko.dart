@@ -9,6 +9,23 @@ class AppLocalizationsKo extends AppLocalizations {
   AppLocalizationsKo([String locale = 'ko']) : super(locale);
 
   @override
+  String get archive_chat => '채팅 보관';
+
+  @override
+  String get unarchive_chat => '채팅 보관 해제';
+
+  @override
+  String get chat_archived => '채팅이 보관되었습니다';
+
+  @override
+  String get chat_unarchived => '채팅 보관이 해제되었습니다';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return '채팅 보관 상태를 변경할 수 없습니다: $error';
+  }
+
+  @override
   String get quick_chat_description => '일회성 질문입니다.';
 
   @override

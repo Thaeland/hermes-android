@@ -9,6 +9,23 @@ class AppLocalizationsFr extends AppLocalizations {
   AppLocalizationsFr([String locale = 'fr']) : super(locale);
 
   @override
+  String get archive_chat => 'Archiver la discussion';
+
+  @override
+  String get unarchive_chat => 'Désarchiver la discussion';
+
+  @override
+  String get chat_archived => 'Discussion archivée';
+
+  @override
+  String get chat_unarchived => 'Discussion désarchivée';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return 'Impossible de modifier l’archivage de la discussion : $error';
+  }
+
+  @override
   String get quick_chat_description => 'Une question ponctuelle.';
 
   @override

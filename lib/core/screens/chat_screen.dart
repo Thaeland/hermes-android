@@ -245,6 +245,14 @@ class ChatScreen extends StatefulWidget {
   final SavedConnection connection;
   final Session session;
 
+  /// Publishes a server-confirmed stored-session change to the owning list.
+  final Future<void> Function(String sessionId, bool archived)?
+  onArchiveChanged;
+
+  /// Lets a longer-lived list own PATCH, read-back and reconciliation even
+  /// when this route is popped before the request completes.
+  final Future<bool> Function(String sessionId, bool archived)? sessionArchiver;
+
   /// The server-owned Project this chat was opened from, when known.
   /// `null` stays explicit as Unassigned in the sticky context header.
   final String? projectName;
@@ -365,6 +373,8 @@ class ChatScreen extends StatefulWidget {
     this.testStoredSessionKey,
     this.testMediaFilesClient,
     this.testTaskHistorySource,
+    this.onArchiveChanged,
+    this.sessionArchiver,
     super.key,
   });
 
@@ -392,6 +402,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _loading = true;
   late String _sessionTitle;
   bool _renaming = false;
+  late bool _sessionArchived;
+  bool _archiving = false;
+  int _archiveRevision = 0;
+  int _archiveReadGeneration = 0;
+  String? _archiveStateSessionId;
+  String? _archiveReadSessionId;
   String? _error;
   late final ApiClient _client;
   late final GatewayChatClient _gateway;
@@ -402,6 +418,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   DesktopGatewayClient? _desktopGateway;
   GatewayTurnApplicationController? _localTurnController;
   NormalGatewayApplicationSession? _normalSession;
+  bool _normalSessionReady = false;
   NormalGatewayChatOwner? _normalChat;
   Object? _normalSubscription;
   Object? _normalReservation;
@@ -524,6 +541,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     _sessionTitle = widget.session.title;
+    _sessionArchived = widget.session.archived;
     WidgetsBinding.instance.addObserver(this);
     _projectName = _normalisedProjectName(widget.projectName);
     _composerDraft = ComposerDraftStore.open(
@@ -631,6 +649,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           .setSessionBoundListener(widget.session.id, _onSessionBound);
     }
     unawaited(_refreshProjectName());
+    unawaited(_refreshArchiveState());
     unawaited(_initializeChat());
     _loadVerboseMode();
     _loadChatDensity();
@@ -717,6 +736,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _normalChat!.invalidateDraftRecovery();
     }
     _normalSubscription = _normalChat!.subscribe(_applyNormalSnapshot);
+    final session = _normalSession!;
+    unawaited(
+      session.ready.then(
+        (_) {
+          if (!mounted || !identical(_normalSession, session)) return;
+          setState(() => _normalSessionReady = true);
+        },
+        onError: (Object _, StackTrace _) {
+          // Failed receipt hydration cannot prove that the chat is idle.
+        },
+      ),
+    );
   }
 
   void _applyNormalSnapshot(
@@ -795,7 +826,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         snapshot.storedSessionId != null &&
         _storedSessionId != snapshot.storedSessionId;
     _storedSessionId = snapshot.storedSessionId;
-    if (bindingChanged) unawaited(_refreshProjectName());
+    if (bindingChanged) {
+      unawaited(_refreshProjectName());
+      unawaited(_refreshArchiveState());
+    }
     final pendingIds = snapshot.pendingInput
         .map(
           (event) =>
@@ -1027,6 +1061,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _normalChat?.bindStoredSession(storedSessionId);
     setState(() => _storedSessionId = storedSessionId);
     unawaited(_refreshProjectName());
+    unawaited(_refreshArchiveState());
   }
 
   Future<void> _restoreSessionModelOverride() async {
@@ -1046,6 +1081,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Future<void> _loadVerboseMode() async {
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
     setState(() => _verboseMode = prefs.getBool('verbose_mode') ?? false);
   }
 
@@ -1092,6 +1128,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     chatDensitySelection.removeListener(_onChatDensityChanged);
     _projectNameRefreshGeneration += 1;
+    _archiveReadGeneration += 1;
     pendingNotificationApprovals.removeListener(
       _consumePendingNotificationApproval,
     );
@@ -1255,7 +1292,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _retryPrompt(String text) async {
-    if (_sending ||
+    if (_archiving ||
+        _sending ||
         _streaming ||
         _pendingReattachResync ||
         text.trim().isEmpty) {
@@ -1267,12 +1305,117 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   bool get _canRename =>
       !_renaming &&
+      !_archiving &&
       !_sending &&
+      !_streaming &&
       !_pendingReattachResync &&
       (!widget.session.isLocalDraft ||
           _storedSessionId != null ||
           _storedSessionKey != widget.session.id ||
           _messages.isNotEmpty);
+
+  String get _archiveSessionId => _storedSessionId ?? _storedSessionKey;
+
+  bool get _hasStoredArchiveTarget =>
+      !widget.session.isLocalDraft ||
+      _storedSessionId != null ||
+      _storedSessionKey != widget.session.id ||
+      _archiveStateSessionId == _archiveSessionId;
+
+  bool get _canArchive =>
+      _hasStoredArchiveTarget &&
+      (_normalSession == null || _normalSessionReady) &&
+      !_archiving &&
+      !_renaming &&
+      !_preparingSend &&
+      !_sending &&
+      !_streaming &&
+      !_recoveringTurn &&
+      !_pendingReattachResync;
+
+  /// Navigation metadata can precede a canonical binding or an edit on another
+  /// device. Read exact stored metadata once per identity/open, without ever
+  /// resuming/creating a chat. A pre-write read cannot undo a confirmed save.
+  Future<void> _refreshArchiveState() async {
+    if (!mounted || _archiving) return;
+    final sessionId = _archiveSessionId;
+    if (_archiveReadSessionId == sessionId) return;
+    if (!_hasStoredArchiveTarget && _messages.isEmpty) return;
+    _archiveReadSessionId = sessionId;
+    final generation = ++_archiveReadGeneration;
+    final revision = _archiveRevision;
+    try {
+      final saved = await _client.getSession(sessionId);
+      if (!mounted ||
+          generation != _archiveReadGeneration ||
+          revision != _archiveRevision ||
+          sessionId != _archiveSessionId) {
+        return;
+      }
+      if (saved['id'] != sessionId || saved['archived'] is! bool) return;
+      setState(() {
+        _sessionArchived = saved['archived'] as bool;
+        _archiveStateSessionId = sessionId;
+      });
+    } catch (_) {
+      // Older gateways may lack metadata. Keep navigation-time state; the
+      // mutation still requires an independently verified server read-back.
+    }
+  }
+
+  Future<void> _setSessionArchived(
+    bool archived, {
+    String? expectedSessionId,
+  }) async {
+    if (!mounted || !_canArchive) return;
+    final sessionId = _archiveSessionId;
+    if (expectedSessionId != null && expectedSessionId != sessionId) return;
+    setState(() => _archiving = true);
+    // Invalidate pending metadata before the first await, including failures.
+    _archiveReadGeneration++;
+    try {
+      final archiver = widget.sessionArchiver;
+      final saved = await (archiver != null
+          ? archiver(sessionId, archived)
+          : _client.setSessionArchived(
+              sessionId: sessionId,
+              archived: archived,
+            ));
+      if (!mounted || sessionId != _archiveSessionId) return;
+      setState(() {
+        _sessionArchived = saved;
+        _archiveStateSessionId = sessionId;
+        _archiveReadSessionId = sessionId;
+        _archiveRevision++;
+      });
+      // The owner may need to clear a device-local expiry before Unarchive
+      // becomes visible. Do not announce success ahead of that reconciliation.
+      await widget.onArchiveChanged?.call(sessionId, saved);
+      if (!mounted || sessionId != _archiveSessionId) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            saved ? context.l10n.chat_archived : context.l10n.chat_unarchived,
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted || sessionId != _archiveSessionId) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(context.l10n.could_not_update_chat_archive(error)),
+          action: SnackBarAction(
+            label: context.l10n.retry,
+            onPressed: () => unawaited(
+              _setSessionArchived(archived, expectedSessionId: sessionId),
+            ),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _archiving = false);
+    }
+  }
 
   Future<void> _renameSession() async {
     if (!_canRename) return;
@@ -2877,7 +3020,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   /// Send message via SSE streaming (Gateway API Server).
   Future<void> _sendMessage({bool speakResponse = false}) async {
-    if (_voiceComposer.listening || _preparingSend) return;
+    if (_voiceComposer.listening || _preparingSend || _archiving) return;
     final text = _textController.text.trim();
     final attachments = List<AttachmentDraft>.from(_attachmentDrafts);
     if (text.isEmpty && attachments.isEmpty) return;
@@ -4685,6 +4828,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           ),
         ),
         actions: [
+          if (_archiving)
+            const Padding(
+              padding: EdgeInsets.only(right: 8),
+              child: Center(
+                child: SizedBox.square(
+                  key: ValueKey('chat-archive-progress'),
+                  dimension: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            ),
           if (_streaming)
             Padding(
               padding: EdgeInsets.only(right: 8),
@@ -4703,12 +4857,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           else
             PopupMenuButton<String>(
               tooltip: context.l10n.chat_actions,
+              onOpened: () => unawaited(_refreshArchiveState()),
               onSelected: (action) {
                 if (action == 'refresh' && !_pendingReattachResync) {
                   _fetchMessages();
                 }
                 if (action == 'export') _exportConversation();
                 if (action == 'rename') unawaited(_renameSession());
+                if (action == 'archive') unawaited(_setSessionArchived(true));
+                if (action == 'unarchive') {
+                  unawaited(_setSessionArchived(false));
+                }
               },
               itemBuilder: (_) => [
                 PopupMenuItem(
@@ -4717,6 +4876,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   child: ListTile(
                     leading: Icon(Icons.edit_outlined),
                     title: Text(context.l10n.rename),
+                  ),
+                ),
+                PopupMenuItem(
+                  value: _sessionArchived ? 'unarchive' : 'archive',
+                  enabled: _canArchive,
+                  child: ListTile(
+                    leading: Icon(
+                      _sessionArchived
+                          ? Icons.unarchive_outlined
+                          : Icons.archive_outlined,
+                    ),
+                    title: Text(
+                      _sessionArchived
+                          ? context.l10n.unarchive_chat
+                          : context.l10n.archive_chat,
+                    ),
                   ),
                 ),
                 PopupMenuItem(
@@ -5110,6 +5285,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   enabled:
                       _streaming ||
                       (!_transcriptLoadBlocksComposer &&
+                          !_archiving &&
                           !_sending &&
                           !_pendingReattachResync &&
                           !_voiceComposer.listening),
@@ -5135,6 +5311,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                               icon: const Icon(Icons.send, size: 20),
                               onPressed:
                                   _transcriptLoadBlocksComposer ||
+                                      _archiving ||
                                       _sending ||
                                       _pendingReattachResync ||
                                       _voiceComposer.listening

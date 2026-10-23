@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../models/session.dart';
 import '../services/local_chat_pin_store.dart';
+import '../services/session_archive_ledger.dart';
 import '../theme/hermes_theme.dart';
 import '../utils/relative_time.dart';
 import '../widgets/hermes_components.dart';
@@ -209,6 +210,64 @@ class WorkspaceSessionsData {
        archivesKnown = archivesKnown ?? !isPartial;
 }
 
+/// Reconcile only mutations newer than a snapshot's physical request epoch.
+WorkspaceSessionsData applySessionArchiveChanges(
+  WorkspaceSessionsData data,
+  SessionArchiveLedger ledger,
+  int observedRevision,
+) {
+  // Keep these authorities independent. A successful empty archive read must
+  // not be repopulated from rows retained after an active-list failure.
+  final active = ledger
+      .apply(data.sessions, observedRevision)
+      .where((row) => !row.archived)
+      .toList();
+  final archived = ledger
+      .apply(data.archivedSessions, observedRevision)
+      .where((row) => row.archived)
+      .toList();
+  final changes = ledger.changesSince(observedRevision).toList();
+  if (changes.isNotEmpty) {
+    final richRows = ledger.apply(
+      [...data.sessions, ...data.archivedSessions],
+      observedRevision,
+      includeMissing: true,
+    );
+    for (final change in changes) {
+      final row = richRows
+          .firstWhere(
+            (row) => ledger.sameConversation(row, change.session),
+            orElse: () => change.session,
+          )
+          .withArchived(change.archived);
+      active.removeWhere((old) => ledger.sameConversation(old, row));
+      archived.removeWhere((old) => ledger.sameConversation(old, row));
+      (change.archived ? archived : active).add(row);
+    }
+  }
+  final restored = <String>{
+    for (final change in ledger.changesSince(observedRevision))
+      if (!change.archived) ...[
+        change.session.id,
+        ?change.session.lineageRootId,
+      ],
+  };
+  return WorkspaceSessionsData(
+    sessions: active,
+    archivedSessions: archived,
+    sessionsKnown: data.sessionsKnown,
+    archivesKnown: data.archivesKnown,
+    isPartial: data.isPartial,
+    claimedSessionIds: data.claimedSessionIds,
+    archivedQuickChatIds: data.archivedQuickChatIds.difference(restored),
+    projectLabels: data.projectLabels,
+    projectsKnown: data.projectsKnown,
+  );
+}
+
+typedef WorkspaceSessionArchiver =
+    Future<bool> Function(Session session, bool archived);
+
 typedef WorkspaceSessionsLoader = Future<WorkspaceSessionsData> Function();
 
 /// Emits cumulative provisional snapshots and returns the final snapshot.
@@ -261,8 +320,8 @@ List<Session> filterWorkspaceSessions({
             // Machine sessions stay out of every human-facing list, the
             // archived view included — an archived cron run is still
             // cron noise. Quick-chat archives are human rows and stay.
-            WorkspaceSessionView.all ||
-            WorkspaceSessionView.search => !isMachineSession(session),
+            WorkspaceSessionView.all || WorkspaceSessionView.search =>
+              !session.archived && !isMachineSession(session),
           } &&
           (normalized.isEmpty ||
               session.title.toLowerCase().contains(normalized) ||
@@ -282,6 +341,7 @@ class WorkspaceSessionsScreen extends StatefulWidget {
   final ValueChanged<Session> onOpenSession;
   final WorkspaceSessionPromoter? onPromote;
   final WorkspaceSessionRenamer? onRename;
+  final WorkspaceSessionArchiver? onArchive;
   final LocalChatPinStore? pinStore;
   final bool embedded;
 
@@ -303,6 +363,7 @@ class WorkspaceSessionsScreen extends StatefulWidget {
     required this.onOpenSession,
     this.onPromote,
     this.onRename,
+    this.onArchive,
     this.pinStore,
     this.embedded = false,
     this.now,
@@ -324,6 +385,8 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
   final _movedProjects = <String, ({int revision, String label})>{};
   final Set<String> _renameDialogs = {};
   final Set<String> _renaming = {};
+  final Set<String> _archiving = {};
+  final _archiveChanges = SessionArchiveLedger();
 
   /// Only reads started before a successful rename need their title patched.
   /// Keep the rest of each response, including unrelated rows and metadata.
@@ -479,6 +542,7 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
     final generation = ++_loadGeneration;
     final titleRevision = _titleRevision;
     final projectRevision = _projectRevision;
+    final archiveRevision = _archiveChanges.revision;
     if (_hasSettledLoad && _data != null) _coldPreview = false;
     _retainedData = _coldPreview
         ? null
@@ -488,11 +552,14 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
 
     WorkspaceSessionsData guarded(WorkspaceSessionsData data) =>
         _withProjectMoves(
-          _withSessionTitles(data, {
-            for (final entry in _savedTitles.entries)
-              if (entry.value.revision > titleRevision)
-                entry.key: entry.value.title,
-          }),
+          _withSessionTitles(
+            applySessionArchiveChanges(data, _archiveChanges, archiveRevision),
+            {
+              for (final entry in _savedTitles.entries)
+                if (entry.value.revision > titleRevision)
+                  entry.key: entry.value.title,
+            },
+          ),
           {
             for (final entry in _movedProjects.entries)
               if (entry.value.revision > projectRevision)
@@ -619,7 +686,12 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
 
   Future<void> _rename(Session session) async {
     final rename = widget.onRename;
-    if (rename == null || !_renameDialogs.add(session.id)) return;
+    if (rename == null ||
+        _archiving.contains(session.id) ||
+        _promoting.contains(session.id) ||
+        !_renameDialogs.add(session.id)) {
+      return;
+    }
     try {
       // PopupMenuButton reports its selection before the popup route has
       // finished teardown. Do not autofocus a dialog during that transition.
@@ -692,7 +764,13 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
 
   Future<void> _promote(Session session, {bool fromMenu = false}) async {
     final promote = widget.onPromote;
-    if (promote == null || !mounted || _promoting.contains(session.id)) return;
+    if (promote == null ||
+        !mounted ||
+        _archiving.contains(session.id) ||
+        _renameDialogs.contains(session.id) ||
+        _promoting.contains(session.id)) {
+      return;
+    }
     setState(() => _promoting.add(session.id));
     try {
       // Own the flight before popup teardown, including the destination picker.
@@ -729,6 +807,71 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
       );
     } finally {
       _promoting.remove(session.id);
+      if (mounted) setState(() {});
+    }
+  }
+
+  Future<void> _setArchived(Session session, bool archived) async {
+    final archive = widget.onArchive;
+    if (archive == null ||
+        !mounted ||
+        _renameDialogs.contains(session.id) ||
+        _promoting.contains(session.id) ||
+        !_archiving.add(session.id)) {
+      return;
+    }
+    setState(() {});
+    try {
+      await Future<void>.delayed(kThemeAnimationDuration);
+      if (!mounted) return;
+      final current = _currentSession(session.id);
+      if (current == null) return;
+      final confirmed = await archive(current, archived);
+      if (confirmed != archived) {
+        throw StateError('Archive state was not confirmed');
+      }
+      if (!mounted) return;
+      setState(() {
+        final previousRevision = _archiveChanges.revision;
+        _archiveChanges.record(current, archived);
+        if (_data case final data?) {
+          _data = applySessionArchiveChanges(
+            data,
+            _archiveChanges,
+            previousRevision,
+          );
+        }
+        if (_retainedData case final retained?) {
+          _retainedData = applySessionArchiveChanges(
+            retained,
+            _archiveChanges,
+            previousRevision,
+          );
+        }
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            archived
+                ? context.l10n.chat_archived
+                : context.l10n.chat_unarchived,
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          persist: false,
+          content: Text(context.l10n.could_not_update_chat_archive(error)),
+          action: SnackBarAction(
+            label: context.l10n.retry,
+            onPressed: () => unawaited(_setArchived(session, archived)),
+          ),
+        ),
+      );
+    } finally {
+      _archiving.remove(session.id);
       if (mounted) setState(() {});
     }
   }
@@ -785,12 +928,10 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
     // Unassigned. The two lists come from different backends at
     // different instants, so dedupe by id — the archived copy wins for
     // a session archived between the two fetches.
-    final archivedIds = data.archivedSessions.map((s) => s.id).toSet();
-    final unionSessions = <Session>[
-      for (final s in data.sessions)
-        if (!archivedIds.contains(s.id)) s,
+    final unionSessions = _archiveChanges.apply([
+      ...data.sessions,
       ...data.archivedSessions,
-    ];
+    ], _archiveChanges.revision);
     final retainedClaims = _retainedData;
     final reuseClaims =
         _isUnassignedSurface &&
@@ -1002,6 +1143,13 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
     final tokens = HermesTokens.of(context);
     final projectLabel = data.projectLabels[session.id];
     final locallyPinned = localPinIdForSession(session, _pinnedIds) != null;
+    final isArchived =
+        session.archived || data.archivedQuickChatIds.contains(session.id);
+    final archiveBusy = _archiving.contains(session.id);
+    final mutating =
+        archiveBusy ||
+        _renameDialogs.contains(session.id) ||
+        _promoting.contains(session.id);
     // The move-to-project affordance serves the Archived-Quick view
     // (promote a lapsed quick chat) and any Unassigned surface — the
     // standalone view or the embedded chip browser with the Unassigned
@@ -1090,10 +1238,13 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
                     tooltip: _isUnassignedSurface
                         ? context.l10n.move_to_project
                         : context.l10n.promote_to_project,
-                    onPressed: () => unawaited(_promote(session)),
+                    onPressed: mutating
+                        ? null
+                        : () => unawaited(_promote(session)),
                     icon: const Icon(Icons.drive_file_move_outline),
                   ),
-          if (_renaming.contains(session.id) ||
+          if (archiveBusy ||
+              _renaming.contains(session.id) ||
               (!showPromote && _promoting.contains(session.id)))
             const SizedBox.square(
               dimension: 24,
@@ -1101,11 +1252,14 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
             ),
           if (widget.pinStore != null ||
               widget.onRename != null ||
-              widget.onPromote != null)
+              widget.onPromote != null ||
+              widget.onArchive != null)
             PopupMenuButton<String>(
               tooltip: context.l10n.chat_actions,
               onSelected: (action) {
                 switch (action) {
+                  case 'archive':
+                    unawaited(_setArchived(session, !isArchived));
                   case 'rename':
                     unawaited(_rename(session));
                   case 'pin':
@@ -1115,16 +1269,26 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
                 }
               },
               itemBuilder: (_) => [
+                if (widget.onArchive != null)
+                  PopupMenuItem(
+                    value: 'archive',
+                    enabled: !mutating,
+                    child: Text(
+                      isArchived
+                          ? context.l10n.unarchive_chat
+                          : context.l10n.archive_chat,
+                    ),
+                  ),
                 if (widget.onRename != null)
                   PopupMenuItem(
                     value: 'rename',
-                    enabled: !_renaming.contains(session.id),
+                    enabled: !mutating,
                     child: Text(context.l10n.rename),
                   ),
                 if (widget.onPromote != null && !isMachineSession(session))
                   PopupMenuItem(
                     value: 'move',
-                    enabled: !_promoting.contains(session.id),
+                    enabled: !mutating,
                     child: Text(context.l10n.move_to_project),
                   ),
                 if (widget.pinStore != null)

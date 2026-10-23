@@ -9,6 +9,23 @@ class AppLocalizationsJa extends AppLocalizations {
   AppLocalizationsJa([String locale = 'ja']) : super(locale);
 
   @override
+  String get archive_chat => 'チャットをアーカイブ';
+
+  @override
+  String get unarchive_chat => 'チャットのアーカイブを解除';
+
+  @override
+  String get chat_archived => 'チャットをアーカイブしました';
+
+  @override
+  String get chat_unarchived => 'チャットのアーカイブを解除しました';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return 'チャットのアーカイブ状態を更新できませんでした: $error';
+  }
+
+  @override
   String get quick_chat_description => '単発の質問用。';
 
   @override

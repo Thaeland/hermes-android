@@ -9,6 +9,23 @@ class AppLocalizationsPt extends AppLocalizations {
   AppLocalizationsPt([String locale = 'pt']) : super(locale);
 
   @override
+  String get archive_chat => 'Arquivar chat';
+
+  @override
+  String get unarchive_chat => 'Desarquivar chat';
+
+  @override
+  String get chat_archived => 'Chat arquivado';
+
+  @override
+  String get chat_unarchived => 'Chat desarquivado';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return 'Não foi possível alterar o arquivo do chat: $error';
+  }
+
+  @override
   String get quick_chat_description => 'Uma pergunta pontual.';
 
   @override
@@ -2754,6 +2771,23 @@ class AppLocalizationsPt extends AppLocalizations {
 /// The translations for Portuguese, as used in Brazil (`pt_BR`).
 class AppLocalizationsPtBr extends AppLocalizationsPt {
   AppLocalizationsPtBr() : super('pt_BR');
+
+  @override
+  String get archive_chat => 'Arquivar chat';
+
+  @override
+  String get unarchive_chat => 'Desarquivar chat';
+
+  @override
+  String get chat_archived => 'Chat arquivado';
+
+  @override
+  String get chat_unarchived => 'Chat desarquivado';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return 'Não foi possível alterar o arquivo do chat: $error';
+  }
 
   @override
   String get quick_chat_description => 'Uma pergunta pontual.';

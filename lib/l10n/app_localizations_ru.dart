@@ -9,6 +9,23 @@ class AppLocalizationsRu extends AppLocalizations {
   AppLocalizationsRu([String locale = 'ru']) : super(locale);
 
   @override
+  String get archive_chat => 'Архивировать чат';
+
+  @override
+  String get unarchive_chat => 'Разархивировать чат';
+
+  @override
+  String get chat_archived => 'Чат архивирован';
+
+  @override
+  String get chat_unarchived => 'Чат разархивирован';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return 'Не удалось изменить статус архивации чата: $error';
+  }
+
+  @override
   String get quick_chat_description => 'Разовый вопрос.';
 
   @override

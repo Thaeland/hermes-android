@@ -9,6 +9,23 @@ class AppLocalizationsZh extends AppLocalizations {
   AppLocalizationsZh([String locale = 'zh']) : super(locale);
 
   @override
+  String get archive_chat => '归档聊天';
+
+  @override
+  String get unarchive_chat => '取消归档聊天';
+
+  @override
+  String get chat_archived => '聊天已归档';
+
+  @override
+  String get chat_unarchived => '聊天已取消归档';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return '无法更新聊天归档状态：$error';
+  }
+
+  @override
   String get quick_chat_description => '一次性问题。';
 
   @override
@@ -2665,6 +2682,23 @@ class AppLocalizationsZh extends AppLocalizations {
 /// The translations for Chinese, using the Han script (`zh_Hans`).
 class AppLocalizationsZhHans extends AppLocalizationsZh {
   AppLocalizationsZhHans() : super('zh_Hans');
+
+  @override
+  String get archive_chat => '归档聊天';
+
+  @override
+  String get unarchive_chat => '取消归档聊天';
+
+  @override
+  String get chat_archived => '聊天已归档';
+
+  @override
+  String get chat_unarchived => '聊天已取消归档';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return '无法更新聊天归档状态：$error';
+  }
 
   @override
   String get quick_chat_description => '一次性问题。';

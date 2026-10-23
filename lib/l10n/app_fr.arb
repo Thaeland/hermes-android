@@ -1,5 +1,10 @@
 {
   "@@locale": "fr",
+  "archive_chat": "Archiver la discussion",
+  "unarchive_chat": "Désarchiver la discussion",
+  "chat_archived": "Discussion archivée",
+  "chat_unarchived": "Discussion désarchivée",
+  "could_not_update_chat_archive": "Impossible de modifier l’archivage de la discussion : {error}",
   "quick_chat_description": "Une question ponctuelle.",
   "ai_full_text": "IA + texte intégral",
   "ai_search_model": "Modèle de recherche IA",

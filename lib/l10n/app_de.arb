@@ -1,5 +1,10 @@
 {
   "@@locale": "de",
+  "archive_chat": "Chat archivieren",
+  "unarchive_chat": "Chat aus Archiv holen",
+  "chat_archived": "Chat archiviert",
+  "chat_unarchived": "Chat aus Archiv geholt",
+  "could_not_update_chat_archive": "Archivstatus des Chats konnte nicht geändert werden: {error}",
   "quick_chat_description": "Eine einmalige Frage.",
   "ai_full_text": "KI + Volltext",
   "ai_search_model": "KI-Suchmodell",

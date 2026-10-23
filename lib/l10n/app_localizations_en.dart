@@ -9,6 +9,23 @@ class AppLocalizationsEn extends AppLocalizations {
   AppLocalizationsEn([String locale = 'en']) : super(locale);
 
   @override
+  String get archive_chat => 'Archive chat';
+
+  @override
+  String get unarchive_chat => 'Unarchive chat';
+
+  @override
+  String get chat_archived => 'Chat archived';
+
+  @override
+  String get chat_unarchived => 'Chat unarchived';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return 'Could not update chat archive: $error';
+  }
+
+  @override
   String get quick_chat_description => 'A one-off question.';
 
   @override

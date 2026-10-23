@@ -1,5 +1,10 @@
 {
   "@@locale": "zh",
+  "archive_chat": "归档聊天",
+  "unarchive_chat": "取消归档聊天",
+  "chat_archived": "聊天已归档",
+  "chat_unarchived": "聊天已取消归档",
+  "could_not_update_chat_archive": "无法更新聊天归档状态：{error}",
   "quick_chat_description": "一次性问题。",
   "ai_full_text": "AI + 全文",
   "ai_search_model": "AI 搜索模型",
