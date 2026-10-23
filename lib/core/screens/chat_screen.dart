@@ -752,6 +752,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
     }
     if (snapshot.turnId == null &&
+        snapshot.subagents.isEmpty &&
         snapshot.pendingInput.isEmpty &&
         _normalPendingRequestIds.isEmpty) {
       _desktopConnectionState = snapshot.connectionState;

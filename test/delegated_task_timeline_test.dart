@@ -693,6 +693,11 @@ void main() {
         );
         await tester.pump();
         expect(position.pixels, offset, reason: 'parent tool completion');
+        expect(
+          requests,
+          hasLength(requestsBefore),
+          reason: 'inspection makes no parent request',
+        );
         const finalText =
             '$queuedText${liveText}Parent completed while inspecting';
         if (completeWhileOpen) {
@@ -704,6 +709,8 @@ void main() {
           await tester.pump(const Duration(milliseconds: 300));
           expect(position.pixels, offset, reason: 'parent completion target');
         }
+        // The app owner may hydrate parent history after its own terminal.
+        final requestsAfterParentTerminal = requests.length;
         hook.handler!(
           StreamEvent(
             type: 'subagent.complete',
@@ -716,7 +723,7 @@ void main() {
         );
         await tester.pump();
         expect(find.text('Status: Failed'), findsOneWidget);
-        expect(requests, hasLength(requestsBefore));
+        expect(requests, hasLength(requestsAfterParentTerminal));
         expect(position.pixels, offset);
         if (width < 700) {
           await tester.binding.handlePopRoute();
@@ -745,13 +752,15 @@ void main() {
           expect(position.pixels, closeTo(position.maxScrollExtent, 1));
         }
         // Only scroll application was suppressed, never stream content.
+        // Receipt-ordered prose remains split around reasoning/tool runs.
         position.jumpTo(position.maxScrollExtent);
         await tester.pump();
         expect(
           tester
               .widgetList<MessageBubble>(find.byType(MessageBubble))
-              .map((bubble) => bubble.content),
-          contains(finalText),
+              .map((bubble) => bubble.content)
+              .join(),
+          endsWith(finalText),
         );
         expect(
           tester

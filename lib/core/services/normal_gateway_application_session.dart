@@ -717,6 +717,27 @@ class NormalGatewayChatOwner {
       _notify();
       return;
     }
+    if (event.type.startsWith('subagent.')) {
+      // Child observers can settle after the parent turn. Updating them must
+      // neither reopen/resubmit the parent nor require its active wire receipt.
+      final update = GatewaySubagentActivity.fromGatewayEvent(
+        event.type,
+        event.data,
+      );
+      if (update != null) {
+        final index = _subagents.indexWhere(
+          (agent) => agent.matchesTask(update),
+        );
+        if (index < 0) {
+          _subagents.add(update);
+        } else {
+          _subagents[index] = _subagents[index].merge(update);
+        }
+        if (_subagents.length > 128) _subagents.removeAt(0);
+      }
+      _notify();
+      return;
+    }
     if (!snapshot.hasActiveTurn ||
         phase == NormalGatewayTurnPhase.preparing ||
         !wireEmitted ||
@@ -852,22 +873,6 @@ class NormalGatewayChatOwner {
           );
         }
         if (_tools.length > 512) _tools.removeAt(0);
-      }
-    } else if (event.type.startsWith('subagent.')) {
-      final update = GatewaySubagentActivity.fromGatewayEvent(
-        event.type,
-        event.data,
-      );
-      if (update != null) {
-        final index = _subagents.indexWhere(
-          (agent) => agent.matchesTask(update),
-        );
-        if (index < 0) {
-          _subagents.add(update);
-        } else {
-          _subagents[index] = _subagents[index].merge(update);
-        }
-        if (_subagents.length > 128) _subagents.removeAt(0);
       }
     } else {
       _status =
