@@ -2685,4 +2685,38 @@ class AppLocalizationsKo extends AppLocalizations {
   String task_tasks_finished(Object count) {
     return '$count delegated task(s) finished';
   }
+
+  @override
+  String get activity_status_unconfirmed => '상태 미확인';
+
+  @override
+  String get activity_recently_updated => '최근 업데이트됨';
+
+  @override
+  String get activity_reconnecting => '다시 연결 중 — 턴 상태 확인 중';
+
+  @override
+  String get activity_outcome_unknown => '턴의 결과를 확인할 수 없었습니다. 채팅을 열어 확인하세요.';
+
+  @override
+  String get activity_chat_updated_detail =>
+      '게이트웨이에 기록된 채팅 활동입니다. 턴의 실시간 상태는 확인할 수 없습니다.';
+
+  @override
+  String get activity_updated => '업데이트됨';
+
+  @override
+  String get activity_empty_title => '최근 활동 없음';
+
+  @override
+  String get activity_empty_detail =>
+      '이 앱에서 시작한 턴과 지난 7일 동안 업데이트된 게이트웨이 채팅이 여기에 표시됩니다.';
+
+  @override
+  String get activity_read_error =>
+      '활동에서 턴 기록이나 게이트웨이 채팅을 읽을 수 없었습니다. 연결을 확인한 후 다시 시도하세요.';
+
+  @override
+  String get activity_chat_unavailable =>
+      '이 채팅은 더 이상 사용할 수 없거나 게이트웨이에 연결할 수 없습니다.';
 }

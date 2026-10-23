@@ -2663,6 +2663,36 @@ class AppLocalizationsZh extends AppLocalizations {
   String task_tasks_finished(Object count) {
     return '$count delegated task(s) finished';
   }
+
+  @override
+  String get activity_status_unconfirmed => '状态未确认';
+
+  @override
+  String get activity_recently_updated => '最近更新';
+
+  @override
+  String get activity_reconnecting => '正在重新连接 — 正在检查轮次状态';
+
+  @override
+  String get activity_outcome_unknown => '无法确认本轮对话的结果。请打开聊天查看。';
+
+  @override
+  String get activity_chat_updated_detail => '网关已记录聊天活动；无法获取轮次的实时状态。';
+
+  @override
+  String get activity_updated => '已更新';
+
+  @override
+  String get activity_empty_title => '暂无近期活动';
+
+  @override
+  String get activity_empty_detail => '在此应用中启动的轮次，以及过去7天内更新的网关聊天都会显示在这里。';
+
+  @override
+  String get activity_read_error => '活动功能无法读取轮次记录或网关聊天。请检查连接后重试。';
+
+  @override
+  String get activity_chat_unavailable => '此聊天已不可用，或无法连接到网关。';
 }
 
 /// The translations for Chinese, using the Han script (`zh_Hans`).
@@ -5318,4 +5348,34 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String task_tasks_finished(Object count) {
     return '$count delegated task(s) finished';
   }
+
+  @override
+  String get activity_status_unconfirmed => '状态未确认';
+
+  @override
+  String get activity_recently_updated => '最近更新';
+
+  @override
+  String get activity_reconnecting => '正在重新连接 — 正在检查轮次状态';
+
+  @override
+  String get activity_outcome_unknown => '无法确认本轮对话的结果。请打开聊天查看。';
+
+  @override
+  String get activity_chat_updated_detail => '网关已记录聊天活动；无法获取轮次的实时状态。';
+
+  @override
+  String get activity_updated => '已更新';
+
+  @override
+  String get activity_empty_title => '暂无近期活动';
+
+  @override
+  String get activity_empty_detail => '在此应用中启动的轮次，以及过去7天内更新的网关聊天都会显示在这里。';
+
+  @override
+  String get activity_read_error => '活动功能无法读取轮次记录或网关聊天。请检查连接后重试。';
+
+  @override
+  String get activity_chat_unavailable => '此聊天已不可用，或无法连接到网关。';
 }

@@ -2754,4 +2754,40 @@ class AppLocalizationsEs extends AppLocalizations {
   String task_tasks_finished(Object count) {
     return '$count delegated task(s) finished';
   }
+
+  @override
+  String get activity_status_unconfirmed => 'Estado sin confirmar';
+
+  @override
+  String get activity_recently_updated => 'Actualizado recientemente';
+
+  @override
+  String get activity_reconnecting =>
+      'Reconectando — comprobando el estado del turno';
+
+  @override
+  String get activity_outcome_unknown =>
+      'No se pudo confirmar el resultado del turno. Abre el chat para comprobarlo.';
+
+  @override
+  String get activity_chat_updated_detail =>
+      'Actividad del chat registrada por el Gateway; el estado del turno en tiempo real no está disponible.';
+
+  @override
+  String get activity_updated => 'Actualizado';
+
+  @override
+  String get activity_empty_title => 'No hay actividad reciente';
+
+  @override
+  String get activity_empty_detail =>
+      'Aquí aparecen los turnos iniciados en esta app y los chats del Gateway actualizados en los últimos 7 días.';
+
+  @override
+  String get activity_read_error =>
+      'Actividad no pudo leer sus registros de turnos o los chats del Gateway. Comprueba la conexión y vuelve a intentarlo.';
+
+  @override
+  String get activity_chat_unavailable =>
+      'Este chat ya no está disponible o no se pudo acceder al Gateway.';
 }

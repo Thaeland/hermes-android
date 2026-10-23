@@ -76,6 +76,16 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
 - Follow text, exposed reasoning and consecutive tool groups in receipt order
   across REST/SSE and Remote Gateway replies. Expanding a card keeps that choice
   while its contents update.
+- **Activity** shows app-observed Remote Gateway turns: waiting for input,
+  running, failed and completed, plus an explicit unconfirmed state during
+  recovery or when an outcome cannot be proven. Recent turn metadata survives
+  app restarts; no prompt, response, title or approval content is stored there.
+  It also lists gateway chats updated within seven days, including REST-only
+  connections and chats started elsewhere. These are labelled **Updated**, not
+  assumed to be running or completed. The tab refreshes while foregrounded,
+  supports pull-to-refresh and opens the relevant chat. This is not a complete
+  server audit log: live outcomes from other clients and historic per-turn
+  outcomes predating this build are unavailable.
 - Persistent reconnect/session resume and defensive retry handling.
 - App-owned stock Gateway turns outlive an open chat route. Reopen a chat to
   reattach, including while other chats run. Pending markers survive process

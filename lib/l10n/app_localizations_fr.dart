@@ -2760,4 +2760,40 @@ class AppLocalizationsFr extends AppLocalizations {
   String task_tasks_finished(Object count) {
     return '$count delegated task(s) finished';
   }
+
+  @override
+  String get activity_status_unconfirmed => 'Statut non confirmé';
+
+  @override
+  String get activity_recently_updated => 'Mis à jour récemment';
+
+  @override
+  String get activity_reconnecting =>
+      'Reconnexion — vérification de l’état du tour';
+
+  @override
+  String get activity_outcome_unknown =>
+      'Le résultat du tour n’a pas pu être confirmé. Ouvrez la discussion pour le vérifier.';
+
+  @override
+  String get activity_chat_updated_detail =>
+      'Activité de la discussion enregistrée par la passerelle ; l’état du tour en temps réel n’est pas disponible.';
+
+  @override
+  String get activity_updated => 'Mis à jour';
+
+  @override
+  String get activity_empty_title => 'Aucune activité récente';
+
+  @override
+  String get activity_empty_detail =>
+      'Les tours lancés dans cette application et les discussions de la passerelle mises à jour au cours des 7 derniers jours apparaissent ici.';
+
+  @override
+  String get activity_read_error =>
+      'La vue Activité n’a pas pu lire ses enregistrements de tours ou les discussions de la passerelle. Vérifiez la connexion et réessayez.';
+
+  @override
+  String get activity_chat_unavailable =>
+      'Cette discussion n’est plus disponible ou la passerelle n’a pas pu être jointe.';
 }

@@ -29,6 +29,7 @@ import '../utils/activity_feed.dart';
 import 'hermes_components.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
+
 /// Reads the timeline. Injectable so the pane can be tested — and later
 /// re-pointed at a cache or a gateway feed — without reaching for a journal.
 typedef ActivityFeedLoader = Future<ActivityFeed> Function();
@@ -48,12 +49,14 @@ class ActivityPane extends StatefulWidget {
   final ValueChanged<ActivityItem>? onOpenItem;
 
   final ActivityClock? clock;
+  final Duration? refreshInterval;
 
   const ActivityPane({
     required this.loadFeed,
     this.actionableOnly = false,
     this.onOpenItem,
     this.clock,
+    this.refreshInterval,
     super.key,
   });
 
@@ -61,7 +64,8 @@ class ActivityPane extends StatefulWidget {
   State<ActivityPane> createState() => ActivityPaneState();
 }
 
-class ActivityPaneState extends State<ActivityPane> {
+class ActivityPaneState extends State<ActivityPane>
+    with WidgetsBindingObserver {
   /// The last successful read. `null` until one lands, which is exactly the
   /// condition for showing the skeleton.
   ActivityFeed? _feed;
@@ -71,10 +75,16 @@ class ActivityPaneState extends State<ActivityPane> {
   Object? _error;
 
   bool _loading = false;
+  Future<void>? _flight;
+  ActivityFeedLoader? _queuedLoader;
+  bool _queuedFullRefresh = false;
+  Timer? _timer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _startTimer();
     unawaited(_load());
   }
 
@@ -83,26 +93,78 @@ class ActivityPaneState extends State<ActivityPane> {
   /// Public so a host can refresh Activity after the user acts elsewhere —
   /// coming back from a chat to a row that still claims the turn is blocked
   /// would be worse than a spinner.
-  Future<void> refresh() => _load();
+  Future<void> refresh({ActivityFeedLoader? loader}) => _load(loader: loader);
 
-  Future<void> _load() async {
-    if (_loading) return;
-    setState(() => _loading = true);
-    try {
-      final feed = await widget.loadFeed();
-      if (!mounted) return;
-      setState(() {
-        _feed = feed;
-        _error = null;
-        _loading = false;
-      });
-    } catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _error = error;
-        _loading = false;
+  void _startTimer() {
+    _timer?.cancel();
+    final interval = widget.refreshInterval;
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    if (interval != null &&
+        interval > Duration.zero &&
+        (lifecycle == null || lifecycle == AppLifecycleState.resumed)) {
+      _timer = Timer.periodic(interval, (_) {
+        if (!_loading) unawaited(_load());
       });
     }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _startTimer();
+    if (state == AppLifecycleState.resumed) unawaited(_load());
+  }
+
+  @override
+  void didUpdateWidget(ActivityPane oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.refreshInterval != widget.refreshInterval) _startTimer();
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  Future<void> _load({ActivityFeedLoader? loader}) {
+    final active = _flight;
+    if (active != null) {
+      if (loader == null) {
+        _queuedFullRefresh = true;
+        _queuedLoader = widget.loadFeed;
+      } else if (!_queuedFullRefresh) {
+        _queuedLoader = loader;
+      }
+      return active;
+    }
+    final future = _drain(loader ?? widget.loadFeed);
+    _flight = future;
+    future.whenComplete(() {
+      if (identical(_flight, future)) _flight = null;
+    });
+    return future;
+  }
+
+  Future<void> _drain(ActivityFeedLoader loader) async {
+    setState(() => _loading = true);
+    do {
+      _queuedLoader = null;
+      _queuedFullRefresh = false;
+      try {
+        final feed = await loader();
+        if (!mounted) return;
+        setState(() {
+          _feed = feed;
+          _error = null;
+        });
+      } catch (error) {
+        if (!mounted) return;
+        setState(() => _error = error);
+      }
+      loader = _queuedLoader ?? loader;
+    } while (mounted && _queuedLoader != null);
+    if (mounted) setState(() => _loading = false);
   }
 
   DateTime get _now => (widget.clock ?? DateTime.now)();
@@ -115,8 +177,7 @@ class ActivityPaneState extends State<ActivityPane> {
       if (_error != null) {
         return ErrorState(
           title: context.l10n.could_not_read_activity,
-          message:
-              context.l10n.activity_reads_the_durable_turn_journal_to_know_what_hermes,
+          message: context.l10n.activity_read_error,
           onRetry: _load,
         );
       }
@@ -142,7 +203,7 @@ class ActivityPaneState extends State<ActivityPane> {
         padding: const EdgeInsets.only(bottom: HermesSpacing.xxl),
         physics: const AlwaysScrollableScrollPhysics(),
         children: [
-          if (_error != null) const _OfflineBanner(),
+          if (_error != null || feed.isStale) const _OfflineBanner(),
           if (groups.isEmpty)
             Padding(
               padding: EdgeInsets.only(
@@ -152,12 +213,16 @@ class ActivityPaneState extends State<ActivityPane> {
                 icon: widget.actionableOnly
                     ? Icons.inbox_outlined
                     : Icons.bolt_outlined,
-                title: widget.actionableOnly
+                title: feed.isStale
+                    ? context.l10n.could_not_read_activity
+                    : widget.actionableOnly
                     ? context.l10n.inbox_is_clear
-                    : context.l10n.nothing_is_running,
-                message: widget.actionableOnly
+                    : context.l10n.activity_empty_title,
+                message: feed.isStale
+                    ? context.l10n.activity_read_error
+                    : widget.actionableOnly
                     ? context.l10n.no_turn_needs_your_input_or_has_failed
-                    : context.l10n.no_turn_is_blocked_in_flight_or_recently_finished_work,
+                    : context.l10n.activity_empty_detail,
               ),
             )
           else
@@ -169,10 +234,7 @@ class ActivityPaneState extends State<ActivityPane> {
 
   List<Widget> _group(ActivityGroup group) {
     return [
-      SectionHeader(
-        title: group.title(context.l10n),
-        count: group.totalCount,
-      ),
+      SectionHeader(title: group.title(context.l10n), count: group.totalCount),
       for (final item in group.items)
         Padding(
           padding: const EdgeInsets.fromLTRB(
@@ -282,7 +344,9 @@ class _ActivityItemCard extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  title == null || title.isEmpty ? context.l10n.untitled_chat : title,
+                  title == null || title.isEmpty
+                      ? context.l10n.untitled_chat
+                      : title,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: tokens.typography.section.copyWith(
@@ -291,7 +355,7 @@ class _ActivityItemCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: HermesSpacing.sm),
-              StatusChip(status: item.status),
+              StatusChip(status: item.status, label: item.statusLabel),
             ],
           ),
           const SizedBox(height: HermesSpacing.xs),

@@ -748,5 +748,15 @@
   "task_status_pending": "Pending",
   "task_status_dispatched": "Dispatched",
   "task_status_unknown": "Unknown status: {status}",
-  "task_tasks_finished": "{count} delegated task(s) finished"
+  "task_tasks_finished": "{count} delegated task(s) finished",
+  "activity_status_unconfirmed": "Status unconfirmed",
+  "activity_recently_updated": "Recently updated",
+  "activity_reconnecting": "Reconnecting — checking the turn status",
+  "activity_outcome_unknown": "The turn’s outcome could not be confirmed. Open the chat to check.",
+  "activity_chat_updated_detail": "Chat activity recorded by the gateway; live turn status is unavailable.",
+  "activity_updated": "Updated",
+  "activity_empty_title": "No recent activity",
+  "activity_empty_detail": "Turns started in this app and gateway chats updated in the last 7 days appear here.",
+  "activity_read_error": "Activity could not read its turn records or gateway chats. Check the connection and try again.",
+  "activity_chat_unavailable": "This chat is no longer available, or the gateway could not be reached."
 }

@@ -2754,6 +2754,42 @@ class AppLocalizationsPt extends AppLocalizations {
   String task_tasks_finished(Object count) {
     return '$count delegated task(s) finished';
   }
+
+  @override
+  String get activity_status_unconfirmed => 'Estado não confirmado';
+
+  @override
+  String get activity_recently_updated => 'Atualizado recentemente';
+
+  @override
+  String get activity_reconnecting =>
+      'A restabelecer ligação — a verificar o estado do turno';
+
+  @override
+  String get activity_outcome_unknown =>
+      'Não foi possível confirmar o resultado do turno. Abra o chat para verificar.';
+
+  @override
+  String get activity_chat_updated_detail =>
+      'Atividade do chat registada pelo Gateway; o estado do turno em tempo real não está disponível.';
+
+  @override
+  String get activity_updated => 'Atualizado';
+
+  @override
+  String get activity_empty_title => 'Sem atividade recente';
+
+  @override
+  String get activity_empty_detail =>
+      'Aqui aparecem os turnos iniciados nesta app e os chats do Gateway atualizados nos últimos 7 dias.';
+
+  @override
+  String get activity_read_error =>
+      'A Atividade não conseguiu ler os registos dos turnos ou os chats do Gateway. Verifique a ligação e tente novamente.';
+
+  @override
+  String get activity_chat_unavailable =>
+      'Este chat já não está disponível ou não foi possível contactar o Gateway.';
 }
 
 /// The translations for Portuguese, as used in Brazil (`pt_BR`).
@@ -5501,4 +5537,40 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String task_tasks_finished(Object count) {
     return '$count delegated task(s) finished';
   }
+
+  @override
+  String get activity_status_unconfirmed => 'Status não confirmado';
+
+  @override
+  String get activity_recently_updated => 'Atualizado recentemente';
+
+  @override
+  String get activity_reconnecting =>
+      'Reconectando — verificando o status do turno';
+
+  @override
+  String get activity_outcome_unknown =>
+      'Não foi possível confirmar o resultado do turno. Abra o chat para verificar.';
+
+  @override
+  String get activity_chat_updated_detail =>
+      'Atividade do chat registrada pelo Gateway; o status do turno em tempo real não está disponível.';
+
+  @override
+  String get activity_updated => 'Atualizado';
+
+  @override
+  String get activity_empty_title => 'Nenhuma atividade recente';
+
+  @override
+  String get activity_empty_detail =>
+      'Aqui aparecem os turnos iniciados neste app e os chats do Gateway atualizados nos últimos 7 dias.';
+
+  @override
+  String get activity_read_error =>
+      'A Atividade não conseguiu ler os registros dos turnos ou os chats do Gateway. Verifique a conexão e tente novamente.';
+
+  @override
+  String get activity_chat_unavailable =>
+      'Este chat não está mais disponível ou não foi possível acessar o Gateway.';
 }

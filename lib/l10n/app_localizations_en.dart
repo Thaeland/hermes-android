@@ -2735,4 +2735,39 @@ class AppLocalizationsEn extends AppLocalizations {
   String task_tasks_finished(Object count) {
     return '$count delegated task(s) finished';
   }
+
+  @override
+  String get activity_status_unconfirmed => 'Status unconfirmed';
+
+  @override
+  String get activity_recently_updated => 'Recently updated';
+
+  @override
+  String get activity_reconnecting => 'Reconnecting — checking the turn status';
+
+  @override
+  String get activity_outcome_unknown =>
+      'The turn’s outcome could not be confirmed. Open the chat to check.';
+
+  @override
+  String get activity_chat_updated_detail =>
+      'Chat activity recorded by the gateway; live turn status is unavailable.';
+
+  @override
+  String get activity_updated => 'Updated';
+
+  @override
+  String get activity_empty_title => 'No recent activity';
+
+  @override
+  String get activity_empty_detail =>
+      'Turns started in this app and gateway chats updated in the last 7 days appear here.';
+
+  @override
+  String get activity_read_error =>
+      'Activity could not read its turn records or gateway chats. Check the connection and try again.';
+
+  @override
+  String get activity_chat_unavailable =>
+      'This chat is no longer available, or the gateway could not be reached.';
 }

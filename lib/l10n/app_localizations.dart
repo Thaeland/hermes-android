@@ -4629,6 +4629,66 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{count} delegated task(s) finished'**
   String task_tasks_finished(Object count);
+
+  /// No description provided for @activity_status_unconfirmed.
+  ///
+  /// In en, this message translates to:
+  /// **'Status unconfirmed'**
+  String get activity_status_unconfirmed;
+
+  /// No description provided for @activity_recently_updated.
+  ///
+  /// In en, this message translates to:
+  /// **'Recently updated'**
+  String get activity_recently_updated;
+
+  /// No description provided for @activity_reconnecting.
+  ///
+  /// In en, this message translates to:
+  /// **'Reconnecting — checking the turn status'**
+  String get activity_reconnecting;
+
+  /// No description provided for @activity_outcome_unknown.
+  ///
+  /// In en, this message translates to:
+  /// **'The turn’s outcome could not be confirmed. Open the chat to check.'**
+  String get activity_outcome_unknown;
+
+  /// No description provided for @activity_chat_updated_detail.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat activity recorded by the gateway; live turn status is unavailable.'**
+  String get activity_chat_updated_detail;
+
+  /// No description provided for @activity_updated.
+  ///
+  /// In en, this message translates to:
+  /// **'Updated'**
+  String get activity_updated;
+
+  /// No description provided for @activity_empty_title.
+  ///
+  /// In en, this message translates to:
+  /// **'No recent activity'**
+  String get activity_empty_title;
+
+  /// No description provided for @activity_empty_detail.
+  ///
+  /// In en, this message translates to:
+  /// **'Turns started in this app and gateway chats updated in the last 7 days appear here.'**
+  String get activity_empty_detail;
+
+  /// No description provided for @activity_read_error.
+  ///
+  /// In en, this message translates to:
+  /// **'Activity could not read its turn records or gateway chats. Check the connection and try again.'**
+  String get activity_read_error;
+
+  /// No description provided for @activity_chat_unavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'This chat is no longer available, or the gateway could not be reached.'**
+  String get activity_chat_unavailable;
 }
 
 class _AppLocalizationsDelegate

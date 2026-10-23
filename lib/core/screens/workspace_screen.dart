@@ -27,6 +27,7 @@ import '../services/desktop_gateway_client.dart';
 import '../services/gateway_turn_application_controller.dart';
 import '../services/gateway_turn_journal.dart';
 import '../services/local_chat_pin_store.dart';
+import '../services/operational_activity_store.dart';
 import '../services/project_folder_provisioner.dart';
 import '../services/projects_repository.dart';
 import '../services/quick_chat_store.dart';
@@ -34,6 +35,7 @@ import '../services/remote_files_client.dart';
 import '../services/shared_attachment_preparer.dart';
 import '../theme/hermes_theme.dart';
 import '../utils/activity_feed.dart';
+import '../utils/operational_activity_feed.dart';
 import '../utils/home_turn_signals.dart';
 import '../utils/new_chat_options.dart';
 import '../widgets/activity_pane.dart';
@@ -273,6 +275,21 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   /// separately from the feed so the badge survives a destination switch that
   /// disposes the pane.
   int _activityBlockedCount = 0;
+  int _activityRead = 0;
+  int _activitySessionRead = 0;
+  bool _activitySessionsStale = false;
+  final Map<String, Session> _activitySessions = {};
+  List<OperationalActivityRecord> _lastActivityRecords = const [];
+  ActivityFeed _lastJournalFeed = const ActivityFeed(
+    groups: [],
+    blockedCount: 0,
+    runningCount: 0,
+  );
+  Object? _activityListener;
+  Timer? _activityDebounce;
+  GatewayTurnApplicationController get _turnController =>
+      widget.turnApplicationController ??
+      GatewayTurnApplicationController.standalone;
 
   /// Blocked plus failed turns shown by the Home Inbox action.
   int _inboxActionCount = 0;
@@ -607,19 +624,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   /// never surface as an error on a destination the user is not looking at.
   Future<void> _refreshActivityBadge() async {
     try {
-      await _loadActivity();
+      await _loadActivity(refreshSessions: false);
     } catch (_) {
-      if (!mounted || (_activityBlockedCount == 0 && _inboxActionCount == 0)) {
-        return;
-      }
-      setState(() {
-        _activityBlockedCount = 0;
-        _inboxActionCount = 0;
-      });
+      // An unreadable source is not proof that known blocked work disappeared.
     }
   }
 
   void _cacheSessionTitles(List<Session> sessions) {
+    _activitySessions.addEntries(sessions.map((row) => MapEntry(row.id, row)));
     final titles = <String, String>{};
     for (final session in sessions) {
       final title = session.title.trim();
@@ -629,35 +641,111 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     _sessionTitles = Map.unmodifiable(titles);
   }
 
-  /// Reads the Activity timeline from the durable turn journal.
-  ///
-  /// Same store, same scope, and same degradation rule as Home's signals: a
-  /// connection with no Desktop Gateway has no journal scope and reports an
-  /// empty timeline instead of an error, so a legacy REST connection keeps
-  /// working.
-  Future<ActivityFeed> _loadActivityFeedFromJournal(
-    SavedConnection connection,
-    Map<String, String> sessionTitles,
-  ) async {
-    final endpointDigest = endpointDigestForConnection(connection);
-    if (endpointDigest == null) {
-      return const ActivityFeed(groups: [], blockedCount: 0, runningCount: 0);
+  /// Read actual app-owned turns plus the gateway's recent session metadata.
+  /// A stock/REST connection must not depend on a recovery-v2 journal existing.
+  Future<ActivityFeed> _loadOperationalActivity({
+    required bool refreshSessions,
+  }) async {
+    final connection = widget.connection;
+    final l10n = context.l10n;
+    var stale = _activitySessionsStale;
+    if (refreshSessions) {
+      final read = ++_activitySessionRead;
+      try {
+        // One latest window, not a second full Home scan every polling tick.
+        // Keep known older rows: OFFSET absence is not deletion proof.
+        final sessions = widget.sessionsLoader != null
+            ? await _loadSessions()
+            : (await _sessionClient.getSessionsPage(
+                limit: 100,
+                offset: 0,
+              )).sessions;
+        if (!mounted) throw StateError('Workspace disposed');
+        if (read == _activitySessionRead) {
+          _activitySessionsStale = false;
+          stale = false;
+          _activitySessions.addEntries(
+            sessions.map((row) => MapEntry(row.id, row)),
+          );
+          _sessionTitles = Map.unmodifiable({
+            ..._sessionTitles,
+            for (final row in sessions) row.id: row.title,
+          });
+        }
+      } catch (_) {
+        if (!mounted) rethrow;
+        if (read == _activitySessionRead) _activitySessionsStale = true;
+        stale = true;
+      }
     }
-    return readActivityFeed(
-      journal: _journal ??= GatewayTurnJournal(),
-      connectionId: connection.id,
-      endpointDigest: endpointDigest,
-      sessionTitles: sessionTitles,
+    if (!mounted) throw StateError('Workspace disposed');
+    try {
+      final records = await _turnController.readActivityRecords(connection);
+      if (!mounted) throw StateError('Workspace disposed');
+      _lastActivityRecords = records;
+    } catch (_) {
+      if (!mounted) rethrow;
+      stale = true;
+    }
+    final endpointDigest = endpointDigestForConnection(connection);
+    if (endpointDigest != null) {
+      try {
+        final snapshot = await (_journal ??= GatewayTurnJournal())
+            .loadSnapshot();
+        if (!mounted) throw StateError('Workspace disposed');
+        _lastJournalFeed = buildActivityFeed(
+          snapshot: snapshot,
+          now: DateTime.now(),
+          connectionId: connection.id,
+          endpointDigest: endpointDigest,
+          sessionTitles: _sessionTitles,
+          // Apply the cap only after all sources have been combined.
+          groupLimit: snapshot.entries.length + 1,
+        );
+      } catch (_) {
+        if (!mounted) rethrow;
+        stale = true;
+      }
+    }
+    final feed = buildOperationalActivityFeed(
+      journalFeed: _lastJournalFeed,
+      records: _lastActivityRecords,
+      sessions: _activitySessions.values,
+      now: DateTime.now(),
+      l10n: l10n,
+    );
+    return ActivityFeed(
+      groups: feed.groups,
+      blockedCount: feed.blockedCount,
+      runningCount: feed.runningCount,
+      isStale: stale,
     );
   }
 
+  void _onTurnActivityChanged() {
+    if (!mounted || _activityDebounce != null) return;
+    // Streaming tokens also notify observers. Coalesce them without issuing
+    // session-list requests; the visible pane's periodic/manual refresh owns I/O.
+    _activityDebounce = Timer(const Duration(milliseconds: 250), () {
+      _activityDebounce = null;
+      if (!mounted) return;
+      Future<ActivityFeed> read() => _loadActivity(refreshSessions: false);
+      final activity = _activityKey.currentState;
+      final inbox = _inboxKey.currentState;
+      if (activity != null) unawaited(activity.refresh(loader: read));
+      if (inbox != null) unawaited(inbox.refresh(loader: read));
+      if (activity == null && inbox == null) unawaited(_refreshActivityBadge());
+    });
+  }
+
   /// Reads the feed and keeps the shell badge in step with it.
-  Future<ActivityFeed> _loadActivity() async {
-    final loader = widget.activityFeedLoader ?? _loadActivityFeedFromJournal;
+  Future<ActivityFeed> _loadActivity({bool refreshSessions = true}) async {
+    final read = ++_activityRead;
+    final loader = widget.activityFeedLoader;
     // Titles may not be cached yet when Activity is the first destination the
     // user opens; read the sessions once so rows are not all untitled. A
     // failed read degrades a row's title, never the timeline itself.
-    if (_sessionTitles.isEmpty) {
+    if (loader != null && _sessionTitles.isEmpty) {
       final generation = _homeGeneration;
       try {
         final sessions = await (widget.sessionsLoader == null
@@ -668,7 +756,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         }
       } catch (_) {}
     }
-    final feed = await loader(widget.connection, _sessionTitles);
+    final feed = loader != null
+        ? await loader(widget.connection, _sessionTitles)
+        : await _loadOperationalActivity(refreshSessions: refreshSessions);
     final inboxCount = feed.groups
         .where(
           (group) =>
@@ -682,7 +772,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       // Deferred: the pane calls this from its own build-triggered load, and
       // setState during that frame would rebuild the shell mid-layout.
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
+        if (!mounted || read != _activityRead) return;
         setState(() {
           _activityBlockedCount = feed.blockedCount;
           _inboxActionCount = inboxCount;
@@ -708,6 +798,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   void initState() {
     super.initState();
     _initialization = _initialize();
+    _activityListener = _turnController.addTurnActivityListener(
+      _onTurnActivityChanged,
+    );
     final legacyText = widget.initialSharedText?.trim();
     final sharedPayload =
         widget.initialSharedPayload ??
@@ -876,6 +969,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   @override
   void dispose() {
     _homeGeneration++;
+    _activityRead++;
+    _activitySessionRead++;
+    _activityDebounce?.cancel();
+    final listener = _activityListener;
+    if (listener != null) _turnController.removeTurnActivityListener(listener);
     // Only tear down what this screen created; an injected repository stays
     // owned by whoever supplied it.
     if (_ownsRepository) {
@@ -1019,6 +1117,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       case HermesDestination.activity:
         return ActivityPane(
           key: _activityKey,
+          refreshInterval: widget.sessionsRefreshInterval,
           loadFeed: _loadActivity,
           onOpenItem: _openActivityItem,
         );
@@ -1177,6 +1276,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         appBar: AppBar(title: Text(context.l10n.inbox)),
         body: ActivityPane(
           key: _inboxKey,
+          refreshInterval: widget.sessionsRefreshInterval,
           loadFeed: _loadActivity,
           onOpenItem: _openActivityItem,
           actionableOnly: true,
@@ -1192,8 +1292,20 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   /// that can never load, so an unknown session is a deliberate no-op rather
   /// than a broken navigation.
   Future<void> _openActivityItem(ActivityItem item) async {
-    final session = _sessionForActivity(item);
-    if (session == null) return;
+    var session =
+        _activitySessions[item.sessionId] ?? _sessionForActivity(item);
+    if (session == null) {
+      try {
+        session = await _sessionClient.getSessionById(item.sessionId);
+      } catch (_) {}
+      if (!mounted) return;
+    }
+    if (session == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.activity_chat_unavailable)),
+      );
+      return;
+    }
     await _openSession(session);
     if (!mounted) return;
     unawaited(_activityKey.currentState?.refresh() ?? Future<void>.value());
