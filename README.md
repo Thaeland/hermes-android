@@ -1,4 +1,4 @@
-# Hermes Android v2.1.31
+# Hermes Android v2.1.32
 
 Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — chat with your Hermes sessions from a phone or tablet over local Wi-Fi or a private Tailscale network.
 
@@ -14,15 +14,15 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
 
 ## Current release
 
-- Version: **2.1.31** (build 2174)
+- Version: **2.1.32** (build 2175)
 - Package: `com.hermesagent.hermes_android`
 - Recommended APK for modern phones: ARM64 release build from the
   [Releases](https://github.com/rusty4444/hermes-android/releases) page.
 - Production builds are signed with a private release keystore. Debug APKs
   signed with the Android debug certificate remain available for testing
   under the `com.hermesagent.hermes_android.dev` package ID.
-- v2.1.31 adds delegated-task inspection, receipt-ordered chat activity,
-  app-owned stock Gateway turns and optional Google-free UnifiedPush.
+- v2.1.32 keeps tool sections collapsed on each chat visit and shows only
+  the current or latest tool call until you expand the group.
   See the [changelog](CHANGELOG.md) for features, fixes and delivery limits.
 - The app checks [GitHub Releases](https://github.com/rusty4444/hermes-android/releases)
   on ordinary launches. An answered check limits network requests to once
@@ -115,6 +115,15 @@ See [CHANGELOG.md](CHANGELOG.md) for the complete release history and
 [docs/HERMESAPK_DEVELOPMENT_LOG.md](docs/HERMESAPK_DEVELOPMENT_LOG.md) for the
 sanitized implementation and validation record.
 
+## What's new in v2.1.32
+
+- Tool sections start collapsed when opening or returning to a chat, including
+  while work is running. The header previews the newest running call, or the
+  latest call when none are running, while retaining group status and timing.
+- Expand a section to inspect every call. Your choice survives incoming events
+  and scrolling within the visit; leaving and reopening resets it. Verbose
+  mode remains an explicit open default.
+
 ## What's new in v2.1.31
 
 - Tap a delegated task for a read-only timeline above the parent chat. Inspect
@@ -137,14 +146,6 @@ sanitized implementation and validation record.
 - A rejected prompt returns only if you have not edited the cleared composer.
   Newer text and deliberately cleared drafts are left alone. Sending another
   turn remains blocked while the current turn or recovery is active.
-
-## What's new in v2.1.29
-
-- Move a chat into a Project or between Projects from the Chats row's action
-  menu. Choose the destination before the app changes its server working folder.
-- After a move, Chats shows the new Project and Unassigned no longer lists
-  the conversation. Cancel or a failed move leaves its placement unchanged.
-  See [Moving chats between Projects](docs/moving-chats.md).
 
 ## Features
 
@@ -589,7 +590,7 @@ cp build/app/outputs/flutter-apk/app-*-release.apk release-apks/
 block in `android/app/build.gradle.kts` derives per-ABI codes as
 `base * 10 + ABI code` (armeabi-v7a = 1, arm64-v8a = 2, x86_64 = 3), so the
 codes stay ordered armeabi-v7a < arm64-v8a < x86_64 as fdroiddata requires.
-For v2.1.31, base `2174` therefore produces codes `21741`/`21742`/`21743`.
+For v2.1.32, base `2175` therefore produces codes `21751`/`21752`/`21753`.
 CI reads the completed arm64 APK with `aapt` and fails if that relationship
 drifts. Release-floor checks continue to apply to the base value and must not
 be weakened to rely on the ABI code.
@@ -701,8 +702,9 @@ lib/
 ## Credits
 
 **AI assistance:** Hermes Agent assists with implementation, research, code
-review and regression tests. Automated checks do not substitute for device
-validation; release notes list the checks performed.
+review and regression tests, including the tool-section behaviour in v2.1.32.
+Automated checks do not substitute for device validation; release notes list
+the checks performed.
 
 - **krotname** (Andrei Ovcharenko) — fixed duplicate final answers after
   Gateway interim previews, including late reasoning and widget regressions
