@@ -1104,6 +1104,10 @@ Future<void> _pumpChat(
               return const ResumedGatewaySession(
                 runtimeSessionId: 'fixture-runtime',
                 running: false,
+                // These history-lag fixtures model a known successful terminal
+                // outcome. Idle alone must not imply success or keep polling
+                // for one; stock idle/partial is covered by the review suite.
+                status: 'completed',
               );
             },
         testDesktopConnectionHook: hook,

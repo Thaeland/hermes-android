@@ -1,16 +1,40 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Per-session composer drafts so leaving a chat never loses typed text.
-///
-/// Persisted in [SharedPreferences] (device-local) and namespaced by
-/// stable connection id + session id (base64url) so endpoint edits do not
-/// strand drafts and identical session ids from different connections never
-/// leak into each other. Empty text clears the entry: an abandoned draft must
-/// not resurrect after the message was sent or deleted.
+/// A route's write authority, independent of its composer edit revision. A
+/// replacement route owns later writes; disposing the old route cannot erase
+/// the replacement's draft. This handle contains no widget or callback.
+class ComposerDraftHandle {
+  final String connectionId;
+  final String sessionId;
+  final int _owner;
+
+  ComposerDraftHandle._(this.connectionId, this.sessionId, this._owner);
+
+  /// An explicit edit may take ownership back, including a deliberate clear.
+  void edited() => ComposerDraftStore._claim(this);
+
+  Future<void> save(String text) => ComposerDraftStore._save(
+    connectionId: connectionId,
+    sessionId: sessionId,
+    text: text,
+    owner: _owner,
+  );
+}
+
+/// Connection-scoped composer drafts and durable local -> stored aliases.
+/// All reads, writes, and alias migrations share one physical queue, including
+/// writes from an old route during replacement. Empty strings are tombstones:
+/// an intentional canonical clear must not resurrect an older local draft.
 abstract final class ComposerDraftStore {
   static const _prefix = 'composer_draft';
+  static const _aliasPrefix = 'composer_draft_alias';
+  static Future<void>? _tail;
+  static int _nextOwner = 0;
+  static final Map<String, int> _owners = {};
+  static SharedPreferences? _ownerPreferences;
 
   static String _key(String connectionId, String sessionId) {
     final namespace = base64Url
@@ -19,14 +43,118 @@ abstract final class ComposerDraftStore {
     return '$_prefix.$namespace';
   }
 
+  static String _aliasKey(String key) =>
+      '$_aliasPrefix.${key.substring(_prefix.length + 1)}';
+
+  static String _resolve(
+    SharedPreferences prefs,
+    String connectionId,
+    String sessionId,
+  ) {
+    var key = _key(connectionId, sessionId);
+    final seen = <String>{};
+    while (seen.add(key)) {
+      final target = prefs.getString(_aliasKey(key));
+      if (target == null) return key;
+      key = _key(connectionId, target);
+    }
+    throw StateError('Cyclic composer draft alias.');
+  }
+
+  static Future<T> _serialized<T>(
+    Future<T> Function(SharedPreferences) action,
+  ) {
+    Future<T> perform() async {
+      final prefs = await SharedPreferences.getInstance();
+      if (!identical(_ownerPreferences, prefs)) {
+        _owners.clear();
+        _ownerPreferences = prefs;
+      }
+      return action(prefs);
+    }
+
+    final previous = _tail;
+    final flight = previous == null
+        ? perform()
+        : previous.then((_) => perform());
+    final tail = flight.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    _tail = tail;
+    tail.whenComplete(() {
+      if (identical(_tail, tail)) _tail = null;
+    }).ignore();
+    return flight;
+  }
+
+  static ComposerDraftHandle open({
+    required String connectionId,
+    required String sessionId,
+  }) {
+    final handle = ComposerDraftHandle._(connectionId, sessionId, ++_nextOwner);
+    _claim(handle);
+    return handle;
+  }
+
+  static void _claim(ComposerDraftHandle handle) {
+    _serialized((prefs) async {
+      _owners[_resolve(prefs, handle.connectionId, handle.sessionId)] =
+          handle._owner;
+    }).ignore();
+  }
+
+  /// Register a binding before notifying routes. Copy before publishing the
+  /// alias, check both writes, and retain the source even after success. A
+  /// partial failure never deletes the only copy. Existing canonical text (or
+  /// a clear tombstone) wins over an old local bucket.
+  static Future<void> bind({
+    required String connectionId,
+    required String localSessionId,
+    required String storedSessionId,
+  }) async {
+    try {
+      await _serialized((prefs) async {
+        final local = _resolve(prefs, connectionId, localSessionId);
+        final stored = _resolve(prefs, connectionId, storedSessionId);
+        if (local == stored) return;
+        final canonicalExists = prefs.containsKey(stored);
+        try {
+          if (!canonicalExists && prefs.containsKey(local)) {
+            if (!await prefs.setString(stored, prefs.getString(local)!)) {
+              throw StateError('Could not copy composer draft.');
+            }
+          }
+          if (!await prefs.setString(_aliasKey(local), storedSessionId)) {
+            throw StateError('Could not persist composer draft alias.');
+          }
+        } catch (_) {
+          // SharedPreferences optimistically updates its cache even when the
+          // platform rejects a write. Do not treat that phantom alias as durable
+          // or skip the next migration retry because it appears in the cache.
+          await prefs.reload();
+          rethrow;
+        }
+        // A canonical route or pre-existing canonical draft must not be
+        // overwritten by a stale local route's later disposal. A real edit
+        // after binding can explicitly acquire the merged identity again.
+        _owners[stored] ??= canonicalExists ? 0 : _owners[local] ?? 0;
+        _owners.remove(local);
+      });
+    } catch (_) {
+      // Best effort. The untouched source is available for a later bind retry.
+    }
+  }
+
   static Future<String?> read({
     required String connectionId,
     required String sessionId,
   }) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final value = prefs.getString(_key(connectionId, sessionId));
-      return (value == null || value.trim().isEmpty) ? null : value;
+      return await _serialized((prefs) async {
+        final value = prefs.getString(_resolve(prefs, connectionId, sessionId));
+        return (value == null || value.trim().isEmpty) ? null : value;
+      });
     } catch (_) {
       return null;
     }
@@ -36,53 +164,60 @@ abstract final class ComposerDraftStore {
     required String connectionId,
     required String sessionId,
     required String text,
+  }) => _save(connectionId: connectionId, sessionId: sessionId, text: text);
+
+  static Future<void> _save({
+    required String connectionId,
+    required String sessionId,
+    required String text,
+    int? owner,
   }) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final key = _key(connectionId, sessionId);
-      if (text.trim().isEmpty) {
-        await prefs.remove(key);
-      } else {
-        await prefs.setString(key, text);
-      }
+      await _serialized((prefs) async {
+        final key = _resolve(prefs, connectionId, sessionId);
+        if (owner != null && _owners[key] != owner) return;
+        if (owner == null) _owners[key] = 0;
+        if (!await prefs.setString(key, text.trim().isEmpty ? '' : text)) {
+          throw StateError('Could not persist composer draft.');
+        }
+      });
     } catch (_) {
       // Best-effort: a failed save must never break the screen.
     }
   }
 
-  /// Drops the draft for one session.
+  /// Clear through aliases too; retain a tombstone against stale migration.
   static Future<void> remove({
     required String connectionId,
     required String sessionId,
-  }) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.remove(_key(connectionId, sessionId));
-    } catch (_) {
-      // Best-effort.
-    }
-  }
+  }) => save(connectionId: connectionId, sessionId: sessionId, text: '');
 
-  /// Drops every draft stored for [connectionId]: called when the user
-  /// deletes a connection so orphaned drafts cannot accumulate.
+  /// Drops every draft and alias for this connection only.
   static Future<void> removeConnection(String connectionId) async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final marker = '$connectionId\u0000';
-      for (final key in prefs.getKeys()) {
-        if (!key.startsWith('$_prefix.')) continue;
-        final decoded = _decode(key);
-        if (decoded != null && decoded.startsWith(marker)) {
-          await prefs.remove(key);
+      await _serialized((prefs) async {
+        final marker = '$connectionId\u0000';
+        for (final key in prefs.getKeys()) {
+          final prefix = key.startsWith('$_prefix.')
+              ? _prefix
+              : key.startsWith('$_aliasPrefix.')
+              ? _aliasPrefix
+              : null;
+          if (prefix == null) continue;
+          final decoded = _decode(key, prefix);
+          if (decoded != null && decoded.startsWith(marker)) {
+            await prefs.remove(key);
+            _owners.remove(key);
+          }
         }
-      }
+      });
     } catch (_) {
       // Best-effort.
     }
   }
 
-  static String? _decode(String key) {
-    final encoded = key.substring(_prefix.length + 1);
+  static String? _decode(String key, String prefix) {
+    final encoded = key.substring(prefix.length + 1);
     try {
       return utf8.decode(base64Url.decode(base64Url.normalize(encoded)));
     } catch (_) {
