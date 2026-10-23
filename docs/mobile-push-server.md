@@ -383,6 +383,25 @@ The authenticated events API is the routing authority; it is not an unlimited
 transcript or a proof that an old attention request still exists. After a retention
 window, missed hooks or connectivity loss, reconcile current authenticated chat state.
 
+## Consuming client/server protocol smoke test
+
+With Flutter dependencies fetched and the server test dependencies installed, run
+from the repository root:
+
+```sh
+MOBILE_PUSH_DART_SMOKE=1 python -m pytest -q -s \
+  server/mobile-push/tests/test_dart_contract_smoke.py
+```
+
+This opt-in test launches the production Dart `MobilePushApi` and `DashboardClient`
+over loopback TCP against the actual Python router/models/store/runtime. It checks
+authorised registration, future-chat events across cursor pages, generation-bound
+responses, bounded login retry, rotation and revocation. Its test subscriber decrypts
+real TLS Web Push and independently verifies VAPID. The password-cookie provider,
+fixed disposable profile and decrypted-proof handoff are fixture seams—not installed
+Hermes authentication, host profile resolution, Android connector or Google delivery.
+The test is skipped in ordinary Python runs unless explicitly enabled.
+
 ## Push payload, hooks and delivery semantics
 
 Database upgrades add a scope column defaulting to `explicit`; existing consent is

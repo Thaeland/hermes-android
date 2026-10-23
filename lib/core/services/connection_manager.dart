@@ -143,6 +143,10 @@ class ConnectionManager {
   // stay retryable by a replacement manager, not strand this native lease until
   // process death. Retrying END never restores consent or releases a sibling.
   static final _pendingPushMutationEnds = <String, Map<String, dynamic>>{};
+  // Every manager writes the same physical list. Own its read/modify/write,
+  // including secrets and rollback, not just the final setStringList call.
+  // Clear the tail when idle so it cannot retain a disposed async/test zone.
+  static Future<void>? _savedConnectionsTail;
 
   final SharedPreferences prefs;
   final CredentialStore _credentialStore;
@@ -171,40 +175,43 @@ class ConnectionManager {
   /// SharedPreferences list is sanitized only after all read-backs match, so a
   /// partial secure-store failure leaves every legacy profile retryable.
   Future<void> initialize() async {
-    final maps = _readConnectionMaps();
-    final connections = _connectionsFromMaps(maps);
-    final hasLegacyFields = maps.any(
-      (map) =>
-          map.containsKey('api_key') || map.containsKey('dashboard_password'),
-    );
-
-    try {
-      for (final connection in connections) {
-        final credentials = _ConnectionCredentials.fromConnection(connection);
-        if (!credentials.isEmpty) {
-          await _writeAndVerifyCredentials(connection.id, credentials);
-        }
-      }
-
-      for (final connection in connections) {
-        final encoded = await _credentialStore.read(
-          _credentialKey(connection.id),
-        );
-        if (encoded != null) {
-          _ConnectionCredentials.decode(encoded);
-        }
-      }
-
-      if (hasLegacyFields) {
-        await _saveAll(connections);
-      }
-    } on CredentialStorageException {
-      rethrow;
-    } catch (_) {
-      throw const CredentialStorageException(
-        'Connection credentials could not be migrated safely.',
+    await _serializeSavedConnections(() async {
+      await _reloadSavedConnections();
+      final maps = _readConnectionMaps();
+      final connections = _connectionsFromMaps(maps);
+      final hasLegacyFields = maps.any(
+        (map) =>
+            map.containsKey('api_key') || map.containsKey('dashboard_password'),
       );
-    }
+
+      try {
+        for (final connection in connections) {
+          final credentials = _ConnectionCredentials.fromConnection(connection);
+          if (!credentials.isEmpty) {
+            await _writeAndVerifyCredentials(connection.id, credentials);
+          }
+        }
+
+        for (final connection in connections) {
+          final encoded = await _credentialStore.read(
+            _credentialKey(connection.id),
+          );
+          if (encoded != null) {
+            _ConnectionCredentials.decode(encoded);
+          }
+        }
+
+        if (hasLegacyFields) {
+          await _saveAll(connections);
+        }
+      } on CredentialStorageException {
+        rethrow;
+      } catch (_) {
+        throw const CredentialStorageException(
+          'Connection credentials could not be migrated safely.',
+        );
+      }
+    });
   }
 
   List<SavedConnection> getConnections() {
@@ -223,9 +230,7 @@ class ConnectionManager {
     final connections = _connectionsFromMaps(_readConnectionMaps());
     final hydrated = <SavedConnection>[];
     for (final connection in connections) {
-      final encoded = await _credentialStore.read(
-        _credentialKey(connection.id),
-      );
+      final encoded = await _readCredentials(connection.id);
       if (encoded == null) {
         hydrated.add(connection);
         continue;
@@ -252,29 +257,33 @@ class ConnectionManager {
     List<SavedConnection> incoming, {
     required bool replaceExisting,
   }) async {
-    final current = _connectionsFromMaps(_readConnectionMaps());
-
     final ordered = List<SavedConnection>.of(incoming);
+    await _mutateSavedConnections(ordered.map((connection) => connection.id), (
+      current,
+    ) async {
+      final List<SavedConnection> next;
+      final removed = <SavedConnection>[];
+      if (replaceExisting) {
+        final keep = ordered.map((connection) => connection.id).toSet();
+        removed.addAll(
+          current.where((connection) => !keep.contains(connection.id)),
+        );
+        next = ordered;
+      } else {
+        final incomingIds = ordered.map((connection) => connection.id).toSet();
+        next = <SavedConnection>[
+          ...ordered,
+          ...current.where(
+            (connection) => !incomingIds.contains(connection.id),
+          ),
+        ];
+      }
 
-    final List<SavedConnection> next;
-    final removed = <SavedConnection>[];
-    if (replaceExisting) {
-      final keep = ordered.map((connection) => connection.id).toSet();
-      removed.addAll(
-        current.where((connection) => !keep.contains(connection.id)),
-      );
-      next = ordered;
-    } else {
-      final incomingIds = ordered.map((connection) => connection.id).toSet();
-      next = <SavedConnection>[
-        ...ordered,
-        ...current.where((connection) => !incomingIds.contains(connection.id)),
-      ];
-    }
-
-    await _withConnectionMutation(
-      [...ordered, ...removed].map((connection) => connection.id),
-      () async {
+      final previous = {
+        for (final row in [...ordered, ...removed])
+          row.id: current.where((c) => c.id == row.id).firstOrNull,
+      };
+      try {
         for (final connection in ordered) {
           await _writeAndVerifyCredentials(
             connection.id,
@@ -288,8 +297,25 @@ class ConnectionManager {
           );
         }
         await _saveAll(next);
-      },
-    );
+      } catch (_) {
+        for (final entry in previous.entries) {
+          try {
+            await _writeAndVerifyCredentials(
+              entry.key,
+              entry.value == null
+                  ? const _ConnectionCredentials(
+                      apiKey: '',
+                      dashboardPassword: null,
+                    )
+                  : _ConnectionCredentials.fromConnection(entry.value!),
+            );
+          } catch (_) {
+            // Keep native ownership through every credential rollback attempt.
+          }
+        }
+        rethrow;
+      }
+    }, replaceExisting: replaceExisting);
   }
 
   Future<void> saveConnection(
@@ -324,17 +350,18 @@ class ConnectionManager {
       dashboardPassword: dashboardPassword,
       gatewayProfile: profile == null || profile.isEmpty ? null : profile,
     );
-    final current = getConnections();
-    current.insert(0, conn);
-    await _commitCredentialAndMetadata(
-      connectionId: conn.id,
-      previousCredentials: const _ConnectionCredentials(
-        apiKey: '',
-        dashboardPassword: null,
-      ),
-      nextCredentials: _ConnectionCredentials.fromConnection(conn),
-      connections: current,
-    );
+    await _mutateSavedConnections([conn.id], (current) async {
+      current.insert(0, conn);
+      await _commitCredentialAndMetadata(
+        connectionId: conn.id,
+        previousCredentials: const _ConnectionCredentials(
+          apiKey: '',
+          dashboardPassword: null,
+        ),
+        nextCredentials: _ConnectionCredentials.fromConnection(conn),
+        connections: current,
+      );
+    });
   }
 
   /// Updates all editable fields on an existing connection while preserving its
@@ -354,54 +381,60 @@ class ConnectionManager {
     String? dashboardPassword,
     String? gatewayProfile,
   }) async {
-    final current = getConnections();
-    final idx = current.indexWhere((c) => c.id == connId);
-    if (idx < 0) return;
+    await _mutateSavedConnections([connId], (current) async {
+      final idx = current.indexWhere((c) => c.id == connId);
+      if (idx < 0) return;
 
-    final previousCredentials = _ConnectionCredentials.fromConnection(
-      current[idx],
-    );
+      final previousCredentials = _ConnectionCredentials.fromConnection(
+        current[idx],
+      );
 
-    final normalized = SavedConnection.normalizeHostAndPort(host, port);
-    final gateway = gatewayPrefix?.trim();
-    final dashboard = dashboardPrefix?.trim();
-    final dashUser = dashboardUsername?.trim();
-    final dashPass = dashboardPassword?.trim();
-    final desktopGateway = desktopGatewayUrl?.trim();
-    final profile = gatewayProfile?.trim();
+      final normalized = SavedConnection.normalizeHostAndPort(host, port);
+      final gateway = gatewayPrefix?.trim();
+      final dashboard = dashboardPrefix?.trim();
+      final dashUser = dashboardUsername?.trim();
+      final dashPass = dashboardPassword?.trim();
+      final desktopGateway = desktopGatewayUrl?.trim();
+      final profile = gatewayProfile?.trim();
 
-    current[idx] = current[idx].copyWith(
-      label: label,
-      host: normalized.host,
-      port: normalized.port,
-      apiKey: apiKey,
-      useHttps: normalized.useHttps,
-      gatewayPrefix: gateway == null || gateway.isEmpty ? null : gateway,
-      clearGatewayPrefix: gateway != null && gateway.isEmpty,
-      dashboardPrefix: dashboard == null || dashboard.isEmpty
-          ? null
-          : dashboard,
-      clearDashboardPrefix: dashboard != null && dashboard.isEmpty,
-      dashboardProxied: dashboardProxied,
-      desktopGatewayUrl: desktopGateway == null || desktopGateway.isEmpty
-          ? null
-          : desktopGateway,
-      clearDesktopGatewayUrl: desktopGateway != null && desktopGateway.isEmpty,
-      dashboardPortOverride: dashboardPort,
-      clearDashboardPort: dashboardPort == null,
-      dashboardUsername: dashUser == null || dashUser.isEmpty ? null : dashUser,
-      clearDashboardUsername: dashUser != null && dashUser.isEmpty,
-      dashboardPassword: dashPass == null || dashPass.isEmpty ? null : dashPass,
-      clearDashboardPassword: dashPass != null && dashPass.isEmpty,
-      gatewayProfile: profile == null || profile.isEmpty ? null : profile,
-      clearGatewayProfile: profile != null && profile.isEmpty,
-    );
-    await _commitCredentialAndMetadata(
-      connectionId: connId,
-      previousCredentials: previousCredentials,
-      nextCredentials: _ConnectionCredentials.fromConnection(current[idx]),
-      connections: current,
-    );
+      current[idx] = current[idx].copyWith(
+        label: label,
+        host: normalized.host,
+        port: normalized.port,
+        apiKey: apiKey,
+        useHttps: normalized.useHttps,
+        gatewayPrefix: gateway == null || gateway.isEmpty ? null : gateway,
+        clearGatewayPrefix: gateway != null && gateway.isEmpty,
+        dashboardPrefix: dashboard == null || dashboard.isEmpty
+            ? null
+            : dashboard,
+        clearDashboardPrefix: dashboard != null && dashboard.isEmpty,
+        dashboardProxied: dashboardProxied,
+        desktopGatewayUrl: desktopGateway == null || desktopGateway.isEmpty
+            ? null
+            : desktopGateway,
+        clearDesktopGatewayUrl:
+            desktopGateway != null && desktopGateway.isEmpty,
+        dashboardPortOverride: dashboardPort,
+        clearDashboardPort: dashboardPort == null,
+        dashboardUsername: dashUser == null || dashUser.isEmpty
+            ? null
+            : dashUser,
+        clearDashboardUsername: dashUser != null && dashUser.isEmpty,
+        dashboardPassword: dashPass == null || dashPass.isEmpty
+            ? null
+            : dashPass,
+        clearDashboardPassword: dashPass != null && dashPass.isEmpty,
+        gatewayProfile: profile == null || profile.isEmpty ? null : profile,
+        clearGatewayProfile: profile != null && profile.isEmpty,
+      );
+      await _commitCredentialAndMetadata(
+        connectionId: connId,
+        previousCredentials: previousCredentials,
+        nextCredentials: _ConnectionCredentials.fromConnection(current[idx]),
+        connections: current,
+      );
+    });
   }
 
   /// Updates the dashboard port + basic-auth credentials on an existing
@@ -415,72 +448,75 @@ class ConnectionManager {
     String? dashboardPrefix,
     bool? dashboardProxied,
   }) async {
-    final current = getConnections();
-    final idx = current.indexWhere((c) => c.id == connId);
-    if (idx < 0) return;
-    final previousCredentials = _ConnectionCredentials.fromConnection(
-      current[idx],
-    );
-    final u = username.trim();
-    final p = password.trim();
-    final gateway = gatewayPrefix?.trim();
-    final dashboard = dashboardPrefix?.trim();
-    current[idx] = current[idx].copyWith(
-      gatewayPrefix: gateway == null || gateway.isEmpty ? null : gateway,
-      clearGatewayPrefix: gateway != null && gateway.isEmpty,
-      dashboardPrefix: dashboard == null || dashboard.isEmpty
-          ? null
-          : dashboard,
-      clearDashboardPrefix: dashboard != null && dashboard.isEmpty,
-      dashboardProxied: dashboardProxied,
-      dashboardPortOverride: dashboardPort,
-      clearDashboardPort: dashboardPort == null,
-      dashboardUsername: u.isEmpty ? null : u,
-      clearDashboardUsername: u.isEmpty,
-      dashboardPassword: p.isEmpty ? null : p,
-      clearDashboardPassword: p.isEmpty,
-    );
-    await _commitCredentialAndMetadata(
-      connectionId: connId,
-      previousCredentials: previousCredentials,
-      nextCredentials: _ConnectionCredentials.fromConnection(current[idx]),
-      connections: current,
-    );
+    await _mutateSavedConnections([connId], (current) async {
+      final idx = current.indexWhere((c) => c.id == connId);
+      if (idx < 0) return;
+      final previousCredentials = _ConnectionCredentials.fromConnection(
+        current[idx],
+      );
+      final u = username.trim();
+      final p = password.trim();
+      final gateway = gatewayPrefix?.trim();
+      final dashboard = dashboardPrefix?.trim();
+      current[idx] = current[idx].copyWith(
+        gatewayPrefix: gateway == null || gateway.isEmpty ? null : gateway,
+        clearGatewayPrefix: gateway != null && gateway.isEmpty,
+        dashboardPrefix: dashboard == null || dashboard.isEmpty
+            ? null
+            : dashboard,
+        clearDashboardPrefix: dashboard != null && dashboard.isEmpty,
+        dashboardProxied: dashboardProxied,
+        dashboardPortOverride: dashboardPort,
+        clearDashboardPort: dashboardPort == null,
+        dashboardUsername: u.isEmpty ? null : u,
+        clearDashboardUsername: u.isEmpty,
+        dashboardPassword: p.isEmpty ? null : p,
+        clearDashboardPassword: p.isEmpty,
+      );
+      await _commitCredentialAndMetadata(
+        connectionId: connId,
+        previousCredentials: previousCredentials,
+        nextCredentials: _ConnectionCredentials.fromConnection(current[idx]),
+        connections: current,
+      );
+    });
   }
 
   Future<void> updateApiKey(String connId, String apiKey) async {
-    final current = getConnections();
-    final idx = current.indexWhere((c) => c.id == connId);
-    if (idx < 0) return;
-    final previousCredentials = _ConnectionCredentials.fromConnection(
-      current[idx],
-    );
-    current[idx] = current[idx].copyWith(apiKey: apiKey);
-    await _commitCredentialAndMetadata(
-      connectionId: connId,
-      previousCredentials: previousCredentials,
-      nextCredentials: _ConnectionCredentials.fromConnection(current[idx]),
-      connections: current,
-    );
+    await _mutateSavedConnections([connId], (current) async {
+      final idx = current.indexWhere((c) => c.id == connId);
+      if (idx < 0) return;
+      final previousCredentials = _ConnectionCredentials.fromConnection(
+        current[idx],
+      );
+      current[idx] = current[idx].copyWith(apiKey: apiKey);
+      await _commitCredentialAndMetadata(
+        connectionId: connId,
+        previousCredentials: previousCredentials,
+        nextCredentials: _ConnectionCredentials.fromConnection(current[idx]),
+        connections: current,
+      );
+    });
   }
 
   Future<void> deleteConnection(String id) async {
-    final current = getConnections();
-    final index = current.indexWhere((connection) => connection.id == id);
-    if (index < 0) return;
-    final previousCredentials = _ConnectionCredentials.fromConnection(
-      current[index],
-    );
-    current.removeWhere((c) => c.id == id);
-    await _commitCredentialAndMetadata(
-      connectionId: id,
-      previousCredentials: previousCredentials,
-      nextCredentials: const _ConnectionCredentials(
-        apiKey: '',
-        dashboardPassword: null,
-      ),
-      connections: current,
-    );
+    await _mutateSavedConnections([id], (current) async {
+      final index = current.indexWhere((connection) => connection.id == id);
+      if (index < 0) return;
+      final previousCredentials = _ConnectionCredentials.fromConnection(
+        current[index],
+      );
+      current.removeWhere((c) => c.id == id);
+      await _commitCredentialAndMetadata(
+        connectionId: id,
+        previousCredentials: previousCredentials,
+        nextCredentials: const _ConnectionCredentials(
+          apiKey: '',
+          dashboardPassword: null,
+        ),
+        connections: current,
+      );
+    });
   }
 
   List<Map<String, dynamic>> _readConnectionMaps() {
@@ -515,6 +551,77 @@ class ConnectionManager {
       dashboardPassword: credentials.dashboardPassword,
       clearDashboardPassword: credentials.dashboardPassword == null,
     );
+  }
+
+  // The tail contains only live owners, never an error from a prior action.
+  static Future<void> _serializeSavedConnections(
+    Future<void> Function() action,
+  ) async {
+    final previous = _savedConnectionsTail;
+    final done = Completer<void>();
+    _savedConnectionsTail = done.future;
+    try {
+      if (previous != null) await previous;
+      await action();
+    } finally {
+      if (identical(_savedConnectionsTail, done.future)) {
+        _savedConnectionsTail = null;
+      }
+      done.complete();
+    }
+  }
+
+  Future<void> _reloadSavedConnections() async {
+    try {
+      // Refresh the SharedPreferences cache only while owning the physical
+      // list, never while a sibling has an optimistic metadata write.
+      await prefs.reload();
+    } catch (_) {
+      throw const CredentialStorageException(
+        'Saved connection metadata could not be read safely.',
+      );
+    }
+  }
+
+  Future<String?> _readCredentials(String id) async {
+    try {
+      return await _credentialStore.read(_credentialKey(id));
+    } catch (_) {
+      throw const CredentialStorageException(
+        'Stored connection credentials could not be read safely.',
+      );
+    }
+  }
+
+  Future<void> _mutateSavedConnections(
+    Iterable<String> connections,
+    Future<void> Function(List<SavedConnection>) action, {
+    bool replaceExisting = false,
+  }) async {
+    final ids = connections.toSet();
+    // Fence starts synchronously, even while queued. A replacement also owns
+    // any rows present when it eventually acquires the shared transaction.
+    final queued = ConnectionMutationBarrier.begin({
+      ...ids,
+      if (replaceExisting)
+        ..._connectionsFromMaps(_readConnectionMaps()).map((row) => row.id),
+    });
+    try {
+      await _serializeSavedConnections(() async {
+        await _reloadSavedConnections();
+        final current = _connectionsFromMaps(_readConnectionMaps());
+        await _withConnectionMutation(
+          {...ids, if (replaceExisting) ...current.map((row) => row.id)},
+          () async {
+            // A different manager may have edited secrets through its own cache.
+            // Native BEGIN must precede these fresh reads and all writes.
+            await action(await loadConnectionsWithSecrets());
+          },
+        );
+      });
+    } finally {
+      queued.release();
+    }
   }
 
   /// Own the full mutation, not just a one-shot invalidation while consent may
@@ -583,21 +690,19 @@ class ConnectionManager {
     required _ConnectionCredentials nextCredentials,
     required List<SavedConnection> connections,
   }) async {
-    await _withConnectionMutation([connectionId], () async {
+    try {
+      await _writeAndVerifyCredentials(connectionId, nextCredentials);
+      await _saveAll(connections);
+    } catch (_) {
       try {
-        await _writeAndVerifyCredentials(connectionId, nextCredentials);
-        await _saveAll(connections);
+        await _writeAndVerifyCredentials(connectionId, previousCredentials);
       } catch (_) {
-        try {
-          await _writeAndVerifyCredentials(connectionId, previousCredentials);
-        } catch (_) {
-          // Never attach platform errors: they may include storage secrets.
-        }
-        throw const CredentialStorageException(
-          'Connection credentials could not be saved safely.',
-        );
+        // Never attach platform errors: they may include storage secrets.
       }
-    });
+      throw const CredentialStorageException(
+        'Connection credentials could not be saved safely.',
+      );
+    }
   }
 
   Future<void> _writeAndVerifyCredentials(
@@ -627,6 +732,7 @@ class ConnectionManager {
   }
 
   Future<void> _saveAll(List<SavedConnection> list) async {
+    final previous = prefs.getStringList(_key);
     try {
       final saved = await prefs.setStringList(
         _key,
@@ -637,9 +743,19 @@ class ConnectionManager {
           'Connection metadata could not be saved safely.',
         );
       }
-    } on CredentialStorageException {
-      rethrow;
     } catch (_) {
+      try {
+        // SharedPreferences exposes optimistic values before its platform
+        // acknowledgement. Restore them (and any uncertain durable write)
+        // while this transaction still exclusively owns the physical list.
+        if (previous == null) {
+          await prefs.remove(_key);
+        } else {
+          await prefs.setStringList(_key, previous);
+        }
+      } catch (_) {
+        // Native consent remains revoked even if storage rollback also fails.
+      }
       throw const CredentialStorageException(
         'Connection metadata could not be saved safely.',
       );

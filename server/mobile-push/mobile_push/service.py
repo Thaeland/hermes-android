@@ -152,7 +152,9 @@ class Runtime:
         try:
             policy = self.profile.policy()
             if policy.enabled and self.profile.durable(event["session_id"]):
-                event = {**event, "registration_generations": self.store.targets()}
+                event = {**event, "registration_generations": self.store.targets(event, policy)}
+                # Even an empty delivery target map must retain resolution/turn
+                # cancellation, independently of subscriptions to those kinds.
                 try:
                     # Preserve order behind any events already queued during a network send.
                     if self.inbox.peek():
@@ -168,11 +170,12 @@ class Runtime:
 
     def _queue_inbox(self, event, policy):
         assert self.store is not None and self.inbox is not None
-        # An inbox item must never acquire a future consent generation when drained.
+        # Drain/send may narrow this observer-time decision, never add targets after
+        # a later consent or ACL grant. Preserve an already captured (even empty) map.
         captured = (
             event
             if "registration_generations" in event
-            else {**event, "registration_generations": self.store.targets()}
+            else {**event, "registration_generations": self.store.targets(event, policy)}
         )
         self.inbox.put(captured, policy)
 

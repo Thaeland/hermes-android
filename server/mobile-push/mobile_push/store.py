@@ -344,14 +344,22 @@ class Store:
         ).fetchone()
         return row[0]
 
-    def targets(self):
-        # WAL readers remain available while the sender holds a write transaction.
+    @staticmethod
+    def _allows_event(row, event, policy):
+        principal = (row["provider"], row["user_id"])
+        return event["kind"] in json.loads(row["kinds_json"]) and SessionScope.from_registration(
+            row
+        ).allows(principal, event["session_id"], policy)
+
+    def targets(self, event, policy: Policy):
+        # Capture event-specific consent AND authority before any deferred write.
+        # WAL readers remain available while the sender holds a write transaction;
+        # these rows and the immutable policy/scope are an admission snapshot.
         with self.connection() as db:
             return {
                 row["installation"]: row["generation"]
-                for row in db.execute(
-                    "SELECT installation,generation FROM registrations WHERE status='active'"
-                )
+                for row in db.execute("SELECT * FROM registrations WHERE status='active'")
+                if self._allows_event(row, event, policy)
             }
 
     def record(self, event, policy: Policy):
@@ -389,9 +397,7 @@ class Store:
                 targets = event.get("registration_generations")
                 if targets is not None and targets.get(row["installation"]) != row["generation"]:
                     continue
-                if not SessionScope.from_registration(row).allows(
-                    principal, sid, policy
-                ) or kind not in json.loads(row["kinds_json"]):
+                if not self._allows_event(row, event, policy):
                     continue
                 event_id = self._event(
                     db,

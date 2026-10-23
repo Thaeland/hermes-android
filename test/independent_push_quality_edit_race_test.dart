@@ -293,9 +293,14 @@ void main() {
         username: 'fixture-user',
         password: 'fixture-password',
       );
-      await second.entered.future;
+      // The shared list owner now queues the second physical transaction, but
+      // its synchronous Dart lease must already reject opt-in starts.
+      await enable(original);
+      expect(second.entered.isCompleted, isFalse);
+      expect(f.requests, isEmpty);
       first.release.complete();
       await one;
+      await second.entered.future;
       expect(f.connectionChanges, hasLength(1));
       await enable(manager.getConnections().first);
       expect(f.requests, isEmpty);

@@ -11,6 +11,7 @@ import 'core/services/config_backup_io.dart';
 import 'core/services/config_backup_service.dart';
 import 'core/services/connection_keepalive_service.dart';
 import 'core/services/connection_manager.dart';
+import 'core/services/connection_mutation_barrier.dart';
 import 'core/services/desktop_gateway_client.dart';
 import 'core/services/background_work_prefs.dart';
 import 'core/services/gateway_turn_application_controller.dart';
@@ -589,15 +590,33 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
     MobilePushRoute? pushRoute,
   }) async {
     if (!mounted || _closingTurnOwner) return;
+    final mutationEpoch = ConnectionMutationBarrier.capture(connection.id);
+    bool isLookupCurrent() {
+      if (!mounted || _closingTurnOwner || _mobilePush.hasPendingTap) {
+        return false;
+      }
+      final saved = _connectionById(connection.id);
+      return saved != null &&
+          ConnectionMutationBarrier.isCurrent(connection.id, mutationEpoch) &&
+          MobilePushService.binding(saved) ==
+              MobilePushService.binding(connection);
+    }
+
+    Future<bool> canContinueLookup() async {
+      if (!isLookupCurrent()) return false;
+      final allowed = await _mobilePush.isRouteCurrent(pushRoute!);
+      // The asynchronous authority read can itself outlive this root, a saved
+      // account mutation, or a newer tap. Do not lend its old success to a page.
+      return allowed && isLookupCurrent();
+    }
+
     Session? session;
     Session? retainedSession;
     if (sessionId != null && sessionId.isNotEmpty) {
       final normal = _turnApplicationController.normalSessionFor(connection);
       await normal.ready.catchError((Object _) {});
       if (!mounted || _closingTurnOwner) return;
-      if (pushRoute != null &&
-          (!await _mobilePush.isRouteCurrent(pushRoute) ||
-              _mobilePush.hasPendingTap)) {
+      if (pushRoute != null && !await canContinueLookup()) {
         return;
       }
       if (!mounted || _closingTurnOwner) return;
@@ -625,7 +644,11 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
         );
         session =
             (widget.testNotificationSessionLookup == null
-                ? await client.getSessionById(sessionId)
+                ? await client.getSessionById(
+                    sessionId,
+                    canContinue: pushRoute == null ? null : canContinueLookup,
+                    isCurrent: pushRoute == null ? null : isLookupCurrent,
+                  )
                 : await widget.testNotificationSessionLookup!(
                     connection,
                     sessionId,
@@ -639,8 +662,8 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
     }
     if (pushRoute != null) {
       // A newer tap owns focus even when this older lookup was already in flight.
-      if (!await _mobilePush.isRouteCurrent(pushRoute) ||
-          _mobilePush.hasPendingTap) {
+      if (!mounted || _closingTurnOwner) return;
+      if (!await _mobilePush.isRouteCurrent(pushRoute) || !isLookupCurrent()) {
         return;
       }
       // Reject prefix resolution or a local alias without durable identity proof.
