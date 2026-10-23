@@ -69,9 +69,47 @@ class ChatTimeline {
   final Set<String> _evictedTools;
   final bool _tombstonesSaturated;
 
+  int get retainedToolIdentityCount => _evictedTools.length;
+
   /// Drop optimistic references on durable hydration, without reusing card IDs.
   ChatTimeline clear() =>
       ChatTimeline._(const [], _nextId, const {}, const {}, false);
+
+  /// Compose independent settled scopes without replaying their receipts into
+  /// the current reducer. Imported local run IDs need a scope namespace; tool
+  /// identities, eviction ledgers and the combined budgets remain intact.
+  ChatTimeline precededBy(Iterable<ChatTimeline> earlier) {
+    final timelines = earlier.toList();
+    if (timelines.isEmpty) return this;
+    final tombstones = <String>{};
+    var saturated = false;
+    for (final timeline in [...timelines, this]) {
+      tombstones.addAll(timeline._evictedTools);
+      saturated |= timeline._tombstonesSaturated;
+    }
+    if (tombstones.length > maxEvictedTools) saturated = true;
+    return ChatTimeline._(
+      const [],
+      _nextId,
+      Set.unmodifiable({
+        for (final timeline in [...timelines, this]) ...timeline.scopes,
+      }),
+      Set.unmodifiable(tombstones.take(maxEvictedTools)),
+      saturated,
+    )._with([
+      for (final timeline in timelines)
+        for (final run in timeline.runs)
+          ChatTimelineRun(
+            id: '${run.scope}:${run.id}',
+            scope: run.scope,
+            kind: run.kind,
+            text: run.text,
+            verbose: run.verbose,
+            activity: run.activity,
+          ),
+      ...runs,
+    ]);
+  }
 
   /// Keep only retained presentation anchors. This is a bounded live view, not
   /// a transcript: durable history is always the authority after hydration.
