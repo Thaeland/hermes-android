@@ -27,11 +27,23 @@ subscribe other connections, all users, or every session automatically.
    authenticated PUT has not returned its generation yet. Only an authenticated
    confirmation response activates the installation.
 
-Pending is not active. `Reconcile / retry` refreshes the authenticated event feed,
-retries distributor registration when it failed, and retries failed server
-revocations. Delivery is best-effort, not a guarantee. A changed endpoint
-immediately clears local generation/active authority and queued old taps; the
-next foreground reconciliation registers and confirms it again. Editing,
+Pending is not active. `Reconcile / retry` repeats the exact authenticated
+registration while native activation is pending, including after a lost PUT reply
+or process death before native generation persistence. The paired server returns
+the same generation; an expired pending challenge is reissued encrypted. A lost
+confirmation reply is recovered by resubmitting the retained decrypted proof and
+checking the authenticated confirmation's exact generation and `active` status,
+even if the original proof TTL has elapsed after server activation. A PUT reporting
+`active` alone never grants native authority. No expired pending proof, push hint,
+revoked nonce or superseded generation can activate the phone. Update the companion
+server with this client for the retry contract; a rejected stale/revoked registration
+requires explicit Disable and fresh opt-in, not silent reactivation.
+
+Reconcile also refreshes the authenticated event feed, retries distributor
+registration when it failed, and retries failed server revocations. Delivery is
+best-effort, not a guarantee. A changed endpoint immediately clears local
+generation/active authority and queued old taps; the next foreground reconciliation
+registers and confirms it again. Editing,
 removing or importing a bound saved connection revokes native authority before
 changing its credentials/metadata; opt in again afterwards.
 
@@ -132,15 +144,20 @@ accessible in the Settings fallback when model settings fail to load.
 ## Frozen server API
 
 Paths are relative to DashboardClient's authenticated origin and dashboard path
-prefix, never the Gateway chat/API key origin:
+prefix, never the Gateway chat/API key origin. Every operation forwards the saved
+`gatewayProfile` as `?profile=<name>`, alongside cursor parameters where applicable.
+The server's vetted profile dependency selects that home's policy/state, not the
+dashboard's launch home. The operator must separately enable the lifecycle
+hooks/worker in that profile; API selection cannot start them.
 
 * `GET /api/plugins/mobile-push/capabilities` → schema 1, enabled, transports
   containing `webpush`, VAPID public key.
 * `PUT /api/plugins/mobile-push/registrations/{installation_id}` → endpoint,
   keys `{p256dh, auth}`, registration_nonce, explicit event_kinds and session_ids;
-  response `{generation, status: pending, registration_nonce}`.
+  response `{generation, status: pending, registration_nonce}` for a fresh grant;
+  exact current retries may recover `status: active` without granting native authority.
 * `POST .../registrations/{id}/confirm` → `{generation, challenge}`;
-  response must contain `status: active` before local activation.
+  response must contain `status: active` and the exact `generation` before local activation.
 * `DELETE .../registrations/{id}` revokes.
 * `GET .../events?after=<cursor>&limit=100` → events, next_cursor, has_more.
   Cursor pages are read to exhaustion (safety cap fails honestly rather than

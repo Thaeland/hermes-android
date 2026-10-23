@@ -9,8 +9,16 @@ class MobilePushApi {
   final DashboardClient client;
   static const prefix = 'plugins/mobile-push';
 
+  Map<String, String> _query([Map<String, String> parameters = const {}]) => {
+    ...parameters,
+    if (client.gatewayProfile != null) 'profile': client.gatewayProfile!,
+  };
+
   Future<Map<String, dynamic>> capabilities() async {
-    final result = await client.apiGet('$prefix/capabilities');
+    final result = await client.apiGet(
+      '$prefix/capabilities',
+      queryParameters: _query(),
+    );
     final key = result['vapid_public_key'];
     if (result['schema'] != 1 ||
         result['enabled'] != true ||
@@ -31,6 +39,7 @@ class MobilePushApi {
     Map<String, dynamic> state,
   ) => client.apiPut(
     '$prefix/registrations/${Uri.encodeComponent(state['installation'] as String)}',
+    queryParameters: _query(),
     body: {
       'endpoint': state['endpoint'],
       'keys': state['keys'],
@@ -51,13 +60,15 @@ class MobilePushApi {
     String challenge,
   ) => client.apiPost(
     '$prefix/registrations/${Uri.encodeComponent(installation)}/confirm',
+    queryParameters: _query(),
     body: {'generation': generation, 'challenge': challenge},
   );
   Future<void> revoke(String installation) => client.apiDelete(
     '$prefix/registrations/${Uri.encodeComponent(installation)}',
+    queryParameters: _query(),
   );
   Future<Map<String, dynamic>> events(String cursor) => client.apiGet(
     '$prefix/events',
-    queryParameters: {'after': cursor, 'limit': '100'},
+    queryParameters: _query({'after': cursor, 'limit': '100'}),
   );
 }

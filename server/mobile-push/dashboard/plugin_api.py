@@ -20,5 +20,8 @@ if _name not in sys.modules:
     _spec.loader.exec_module(_package)
 _api = importlib.import_module(_name + ".api")
 _config = importlib.import_module(_name + ".config")
-# Capture profile home now; never read mutable process environment in request workers.
-router = _api.create_router(_config.Profile(Path(get_hermes_home()).resolve()))
+# Hermes' _plugin_route_secret_scope validates ?profile and binds get_hermes_home
+# in the request context (also copied into sync workers). Do not capture launch
+# home or parse client paths/headers here. API stores and lifecycle workers both
+# use the selected profile's immutable on-disk paths.
+router = _api.create_router(lambda: _config.Profile(Path(get_hermes_home()).resolve()))
