@@ -513,6 +513,83 @@ void main() {
     },
   );
 
+  test(
+    'unknown-floor presentation pins known context, not later canonical rows',
+    () async {
+      final f = _Fixture();
+      addTearDown(f.close);
+      await f.session.ready;
+      const before = [
+        {'id': 3, 'role': 'assistant', 'content': 'Older numeric context'},
+        {
+          'id': 'legacy',
+          'role': 'assistant',
+          'content': 'Known legacy context',
+        },
+      ];
+      f.chat('local', stored: 'stored').observeHistory(before);
+      await f.start(seedHistory: false);
+      expect(f.owner.snapshot.rowFloor, isNull);
+      f.emit('message.delta', {'text': 'Received response'});
+      expect(f.owner.snapshot.presentationHistoryRows, before);
+      f.emit('message.complete', {'text': 'Received response'});
+      await _flush();
+      const canonical = [
+        {'id': 11, 'role': 'user', 'content': 'Unrelated canonical prompt'},
+        {
+          'id': 12,
+          'role': 'assistant',
+          'content': 'Unproven different response',
+        },
+      ];
+      f.owner.observeHistory(canonical);
+      expect(f.owner.snapshot.historyRows, canonical);
+      expect(f.owner.snapshot.presentationHistoryRows, before);
+      const older = {
+        'id': 1,
+        'role': 'assistant',
+        'content': 'Paged older context',
+      };
+      expect(f.owner.snapshot.historyForPresentation([older, ...canonical]), [
+        older,
+        ...before,
+      ]);
+      expect(f.owner.snapshot.displayRows.last['content'], 'Received response');
+      expect(f.owner.snapshot.timeline.runs, isNotEmpty);
+    },
+  );
+
+  test(
+    'a newer numeric baseline cannot retire an older unknown-floor reply',
+    () async {
+      final f = _Fixture();
+      addTearDown(f.close);
+      await f.start(seedHistory: false);
+      f.emit('message.complete', {'text': 'Uncorrelated first response'});
+      await _flush();
+      expect(f.owner.snapshot.historyRows.single['id'], 10);
+      f.rpc.complete();
+      await f.flight;
+      f.resetRpc();
+      await f.start(seedHistory: false);
+      expect(f.owner.snapshot.rowFloor, isNull);
+      f.emit('message.complete', {'text': 'Second received response'});
+      await _flush();
+      f.owner.observeHistory([
+        {'id': 20, 'role': 'assistant', 'content': 'New canonical response'},
+      ]);
+      expect(f.owner.snapshot.displayRows, hasLength(4));
+      expect(
+        f.owner.snapshot.displayRows.map((row) => row['content']),
+        containsAll([
+          'Uncorrelated first response',
+          'Second received response',
+        ]),
+      );
+      expect(f.owner.snapshot.presentationHistoryRows, isEmpty);
+    },
+  );
+
   test('RPC acknowledgement alone is unresolved, never terminal', () async {
     final f = _Fixture();
     await f.start();

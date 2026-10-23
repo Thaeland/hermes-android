@@ -67,6 +67,7 @@ class DesktopGatewayClient {
   DesktopAsyncEventSessionPredicate? _asyncEventAcceptsSession;
   DesktopConnectionCallback? _connectionListener;
   GatewayTurnSessionBoundCallback? _sessionBoundListener;
+  GatewayTurnSessionBoundCallback? _sessionCreatedListener;
   GatewayTurnCoordinatorRegistry? _turnCoordinatorRegistry;
   ProjectsGatewayClient? _projects;
   final CapabilityRegistry _capabilities = CapabilityRegistry();
@@ -432,6 +433,7 @@ class DesktopGatewayClient {
       return _DesktopGatewayBinding(
         runtimeSessionId: created.runtimeSessionId,
         storedSessionId: created.storedSessionId,
+        created: created.hasEmptyHistory,
       );
     }
   }
@@ -445,6 +447,13 @@ class DesktopGatewayClient {
         _storedSessionIds[mobileSessionId] != binding.storedSessionId;
     _gatewaySessionIds[mobileSessionId] = binding.runtimeSessionId;
     _storedSessionIds[mobileSessionId] = binding.storedSessionId;
+    // Validated empty creation, unlike resume or a missing HTTP transcript,
+    // proves this new durable session has no earlier messages. Deliver once and
+    // before binding observers can prepare a prompt or persist its receipt.
+    if (binding.created && !binding.creationDelivered) {
+      binding.creationDelivered = true;
+      _sessionCreatedListener?.call(mobileSessionId, binding.storedSessionId);
+    }
     if (bindingChanged) {
       _sessionBoundListener?.call(mobileSessionId, binding.storedSessionId);
     }
@@ -687,8 +696,14 @@ class DesktopGatewayClient {
   /// A stock gateway can create the durable session lazily during the first
   /// attachment or prompt call, so consumers must not rely on an eager
   /// [ensureSession] having already exposed the stored identity.
-  void setSessionBoundListener(GatewayTurnSessionBoundCallback? listener) {
+  /// [onCreated] carries only explicitly proven empty creation, never resume
+  /// or an incomplete/nonempty creation response.
+  void setSessionBoundListener(
+    GatewayTurnSessionBoundCallback? listener, {
+    GatewayTurnSessionBoundCallback? onCreated,
+  }) {
     _sessionBoundListener = listener;
+    _sessionCreatedListener = onCreated;
   }
 
   Future<RemoteFileAttachment> attachFile({
@@ -1260,11 +1275,14 @@ class _DesktopGatewayBinding {
   final String runtimeSessionId;
   final String storedSessionId;
   final ResumedGatewaySession? resumed;
+  final bool created;
+  bool creationDelivered = false;
   bool resumeStateDelivered = false;
 
   _DesktopGatewayBinding({
     required this.runtimeSessionId,
     required this.storedSessionId,
     this.resumed,
+    this.created = false,
   });
 }

@@ -872,13 +872,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
       if (snapshot.displayRows.isNotEmpty) {
         final floor = snapshot.rowFloor;
-        final base = _historyWindow.rows.where((row) {
-          final id = int.tryParse(row['id']?.toString() ?? '');
-          return snapshot.displayRows.first['role'] != 'user' ||
-              floor == null ||
-              id == null ||
-              id <= floor;
-        });
+        final base = snapshot.historyForPresentation(_historyWindow.rows).where(
+          (row) {
+            final id = int.tryParse(row['id']?.toString() ?? '');
+            return snapshot.displayRows.first['role'] != 'user' ||
+                floor == null ||
+                id == null ||
+                id <= floor;
+          },
+        );
         _messages = [
           ...base,
           ...snapshot.displayRows.map((row) => Map<String, dynamic>.from(row)),
@@ -2110,6 +2112,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     List<Map<String, dynamic>> messages, {
     bool replacePresentation = true,
   }) {
+    // Held canonical rows must not leak back into presentation as task/tool
+    // cards while their prose is withheld beside an uncorrelated live reply.
+    messages =
+        _normalChat?.snapshot.historyForPresentation(messages) ?? messages;
     // Hydration and optimistic presentation change authority together. Every
     // latest-history path calls this before installing the durable window.
     // Older paging cannot authoritatively replace the live tail's chronology.

@@ -68,6 +68,11 @@ class NormalGatewayChatSnapshot {
   final int? rowFloor;
   final List<Map<String, dynamic>> displayRows;
   final List<Map<String, dynamic>> historyRows;
+
+  /// When history cannot be correlated with received output, present only the
+  /// base known before admission. Later canonical rows remain in historyRows,
+  /// but are not claimed to be either duplicates or independent new turns.
+  final List<Map<String, dynamic>>? presentationHistoryRows;
   final List<GatewayToolActivity> tools;
   final List<GatewaySubagentActivity> subagents;
   final List<StreamEvent> pendingInput;
@@ -86,6 +91,7 @@ class NormalGatewayChatSnapshot {
     required this.rowFloor,
     required this.displayRows,
     required this.historyRows,
+    this.presentationHistoryRows,
     required this.tools,
     required this.subagents,
     required this.pendingInput,
@@ -104,6 +110,30 @@ class NormalGatewayChatSnapshot {
     NormalGatewayTurnPhase.reconciling,
   }.contains(phase);
   bool get reconciling => phase == NormalGatewayTurnPhase.reconciling;
+
+  List<Map<String, dynamic>> historyForPresentation(
+    List<Map<String, dynamic>> retainedHistory,
+  ) {
+    final base = presentationHistoryRows;
+    if (base == null) return retainedHistory;
+    // Keep already paged older context too. Durable rows below the earliest
+    // known pre-admission row cannot belong to the uncorrelated live tail.
+    int? oldestKnownId;
+    for (final row in base) {
+      final id = int.tryParse(row['id']?.toString() ?? '');
+      if (id != null && (oldestKnownId == null || id < oldestKnownId)) {
+        oldestKnownId = id;
+      }
+    }
+    return [
+      if (oldestKnownId != null)
+        ...retainedHistory.where((row) {
+          final id = int.tryParse(row['id']?.toString() ?? '');
+          return id != null && id < oldestKnownId!;
+        }),
+      ...base,
+    ];
+  }
 }
 
 /// One stock client and independent history client per configuration scope.
@@ -147,10 +177,18 @@ class NormalGatewayApplicationSession {
        _history =
            history ??
            ((id) => historyClient!.getMessages(id, limit: 50, latest: true)) {
-    client?.setSessionBoundListener((local, stored) {
-      final owner = _aliases[local];
-      if (owner != null) _bind(owner, stored);
-    });
+    client?.setSessionBoundListener(
+      (local, stored) {
+        final owner = _aliases[local];
+        if (owner != null) _bind(owner, stored);
+      },
+      onCreated: (local, stored) {
+        final owner = _aliases[local];
+        if (!_closed && owner != null && !owner.wireEmitted) {
+          owner._createdEmptySessionId = stored;
+        }
+      },
+    );
     client?.setSessionEventListener(receiveEvent);
     client?.setAsyncEventListener((local, event) {
       // Raw stream frames have a separate, single ingress. This path carries
@@ -395,6 +433,8 @@ class NormalGatewayChatOwner {
   final List<Map<String, dynamic>> _priorDisplay = [];
   List<Map<String, dynamic>> _history = [];
   bool _historyKnown = false;
+  String? _createdEmptySessionId;
+  List<Map<String, dynamic>> _presentationBase = [];
   final List<GatewayToolActivity> _tools = [];
   final List<GatewaySubagentActivity> _subagents = [];
   // Observer identity outlives parent presentation and its canonical hydration.
@@ -423,6 +463,16 @@ class NormalGatewayChatOwner {
     this.workingDirectory,
   );
 
+  bool get _hasReceivedPresentation =>
+      _timeline.runs.isNotEmpty ||
+      _tools.isNotEmpty ||
+      _subagents.isNotEmpty ||
+      [..._priorDisplay, ..._display].any(
+        (row) =>
+            row['role'] == 'assistant' &&
+            (row['content']?.toString().isNotEmpty ?? false),
+      );
+
   NormalGatewayChatSnapshot get snapshot => NormalGatewayChatSnapshot(
     turnId: turnId,
     storedSessionId: storedSessionId,
@@ -435,6 +485,14 @@ class NormalGatewayChatOwner {
     historyRows: _history
         .map((row) => Map<String, dynamic>.unmodifiable(row))
         .toList(growable: false),
+    presentationHistoryRows:
+        _floor == null &&
+            (_display.isNotEmpty || _priorDisplay.isNotEmpty) &&
+            _hasReceivedPresentation
+        ? _presentationBase
+              .map((row) => Map<String, dynamic>.unmodifiable(row))
+              .toList(growable: false)
+        : null,
     tools: List.unmodifiable(_tools),
     subagents: List.unmodifiable(_subagents),
     pendingInput: List.unmodifiable(_pendingInput.values),
@@ -501,6 +559,11 @@ class NormalGatewayChatOwner {
       return null;
     }
     _generation++;
+    if (_display.isEmpty && _priorDisplay.isEmpty) {
+      _presentationBase = _history
+          .map((row) => Map<String, dynamic>.from(row))
+          .toList();
+    }
     turnId = const Uuid().v4();
     _reservation = Object();
     phase = NormalGatewayTurnPhase.preparing;
@@ -553,6 +616,10 @@ class NormalGatewayChatOwner {
     _draftRestoreAllowed = canRestoreDraft;
     _draftHandle = draftHandle;
     phase = NormalGatewayTurnPhase.submitting;
+    // A newer turn's baseline cannot retroactively correlate an older,
+    // genuinely received unknown-floor reply retained in the same projection.
+    final protectUnknownPresentation =
+        _floor == null && _hasReceivedPresentation;
     _priorDisplay.addAll(_display);
     if (_priorDisplay.length > 256) {
       _priorDisplay.removeRange(0, _priorDisplay.length - 256);
@@ -585,10 +652,17 @@ class NormalGatewayChatOwner {
         }
         _session._bind(this, stored);
       }
-      // Use only a successfully observed, pre-admission canonical baseline.
-      // A slow/unavailable history endpoint must not block sending; unknown
-      // remains unknown and cannot later establish history-only completion.
-      _floor = _historyKnown ? _numericFloor(_history) : null;
+      // An explicitly empty session.create is independent known-empty authority,
+      // consumed only by its first submission to this exact durable binding.
+      // Resume/bind/404 never imply zero, and HTTP cannot delay wire emission.
+      _floor = protectUnknownPresentation
+          ? null
+          : _historyKnown
+          ? _numericFloor(_history)
+          : _createdEmptySessionId == storedSessionId
+          ? 0
+          : null;
+      _createdEmptySessionId = null;
       _historyKnown = false;
       if (!_current(generation)) return;
       final now = DateTime.now().millisecondsSinceEpoch;
@@ -1344,6 +1418,7 @@ class NormalGatewayChatOwner {
   }
 
   void _clearTransientPresentation() {
+    _presentationBase = [];
     _display.clear();
     _priorDisplay.clear();
     _timeline = _timeline.clear();
