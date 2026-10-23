@@ -2544,4 +2544,46 @@ class AppLocalizationsFr extends AppLocalizations {
   String
   get compact_removes_the_you_and_hermes_labels_and_trims_bubble_padding_spacing_and_side_margins =>
       'Le mode compacte supprime les étiquettes « You » et « Hermes » et réduit les marges internes, l’espacement et les marges latérales des bulles.';
+
+  @override
+  String get background_work => 'Activité en arrière-plan';
+
+  @override
+  String get keep_chats_active_in_background =>
+      'Garder les discussions actives en arrière-plan';
+
+  @override
+  String get background_work_description =>
+      'Maintient la connexion des discussions lancées par vous lorsque cette app est en arrière-plan. Les connexions inactives peuvent être coupées. Consomme plus de batterie et de données. Désactiver cette option n’arrête pas le travail sur le serveur.';
+
+  @override
+  String get background_work_limits =>
+      'Android peut malgré tout suspendre les connexions en mode Doze ou terminer le processus de l’app. Les notifications après la fin du processus nécessitent une configuration push séparée. L’arrêt forcé n’est pas pris en charge.';
+
+  @override
+  String get background_work_disclosure =>
+      'Une notification de service obligatoire reste visible lorsque la protection en arrière-plan est active, même si les notifications de discussion facultatives sont désactivées.';
+
+  @override
+  String get battery_optimisation_settings =>
+      'Paramètres d’optimisation de la batterie';
+
+  @override
+  String get battery_optimisation_description =>
+      'Ouvre les paramètres Android pour consulter les restrictions de batterie. Aucune exemption n’est demandée automatiquement et modifier les paramètres ne garantit pas la réception.';
+
+  @override
+  String get battery_settings_unavailable =>
+      'Impossible d’ouvrir les paramètres de batterie sur cet appareil.';
+
+  @override
+  String get background_work_save_failed =>
+      'Impossible d’enregistrer le réglage d’activité en arrière-plan.';
+
+  @override
+  String get ongoing_chat_channel_name => 'Discussions actives';
+
+  @override
+  String get ongoing_chat_channel_description =>
+      'Mises à jour silencieuses des discussions lancées par vous et non terminées';
 }

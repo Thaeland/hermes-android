@@ -193,7 +193,7 @@ void main() {
     test(
       'initialization asks Android for the notification permission',
       () async {
-        await service.ensureInitialized();
+        await service.ensureInitialized(requestPermission: true);
 
         // Android 13+ denies POST_NOTIFICATIONS by default even when the
         // manifest declares it. Never asking means every notification is
@@ -203,8 +203,8 @@ void main() {
     );
 
     test('the permission is requested once, not on every call', () async {
-      await service.ensureInitialized();
-      await service.ensureInitialized();
+      await service.ensureInitialized(requestPermission: true);
+      await service.ensureInitialized(requestPermission: true);
 
       expect(sink.permissionRequestCount, 1);
     });
@@ -214,7 +214,7 @@ void main() {
       () async {
         sink.permissionResult = false;
 
-        await service.ensureInitialized();
+        await service.ensureInitialized(requestPermission: true);
 
         expect(service.permissionGranted, isFalse);
       },
@@ -223,7 +223,7 @@ void main() {
     test('a granted permission lets turn notifications through', () async {
       sink.permissionResult = true;
 
-      await service.ensureInitialized();
+      await service.ensureInitialized(requestPermission: true);
       await service.showTurnCompleted(
         title: 'Ready',
         turnSummary: 'done',
@@ -238,7 +238,7 @@ void main() {
       // iOS and Android < 13 return null: no runtime gate to satisfy.
       sink.permissionResult = null;
 
-      await service.ensureInitialized();
+      await service.ensureInitialized(requestPermission: true);
       await service.showTurnCompleted(
         title: 'Ready',
         turnSummary: 'done',
@@ -254,7 +254,7 @@ void main() {
       () async {
         sink.permissionError = StateError('no platform channel');
 
-        await service.ensureInitialized();
+        await service.ensureInitialized(requestPermission: true);
 
         // The app must keep running; notifications degrade, they never crash.
         await service.showTurnCompleted(

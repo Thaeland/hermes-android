@@ -2538,6 +2538,48 @@ class AppLocalizationsPt extends AppLocalizations {
   String
   get compact_removes_the_you_and_hermes_labels_and_trims_bubble_padding_spacing_and_side_margins =>
       'O modo compacto remove os rótulos You e Hermes e reduz as margens internas, o espaçamento e as margens laterais dos balões.';
+
+  @override
+  String get background_work => 'Trabalho em segundo plano';
+
+  @override
+  String get keep_chats_active_in_background =>
+      'Manter conversas ativas em segundo plano';
+
+  @override
+  String get background_work_description =>
+      'Mantém conectadas as conversas iniciadas por você enquanto o app está em segundo plano. Conexões ociosas podem ser desconectadas. Consome mais bateria e dados. Desativar não interrompe o trabalho no servidor.';
+
+  @override
+  String get background_work_limits =>
+      'O Android ainda pode suspender conexões no modo Doze ou encerrar o processo do app. Notificações após o encerramento do processo exigem uma configuração de push separada. A parada forçada não é suportada.';
+
+  @override
+  String get background_work_disclosure =>
+      'Uma notificação obrigatória do serviço permanece visível enquanto a proteção em segundo plano está ativa, mesmo com as notificações opcionais de conversa desativadas.';
+
+  @override
+  String get battery_optimisation_settings =>
+      'Configurações de otimização da bateria';
+
+  @override
+  String get battery_optimisation_description =>
+      'Abre as configurações do Android para revisar as restrições de bateria. Nenhuma exceção é solicitada automaticamente e alterar as configurações não garante a entrega.';
+
+  @override
+  String get battery_settings_unavailable =>
+      'Não foi possível abrir as configurações de bateria neste dispositivo.';
+
+  @override
+  String get background_work_save_failed =>
+      'Não foi possível salvar a configuração de trabalho em segundo plano.';
+
+  @override
+  String get ongoing_chat_channel_name => 'Conversas ativas';
+
+  @override
+  String get ongoing_chat_channel_description =>
+      'Atualizações silenciosas de conversas iniciadas por você ainda não concluídas';
 }
 
 /// The translations for Portuguese, as used in Brazil (`pt_BR`).
@@ -5069,4 +5111,46 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String
   get compact_removes_the_you_and_hermes_labels_and_trims_bubble_padding_spacing_and_side_margins =>
       'O modo compacto remove os rótulos You e Hermes e reduz as margens internas, o espaçamento e as margens laterais dos balões.';
+
+  @override
+  String get background_work => 'Trabalho em segundo plano';
+
+  @override
+  String get keep_chats_active_in_background =>
+      'Manter conversas ativas em segundo plano';
+
+  @override
+  String get background_work_description =>
+      'Mantém conectadas as conversas iniciadas por você enquanto o app está em segundo plano. Conexões ociosas podem ser desconectadas. Consome mais bateria e dados. Desativar não interrompe o trabalho no servidor.';
+
+  @override
+  String get background_work_limits =>
+      'O Android ainda pode suspender conexões no modo Doze ou encerrar o processo do app. Notificações após o encerramento do processo exigem uma configuração de push separada. A parada forçada não é suportada.';
+
+  @override
+  String get background_work_disclosure =>
+      'Uma notificação obrigatória do serviço permanece visível enquanto a proteção em segundo plano está ativa, mesmo com as notificações opcionais de conversa desativadas.';
+
+  @override
+  String get battery_optimisation_settings =>
+      'Configurações de otimização da bateria';
+
+  @override
+  String get battery_optimisation_description =>
+      'Abre as configurações do Android para revisar as restrições de bateria. Nenhuma exceção é solicitada automaticamente e alterar as configurações não garante a entrega.';
+
+  @override
+  String get battery_settings_unavailable =>
+      'Não foi possível abrir as configurações de bateria neste dispositivo.';
+
+  @override
+  String get background_work_save_failed =>
+      'Não foi possível salvar a configuração de trabalho em segundo plano.';
+
+  @override
+  String get ongoing_chat_channel_name => 'Conversas ativas';
+
+  @override
+  String get ongoing_chat_channel_description =>
+      'Atualizações silenciosas de conversas iniciadas por você ainda não concluídas';
 }

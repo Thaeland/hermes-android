@@ -2453,6 +2453,42 @@ class AppLocalizationsZh extends AppLocalizations {
   String
   get compact_removes_the_you_and_hermes_labels_and_trims_bubble_padding_spacing_and_side_margins =>
       '紧凑模式会去掉 You 和 Hermes 标签，并缩小气泡内边距、间距和两侧边距。';
+
+  @override
+  String get background_work => '后台运行';
+
+  @override
+  String get keep_chats_active_in_background => '在后台保持聊天连接';
+
+  @override
+  String get background_work_description =>
+      '应用在后台时，保持用户发起的聊天连接。空闲连接可能会断开。此功能会增加电量和流量消耗。关闭后不会停止服务器上的任务。';
+
+  @override
+  String get background_work_limits =>
+      'Android 仍可能在 Doze 模式下暂停连接或结束应用进程。进程结束后的通知需要单独设置推送。不支持强行停止后的通知。';
+
+  @override
+  String get background_work_disclosure => '后台保护开启时，即使关闭了可选的聊天通知，仍会显示必需的服务通知。';
+
+  @override
+  String get battery_optimisation_settings => '电池优化设置';
+
+  @override
+  String get battery_optimisation_description =>
+      '打开 Android 设置以查看电池限制。不会自动申请豁免，更改设置也不能保证通知送达。';
+
+  @override
+  String get battery_settings_unavailable => '无法在此设备上打开电池设置。';
+
+  @override
+  String get background_work_save_failed => '无法保存后台运行设置。';
+
+  @override
+  String get ongoing_chat_channel_name => '进行中的聊天';
+
+  @override
+  String get ongoing_chat_channel_description => '用户发起的未完成聊天的静默状态更新';
 }
 
 /// The translations for Chinese, using the Han script (`zh_Hans`).
@@ -4898,4 +4934,40 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String
   get compact_removes_the_you_and_hermes_labels_and_trims_bubble_padding_spacing_and_side_margins =>
       '紧凑模式会去掉 You 和 Hermes 标签，并缩小气泡内边距、间距和两侧边距。';
+
+  @override
+  String get background_work => '后台运行';
+
+  @override
+  String get keep_chats_active_in_background => '在后台保持聊天连接';
+
+  @override
+  String get background_work_description =>
+      '应用在后台时，保持用户发起的聊天连接。空闲连接可能会断开。此功能会增加电量和流量消耗。关闭后不会停止服务器上的任务。';
+
+  @override
+  String get background_work_limits =>
+      'Android 仍可能在 Doze 模式下暂停连接或结束应用进程。进程结束后的通知需要单独设置推送。不支持强行停止后的通知。';
+
+  @override
+  String get background_work_disclosure => '后台保护开启时，即使关闭了可选的聊天通知，仍会显示必需的服务通知。';
+
+  @override
+  String get battery_optimisation_settings => '电池优化设置';
+
+  @override
+  String get battery_optimisation_description =>
+      '打开 Android 设置以查看电池限制。不会自动申请豁免，更改设置也不能保证通知送达。';
+
+  @override
+  String get battery_settings_unavailable => '无法在此设备上打开电池设置。';
+
+  @override
+  String get background_work_save_failed => '无法保存后台运行设置。';
+
+  @override
+  String get ongoing_chat_channel_name => '进行中的聊天';
+
+  @override
+  String get ongoing_chat_channel_description => '用户发起的未完成聊天的静默状态更新';
 }

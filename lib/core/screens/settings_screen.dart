@@ -8,6 +8,7 @@ import '../services/config_backup_io.dart';
 import '../services/config_backup_service.dart';
 import '../services/connection_manager.dart';
 import '../services/notification_prefs.dart';
+import '../widgets/background_work_settings.dart';
 import '../services/turn_notification_service.dart';
 import '../widgets/config_backup_card.dart';
 import '../widgets/chat_density_settings_card.dart';
@@ -226,6 +227,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
           const SizedBox(height: 16),
           _buildSectionHeader(context.l10n.about),
           _AboutCard(),
+          const SizedBox(height: 16),
+          _buildSectionHeader(context.l10n.background_work),
+          const BackgroundWorkSettings(),
+          const SizedBox(height: 16),
+          _buildSectionHeader(context.l10n.notifications),
+          const _NotificationSettings(),
         ],
       );
     }
@@ -391,7 +398,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _buildSectionHeader(context.l10n.notifications),
         const _NotificationSettings(),
         const SizedBox(height: 16),
-
+        _buildSectionHeader(context.l10n.background_work),
+        const BackgroundWorkSettings(),
         const SizedBox(height: 16),
 
         // ---- Section: Voice ----
@@ -1005,9 +1013,11 @@ class _NotificationSettingsState extends State<_NotificationSettings> {
     // Resolve the Android 13+ permission state so a denied app shows the hint
     // instead of looking silently broken.
     unawaited(
-      TurnNotificationService.shared.ensureInitialized().then((_) {
-        if (mounted) setState(() {});
-      }),
+      TurnNotificationService.shared
+          .ensureInitialized(requestPermission: true)
+          .then((_) {
+            if (mounted) setState(() {});
+          }),
     );
   }
 
@@ -1072,8 +1082,12 @@ class _NotificationSettingsState extends State<_NotificationSettings> {
               title: Text(context.l10n.enable_notifications),
               subtitle: Text(context.l10n.enable_notifications_description),
               value: prefs.enabled,
-              onChanged: (on) =>
-                  unawaited(NotificationPrefsStore.setEnabled(on)),
+              onChanged: (on) async {
+                await NotificationPrefsStore.setEnabled(on);
+                if (!on) {
+                  await TurnNotificationService.shared.cancelAllOngoingChats();
+                }
+              },
             ),
             for (final kind in HermesNotificationKind.values) ...[
               const Divider(height: 1),

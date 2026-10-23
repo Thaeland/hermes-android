@@ -2473,4 +2473,41 @@ class AppLocalizationsJa extends AppLocalizations {
   String
   get compact_removes_the_you_and_hermes_labels_and_trims_bubble_padding_spacing_and_side_margins =>
       'コンパクトでは「You」「Hermes」のラベルを外し、吹き出しの余白・間隔・左右のマージンを詰めます。';
+
+  @override
+  String get background_work => 'バックグラウンド動作';
+
+  @override
+  String get keep_chats_active_in_background => 'バックグラウンドでもチャットを接続';
+
+  @override
+  String get background_work_description =>
+      'ユーザーが開始したチャットの接続を、アプリがバックグラウンドにある間も維持します。待機中の接続は切断される場合があります。バッテリーと通信量を多く使います。オフにしてもサーバー上の処理は停止しません。';
+
+  @override
+  String get background_work_limits =>
+      'Android は Doze 中に接続を休止したり、アプリのプロセスを終了したりする場合があります。プロセス終了後の通知には、別途プッシュ設定が必要です。強制停止には対応していません。';
+
+  @override
+  String get background_work_disclosure =>
+      'バックグラウンド保護が有効な間は、任意のチャット通知がオフでも、必須のサービス通知が表示されます。';
+
+  @override
+  String get battery_optimisation_settings => 'バッテリー最適化の設定';
+
+  @override
+  String get battery_optimisation_description =>
+      'Android の設定を開き、バッテリー制限を確認します。最適化の除外を自動では要求しません。設定を変更しても通知の到達は保証されません。';
+
+  @override
+  String get battery_settings_unavailable => 'この端末ではバッテリー設定を開けませんでした。';
+
+  @override
+  String get background_work_save_failed => 'バックグラウンド動作の設定を保存できませんでした。';
+
+  @override
+  String get ongoing_chat_channel_name => '進行中のチャット';
+
+  @override
+  String get ongoing_chat_channel_description => 'ユーザーが開始した未完了のチャットの静かな状態通知';
 }

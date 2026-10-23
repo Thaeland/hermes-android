@@ -689,5 +689,16 @@
   "chat_density_comfortable_description": "Balões mais amplos com um rótulo de remetente acima de cada mensagem.",
   "chat_density_compact_description": "Balões mais justos e sem rótulo para caberem mais mensagens na tela.",
   "chat_density_label_description": "{label} — {description}",
-  "compact_removes_the_you_and_hermes_labels_and_trims_bubble_padding_spacing_and_side_margins": "O modo compacto remove os rótulos You e Hermes e reduz as margens internas, o espaçamento e as margens laterais dos balões."
+  "compact_removes_the_you_and_hermes_labels_and_trims_bubble_padding_spacing_and_side_margins": "O modo compacto remove os rótulos You e Hermes e reduz as margens internas, o espaçamento e as margens laterais dos balões.",
+  "background_work": "Trabalho em segundo plano",
+  "keep_chats_active_in_background": "Manter conversas ativas em segundo plano",
+  "background_work_description": "Mantém conectadas as conversas iniciadas por você enquanto o app está em segundo plano. Conexões ociosas podem ser desconectadas. Consome mais bateria e dados. Desativar não interrompe o trabalho no servidor.",
+  "background_work_limits": "O Android ainda pode suspender conexões no modo Doze ou encerrar o processo do app. Notificações após o encerramento do processo exigem uma configuração de push separada. A parada forçada não é suportada.",
+  "background_work_disclosure": "Uma notificação obrigatória do serviço permanece visível enquanto a proteção em segundo plano está ativa, mesmo com as notificações opcionais de conversa desativadas.",
+  "battery_optimisation_settings": "Configurações de otimização da bateria",
+  "battery_optimisation_description": "Abre as configurações do Android para revisar as restrições de bateria. Nenhuma exceção é solicitada automaticamente e alterar as configurações não garante a entrega.",
+  "battery_settings_unavailable": "Não foi possível abrir as configurações de bateria neste dispositivo.",
+  "background_work_save_failed": "Não foi possível salvar a configuração de trabalho em segundo plano.",
+  "ongoing_chat_channel_name": "Conversas ativas",
+  "ongoing_chat_channel_description": "Atualizações silenciosas de conversas iniciadas por você ainda não concluídas"
 }

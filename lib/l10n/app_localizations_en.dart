@@ -2520,4 +2520,45 @@ class AppLocalizationsEn extends AppLocalizations {
   String
   get compact_removes_the_you_and_hermes_labels_and_trims_bubble_padding_spacing_and_side_margins =>
       'Compact removes the You and Hermes labels and trims bubble padding, spacing, and side margins.';
+
+  @override
+  String get background_work => 'Background work';
+
+  @override
+  String get keep_chats_active_in_background =>
+      'Keep chats active in the background';
+
+  @override
+  String get background_work_description =>
+      'Keep user-started chats connected while this app is in the background. Idle connections may disconnect. Uses more battery and network data. Turning this off does not stop work on the server.';
+
+  @override
+  String get background_work_limits =>
+      'Android may still suspend connections during Doze or end the app process. Notifications after process death require the separate push setup. Force stop is not supported.';
+
+  @override
+  String get background_work_disclosure =>
+      'A required service notification stays visible while background protection is active, even when optional chat notifications are off.';
+
+  @override
+  String get battery_optimisation_settings => 'Battery optimisation settings';
+
+  @override
+  String get battery_optimisation_description =>
+      'Open Android settings to review battery restrictions. No exemption is requested automatically, and changing settings does not guarantee delivery.';
+
+  @override
+  String get battery_settings_unavailable =>
+      'Battery settings could not be opened on this device.';
+
+  @override
+  String get background_work_save_failed =>
+      'Could not save the background work setting.';
+
+  @override
+  String get ongoing_chat_channel_name => 'Active chats';
+
+  @override
+  String get ongoing_chat_channel_description =>
+      'Quiet status updates for unresolved user-started chats';
 }
