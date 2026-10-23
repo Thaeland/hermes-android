@@ -333,16 +333,22 @@ checkout and its installed dependencies (these variables are read-only inputs):
 
 ```sh
 export HERMES_AGENT_SOURCE=/absolute/path/to/hermes-agent-source
-# Optional fallback site-packages for dependencies already in that selected environment:
-export HERMES_AGENT_SITE_PACKAGES=/absolute/path/to/hermes-environment/lib/python3.14/site-packages
+# Dependencies used by the inspected Hermes manager/loader on Python 3.11:
+uv pip install --python "$TMPDIR/mobile-push-tests/bin/python" ruamel.yaml python-dotenv rich
+# Optional fallback for dependencies already in a selected Hermes environment:
+# use the SAME Python minor version as the test interpreter, not a 3.14 site
+# directory with a 3.11 interpreter (compiled extensions are not interchangeable).
+export HERMES_AGENT_SITE_PACKAGES=/absolute/path/to/matching-hermes-environment/lib/python3.11/site-packages
 # Repeat the pytest command above with these variables set.
 ```
 
 No source checkout means the three host integration tests are explicitly skipped;
 the ordinary protocol/crypto tests still run. With the inspected source/dependency
 paths set, the full suite ran with **80 passed** on Python 3.14.7, including real
-manager/loader lifecycle tests and an actual TLS loopback receiver. A Starlette
-TestClient/httpx deprecation warning is upstream, not a skipped test.
+manager/loader lifecycle tests and an actual TLS loopback receiver. The integrated
+checkout was independently rerun on Python 3.11.15 with the minimum-version TLS
+fixture compatibility fix: **80 passed**, including all three real-host tests.
+A Starlette TestClient/httpx deprecation warning is upstream, not a skipped test.
 
 The receiver uses real pywebpush encryption, independently decrypts with the generated
 subscriber private key/auth secret, verifies the VAPID JWT signature/audience and
