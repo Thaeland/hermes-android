@@ -120,7 +120,7 @@ sanitized implementation and validation record.
 - **Messaging-style UI** — dark/light/system themes, gold Hermes accent color (`#D4AF37`), markdown rendering, relative timestamps, and responsive phone/tablet layouts.
 - **Gold/black Hermes branding** — distinctive gold accent on black background, custom app icon with mipmap densities, agent messages use grey bubbles.
 - **Gateway API integration** — sessions and chat run through the Hermes Gateway API Server, normally on port `8642`, with HTTP and HTTPS endpoints supported. Reverse-proxy deployments can set a gateway path prefix that is applied before `/api` and `/v1` routes.
-- **Dashboard integrations** — Memory, Cron Jobs, Skills, and Settings screens use the Hermes dashboard API (default port `9119`, configurable per connection) on the same host. Works with open (`--insecure`) dashboards, **password-protected dashboards** via the built-in login, and proxied dashboards where auth is injected upstream.
+- **Dashboard integrations:** Memory, Cron Jobs, Skills, Settings and Remote Gateway chat use the authenticated Hermes dashboard (default port `9119`, configurable per connection). Use the built-in password login or a trusted reverse proxy. Current Hermes requires an authentication provider before the dashboard can bind to a non-loopback address; `--insecure` no longer bypasses this requirement.
 - **Model settings** — view and change the configured Hermes model where the dashboard exposes model settings.
 - **Cron management** — list, trigger, pause/resume, create, edit, and delete scheduled Hermes cron jobs.
 - **Skills browser** — view available Hermes skills with descriptions and trigger conditions.
@@ -172,7 +172,7 @@ Download the latest APK from this repository's
 For most Android phones, install the ARM64 APK:
 
 ```bash
-adb install Hermes-Android-2.0.1-arm64-release.apk
+adb install -r app-arm64-v8a-release.apk
 ```
 
 If sideloading directly on Android, enable **Install unknown apps** for your browser or file manager, then open the downloaded APK.
@@ -191,15 +191,24 @@ Use your normal Hermes gateway/API-server startup command and confirm:
 
 Memory, Cron Jobs, Skills, and Settings use the Hermes dashboard API (default port `9119`).
 
-Open dashboard (no login):
+Configure a dashboard authentication provider before exposing it to your LAN or
+tailnet. For password login, Hermes uses `dashboard.basic_auth.username`, a
+scrypt `dashboard.basic_auth.password_hash`, the bundled `basic` auth plugin,
+and a separate session-signing secret. Follow the current
+[Hermes documentation](https://hermes-agent.nousresearch.com/docs) for setup;
+keep passwords and signing secrets out of commands, chat and committed files.
+
+Start the configured dashboard:
 
 ```bash
-hermes dashboard --insecure --host 0.0.0.0 --tui --port 9119
+hermes dashboard --host 0.0.0.0 --port 9119 --no-open
 ```
 
-Password-protected dashboard (recommended on shared networks) — start it with a
-basic-auth provider instead of `--insecure`, then enter the username/password in
-the app's **Dashboard / Proxy Settings** dialog (see [Dashboard access](#4-optional-configure-dashboard-access)).
+Enter its username/password in the app's **Dashboard / Proxy Settings** dialog
+(see [Dashboard access](#4-optional-configure-dashboard-access)). An existing
+trusted reverse proxy can supply identity instead. A public `/api/status`
+response proves reachability, not successful login: validate a protected route
+after authenticating.
 
 > `--host 0.0.0.0` is required when connecting from another device. A localhost-only dashboard cannot be reached from Android.
 
@@ -247,8 +256,9 @@ afterwards:
    - **Dashboard Port** — leave blank to use the default (`9119` for HTTP, or the
      same external port for HTTPS deployments), or set an explicit port if your
      dashboard is exposed elsewhere.
-   - **Username / Password** — only for a password-protected dashboard. Leave
-     both blank for an open (`--insecure`) dashboard.
+   - **Username / Password** — the dashboard's password-login credentials.
+     Leave both blank only when a trusted proxy supplies identity or for a
+     local loopback dashboard. `--insecure` is not a remote-auth bypass.
    - **Hermes profile** — only when the dashboard is a *machine-level* one
      (`hermes dashboard` / `hermes serve` without `--isolated`) that hosts
      several profiles. Hermes scopes each JSON-RPC call on that socket by a
@@ -360,15 +370,17 @@ Android app (Flutter)
    ├─ /api/memory
    ├─ /api/cron/jobs
    ├─ /api/skills
-   └─ /api/model/*
+   ├─ /api/model/*
+   ├─ /api/auth/ws-ticket → /api/ws  (Remote Gateway JSON-RPC)
+   └─ /api/sessions/{id}/messages  (richer dashboard transcript)
 ```
 
 ## Using the app
 
 ### Chat screen
 
-- **Send messages** — Type in the input field and tap the send button or press Enter.
-- **Streaming responses** — The agent's response appears token-by-token in real-time. The chat auto-scrolls to the bottom as new tokens arrive.
+- **Send messages:** Type in the input field and tap Send. Enter/Return inserts a new line.
+- **Streaming responses:** Replies arrive through Remote Gateway JSON-RPC or legacy REST/SSE. The chat follows new content while you are at the end; scrolling up lets you read earlier messages.
 - **Tool progress** — When the agent uses tools, inline progress messages show the tool name, status, and progress.
 - **Verbose mode** — Toggle in the app settings to show raw message metadata (role, tool call IDs, timestamps).
 - **Markdown rendering** — Assistant messages render markdown (code blocks, tables, lists, links).
@@ -516,12 +528,12 @@ Check that the Android connection's API key matches `API_SERVER_KEY` from the He
 ### Streaming stops or messages don't appear
 
 - The SSE connection may have timed out. Pull to refresh the session list and re-enter the chat.
-- Check that the Gateway API Server is running and responsive: `curl http://<host>:8642/api/sessions`.
+- Check reachability with `curl http://<host>:8642/health`. This public endpoint does not validate the API key; session/model reads require Bearer authentication.
 - If using a reverse proxy, ensure it supports long-lived SSE connections (no aggressive timeouts).
 
 ### Dashboard screens show empty or error
 
-- Verify the dashboard is running with `--host 0.0.0.0` (an open dashboard also needs `--insecure`).
+- Verify the dashboard is running with `--host 0.0.0.0` and a configured password/OAuth authentication provider or trusted proxy. Current Hermes ignores the deprecated `--insecure` flag rather than disabling authentication.
 - If the dashboard is password-protected, set the username/password under **⋮ → Dashboard / Proxy Settings** (or **Custom proxy and dashboard details** when adding the connection). A 401 here means the credentials are wrong.
 - If the dashboard sits behind a reverse-proxy path, set **Dashboard path prefix**. If the proxy injects dashboard auth, enable **Dashboard behind proxy** so the app sends clean requests.
 - Check the dashboard port matches the connection (default `9119` for local/Tailscale, same HTTPS port for hosted; override it in Dashboard / Proxy Settings if needed).
@@ -563,7 +575,7 @@ lib/
 │   │   └── session.dart                # Session model
 │   ├── screens/
 │   │   ├── session_list_screen.dart   # Session browser
-│   │   ├── chat_screen.dart           # Chat with SSE streaming
+│   │   ├── chat_screen.dart           # Remote Gateway and legacy REST/SSE chat
 │   │   ├── settings_screen.dart       # Model/theme/app settings
 │   │   ├── memory_screen.dart         # Memory viewer
 │   │   ├── skills_screen.dart         # Skills browser
@@ -571,7 +583,7 @@ lib/
 │   ├── services/
 │   │   ├── attachment_draft_service.dart # Cache, sanitization, limits, upload order
 │   │   ├── connection_manager.dart    # Saved connections, Gateway API, Dashboard API
-│   │   └── ws_client.dart             # JSON-RPC WebSocket client for future dashboard/TUI use
+│   │   └── ws_client.dart             # Active Remote Gateway JSON-RPC transport
 │   └── utils/
 │       └── responsive.dart            # Phone/tablet breakpoints
 └── assets/
@@ -580,6 +592,10 @@ lib/
 ```
 
 ## Credits
+
+**AI assistance:** Hermes Agent assists with implementation, research, code
+review and regression tests. Automated checks do not substitute for device
+validation; release notes list the checks performed.
 
 - **krotname** (Andrei Ovcharenko) — fixed duplicate final answers after
   Gateway interim previews, including late reasoning and widget regressions
