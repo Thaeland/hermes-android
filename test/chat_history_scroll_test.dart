@@ -1051,21 +1051,31 @@ void main() {
           });
           remote.finish();
           await tester.pumpAndSettle();
-          final completedReasoning = event == 'reasoning.available'
-              ? 'Reasoning for $event'
-              : 'Partial reasoning. Reasoning for $event';
-          expect(
-            tester
-                .widget<GatewayReasoningCard>(find.byType(GatewayReasoningCard))
-                .initiallyExpanded,
-            lateVerbose,
-          );
-          if (!lateVerbose) {
+          final cards = tester
+              .widgetList<GatewayReasoningCard>(
+                find.byType(GatewayReasoningCard),
+              )
+              .toList();
+          if (lateVerbose) {
+            // Append-mode scope transfer preserves both receipt runs and their
+            // expansion identities; it must not move the late run into R1.
+            expect(cards.map((card) => card.text), [
+              'Partial reasoning. ',
+              'Reasoning for $event',
+            ]);
+            expect(cards.map((card) => card.initiallyExpanded), [false, true]);
+            await tester.tap(find.text('Reasoning').first);
+            await tester.pumpAndSettle();
+            expect(find.text('Partial reasoning. '), findsOneWidget);
+          } else {
+            // An explicit available snapshot replaces earlier scoped content.
+            expect(cards, hasLength(1));
+            expect(cards.single.initiallyExpanded, isFalse);
             await tester.tap(find.text('Reasoning'));
             await tester.pumpAndSettle();
+            expect(find.text('Partial reasoning. '), findsNothing);
           }
-          expect(find.text(completedReasoning), findsOneWidget);
-          expect(find.text('Partial reasoning. '), findsNothing);
+          expect(find.text('Reasoning for $event'), findsOneWidget);
           expect(
             find.text('Answer for $event', findRichText: true),
             findsOneWidget,

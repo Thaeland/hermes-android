@@ -235,9 +235,10 @@ class ChatTimeline {
     ]);
   }
 
-  /// A preview completion can consume an empty interim continuation. Transfer
-  /// its references, combining scoped reasoning exactly as the wire contract
-  /// requests, without moving a tool or changing a card's stable identity.
+  /// A preview completion can consume an empty interim continuation. Append
+  /// reasoning transfers ownership only: keep each run's position and card ID,
+  /// even if the reassignment makes two reasoning runs adjacent. Only explicit
+  /// replacement semantics may replace earlier scoped reasoning.
   ChatTimeline reassignScope(
     Object from,
     Object to, {
@@ -251,14 +252,10 @@ class ChatTimeline {
     final targetReasoning = forScope(
       to,
     ).where((r) => r.kind == ChatTimelineKind.reasoning).toList();
-    if (sourceReasoning.isNotEmpty && targetReasoning.isNotEmpty) {
-      final merged = GatewayReasoningUpdate(
-        text: sourceReasoning.map((r) => r.text).join(),
-        mode: replaceReasoning
-            ? GatewayReasoningEventMode.replace
-            : GatewayReasoningEventMode.append,
-        verbose: sourceReasoning.last.verbose,
-      ).applyTo(targetReasoning.map((r) => r.text).join());
+    if (replaceReasoning &&
+        sourceReasoning.isNotEmpty &&
+        targetReasoning.isNotEmpty) {
+      final merged = sourceReasoning.map((r) => r.text).join();
       next = next._replaceReasoning(to, merged, sourceReasoning.last.verbose);
       next = next._with(
         next.runs

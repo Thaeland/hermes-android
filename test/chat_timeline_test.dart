@@ -266,6 +266,33 @@ void main() {
     },
   );
 
+  for (final withBarrier in [false, true]) {
+    test(
+      'append-mode scope transfer preserves receipt ids; barrier=$withBarrier',
+      () {
+        final original = Object();
+        final pending = Object();
+        var state = const ChatTimeline().reasoning(original, reasoning('R1'));
+        if (withBarrier) {
+          state = state.appendText(original, 'A').tool(pending, tool('t1'));
+        }
+        state = state.reasoning(pending, reasoning('R2'));
+        final next = state.reassignScope(pending, original);
+        expect(next.runs.map((run) => run.id), state.runs.map((run) => run.id));
+        expect(
+          next.runs.map((run) => run.text),
+          state.runs.map((run) => run.text),
+        );
+        expect(
+          next.runs.map((run) => run.kind),
+          state.runs.map((run) => run.kind),
+        );
+        expect(next.forScope(pending), isEmpty);
+        expect(next.forScope(original).length, state.runs.length);
+      },
+    );
+  }
+
   test(
     'preview reassignment combines late reasoning and retains tool positions',
     () {
