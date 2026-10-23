@@ -5,17 +5,79 @@ import 'local_chat_pin_store.dart';
 
 typedef SessionScanProgress = void Function(List<Session> sessions);
 
-/// Shares only an in-flight scan; a later refresh always reads fresh history.
+/// Coalesces readers only within the same physical authority revision.
+/// Invalidating starts a new flight without replaying an older flight's rows.
+class SharedSessionScan {
+  final Future<List<Session>> Function(SessionScanProgress publish) read;
+  final _flights = <_SessionScanFlight>{};
+  _SessionScanFlight? _current;
+  var _revision = 0;
+  bool _closed = false;
+  bool get isClosed => _closed;
+
+  SharedSessionScan(this.read);
+
+  Future<List<Session>> load({SessionScanProgress? onProgress}) async {
+    if (isClosed) throw StateError('Session browser is closed');
+    var flight = _current;
+    if (flight == null || flight.revision != _revision) {
+      flight = _SessionScanFlight(_revision);
+      final started = flight;
+      _current = started;
+      _flights.add(started);
+      started.result =
+          Future<List<Session>>.sync(
+            () => read((rows) {
+              if (isClosed || !_flights.contains(started)) return;
+              started.progress = List.unmodifiable(rows);
+              for (final listener in started.listeners.toList()) {
+                listener(started.progress!);
+              }
+            }),
+          ).whenComplete(() {
+            _flights.remove(started);
+            if (identical(_current, started)) _current = null;
+          });
+    }
+    try {
+      if (onProgress != null) {
+        flight.listeners.add(onProgress);
+        if (flight.progress case final previous?) onProgress(previous);
+      }
+      final rows = await flight.result;
+      if (isClosed) throw StateError('Session browser is closed');
+      return rows;
+    } finally {
+      if (onProgress != null) flight.listeners.remove(onProgress);
+    }
+  }
+
+  void invalidate() => _revision++;
+
+  void close() {
+    _closed = true;
+    for (final flight in _flights) {
+      flight.listeners.clear();
+    }
+  }
+}
+
+class _SessionScanFlight {
+  final int revision;
+  final listeners = <SessionScanProgress>{};
+  late final Future<List<Session>> result;
+  List<Session>? progress;
+
+  _SessionScanFlight(this.revision);
+}
+
 /// Both conversation browsers observe the same unfiltered source so legacy
 /// cron identities are not lost behind a source=cron request.
 class SessionBrowserLoader {
   final ApiClient api;
   final Future<List<String>> Function() loadPins;
   final Future<List<Session>> Function()? sessionsLoader;
-  final _listeners = <SessionScanProgress>{};
-  Future<List<Session>>? _inFlight;
-  List<Session>? _progress;
-  bool _closed = false;
+  late final _owner = SharedSessionScan(_scan);
 
   SessionBrowserLoader({
     required this.api,
@@ -23,42 +85,22 @@ class SessionBrowserLoader {
     this.sessionsLoader,
   });
 
-  Future<List<Session>> load({SessionScanProgress? onProgress}) async {
-    if (_closed) throw StateError('Session browser is closed');
-    if (onProgress != null) {
-      _listeners.add(onProgress);
-      final previous = _progress;
-      if (_inFlight != null && previous != null) onProgress(previous);
-    }
-    try {
-      return await (_inFlight ??= _scan().whenComplete(() {
-        _inFlight = null;
-        _progress = null;
-      }));
-    } finally {
-      if (onProgress != null) _listeners.remove(onProgress);
-    }
-  }
+  Future<List<Session>> load({SessionScanProgress? onProgress}) =>
+      _owner.load(onProgress: onProgress);
 
-  void _publish(Iterable<Session> sessions) {
-    if (_closed) return;
-    final snapshot = List<Session>.unmodifiable(sessions);
-    _progress = snapshot;
-    for (final listener in _listeners.toList()) {
-      listener(snapshot);
-    }
-  }
+  void invalidate() => _owner.invalidate();
+  bool get _closed => _owner.isClosed;
 
-  Future<List<Session>> _scan() async {
+  Future<List<Session>> _scan(SessionScanProgress publish) async {
     final custom = sessionsLoader;
     if (custom != null) {
       final sessions = await custom();
-      _publish(sessions);
+      publish(sessions);
       return sessions;
     }
     final first = await api.getSessionsPage(limit: 5);
     if (_closed) throw StateError('Session browser is closed');
-    _publish(first.sessions);
+    publish(first.sessions);
     const pageSize = 100;
     final all = <String, Session>{};
     var offset = 0;
@@ -72,7 +114,7 @@ class SessionBrowserLoader {
         if (!all.containsKey(session.id)) newRows++;
         all[session.id] = session;
       }
-      _publish(all.values);
+      publish(List.unmodifiable(all.values));
       final pinsOnPage = page.sessions
           .where((session) => session.pinned)
           .length;
@@ -111,8 +153,5 @@ class SessionBrowserLoader {
     return List.unmodifiable(all.values);
   }
 
-  void close() {
-    _closed = true;
-    _listeners.clear();
-  }
+  void close() => _owner.close();
 }

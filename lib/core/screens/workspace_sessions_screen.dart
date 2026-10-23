@@ -194,6 +194,24 @@ class WorkspaceSessionsData {
     this.projectsKnown = true,
   });
 
+  WorkspaceSessionsData withArchives({
+    required List<Session> rows,
+    bool loading = false,
+    Object? error,
+  }) => WorkspaceSessionsData(
+    sessions: sessions,
+    isPartial: isPartial,
+    sessionsError: sessionsError,
+    archivedSessions: rows,
+    archivedIsPartial: loading,
+    archiveError: error,
+    claimedSessionIds: claimedSessionIds,
+    archivedQuickChatIds: archivedQuickChatIds,
+    projectLabels: projectLabels,
+    projectsKnown: projectsKnown,
+    projectsLoading: projectsLoading,
+  );
+
   WorkspaceSessionsData copyWith({
     List<Session>? sessions,
     List<Session>? archivedSessions,
@@ -216,6 +234,10 @@ class WorkspaceSessionsData {
 }
 
 typedef WorkspaceSessionsLoader = Future<WorkspaceSessionsData> Function();
+typedef WorkspaceArchivesLoader =
+    Future<List<Session>> Function(
+      void Function(List<Session> rows) onProgress,
+    );
 typedef WorkspaceSessionsProgressiveLoader =
     Future<WorkspaceSessionsData> Function(
       void Function(WorkspaceSessionsData data) onProgress,
@@ -280,6 +302,9 @@ class WorkspaceSessionsScreen extends StatefulWidget {
   final WorkspaceSessionKind kind;
   final WorkspaceSessionsLoader load;
   final WorkspaceSessionsProgressiveLoader? loadProgressively;
+
+  /// Retries the archive authority without waiting for unrelated active scans.
+  final WorkspaceArchivesLoader? reloadArchives;
   final WorkspaceSessionsData? initialData;
   final ValueChanged<Session> onOpenSession;
   final WorkspaceSessionPromoter? onPromote;
@@ -305,6 +330,7 @@ class WorkspaceSessionsScreen extends StatefulWidget {
     this.kind = WorkspaceSessionKind.chats,
     required this.load,
     this.loadProgressively,
+    this.reloadArchives,
     this.initialData,
     required this.onOpenSession,
     this.onPromote,
@@ -353,6 +379,9 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
   /// after it so a return from chat cannot lose a rename behind an old load.
   Future<void>? _loadInFlight;
   Future<void>? _queuedRefresh;
+  Future<void>? _archiveReadInFlight;
+  Future<void>? _queuedArchiveRefresh;
+  int _archiveReadRevision = 0;
 
   /// The active chip filter in the embedded Chats browser.
   WorkspaceChatsFilter _filter = WorkspaceChatsFilter.all;
@@ -459,6 +488,16 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
   /// Completes after a read started at or after this refresh request.
   Future<void> refresh() {
     if (!mounted) return Future<void>.value();
+    if (widget.embedded &&
+        _filter == WorkspaceChatsFilter.archived &&
+        widget.reloadArchives != null) {
+      final pending = _archiveReadInFlight;
+      if (pending == null) return _loadArchives();
+      return _queuedArchiveRefresh ??= pending.then<void>((_) {
+        _queuedArchiveRefresh = null;
+        return _loadArchives();
+      });
+    }
     final pending = _loadInFlight;
     if (pending == null) return _load();
     return _queuedRefresh ??= pending.then<void>((_) {
@@ -474,11 +513,66 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
     });
   }
 
+  Future<void> _loadArchives() =>
+      _archiveReadInFlight ??= _loadArchivesOnce().whenComplete(() {
+        _archiveReadInFlight = null;
+      });
+
+  Future<void> _loadArchivesOnce() async {
+    if (!mounted || _data == null) return;
+    final revision = ++_archiveReadRevision;
+    final titleRevision = _titleRevision;
+    void apply(List<Session> rows, {bool loading = false, Object? error}) {
+      if (!mounted || revision != _archiveReadRevision) return;
+      final previous = _data!;
+      final seen = rows.map((row) => row.id).toSet();
+      final retained = loading || error != null
+          ? [
+              ...rows,
+              ...previous.archivedSessions.where(
+                (row) => !seen.contains(row.id),
+              ),
+            ]
+          : rows;
+      setState(() {
+        _data = _withSessionTitles(
+          previous.withArchives(rows: retained, loading: loading, error: error),
+          {
+            for (final entry in _savedTitles.entries)
+              if (entry.value.revision > titleRevision)
+                entry.key: entry.value.title,
+          },
+        );
+        _error = null;
+        if (!loading && error == null) _archivesFullyLoaded = true;
+      });
+    }
+
+    apply(_data!.archivedSessions, loading: true);
+    try {
+      final rows = await widget.reloadArchives!(
+        (rows) => apply(rows, loading: true),
+      );
+      apply(rows);
+    } catch (error) {
+      apply(const [], error: error);
+    }
+  }
+
   Future<void> _loadOnce() async {
     final titleRevision = _titleRevision;
     final projectRevision = _projectRevision;
+    final archiveRevision = _archiveReadRevision;
     void apply(WorkspaceSessionsData data) {
       if (!mounted) return;
+      // An older aggregate load cannot undo a newer archive-only retry.
+      if (archiveRevision != _archiveReadRevision && _data != null) {
+        data = data.withArchives(
+          rows: _data!.archivedSessions,
+          loading: _data!.archivedIsPartial,
+          error: _data!.archiveError,
+        );
+      }
       if (!data.isPartial && data.sessionsError == null) {
         _activeFullyLoaded = true;
       }

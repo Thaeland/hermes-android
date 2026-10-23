@@ -285,9 +285,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   List<Session> _knownSessions = const [];
   bool _sessionsKnown = false;
   int _signalsGeneration = 0;
-  Future<List<Session>>? _archiveScan;
-  List<Session>? _archiveProgress;
-  final _archiveListeners = <SessionScanProgress>{};
+  SharedSessionScan? _archiveLoader;
+  int _sessionTitleRevision = 0;
+  final _confirmedTitles = <String, ({int revision, String title})>{};
 
   /// Best-effort Project labels learned from the latest projects.tree read,
   /// used to carry context into chats opened from the global Chats browser.
@@ -343,37 +343,35 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     );
   }
 
+  SharedSessionScan get _archivesLoader => _archiveLoader ??= SharedSessionScan(
+    (publish) => _dashboardClient.getArchivedSessions(
+      gatewayProfile: widget.connection.gatewayProfile,
+      maxPages: null,
+      isCancelled: () => !mounted,
+      onProgress: publish,
+    ),
+  );
+
   Future<List<Session>> _loadArchivedSessions({
     SessionScanProgress? onProgress,
   }) async {
-    if (onProgress != null) {
-      _archiveListeners.add(onProgress);
-      if (_archiveScan != null && _archiveProgress != null) {
-        onProgress(_archiveProgress!);
-      }
-    }
-    try {
-      return await (_archiveScan ??= _dashboardClient
-          .getArchivedSessions(
-            gatewayProfile: widget.connection.gatewayProfile,
-            maxPages: null,
-            isCancelled: () => !mounted,
-            onProgress: (sessions) {
-              if (!mounted) return;
-              _archiveProgress = sessions;
-              for (final listener in _archiveListeners.toList()) {
-                listener(sessions);
-              }
-            },
-          )
-          .whenComplete(() {
-            _archiveScan = null;
-            _archiveProgress = null;
-          }));
-    } finally {
-      if (onProgress != null) _archiveListeners.remove(onProgress);
-    }
+    final revision = _sessionTitleRevision;
+    final rows = await _archivesLoader.load(
+      onProgress: onProgress == null
+          ? null
+          : (rows) => onProgress(_withConfirmedTitles(rows, revision)),
+    );
+    return _withConfirmedTitles(rows, revision);
   }
+
+  List<Session> _withConfirmedTitles(List<Session> rows, int readRevision) => [
+    for (final row in rows)
+      if (_confirmedTitles[row.id] case final saved?
+          when saved.revision > readRevision)
+        row.withTitle(saved.title)
+      else
+        row,
+  ];
 
   /// Opens the Quick chat lifecycle store for this connection.
   ///
@@ -447,9 +445,15 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     // failed read degrades a row's title, never the timeline itself.
     if (!_sessionsKnown) {
       final generation = _signalsGeneration;
+      final revision = _sessionTitleRevision;
       try {
-        final sessions = await _sessionLoader.load();
-        if (mounted && generation == _signalsGeneration) {
+        final sessions = _withConfirmedTitles(
+          await _sessionLoader.load(),
+          revision,
+        );
+        if (mounted &&
+            generation == _signalsGeneration &&
+            revision == _sessionTitleRevision) {
           _knownSessions = sessions;
           _sessionsKnown = true;
           _cacheSessionTitles(sessions);
@@ -665,7 +669,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   void dispose() {
     _signalsGeneration++;
     _browserLoader?.close();
-    _archiveListeners.clear();
+    _archiveLoader?.close();
     // Only tear down what this screen created; an injected repository stays
     // owned by whoever supplied it.
     if (_ownsRepository) {
@@ -755,6 +759,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           load: _loadWorkspaceSessionsData,
           loadProgressively: (onProgress) =>
               _loadWorkspaceSessionsData(onProgress: onProgress),
+          reloadArchives: (onProgress) =>
+              _loadArchivedSessions(onProgress: onProgress),
           onOpenSession: (session) => unawaited(
             _openSession(session, projectName: _chatProjectLabels[session.id]),
           ),
@@ -779,6 +785,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             kind: WorkspaceSessionKind.crons,
             onProgress: onProgress,
           ),
+          reloadArchives: (onProgress) =>
+              _loadArchivedSessions(onProgress: onProgress),
           onOpenSession: (session) => unawaited(_openSession(session)),
           onRename: _renameSession,
         );
@@ -1231,17 +1239,20 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     }
 
     Future<void> readActive() async {
+      final revision = _sessionTitleRevision;
       void accept(List<Session> rows) {
         if (!mounted) return;
-        sessions = rows;
-        setState(() => _knownSessions = rows);
-        _cacheSessionTitles(rows);
+        sessions = _withConfirmedTitles(rows, revision);
+        if (revision == _sessionTitleRevision) {
+          setState(() => _knownSessions = sessions);
+          _cacheSessionTitles(sessions);
+        }
         publish();
       }
 
       try {
         accept(await _sessionLoader.load(onProgress: accept));
-        _sessionsKnown = true;
+        if (revision == _sessionTitleRevision) _sessionsKnown = true;
       } catch (error) {
         sessionsError = error;
       } finally {
@@ -1317,6 +1328,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       title: title,
     );
     if (mounted) {
+      _confirmedTitles[session.id] = (
+        revision: ++_sessionTitleRevision,
+        title: savedTitle,
+      );
+      _browserLoader?.invalidate();
+      _archiveLoader?.invalidate();
       _sessionTitles = Map.unmodifiable({
         ..._sessionTitles,
         session.id: savedTitle,
