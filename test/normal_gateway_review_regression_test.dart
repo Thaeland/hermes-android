@@ -391,6 +391,8 @@ class _Sink implements TurnNotificationSink {
   @override
   Future<bool?> requestPermission() async => true;
   @override
+  Future<bool?> checkPermission() async => true;
+  @override
   Future<NotificationResponse?> takeInitialLaunchResponse() async => null;
   @override
   Future<void> show(TurnNotification notification) async =>

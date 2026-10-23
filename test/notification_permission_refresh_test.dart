@@ -140,7 +140,12 @@ void main() {
       await tester.scrollUntilVisible(
         find.text('Send test notification'),
         400,
-        scrollable: find.byType(Scrollable).last,
+        scrollable: find
+            .descendant(
+              of: find.byType(SettingsScreen),
+              matching: find.byType(Scrollable),
+            )
+            .first,
       );
       await tester.pumpAndSettle();
       final strings = AppLocalizations.of(

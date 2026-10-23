@@ -1830,7 +1830,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _applyNormalSnapshot(normalSnapshot!, hydrateHistory: false);
       }
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || !_scrollController.hasClients) return;
+        if (!mounted ||
+            _openTaskController != null ||
+            !_scrollController.hasClients) {
+          return;
+        }
         final delta = _scrollController.position.maxScrollExtent - oldExtent;
         _scrollController.jumpTo(
           (oldPixels + delta).clamp(

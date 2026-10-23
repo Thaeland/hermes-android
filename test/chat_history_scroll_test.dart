@@ -343,6 +343,7 @@ void main() {
               const ResumedGatewaySession(
                 runtimeSessionId: 'runtime-fixture',
                 running: false,
+                status: 'completed',
               ),
         );
         hook.handler!(DesktopConnectionState.connected);
