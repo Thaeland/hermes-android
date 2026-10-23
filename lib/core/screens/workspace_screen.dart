@@ -354,9 +354,13 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
 
   Future<List<Session>> _loadArchivedSessions({
     SessionScanProgress? onProgress,
+    bool fresh = false,
   }) async {
     final revision = _sessionTitleRevision;
-    final rows = await _archivesLoader.load(
+    final owner = _archivesLoader;
+    // Passive pane loads coalesce; an explicit refresh needs new physical I/O.
+    if (fresh) owner.invalidate();
+    final rows = await owner.load(
       onProgress: onProgress == null
           ? null
           : (rows) => onProgress(_withConfirmedTitles(rows, revision)),
@@ -760,7 +764,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           loadProgressively: (onProgress) =>
               _loadWorkspaceSessionsData(onProgress: onProgress),
           reloadArchives: (onProgress) =>
-              _loadArchivedSessions(onProgress: onProgress),
+              _loadArchivedSessions(onProgress: onProgress, fresh: true),
           onOpenSession: (session) => unawaited(
             _openSession(session, projectName: _chatProjectLabels[session.id]),
           ),
@@ -786,7 +790,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             onProgress: onProgress,
           ),
           reloadArchives: (onProgress) =>
-              _loadArchivedSessions(onProgress: onProgress),
+              _loadArchivedSessions(onProgress: onProgress, fresh: true),
           onOpenSession: (session) => unawaited(_openSession(session)),
           onRename: _renameSession,
         );

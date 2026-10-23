@@ -8,6 +8,7 @@ import 'package:hermes_android/core/models/session.dart';
 import 'package:hermes_android/core/screens/workspace_screen.dart';
 import 'package:hermes_android/core/screens/workspace_sessions_screen.dart';
 import 'package:hermes_android/core/theme/hermes_theme.dart';
+import 'package:hermes_android/core/utils/activity_feed.dart';
 import 'package:hermes_android/core/utils/home_turn_signals.dart';
 import 'package:hermes_android/l10n/app_localizations.dart';
 import 'package:http/http.dart' as http;
@@ -198,4 +199,209 @@ void main() {
     );
     await tester.pumpWidget(const SizedBox());
   });
+
+  testWidgets('recovered archive survives the old aggregate final snapshot', (
+    tester,
+  ) async {
+    final active = Completer<http.Response>();
+    addTearDown(() {
+      if (!active.isCompleted) active.complete(page([]));
+    });
+    final activeClient = MockClient((request) async {
+      if (request.url.queryParameters['limit'] == '5' ||
+          request.url.queryParameters['offset'] == '0') {
+        return page([row('live', 'Live run', source: 'cron')]);
+      }
+      return active.future;
+    });
+    var failed = true;
+    var calls = 0;
+    final recovered = [
+      for (var i = 0; i < 7; i++)
+        row(
+          'archive-$i',
+          'Recovered archive $i',
+          source: 'cron',
+          archived: true,
+        ),
+    ];
+    await pumpWorkspace(
+      tester,
+      active: activeClient,
+      dashboard: MockClient((_) async {
+        calls++;
+        if (failed) return http.Response('offline', 503);
+        return archives(recovered, recovered.length);
+      }),
+    );
+    await tester.tap(find.text('Crons').last);
+    await frames(tester);
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Archived'));
+    await frames(tester);
+    expect(find.widgetWithText(TextButton, 'Retry'), findsOneWidget);
+    failed = false;
+    final before = calls;
+    await tester.tap(find.widgetWithText(TextButton, 'Retry'));
+    await frames(tester);
+    expect(calls, greaterThan(before));
+    expect(find.text('Recovered archive 0'), findsOneWidget);
+    expect(find.text('Recovered archive 6'), findsOneWidget);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+    active.complete(page([]));
+    await frames(tester);
+    expect(find.text('Recovered archive 0'), findsOneWidget);
+    expect(find.text('Recovered archive 6'), findsOneWidget);
+    expect(find.widgetWithText(TextButton, 'Retry'), findsNothing);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('late old Crons scan cannot rewrite Activity title cache', (
+    tester,
+  ) async {
+    var title = 'Original chat';
+    var scans = 0;
+    final old = Completer<http.Response>();
+    addTearDown(() {
+      if (!old.isCompleted) old.complete(page([]));
+    });
+    final snapshots = <Map<String, String>>[];
+    final client = MockClient((request) async {
+      if (request.method == 'PATCH') {
+        title = (jsonDecode(request.body) as Map)['title'] as String;
+        return http.Response(jsonEncode({'session': row('human', title)}), 200);
+      }
+      if (request.url.queryParameters['limit'] == '5') {
+        scans++;
+        return page([
+          row('human', title),
+          row('cron', 'Cron run', source: 'cron'),
+        ]);
+      }
+      if (request.url.queryParameters['offset'] == '0') {
+        return page([
+          row('human', title),
+          row('cron', 'Cron run', source: 'cron'),
+        ]);
+      }
+      if (scans == 2) return old.future;
+      return page([]);
+    });
+    tester.view.physicalSize = const Size(600, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        theme: hermesTheme(Brightness.dark),
+        home: WorkspaceScreen(
+          connection: SavedConnection(
+            id: 'spec-title-cache',
+            label: 'Test',
+            host: 'fixture',
+            port: 8642,
+            apiKey: 'test-key',
+            dashboardProxied: true,
+          ),
+          testSessionsHttpClient: client,
+          testDashboardHttpClient: MockClient((_) async => archives([], 0)),
+          turnSignalsLoader: (_) async => HomeTurnSignals.empty,
+          activityFeedLoader: (_, titles) async {
+            snapshots.add(Map.of(titles));
+            return const ActivityFeed(
+              groups: [],
+              blockedCount: 0,
+              runningCount: 0,
+            );
+          },
+        ),
+      ),
+    );
+    await frames(tester);
+    await tester.tap(find.text('Crons').last);
+    await frames(tester);
+    expect(scans, 2);
+    await tester.tap(find.text('Chats').last);
+    await frames(tester);
+    await tester.tap(find.byTooltip('Chat actions'));
+    await frames(tester);
+    await tester.tap(find.text('Rename'));
+    await frames(tester);
+    await tester.enterText(find.byType(TextField).last, 'Confirmed rename');
+    await tester.tap(find.widgetWithText(FilledButton, 'Rename'));
+    await frames(tester);
+    final fresh = tester
+        .state<WorkspaceSessionsScreenState>(
+          find.byType(WorkspaceSessionsScreen),
+        )
+        .refresh();
+    await frames(tester);
+    await fresh;
+    expect(scans, 3);
+    old.complete(page([row('human', 'Original chat')]));
+    await frames(tester);
+    await tester.tap(find.text('Activity').last);
+    await frames(tester);
+    expect(snapshots, isNotEmpty);
+    expect(snapshots.last['human'], 'Confirmed rename');
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+    'explicit Archived refresh must not finish on pre-refresh physical snapshot',
+    (tester) async {
+      final held = Completer<http.Response>();
+      addTearDown(() {
+        if (!held.isCompleted) held.complete(archives([], 0));
+      });
+      var dashboardCalls = 0;
+      final original = row(
+        'original-archive',
+        'Original archived run',
+        source: 'cron',
+        archived: true,
+      );
+      final newlyPersisted = row(
+        'new-archive',
+        'Newly persisted archived run',
+        source: 'cron',
+        archived: true,
+      );
+      final dashboard = MockClient((request) async {
+        dashboardCalls++;
+        if (dashboardCalls == 1) return held.future;
+        return archives([original, newlyPersisted], 2);
+      });
+      await pumpWorkspace(
+        tester,
+        sessions: () async => [],
+        dashboard: dashboard,
+      );
+      await tester.tap(find.text('Crons').last);
+      await frames(tester);
+      await tester.tap(find.widgetWithText(ChoiceChip, 'Archived'));
+      await frames(tester);
+      expect(dashboardCalls, 1);
+      final refresh = tester
+          .state<WorkspaceSessionsScreenState>(
+            find.byType(WorkspaceSessionsScreen),
+          )
+          .refresh();
+      await frames(tester);
+      // The first response captured the database before the new row existed.
+      // An explicit refresh after that change must eventually perform fresh I/O.
+      held.complete(archives([original], 1));
+      await frames(tester);
+      await refresh;
+      expect(
+        dashboardCalls,
+        greaterThan(1),
+        reason:
+            'refresh must include an archive read started after the refresh request, not just join the initial old flight',
+      );
+      expect(find.text('Newly persisted archived run'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
 }
