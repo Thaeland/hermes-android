@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/gateway_insight.dart';
+import '../theme/hermes_theme.dart';
 import 'delegated_task_labels.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
@@ -151,7 +152,25 @@ class GatewaySubagentCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = HermesTokens.of(context);
     final complete = activities.every((activity) => activity.isComplete);
+    final hasFailures = activities.any((task) => task.failed);
+    final hasInterrupted = activities.any(
+      (task) => task.status == 'interrupted',
+    );
+    final hasCancelled = activities.any((task) => task.status == 'cancelled');
+    final allSucceeded = activities.every((task) => task.succeeded);
+    final statusColor = hasFailures
+        ? tokens.danger
+        : hasInterrupted
+        ? tokens.warning
+        : hasCancelled
+        ? tokens.muted
+        : allSucceeded
+        ? tokens.success
+        : complete
+        ? tokens.muted
+        : tokens.running;
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: ExpansionTile(
@@ -164,9 +183,7 @@ class GatewaySubagentCard extends StatelessWidget {
               : complete
               ? Icons.hub_outlined
               : Icons.account_tree_outlined,
-          color: activities.any((task) => task.failed)
-              ? Theme.of(context).colorScheme.error
-              : null,
+          color: statusColor,
         ),
         title: Text(
           complete
@@ -197,17 +214,18 @@ class GatewaySubagentCard extends StatelessWidget {
                           : activity.succeeded
                           ? Icons.check_circle_outline
                           : Icons.help_outline,
-                      color: activity.failed
-                          ? Theme.of(context).colorScheme.error
-                          : null,
+                      color: _statusColor(tokens, activity),
                       semanticLabel: delegatedTaskStatus(
                         context.l10n,
                         activity,
                       ),
                     )
-                  : const SizedBox.square(
+                  : SizedBox.square(
                       dimension: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: _statusColor(tokens, activity),
+                      ),
                     ),
               title: Text(delegatedTaskGoal(context.l10n, activity)),
               subtitle: Text(
@@ -223,5 +241,14 @@ class GatewaySubagentCard extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  Color _statusColor(HermesTokens tokens, GatewaySubagentActivity activity) {
+    if (activity.failed) return tokens.danger;
+    if (activity.status == 'cancelled') return tokens.muted;
+    if (activity.interrupted) return tokens.warning;
+    if (activity.succeeded) return tokens.success;
+    // A terminal phase alone does not prove that the delegated task succeeded.
+    return activity.isComplete ? tokens.muted : tokens.running;
   }
 }

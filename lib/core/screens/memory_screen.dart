@@ -8,8 +8,10 @@
 // API: GET /api/config returns the full config including memory.
 import 'package:flutter/material.dart';
 import '../services/connection_manager.dart';
+import '../theme/hermes_theme.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
+
 class MemoryScreen extends StatefulWidget {
   final SavedConnection connection;
   const MemoryScreen({required this.connection, super.key});
@@ -109,6 +111,7 @@ class _MemoryScreenState extends State<MemoryScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = HermesTokens.of(context);
     return Scaffold(
       appBar: AppBar(
         title: Column(
@@ -118,7 +121,7 @@ class _MemoryScreenState extends State<MemoryScreen> {
             if (_source != null)
               Text(
                 context.l10n.source(_source ?? ''),
-                style: const TextStyle(fontSize: 11, color: Colors.grey),
+                style: TextStyle(fontSize: 11, color: tokens.muted),
               ),
           ],
         ),
@@ -134,6 +137,7 @@ class _MemoryScreenState extends State<MemoryScreen> {
   }
 
   Widget _buildBody() {
+    final tokens = HermesTokens.of(context);
     if (_loading) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -145,7 +149,7 @@ class _MemoryScreenState extends State<MemoryScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.error_outline, size: 48, color: Colors.orange),
+              Icon(Icons.error_outline, size: 48, color: tokens.warning),
               const SizedBox(height: 16),
               Text(
                 context.l10n.failed_to_load_memory,
@@ -173,7 +177,7 @@ class _MemoryScreenState extends State<MemoryScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.psychology, size: 48, color: Colors.grey),
+            Icon(Icons.psychology, size: 48, color: tokens.muted),
             const SizedBox(height: 16),
             Text(
               context.l10n.no_memory_entries,
@@ -181,11 +185,13 @@ class _MemoryScreenState extends State<MemoryScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              context.l10n.memory_entries_are_cross_session_facts_the_agent_remembers_they,
+              context
+                  .l10n
+                  .memory_entries_are_cross_session_facts_the_agent_remembers_they,
               textAlign: TextAlign.center,
               style: Theme.of(
                 context,
-              ).textTheme.bodyMedium?.copyWith(color: Colors.grey),
+              ).textTheme.bodyMedium?.copyWith(color: tokens.muted),
             ),
           ],
         ),
@@ -214,13 +220,18 @@ class _MemoryScreenState extends State<MemoryScreen> {
                       Chip(
                         label: Text(
                           target,
-                          style: const TextStyle(fontSize: 11),
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: target == 'user'
+                                ? tokens.onAccentContainer
+                                : tokens.onSurface,
+                          ),
                         ),
                         padding: EdgeInsets.zero,
                         visualDensity: VisualDensity.compact,
                         backgroundColor: target == 'user'
-                            ? Colors.blue.shade800
-                            : Colors.grey.shade800,
+                            ? tokens.accentContainer
+                            : tokens.raised,
                       ),
                     ],
                   ),

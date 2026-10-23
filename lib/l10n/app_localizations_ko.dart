@@ -9,6 +9,39 @@ class AppLocalizationsKo extends AppLocalizations {
   AppLocalizationsKo([String locale = 'ko']) : super(locale);
 
   @override
+  String get theme_palette => '색상 테마';
+
+  @override
+  String get theme_palette_gold => '금색';
+
+  @override
+  String get theme_palette_purple => '보라색';
+
+  @override
+  String get theme_palette_orange => '주황색';
+
+  @override
+  String get theme_palette_green => '초록색';
+
+  @override
+  String get theme_palette_blue => '파란색';
+
+  @override
+  String get theme_palette_red => '빨간색';
+
+  @override
+  String get theme_palette_teal => '청록색';
+
+  @override
+  String get theme_palette_pink => '분홍색';
+
+  @override
+  String get theme_palette_indigo => '남색';
+
+  @override
+  String get theme_palette_cyan => '시안';
+
+  @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
       '일회성 질문입니다. 72시간 후에 자동으로 보관 처리되며, 보관할 가치가 있는 내용은 기억에 유지됩니다.';
 

@@ -9,6 +9,39 @@ class AppLocalizationsPt extends AppLocalizations {
   AppLocalizationsPt([String locale = 'pt']) : super(locale);
 
   @override
+  String get theme_palette => 'Tema de cor';
+
+  @override
+  String get theme_palette_gold => 'Dourado';
+
+  @override
+  String get theme_palette_purple => 'Roxo';
+
+  @override
+  String get theme_palette_orange => 'Laranja';
+
+  @override
+  String get theme_palette_green => 'Verde';
+
+  @override
+  String get theme_palette_blue => 'Azul';
+
+  @override
+  String get theme_palette_red => 'Vermelho';
+
+  @override
+  String get theme_palette_teal => 'Verde-petróleo';
+
+  @override
+  String get theme_palette_pink => 'Rosa';
+
+  @override
+  String get theme_palette_indigo => 'Índigo';
+
+  @override
+  String get theme_palette_cyan => 'Ciano';
+
+  @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
       'Uma pergunta pontual. É arquivada automaticamente após 72 horas; o que valer a pena guardar continua na memória.';
 
@@ -2759,6 +2792,39 @@ class AppLocalizationsPt extends AppLocalizations {
 /// The translations for Portuguese, as used in Brazil (`pt_BR`).
 class AppLocalizationsPtBr extends AppLocalizationsPt {
   AppLocalizationsPtBr() : super('pt_BR');
+
+  @override
+  String get theme_palette => 'Tema de cor';
+
+  @override
+  String get theme_palette_gold => 'Dourado';
+
+  @override
+  String get theme_palette_purple => 'Roxo';
+
+  @override
+  String get theme_palette_orange => 'Laranja';
+
+  @override
+  String get theme_palette_green => 'Verde';
+
+  @override
+  String get theme_palette_blue => 'Azul';
+
+  @override
+  String get theme_palette_red => 'Vermelho';
+
+  @override
+  String get theme_palette_teal => 'Verde-petróleo';
+
+  @override
+  String get theme_palette_pink => 'Rosa';
+
+  @override
+  String get theme_palette_indigo => 'Índigo';
+
+  @override
+  String get theme_palette_cyan => 'Ciano';
 
   @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>

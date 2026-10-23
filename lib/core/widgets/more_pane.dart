@@ -22,6 +22,7 @@ import '../theme/hermes_theme.dart';
 import 'hermes_components.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
+
 /// Whether a More entry can be opened right now, and why not when it cannot.
 enum MoreEntryAvailability {
   /// Usable now.
@@ -103,7 +104,8 @@ List<MoreSection> buildMoreSections({
         MoreEntry(
           id: 'archived-quick',
           title: l10n.archived_quick_chats,
-          subtitle: l10n.review_or_promote_quick_chats_past_their_retention_period,
+          subtitle:
+              l10n.review_or_promote_quick_chats_past_their_retention_period,
           icon: Icons.archive_outlined,
         ),
         MoreEntry(
@@ -120,8 +122,8 @@ List<MoreSection> buildMoreSections({
           subtitle: l10n.artifacts_attachments_and_generated_media,
           icon: Icons.image_outlined,
           availability: MoreEntryAvailability.unavailable,
-          unavailableReason:
-              l10n.needs_a_server_authoritative_assets_index_in_the_hermes_gateway,
+          unavailableReason: l10n
+              .needs_a_server_authoritative_assets_index_in_the_hermes_gateway,
         ),
       ],
     ),
@@ -134,8 +136,8 @@ List<MoreSection> buildMoreSections({
           subtitle: l10n.cross_device_ordering_and_reversible_bulk_organization,
           icon: Icons.push_pin_outlined,
           availability: MoreEntryAvailability.unavailable,
-          unavailableReason:
-              l10n.needs_durable_pin_ordering_batch_mutation_and_undo_contracts_in,
+          unavailableReason: l10n
+              .needs_durable_pin_ordering_batch_mutation_and_undo_contracts_in,
         ),
         MoreEntry(
           id: 'ai-filing',
@@ -143,8 +145,8 @@ List<MoreSection> buildMoreSections({
           subtitle: l10n.suggest_projects_and_learn_from_your_corrections,
           icon: Icons.auto_fix_high_outlined,
           availability: MoreEntryAvailability.unavailable,
-          unavailableReason:
-              l10n.needs_a_correction_aware_filing_contract_in_the_hermes_gateway,
+          unavailableReason: l10n
+              .needs_a_correction_aware_filing_contract_in_the_hermes_gateway,
         ),
       ],
     ),
@@ -255,15 +257,13 @@ class _MoreEntryCard extends StatelessWidget {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: (dimmed ? tokens.muted : tokens.accent).withValues(
-                  alpha: 0.14,
-                ),
+                color: dimmed ? tokens.raised : tokens.accentContainer,
                 borderRadius: BorderRadius.circular(HermesRadius.sm),
               ),
               child: Icon(
                 entry.icon,
                 size: 20,
-                color: dimmed ? tokens.muted : tokens.accent,
+                color: dimmed ? tokens.muted : tokens.onAccentContainer,
               ),
             ),
             const SizedBox(width: HermesSpacing.md),

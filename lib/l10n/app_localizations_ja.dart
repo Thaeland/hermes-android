@@ -9,6 +9,39 @@ class AppLocalizationsJa extends AppLocalizations {
   AppLocalizationsJa([String locale = 'ja']) : super(locale);
 
   @override
+  String get theme_palette => 'カラーテーマ';
+
+  @override
+  String get theme_palette_gold => '金色';
+
+  @override
+  String get theme_palette_purple => '紫';
+
+  @override
+  String get theme_palette_orange => 'オレンジ';
+
+  @override
+  String get theme_palette_green => '緑';
+
+  @override
+  String get theme_palette_blue => '青';
+
+  @override
+  String get theme_palette_red => '赤';
+
+  @override
+  String get theme_palette_teal => '青緑';
+
+  @override
+  String get theme_palette_pink => 'ピンク';
+
+  @override
+  String get theme_palette_indigo => '藍色';
+
+  @override
+  String get theme_palette_cyan => 'シアン';
+
+  @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
       '単発の質問用。72時間後に自動アーカイブされますが、残す価値のある内容は記憶されます。';
 
