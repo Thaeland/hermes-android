@@ -4524,10 +4524,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _pendingComposerPrompt = null;
     if (text.trim().isEmpty) return;
     if (_composerRevision == _clearedComposerRevision) {
-      _textController.value = TextEditingValue(
-        text: text,
-        selection: TextSelection.collapsed(offset: text.length),
-      );
+      // Replaying a rejected submission is not a user edit. Keep this route's
+      // existing write authority so a newer canonical route's draft or clear
+      // cannot be overwritten through the controller listener.
+      final wasRestoring = _restoringComposerDraft;
+      _restoringComposerDraft = true;
+      try {
+        _textController.value = TextEditingValue(
+          text: text,
+          selection: TextSelection.collapsed(offset: text.length),
+        );
+      } finally {
+        _restoringComposerDraft = wasRestoring;
+      }
     }
     unawaited(_composerDraft.save(_textController.text));
   }
