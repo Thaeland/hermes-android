@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../models/gateway_insight.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
+
 class GatewayReasoningCard extends StatelessWidget {
   final String text;
   final bool initiallyExpanded;
@@ -85,8 +86,13 @@ class GatewayNoticeCard extends StatelessWidget {
 
 class GatewaySubagentCard extends StatelessWidget {
   final List<GatewaySubagentActivity> activities;
+  final ValueChanged<GatewaySubagentActivity>? onOpenTask;
 
-  const GatewaySubagentCard({required this.activities, super.key});
+  const GatewaySubagentCard({
+    required this.activities,
+    this.onOpenTask,
+    super.key,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -108,17 +114,28 @@ class GatewaySubagentCard extends StatelessWidget {
         children: [
           for (final activity in activities)
             ListTile(
+              key: ValueKey('delegated-task-${activity.id}'),
+              onTap: onOpenTask == null ? null : () => onOpenTask!(activity),
+              trailing: onOpenTask == null
+                  ? null
+                  : const Icon(Icons.chevron_right),
               dense: true,
               leading: activity.isComplete
-                  ? const Icon(Icons.check_circle_outline, color: Colors.green)
+                  ? Icon(
+                      activity.status == 'failed' || activity.status == 'error'
+                          ? Icons.error_outline
+                          : activity.status == 'interrupted'
+                          ? Icons.pause_circle_outline
+                          : Icons.check_circle_outline,
+                    )
                   : const SizedBox.square(
                       dimension: 18,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     ),
-              title: Text(activity.goal),
+              title: Text(activity.displayGoal),
               subtitle: Text(
                 [
-                  activity.phase.name,
+                  activity.statusLabel,
                   if (activity.model != null) activity.model!,
                   if (activity.detail != null) activity.detail!,
                 ].join(' • '),
