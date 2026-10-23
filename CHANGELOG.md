@@ -4,6 +4,28 @@ All notable changes since v1.0.7 are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The [README](README.md)
 shows only the three latest releases.
 
+## [Unreleased]
+
+### Added
+
+- Native **More → Assets** browser for explicit generated-file references in
+  saved Hermes replies. Includes filename/source-chat search, file-type filters,
+  on-demand image previews, download/share and navigation to the source chat.
+- Bounded, incremental recent-chat and older-message scans with visible partial
+  scope, refresh and retry for failed reads. Reads stay on the saved connection's
+  Dashboard profile without resuming sessions or running an agent.
+- A streaming 25 MiB per-file download budget for Assets, including chunked
+  responses and authentication retries.
+
+### Limits
+
+- Assets is reconstructed from saved `MEDIA:` references, not a server-owned
+  catalogue of all attachments, project files or outputs. Referenced files may
+  have expired or been removed. The Organisation placeholders remain gated:
+  durable batch undo and correction-learning AI filing need separate contracts.
+- This development slice was assisted by Hermes Agent; it is not a published
+  release and does not change the current stable version.
+
 ## [2.1.32] - 2026-10-23
 
 ### Fixed

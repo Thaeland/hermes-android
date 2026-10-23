@@ -9,6 +9,76 @@ class AppLocalizationsJa extends AppLocalizations {
   AppLocalizationsJa([String locale = 'ja']) : super(locale);
 
   @override
+  String get assets_recent_subtitle => '保存済みのチャットで Hermes が共有したファイルを探す';
+
+  @override
+  String get assets_scope_notice =>
+      '保存済みの返信で Hermes が明示的に共有した生成ファイルを表示します。チャット履歴の一部のみを対象としており、すべてのファイルや添付ファイルを網羅するものではありません。参照先のファイルはすでに存在しない場合があります。';
+
+  @override
+  String get assets_download_limit =>
+      'ファイルはタップしたときにのみ読み込まれます。プレビューとダウンロードの上限は、それぞれ 1 ファイルあたり 25 MiB です。これより大きなファイルはダッシュボードをご利用ください。';
+
+  @override
+  String get assets_search_hint => '見つかったファイルや共有元のチャットを検索';
+
+  @override
+  String get assets_all => 'すべて';
+
+  @override
+  String get assets_images => '画像';
+
+  @override
+  String get assets_audio => '音声';
+
+  @override
+  String get assets_video => '動画';
+
+  @override
+  String get assets_documents => 'ドキュメントとその他のファイル';
+
+  @override
+  String get assets_empty => '調べたメッセージにアセットは見つかりませんでした';
+
+  @override
+  String get assets_empty_detail =>
+      'さらにチャットや古いメッセージを調べると、より前の履歴を確認できます。通常の添付ファイルやリンクのないファイルは、ここではインデックス化されません。';
+
+  @override
+  String get assets_no_matches => '一致するアセットはありません';
+
+  @override
+  String get assets_load_more_chats => 'さらにチャットを調べる';
+
+  @override
+  String get assets_load_older_messages => '古いメッセージを調べる';
+
+  @override
+  String get assets_load_failed =>
+      '履歴の一部を読み込めませんでした。結果は不完全です。ダッシュボード接続を確認して、もう一度お試しください。';
+
+  @override
+  String get assets_retry_failed => '読み込めなかった履歴を再読み込み';
+
+  @override
+  String get assets_partial =>
+      'サーバーから履歴が不完全であると報告されました。ダッシュボードを確認してから更新してください。';
+
+  @override
+  String assets_scan_summary(int files, int chats) {
+    return '調べたチャット $chats 件からファイル参照 $files 件を検出';
+  }
+
+  @override
+  String assets_open_chat(String title) {
+    return 'チャットを開く: $title';
+  }
+
+  @override
+  String get assets_file_too_large =>
+      'このファイルはダウンロードの上限を超えています。ダッシュボードを開いてダウンロードしてください。';
+
+  @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
       '単発の質問用。72時間後に自動アーカイブされますが、残す価値のある内容は記憶されます。';
 

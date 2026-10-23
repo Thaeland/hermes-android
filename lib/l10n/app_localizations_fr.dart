@@ -9,6 +9,80 @@ class AppLocalizationsFr extends AppLocalizations {
   AppLocalizationsFr([String locale = 'fr']) : super(locale);
 
   @override
+  String get assets_recent_subtitle =>
+      'Retrouvez les fichiers partagés par Hermes dans les discussions enregistrées';
+
+  @override
+  String get assets_scope_notice =>
+      'Fichiers générés explicitement partagés par Hermes dans les réponses enregistrées. Il s’agit d’une vue partielle de l’historique des discussions, et non d’un catalogue complet des fichiers ou pièces jointes. Les fichiers référencés peuvent ne plus exister.';
+
+  @override
+  String get assets_download_limit =>
+      'Les fichiers ne sont chargés que lorsque vous appuyez dessus. Les aperçus et les téléchargements sont limités à 25 MiB par fichier ; utilisez le tableau de bord pour les fichiers plus volumineux.';
+
+  @override
+  String get assets_search_hint =>
+      'Rechercher parmi les fichiers trouvés ou les discussions d’origine';
+
+  @override
+  String get assets_all => 'Tous';
+
+  @override
+  String get assets_images => 'Images';
+
+  @override
+  String get assets_audio => 'Audio';
+
+  @override
+  String get assets_video => 'Vidéo';
+
+  @override
+  String get assets_documents => 'Documents et autres fichiers';
+
+  @override
+  String get assets_empty =>
+      'Aucune ressource trouvée dans les messages analysés';
+
+  @override
+  String get assets_empty_detail =>
+      'Analysez davantage de discussions ou des messages plus anciens pour remonter plus loin dans l’historique. Les pièces jointes ordinaires et les fichiers sans lien ne sont pas indexés ici.';
+
+  @override
+  String get assets_no_matches => 'Aucune ressource correspondante';
+
+  @override
+  String get assets_load_more_chats => 'Analyser plus de discussions';
+
+  @override
+  String get assets_load_older_messages => 'Analyser les messages plus anciens';
+
+  @override
+  String get assets_load_failed =>
+      'Une partie de l’historique n’a pas pu être lue. Les résultats sont incomplets. Vérifiez la connexion au tableau de bord, puis réessayez.';
+
+  @override
+  String get assets_retry_failed =>
+      'Réessayer les lectures de l’historique qui ont échoué';
+
+  @override
+  String get assets_partial =>
+      'Le serveur a signalé un historique incomplet. Vérifiez le tableau de bord, puis actualisez.';
+
+  @override
+  String assets_scan_summary(int files, int chats) {
+    return 'Références de fichiers trouvées : $files · Discussions analysées : $chats';
+  }
+
+  @override
+  String assets_open_chat(String title) {
+    return 'Ouvrir la discussion : $title';
+  }
+
+  @override
+  String get assets_file_too_large =>
+      'Ce fichier dépasse la limite de téléchargement. Ouvrez le tableau de bord pour le télécharger.';
+
+  @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
       'Une question ponctuelle. S\'archive automatiquement après 72 heures ; tout ce qui mérite d\'être conservé reste en mémoire.';
 

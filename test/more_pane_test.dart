@@ -5,7 +5,6 @@ import 'package:hermes_android/core/widgets/more_pane.dart';
 import 'support/l10n_test_utils.dart';
 import 'package:hermes_android/l10n/app_localizations.dart';
 
-
 Future<void> _pumpPane(
   WidgetTester tester, {
   required List<MoreSection> sections,
@@ -81,7 +80,10 @@ void main() {
     });
 
     test('every section has a title and at least one entry', () {
-      for (final section in buildMoreSections(dashboardReachable: true, l10n: l10n)) {
+      for (final section in buildMoreSections(
+        dashboardReachable: true,
+        l10n: l10n,
+      )) {
         expect(section.title, isNotEmpty);
         expect(section.entries, isNotEmpty);
       }
@@ -89,7 +91,10 @@ void main() {
 
     test('dashboard-backed entries are available when the dashboard is', () {
       final entries = {
-        for (final section in buildMoreSections(dashboardReachable: true, l10n: l10n))
+        for (final section in buildMoreSections(
+          dashboardReachable: true,
+          l10n: l10n,
+        ))
           for (final entry in section.entries) entry.id: entry,
       };
 
@@ -104,7 +109,10 @@ void main() {
 
     test('a missing dashboard disables its entries with a reason', () {
       final entries = {
-        for (final section in buildMoreSections(dashboardReachable: false, l10n: l10n))
+        for (final section in buildMoreSections(
+          dashboardReachable: false,
+          l10n: l10n,
+        ))
           for (final entry in section.entries) entry.id: entry,
       };
 
@@ -126,7 +134,10 @@ void main() {
 
     test('local settings stay reachable without a dashboard', () {
       final entries = {
-        for (final section in buildMoreSections(dashboardReachable: false, l10n: l10n))
+        for (final section in buildMoreSections(
+          dashboardReachable: false,
+          l10n: l10n,
+        ))
           for (final entry in section.entries) entry.id: entry,
       };
 
@@ -138,11 +149,14 @@ void main() {
 
     test('contract-gated organization stays visible with exact reasons', () {
       final entries = {
-        for (final section in buildMoreSections(dashboardReachable: true, l10n: l10n))
+        for (final section in buildMoreSections(
+          dashboardReachable: true,
+          l10n: l10n,
+        ))
           for (final entry in section.entries) entry.id: entry,
       };
 
-      for (final id in ['assets', 'pin-batch-undo', 'ai-filing']) {
+      for (final id in ['pin-batch-undo', 'ai-filing']) {
         expect(entries[id]!.availability, MoreEntryAvailability.unavailable);
         expect(entries[id]!.unavailableReason, contains('Gateway'));
       }
@@ -152,7 +166,10 @@ void main() {
       'native Smart Views are available and only contract gaps are disabled',
       () {
         final entries = {
-          for (final section in buildMoreSections(dashboardReachable: true, l10n: l10n))
+          for (final section in buildMoreSections(
+            dashboardReachable: true,
+            l10n: l10n,
+          ))
             for (final entry in section.entries) entry.id: entry,
         };
 
@@ -163,23 +180,28 @@ void main() {
       },
     );
 
-    test('Files follows the dashboard it depends on', () {
+    test('Files and Assets follow the dashboard they depend on', () {
       final entries = {
-        for (final section in buildMoreSections(dashboardReachable: false, l10n: l10n))
+        for (final section in buildMoreSections(
+          dashboardReachable: false,
+          l10n: l10n,
+        ))
           for (final entry in section.entries) entry.id: entry,
       };
 
       expect(entries['files']!.availability, MoreEntryAvailability.unavailable);
       expect(entries['files']!.unavailableReason, isNotNull);
+      expect(
+        entries['assets']!.availability,
+        MoreEntryAvailability.unavailable,
+      );
+      expect(entries['assets']!.unavailableReason, isNotNull);
     });
   });
 
   group('MorePane', () {
     List<MoreSection> sections({bool dashboardReachable = true}) =>
-        buildMoreSections(
-          dashboardReachable: dashboardReachable,
-          l10n: l10n,
-        );
+        buildMoreSections(dashboardReachable: dashboardReachable, l10n: l10n);
 
     testWidgets('renders every section title and entry', (tester) async {
       final built = sections();
@@ -253,26 +275,25 @@ void main() {
       expect(find.text(cron.unavailableReason!), findsWidgets);
     });
 
-    testWidgets(
-      'a contract-gated entry explains itself and is not selectable',
-      (tester) async {
-        final picked = <String>[];
-        await _pumpPane(
-          tester,
-          sections: sections(),
-          onSelect: (entry) => picked.add(entry.id),
-        );
+    testWidgets('Assets is selectable and describes its recent-chat scope', (
+      tester,
+    ) async {
+      final picked = <String>[];
+      await _pumpPane(
+        tester,
+        sections: sections(),
+        onSelect: (entry) => picked.add(entry.id),
+      );
 
-        await tester.tap(find.text('Assets'), warnIfMissed: false);
-        await tester.pumpAndSettle();
+      await tester.tap(find.text('Assets'), warnIfMissed: false);
+      await tester.pumpAndSettle();
 
-        expect(
-          find.textContaining('server-authoritative Assets index'),
-          findsOneWidget,
-        );
-        expect(picked, isEmpty);
-      },
-    );
+      expect(
+        find.text('Find files shared by Hermes in saved chats'),
+        findsOneWidget,
+      );
+      expect(picked, ['assets']);
+    });
 
     testWidgets('survives a large text scale on a narrow phone', (
       tester,

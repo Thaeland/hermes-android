@@ -36,6 +36,14 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
 - Previous upstream releases remain available from the
   [Releases](https://github.com/rusty4444/hermes-android/releases) page.
 
+## Unreleased development
+
+- **More → Assets** browses generated files explicitly shared in saved Hermes
+  replies. Search found filenames or source chats, filter by file type, preview
+  images and download/share files. History scans are incremental and downloads
+  are lazy, with a 25 MiB per-file limit. This is not a complete attachment or
+  filesystem catalogue. See [Browsing chat assets](docs/chat-assets.md).
+
 ## Remote Gateway edition highlights
 
 - One Desktop Gateway JSON-RPC session for text, images, and files.

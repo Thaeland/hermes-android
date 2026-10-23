@@ -9,6 +9,73 @@ class AppLocalizationsZh extends AppLocalizations {
   AppLocalizationsZh([String locale = 'zh']) : super(locale);
 
   @override
+  String get assets_recent_subtitle => '查找 Hermes 在已保存的聊天中分享的文件';
+
+  @override
+  String get assets_scope_notice =>
+      '仅显示 Hermes 在已保存的回复中明确分享的已生成文件。这里只展示部分聊天历史，并非完整的文件或附件目录。引用的文件可能已不存在。';
+
+  @override
+  String get assets_download_limit =>
+      '文件仅在点按时加载。预览和下载的单个文件大小上限均为 25 MiB；更大的文件请通过仪表盘获取。';
+
+  @override
+  String get assets_search_hint => '搜索找到的文件或来源聊天';
+
+  @override
+  String get assets_all => '全部';
+
+  @override
+  String get assets_images => '图片';
+
+  @override
+  String get assets_audio => '音频';
+
+  @override
+  String get assets_video => '视频';
+
+  @override
+  String get assets_documents => '文档和其他文件';
+
+  @override
+  String get assets_empty => '在已扫描的消息中未找到资产';
+
+  @override
+  String get assets_empty_detail =>
+      '扫描更多聊天或更早的消息，以查看更早的历史。普通附件和未链接的文件不会在此建立索引。';
+
+  @override
+  String get assets_no_matches => '未找到匹配的资产';
+
+  @override
+  String get assets_load_more_chats => '扫描更多聊天';
+
+  @override
+  String get assets_load_older_messages => '扫描更早的消息';
+
+  @override
+  String get assets_load_failed => '部分历史记录无法读取。结果不完整。请检查仪表盘连接并重试。';
+
+  @override
+  String get assets_retry_failed => '重试读取失败的历史记录';
+
+  @override
+  String get assets_partial => '服务器报告历史记录不完整。请检查仪表盘后刷新。';
+
+  @override
+  String assets_scan_summary(int files, int chats) {
+    return '已扫描 $chats 个聊天，找到 $files 处文件引用';
+  }
+
+  @override
+  String assets_open_chat(String title) {
+    return '打开聊天：$title';
+  }
+
+  @override
+  String get assets_file_too_large => '此文件超出下载大小上限。请打开仪表盘进行下载。';
+
+  @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
       '一次性问题。将在 72 小时后自动归档；任何值得保留的内容都会被记住。';
 
@@ -2668,6 +2735,73 @@ class AppLocalizationsZh extends AppLocalizations {
 /// The translations for Chinese, using the Han script (`zh_Hans`).
 class AppLocalizationsZhHans extends AppLocalizationsZh {
   AppLocalizationsZhHans() : super('zh_Hans');
+
+  @override
+  String get assets_recent_subtitle => '查找 Hermes 在已保存的聊天中分享的文件';
+
+  @override
+  String get assets_scope_notice =>
+      '仅显示 Hermes 在已保存的回复中明确分享的已生成文件。这里只展示部分聊天历史，并非完整的文件或附件目录。引用的文件可能已不存在。';
+
+  @override
+  String get assets_download_limit =>
+      '文件仅在点按时加载。预览和下载的单个文件大小上限均为 25 MiB；更大的文件请通过仪表盘获取。';
+
+  @override
+  String get assets_search_hint => '搜索找到的文件或来源聊天';
+
+  @override
+  String get assets_all => '全部';
+
+  @override
+  String get assets_images => '图片';
+
+  @override
+  String get assets_audio => '音频';
+
+  @override
+  String get assets_video => '视频';
+
+  @override
+  String get assets_documents => '文档和其他文件';
+
+  @override
+  String get assets_empty => '在已扫描的消息中未找到资产';
+
+  @override
+  String get assets_empty_detail =>
+      '扫描更多聊天或更早的消息，以查看更早的历史。普通附件和未链接的文件不会在此建立索引。';
+
+  @override
+  String get assets_no_matches => '未找到匹配的资产';
+
+  @override
+  String get assets_load_more_chats => '扫描更多聊天';
+
+  @override
+  String get assets_load_older_messages => '扫描更早的消息';
+
+  @override
+  String get assets_load_failed => '部分历史记录无法读取。结果不完整。请检查仪表盘连接并重试。';
+
+  @override
+  String get assets_retry_failed => '重试读取失败的历史记录';
+
+  @override
+  String get assets_partial => '服务器报告历史记录不完整。请检查仪表盘后刷新。';
+
+  @override
+  String assets_scan_summary(int files, int chats) {
+    return '已扫描 $chats 个聊天，找到 $files 处文件引用';
+  }
+
+  @override
+  String assets_open_chat(String title) {
+    return '打开聊天：$title';
+  }
+
+  @override
+  String get assets_file_too_large => '此文件超出下载大小上限。请打开仪表盘进行下载。';
 
   @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>

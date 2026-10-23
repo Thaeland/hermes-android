@@ -3,6 +3,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -1339,6 +1340,14 @@ class DashboardHttpException implements Exception {
   String toString() => 'HTTP $statusCode';
 }
 
+/// A bounded native preview/download exceeded its caller's memory budget.
+class DownloadSizeLimitException implements Exception {
+  const DownloadSizeLimitException();
+
+  @override
+  String toString() => 'DownloadSizeLimitException';
+}
+
 /// Client for the Hermes Dashboard REST API.
 ///
 /// Three auth modes, picked by proxy configuration and supplied credentials:
@@ -1585,24 +1594,64 @@ class DashboardClient {
     String endpoint, {
     Map<String, String>? queryParameters,
     bool retried = false,
+    int? maxBytes,
   }) async {
+    if (maxBytes != null && maxBytes <= 0) {
+      throw ArgumentError.value(maxBytes, 'maxBytes', 'must be positive');
+    }
     final authGeneration = _authGeneration;
     final headers = await _authHeaders();
     final uri = Uri.parse(
       '$_baseUrl/api/$endpoint',
     ).replace(queryParameters: queryParameters);
-    final res = await _http
-        .get(uri, headers: headers)
-        .timeout(ApiClient.requestTimeout);
+    final http.Response res;
+    if (maxBytes == null) {
+      res = await _http
+          .get(uri, headers: headers)
+          .timeout(ApiClient.requestTimeout);
+    } else {
+      final request = http.Request('GET', uri)..headers.addAll(headers);
+      final response = await _http
+          .send(request)
+          .timeout(ApiClient.requestTimeout);
+      // Apply the budget to the stream, not after buffering the whole file.
+      // Error bodies are unnecessary; discard them before re-authentication.
+      if (response.statusCode != 200) {
+        final subscription = response.stream.listen((_) {});
+        await subscription.cancel();
+        res = http.Response('', response.statusCode, headers: response.headers);
+      } else {
+        if ((response.contentLength ?? 0) > maxBytes) {
+          final subscription = response.stream.listen((_) {});
+          await subscription.cancel();
+          throw const DownloadSizeLimitException();
+        }
+        final bytes = BytesBuilder(copy: false);
+        await for (final chunk in response.stream.timeout(
+          ApiClient.requestTimeout,
+        )) {
+          if (bytes.length + chunk.length > maxBytes) {
+            throw const DownloadSizeLimitException();
+          }
+          bytes.add(chunk);
+        }
+        res = http.Response.bytes(
+          bytes.takeBytes(),
+          response.statusCode,
+          headers: response.headers,
+        );
+      }
+    }
     if (res.statusCode == 401 && !retried) {
       _resetAuth(ifGeneration: authGeneration);
       return apiGetBytes(
         endpoint,
         queryParameters: queryParameters,
         retried: true,
+        maxBytes: maxBytes,
       );
     }
-    if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
+    if (res.statusCode != 200) throw DashboardHttpException(res.statusCode);
     return res;
   }
 
