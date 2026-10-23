@@ -312,7 +312,14 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
   String? _routingIdentity;
   int? _routingGeneration;
   final _notificationChatRoutes =
-      <String, ({SavedConnection connection, Route<void> route})>{};
+      <
+        ({
+          SavedConnection connection,
+          String sessionId,
+          bool openedAsStoredSession,
+          Route<void> route,
+        })
+      >[];
   _NotificationNavigationIntent? _pendingNavigation;
   NotificationResponse? _pendingNormalResponse;
 
@@ -782,16 +789,39 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
   void _pruneNotificationChatRoutes() {
     final navigator = _navigatorKey.currentState;
     _notificationChatRoutes.removeWhere(
-      (_, entry) =>
+      (entry) =>
           !entry.route.isActive ||
           entry.route.navigator != navigator ||
           !_connectionIsCurrent(entry.connection),
     );
   }
 
-  bool _focusNotificationChat(String identity) {
+  String _notificationChatIdentity(SavedConnection connection, String? id) {
+    final normal = _turnApplicationController.normalSessionFor(connection);
+    final owner = normal.findChat(id ?? '');
+    return jsonEncode([
+      MobilePushService.binding(connection),
+      owner?.storedSessionId ?? owner?.localSessionId ?? id,
+    ]);
+  }
+
+  bool _focusNotificationChat(SavedConnection connection, String? sessionId) {
     _pruneNotificationChatRoutes();
-    final route = _notificationChatRoutes[identity]?.route;
+    final identity = _notificationChatIdentity(connection, sessionId);
+    // Resolve both sides now: a verified handoff can change the winning owner's
+    // local ID, and a later lineage binding can change its durable ID as well.
+    final matches = _notificationChatRoutes.where(
+      (entry) =>
+          _notificationChatIdentity(entry.connection, entry.sessionId) ==
+          identity,
+    );
+    // If independent pre-binding routes converge, prefer the original durable
+    // route over a local draft route, even after its durable ID moves again.
+    // Within each kind retain registration order, independent of the tapped alias.
+    final route =
+        (matches.where((entry) => entry.openedAsStoredSession).firstOrNull ??
+                matches.firstOrNull)
+            ?.route;
     final navigator = _navigatorKey.currentState;
     if (route == null || navigator == null || !navigator.mounted) return false;
     // isActive includes covered routes. Pop back to the canonical route rather
@@ -817,17 +847,14 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
     if (!mounted || _closingTurnOwner || !_connectionIsCurrent(connection)) {
       return;
     }
-    final normal = _turnApplicationController.normalSessionFor(connection);
-    String identityFor(String? id) => jsonEncode([
-      MobilePushService.binding(connection),
-      normal.findChat(id ?? '')?.localSessionId ?? id,
-    ]);
-    var identity = identityFor(sessionId);
+    final identity = _notificationChatIdentity(connection, sessionId);
     if (_routingIdentity == identity &&
         _routingGeneration == _notificationGeneration) {
       return;
     }
-    if (pushRoute == null && !_background && _focusNotificationChat(identity)) {
+    if (pushRoute == null &&
+        !_background &&
+        _focusNotificationChat(connection, sessionId)) {
       // Tapping the already-open chat is still a newer routing intent: an
       // older, different pending lookup must not steal focus afterwards.
       ++_notificationGeneration;
@@ -860,12 +887,7 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
     final pushRoute = intent.pushRoute;
     final generation = intent.generation;
     final normal = _turnApplicationController.normalSessionFor(connection);
-    String identityFor(String? id) => jsonEncode([
-      MobilePushService.binding(connection),
-      normal.findChat(id ?? '')?.localSessionId ?? id,
-    ]);
-    var identity = identityFor(sessionId);
-    _routingIdentity = identity;
+    _routingIdentity = _notificationChatIdentity(connection, sessionId);
     _routingGeneration = generation;
     var deferred = false;
     bool currentSync() {
@@ -897,14 +919,13 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
       Session? session;
       Session? retainedSession;
       if (!await current() || !currentSync()) return;
-      if (_focusNotificationChat(identity)) return;
+      if (_focusNotificationChat(connection, sessionId)) return;
       if (sessionId != null && sessionId.isNotEmpty) {
         await normal.ready.catchError((Object _) {});
         if (!await current() || !currentSync()) return;
         final owner = normal.findChat(sessionId);
-        identity = identityFor(sessionId);
-        _routingIdentity = identity;
-        if (_focusNotificationChat(identity)) return;
+        _routingIdentity = _notificationChatIdentity(connection, sessionId);
+        if (_focusNotificationChat(connection, sessionId)) return;
         sessionId = owner?.storedSessionId ?? sessionId;
         if (owner != null) {
           retainedSession = Session(
@@ -952,6 +973,10 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
       // Push has no legacy workspace/draft fallback: only the authenticated
       // existing session named by the reconciled event is eligible.
       if (pushRoute != null && session == null) return;
+      // Binding may have converged while the authenticated detail read awaited.
+      if (session != null && _focusNotificationChat(connection, session.id)) {
+        return;
+      }
       widget.connManager.prefs.setString(
         HomeScreenState._lastConnectionKey,
         connection.id,
@@ -976,15 +1001,15 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
       );
       final navigator = _navigatorKey.currentState;
       if (navigator == null || !navigator.mounted) return;
-      _notificationChatRoutes[identity] = (
+      _notificationChatRoutes.add((
         connection: connection,
+        sessionId: session.id,
+        openedAsStoredSession: !session.isLocalDraft,
         route: route,
-      );
+      ));
       unawaited(
         navigator.push(route).whenComplete(() {
-          if (_notificationChatRoutes[identity]?.route == route) {
-            _notificationChatRoutes.remove(identity);
-          }
+          _notificationChatRoutes.removeWhere((entry) => entry.route == route);
         }),
       );
     } finally {
