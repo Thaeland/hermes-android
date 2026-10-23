@@ -277,8 +277,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   int _activityBlockedCount = 0;
   int _activityRead = 0;
   int _activitySessionRead = 0;
+  int _sessionMetadataRead = 0;
+  int _activityRecordsRead = 0;
+  int _activityJournalRead = 0;
   bool _activitySessionsStale = false;
-  final Map<String, Session> _activitySessions = {};
+  bool _activitySessionsPartial = true;
+  final _activitySessions = ActivitySessionCache();
   List<OperationalActivityRecord> _lastActivityRecords = const [];
   Map<String, String> _lastJournalAliases = const {};
   ActivityFeed _lastJournalFeed = const ActivityFeed(
@@ -301,7 +305,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   /// of its own. Reusing what Home already fetched costs no extra request and
   /// no new gateway contract; a turn whose chat is absent simply stays
   /// untitled rather than being dropped or given a fabricated name.
-  Map<String, String> _sessionTitles = const {};
+  Map<String, String> get _sessionTitles => _activitySessions.titles;
   final _chatsKey = GlobalKey<WorkspaceSessionsScreenState>();
   int _homeGeneration = 0;
   Future<SessionListPage>? _homeFirstPageScan;
@@ -362,7 +366,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     // Consecutive pages that contributed zero unseen ids (see below).
     var zeroNewPages = 0;
     for (var page = 0; page < maxPages; page++) {
-      final result = await api.getSessionsPage(limit: pageSize, offset: offset);
+      final result = await _readSessionPage(limit: pageSize, offset: offset);
       // The stock gateway back-fills pinned sessions past `limit` and
       // repeats them on later pages, so the returned row count is NOT
       // the window size: advance by the requested pageSize or window
@@ -403,7 +407,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     }
     final pins = await _pinStore?.load() ?? const <String>[];
     if (pins.isNotEmpty) {
-      all.addAll(await loadUnlistedLocalPins(api, all, pins));
+      final read = _activitySessions.beginRead();
+      final unlisted = await loadUnlistedLocalPins(api, all, pins);
+      if (mounted) _activitySessions.merge(unlisted, read: read);
+      all.addAll(unlisted);
     }
     return all;
   }
@@ -443,10 +450,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     unawaited(_refreshTurnSignals(generation));
     return (widget.sessionsLoader == null
             ? _loadFullHomeSessions()
-            : _loadSessions())
+            : _loadInjectedSessions())
         .then((sessions) {
           if (!mounted || generation != _homeGeneration) return sessions;
-          _onHomeSessions(sessions, generation: generation, complete: true);
+          _onHomeSessions(generation: generation);
           return sessions;
         });
   }
@@ -463,7 +470,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     if (!mounted || generation != _homeGeneration) return first;
     _homeFirstPageSessions = first;
     if (_destination == HermesDestination.chats) setState(() {});
-    _onHomeSessions(first, generation: generation, complete: false);
+    _onHomeSessions(generation: generation);
     // Give the pane a frame to show the first slice before starting a new
     // scan. If an earlier refresh already has one in flight, subscribe now:
     // deferring that subscription can outlive the scan and start a duplicate.
@@ -487,7 +494,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             : scanned;
         _completeHomeSessions = List.unmodifiable(full);
         if (_destination == HermesDestination.chats) setState(() {});
-        _onHomeSessions(full, generation: generation, complete: true);
+        _onHomeSessions(generation: generation);
         onUpdate(full);
       } catch (_) {
         // Keep the successfully loaded first page even if an older shared
@@ -519,7 +526,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   Future<SessionListPage> _loadFirstHomePage() {
     final pending = _homeFirstPageScan;
     if (pending != null) return pending;
-    final scan = _sessionClient.getSessionsPage(limit: 5);
+    final scan = _readSessionPage(limit: 5);
     _homeFirstPageScan = scan;
     void clear() {
       if (identical(_homeFirstPageScan, scan)) _homeFirstPageScan = null;
@@ -558,23 +565,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     if (_destination == HermesDestination.chats) setState(() {});
   }
 
-  void _onHomeSessions(
-    List<Session> sessions, {
-    required int generation,
-    required bool complete,
-  }) {
-    // Cache the titles for Activity. Done here rather than in a second
-    // request: the journal knows what ran, the session list knows what it
-    // was called, and only one of the two costs a round trip.
-    if (complete) {
-      _cacheSessionTitles(sessions);
-    } else {
-      _sessionTitles = Map.unmodifiable({
-        ..._sessionTitles,
-        for (final session in sessions)
-          if (session.title.trim().isNotEmpty) session.id: session.title.trim(),
-      });
-    }
+  void _onHomeSessions({required int generation}) {
+    // Metadata is merged at each actual request boundary, never from this
+    // reassembled Home projection: a shared scan may predate Activity reads.
     // The stored deadline determines which Quick chats are archived. A page
     // scan (including the capped full scan) is not a deletion-safe snapshot.
     unawaited(_refreshQuickChats(generation));
@@ -631,15 +624,98 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     }
   }
 
-  void _cacheSessionTitles(List<Session> sessions) {
-    _activitySessions.addEntries(sessions.map((row) => MapEntry(row.id, row)));
-    final titles = <String, String>{};
-    for (final session in sessions) {
-      final title = session.title.trim();
-      if (title.isEmpty) continue;
-      titles[session.id] = title;
+  Future<SessionListPage> _readSessionPage({
+    required int limit,
+    int offset = 0,
+  }) async {
+    final read = _activitySessions.beginRead();
+    _sessionMetadataRead = read;
+    try {
+      final page = await _sessionClient.getSessionsPage(
+        limit: limit,
+        offset: offset,
+      );
+      if (mounted) {
+        _activitySessions.merge(page.sessions, read: read);
+        if (read == _sessionMetadataRead) _activitySessionsStale = false;
+      }
+      return page;
+    } catch (_) {
+      if (mounted && read == _sessionMetadataRead) {
+        _activitySessionsStale = true;
+      }
+      rethrow;
     }
-    _sessionTitles = Map.unmodifiable(titles);
+  }
+
+  Future<List<Session>> _loadInjectedSessions() async {
+    final read = _activitySessions.beginRead();
+    _sessionMetadataRead = read;
+    try {
+      final sessions = await _loadSessions();
+      if (mounted) {
+        _activitySessions.merge(sessions, read: read);
+        if (read == _sessionMetadataRead) _activitySessionsStale = false;
+      }
+      return sessions;
+    } catch (_) {
+      if (mounted && read == _sessionMetadataRead) {
+        _activitySessionsStale = true;
+      }
+      rethrow;
+    }
+  }
+
+  /// Seek useful recent rows without turning each poll into Home's full scan.
+  /// A request budget or a filled preview is not exhaustive absence proof.
+  Future<void> _refreshActivitySessions() async {
+    final scan = ++_activitySessionRead;
+    var partial = true;
+    try {
+      if (widget.sessionsLoader != null) {
+        await _loadInjectedSessions();
+        partial = false; // The injected loader supplies a complete fixture.
+        return;
+      }
+      const pageSize = 100;
+      const maxPages = 3;
+      final usefulRoots = <String>{};
+      final floor =
+          DateTime.now()
+              .subtract(kActivityCompletedWindow)
+              .millisecondsSinceEpoch /
+          1000;
+      for (var page = 0; page < maxPages; page++) {
+        final result = await _readSessionPage(
+          limit: pageSize,
+          offset: page * pageSize,
+        );
+        if (!mounted || scan != _activitySessionRead) return;
+        for (final session in result.sessions) {
+          final at = session.lastActive > 0
+              ? session.lastActive
+              : session.startedAt;
+          if (!session.isLocalDraft &&
+              session.messageCount > 0 &&
+              at.isFinite &&
+              at >= floor) {
+            usefulRoots.add(session.lineageRootId ?? session.id);
+          }
+        }
+        // Stock can under-report has_more when pins sit inside its window.
+        // A full/back-filled response is therefore still partial even when
+        // has_more=false; advance by the requested size, not response length.
+        if (!result.hasMore && result.sessions.length < pageSize) {
+          partial = false;
+          break;
+        }
+        if (usefulRoots.length >= kActivityGroupLimit) break;
+      }
+    } finally {
+      if (mounted && scan == _activitySessionRead) {
+        _activitySessionsPartial = partial;
+      }
+    }
   }
 
   /// Read actual app-owned turns plus the gateway's recent session metadata.
@@ -649,41 +725,22 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   }) async {
     final connection = widget.connection;
     final l10n = context.l10n;
-    var stale = _activitySessionsStale;
+    var stale = false;
     if (refreshSessions) {
-      final read = ++_activitySessionRead;
       try {
-        // One latest window, not a second full Home scan every polling tick.
-        // Keep known older rows: OFFSET absence is not deletion proof.
-        final sessions = widget.sessionsLoader != null
-            ? await _loadSessions()
-            : (await _sessionClient.getSessionsPage(
-                limit: 100,
-                offset: 0,
-              )).sessions;
-        if (!mounted) throw StateError('Workspace disposed');
-        if (read == _activitySessionRead) {
-          _activitySessionsStale = false;
-          stale = false;
-          _activitySessions.addEntries(
-            sessions.map((row) => MapEntry(row.id, row)),
-          );
-          _sessionTitles = Map.unmodifiable({
-            ..._sessionTitles,
-            for (final row in sessions) row.id: row.title,
-          });
-        }
+        await _refreshActivitySessions();
       } catch (_) {
         if (!mounted) rethrow;
-        if (read == _activitySessionRead) _activitySessionsStale = true;
-        stale = true;
+        // Read ownership (shared with Home) decides freshness. An obsolete
+        // failure must not mark a newer successful metadata read offline.
       }
     }
     if (!mounted) throw StateError('Workspace disposed');
     try {
+      final read = ++_activityRecordsRead;
       final records = await _turnController.readActivityRecords(connection);
       if (!mounted) throw StateError('Workspace disposed');
-      _lastActivityRecords = records;
+      if (read == _activityRecordsRead) _lastActivityRecords = records;
     } catch (_) {
       if (!mounted) rethrow;
       stale = true;
@@ -691,24 +748,27 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     final endpointDigest = endpointDigestForConnection(connection);
     if (endpointDigest != null) {
       try {
+        final read = ++_activityJournalRead;
         final snapshot = await (_journal ??= GatewayTurnJournal())
             .loadSnapshot();
         if (!mounted) throw StateError('Workspace disposed');
-        _lastJournalAliases = {
-          for (final binding in snapshot.bindings)
-            if (binding.connectionId == connection.id &&
-                binding.endpointDigest == endpointDigest)
-              binding.localSessionId: binding.storedSessionId,
-        };
-        _lastJournalFeed = buildActivityFeed(
-          snapshot: snapshot,
-          now: DateTime.now(),
-          connectionId: connection.id,
-          endpointDigest: endpointDigest,
-          sessionTitles: _sessionTitles,
-          // Apply the cap only after all sources have been combined.
-          groupLimit: snapshot.entries.length + 1,
-        );
+        if (read == _activityJournalRead) {
+          _lastJournalAliases = {
+            for (final binding in snapshot.bindings)
+              if (binding.connectionId == connection.id &&
+                  binding.endpointDigest == endpointDigest)
+                binding.localSessionId: binding.storedSessionId,
+          };
+          _lastJournalFeed = buildActivityFeed(
+            snapshot: snapshot,
+            now: DateTime.now(),
+            connectionId: connection.id,
+            endpointDigest: endpointDigest,
+            sessionTitles: _sessionTitles,
+            // Apply the cap only after all sources have been combined.
+            groupLimit: snapshot.entries.length + 1,
+          );
+        }
       } catch (_) {
         if (!mounted) rethrow;
         stale = true;
@@ -717,16 +777,19 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     final feed = buildOperationalActivityFeed(
       journalFeed: _lastJournalFeed,
       journalSessionAliases: _lastJournalAliases,
+      sessionAliases: _activitySessions.aliases,
       records: _lastActivityRecords,
-      sessions: _activitySessions.values,
+      sessions: _activitySessions.sessions,
       now: DateTime.now(),
       l10n: l10n,
+      isPartial: _activitySessionsPartial,
     );
     return ActivityFeed(
       groups: feed.groups,
       blockedCount: feed.blockedCount,
       runningCount: feed.runningCount,
-      isStale: stale,
+      isStale: stale || _activitySessionsStale,
+      isPartial: feed.isPartial,
     );
   }
 
@@ -738,11 +801,17 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       _activityDebounce = null;
       if (!mounted) return;
       Future<ActivityFeed> read() => _loadActivity(refreshSessions: false);
-      final activity = _activityKey.currentState;
+      final activity =
+          _destination == HermesDestination.activity &&
+              (ModalRoute.of(context)?.isCurrent ?? true)
+          ? _activityKey.currentState
+          : null;
       final inbox = _inboxKey.currentState;
       if (activity != null) unawaited(activity.refresh(loader: read));
       if (inbox != null) unawaited(inbox.refresh(loader: read));
-      if (activity == null && inbox == null) unawaited(_refreshActivityBadge());
+      // IndexedStack retains Activity and an Inbox route can also be covered.
+      // Neither mounted key is proof a pane accepted this observer refresh.
+      if (activity == null) unawaited(_refreshActivityBadge());
     });
   }
 
@@ -754,14 +823,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     // user opens; read the sessions once so rows are not all untitled. A
     // failed read degrades a row's title, never the timeline itself.
     if (loader != null && _sessionTitles.isEmpty) {
-      final generation = _homeGeneration;
       try {
-        final sessions = await (widget.sessionsLoader == null
+        await (widget.sessionsLoader == null
             ? _loadFullHomeSessions()
-            : _loadSessions());
-        if (mounted && generation == _homeGeneration) {
-          _cacheSessionTitles(sessions);
-        }
+            : _loadInjectedSessions());
       } catch (_) {}
     }
     final feed = loader != null
@@ -786,6 +851,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           _inboxActionCount = inboxCount;
         });
       });
+      // A hidden-pane observer read has no loading widget to request a frame.
+      // Ensure its deferred badge projection actually runs while idle.
+      WidgetsBinding.instance.scheduleFrame();
     }
     return feed;
   }
@@ -1125,6 +1193,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       case HermesDestination.activity:
         return ActivityPane(
           key: _activityKey,
+          active: _destination == HermesDestination.activity,
           refreshInterval: widget.sessionsRefreshInterval,
           loadFeed: _loadActivity,
           onOpenItem: _openActivityItem,
@@ -1503,8 +1572,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   }) async {
     final placementRevision = _placementRevision;
     final placementRead = ++_placementRead;
-    final sessions = await (sessionsFuture ?? _loadSessions());
-    _cacheSessionTitles(sessions);
+    final sessions =
+        await (sessionsFuture ??
+            (widget.sessionsLoader == null
+                ? _loadSessionsFromGateway()
+                : _loadInjectedSessions()));
 
     Set<String> claimed = const {};
     Map<String, String> projectLabels = const {};
@@ -1612,10 +1684,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       title: title,
     );
     if (mounted) {
-      _sessionTitles = Map.unmodifiable({
-        ..._sessionTitles,
-        session.id: savedTitle,
-      });
+      final current = _activitySessions[session.id] ?? session;
+      _activitySessions.merge([
+        current.withTitle(savedTitle),
+      ], read: _activitySessions.beginRead());
       unawaited(_homeKey.currentState?.refresh() ?? Future<void>.value());
     }
     return savedTitle;

@@ -154,6 +154,31 @@ void main() {
     },
   );
 
+  test('a retained root cannot suppress its current continuation', () {
+    final result = feed(
+      sessions: [
+        session('root', daysAgo: 1),
+        session('tip', root: 'root'),
+      ],
+    );
+    expect(result.groups.single.items.map((item) => item.sessionId), ['tip']);
+    expect(result.groups.single.totalCount, 1);
+  });
+
+  test('retained continuation rows collapse before totals and limits', () {
+    final result = feed(
+      sessions: [
+        session('tip-1', root: 'root', daysAgo: 1),
+        session('tip-2', root: 'root'),
+        session('root', daysAgo: 2),
+      ],
+      limit: 1,
+    );
+    expect(result.groups.single.items.single.sessionId, 'tip-2');
+    expect(result.groups.single.totalCount, 1);
+    expect(result.groups.single.overflow, 0);
+  });
+
   test(
     'v2 local bindings resolve canonical compression tips without a duplicate metadata row',
     () {
@@ -188,6 +213,95 @@ void main() {
       expect(result.groups.single.items.single.title, 'Chat tip');
     },
   );
+
+  test('shared cache fences old Home metadata and keeps unrelated chats', () {
+    final cache = ActivitySessionCache();
+    final homeRead = cache.beginRead();
+    final activityRead = cache.beginRead();
+    cache.merge([session('stored').withTitle('New title')], read: activityRead);
+    cache.merge([
+      session('stored').withTitle('Obsolete title'),
+      session('other'),
+    ], read: homeRead);
+    expect(cache.titles['stored'], 'New title');
+    expect(cache.titles['other'], 'Chat other');
+    cache.merge([], read: cache.beginRead());
+    expect(cache.sessions, hasLength(2));
+  });
+
+  test('current returned tip wins even when its timestamp is lower', () {
+    final cache = ActivitySessionCache();
+    cache.merge([session('root')], read: cache.beginRead());
+    final oldHome = cache.beginRead();
+    cache.merge([session('tip-1', root: 'root')], read: cache.beginRead());
+    cache.merge([
+      session('tip-2', root: 'root', daysAgo: 1),
+    ], read: cache.beginRead());
+    cache.merge([session('tip-old', root: 'root')], read: oldHome);
+    cache.merge([session('root')], read: cache.beginRead());
+    expect(cache.sessions.single.id, 'tip-2');
+    for (final id in ['root', 'tip-1', 'tip-2', 'tip-old']) {
+      expect(cache.aliases[id], 'tip-2');
+      expect(cache.titles[id], 'Chat tip-2');
+    }
+    final result = buildOperationalActivityFeed(
+      journalFeed: empty,
+      records: [
+        OperationalActivityRecord(
+          scope: 'scope',
+          localSessionId: 'local',
+          storedSessionId: 'root',
+          turnId: 'completed',
+          state: OperationalActivityState.completed,
+          updatedAtEpochMs: now.millisecondsSinceEpoch,
+        ),
+        OperationalActivityRecord(
+          scope: 'scope',
+          localSessionId: 'local-2',
+          storedSessionId: 'tip-1',
+          turnId: 'failed',
+          state: OperationalActivityState.failed,
+          updatedAtEpochMs: now.millisecondsSinceEpoch,
+        ),
+        OperationalActivityRecord(
+          scope: 'scope',
+          localSessionId: 'missing',
+          storedSessionId: 'absent',
+          turnId: 'unlisted',
+          state: OperationalActivityState.needsInput,
+          updatedAtEpochMs: now.millisecondsSinceEpoch,
+        ),
+      ],
+      sessions: cache.sessions,
+      sessionAliases: cache.aliases,
+      now: now,
+      l10n: l10n,
+      isPartial: true,
+    );
+    expect(result.isPartial, isTrue);
+    expect(result.groups.expand((g) => g.items).map((i) => i.sessionId), [
+      'absent',
+      'tip-2',
+      'tip-2',
+    ]);
+    expect(result.groups.map((g) => g.totalCount), [1, 1, 1]);
+  });
+
+  test('metadata partiality is not lost when merging journal rows', () {
+    final result = buildOperationalActivityFeed(
+      journalFeed: const ActivityFeed(
+        groups: [],
+        blockedCount: 0,
+        runningCount: 0,
+        isPartial: true,
+      ),
+      records: [],
+      sessions: [],
+      now: now,
+      l10n: l10n,
+    );
+    expect(result.isPartial, isTrue);
+  });
 
   test(
     'duplicate receipt identity produces one row; caps apply after merging',

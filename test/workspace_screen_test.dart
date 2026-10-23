@@ -776,6 +776,65 @@ void main() {
     },
   );
 
+  testWidgets(
+    'retained hidden Activity still updates the badge without a list read',
+    (tester) async {
+      final controller = GatewayTurnApplicationController();
+      var blocked = 0;
+      var listReads = 0;
+      var feedReads = 0;
+      await _pump(
+        tester,
+        connection: _connection(),
+        turnApplicationController: controller,
+        sessions: [_session(id: 'chat', title: 'Known chat')],
+        onSessionsLoad: () => listReads++,
+        activityFeedLoader: (_, _) async {
+          feedReads++;
+          return ActivityFeed(
+            groups: [],
+            blockedCount: blocked,
+            runningCount: 0,
+          );
+        },
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(HermesDestination.activity.label(l10n)).last);
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<ActivityPane>(find.byType(ActivityPane)).active,
+        isTrue,
+      );
+      await tester.tap(find.text(HermesDestination.more.label(l10n)).last);
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<ActivityPane>(
+              find.byType(ActivityPane, skipOffstage: false),
+            )
+            .active,
+        isFalse,
+      );
+      final listsBefore = listReads;
+      final feedsBefore = feedReads;
+      blocked = 1;
+      final token = controller.beginLegacyTurn();
+      await tester.pump(const Duration(milliseconds: 250));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<HermesShell>(find.byType(HermesShell))
+            .badges[HermesDestination.activity],
+        1,
+      );
+      expect(listReads, listsBefore);
+      expect(feedReads, feedsBefore + 1);
+      await tester.pumpWidget(const SizedBox());
+      controller.endLegacyTurn(token);
+      await controller.close();
+    },
+  );
+
   testWidgets('Activity no longer ships a placeholder', (tester) async {
     await _pump(
       tester,
