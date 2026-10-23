@@ -164,7 +164,11 @@ class _HermesShellState extends State<HermesShell> {
   }
 
   Widget _icon(HermesDestination destination, {required bool selected}) {
-    final icon = Icon(selected ? destination.selectedIcon : destination.icon);
+    final tokens = HermesTokens.of(context);
+    final icon = Icon(
+      selected ? destination.selectedIcon : destination.icon,
+      color: selected ? tokens.onAccentContainer : tokens.muted,
+    );
     final badge = _badge(destination);
     if (badge == null) return icon;
     return Badge(label: (badge as Badge).label, child: icon);
@@ -209,7 +213,7 @@ class _HermesShellState extends State<HermesShell> {
               onDestinationSelected: (index) =>
                   _select(HermesDestination.values[index]),
               labelType: NavigationRailLabelType.all,
-              indicatorColor: tokens.accent.withValues(alpha: 0.18),
+              indicatorColor: tokens.accentContainer,
               destinations: [
                 for (final destination in HermesDestination.values)
                   NavigationRailDestination(
@@ -248,7 +252,7 @@ class _HermesShellState extends State<HermesShell> {
         ),
         child: NavigationBar(
           backgroundColor: tokens.raised,
-          indicatorColor: tokens.accent.withValues(alpha: 0.18),
+          indicatorColor: tokens.accentContainer,
           selectedIndex: _current.index,
           onDestinationSelected: (index) =>
               _select(HermesDestination.values[index]),

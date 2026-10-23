@@ -8,6 +8,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../services/remote_files_client.dart';
+import 'hermes_system_ui.dart';
 import '../utils/media_tags.dart';
 
 /// Download a gateway path and hand it to the system share sheet. Shared by
@@ -165,25 +166,32 @@ class _MediaArtifactCardState extends State<MediaArtifactCard> {
     if (bytes == null || !mounted) return;
     await showDialog<void>(
       context: context,
-      builder: (dialogContext) => Dialog.fullscreen(
-        backgroundColor: Colors.black,
-        child: Stack(
-          children: [
-            Positioned.fill(
-              child: InteractiveViewer(
-                maxScale: 8,
-                child: Center(child: Image.memory(bytes)),
+      builder: (dialogContext) => HermesSystemUi(
+        cinema: true,
+        child: Dialog.fullscreen(
+          // Intentional media-viewer exception: a neutral cinema canvas must not
+          // tint the user's image. The close affordance stays white on black.
+          backgroundColor: Colors.black,
+          child: Stack(
+            children: [
+              Positioned.fill(
+                child: InteractiveViewer(
+                  maxScale: 8,
+                  child: Center(child: Image.memory(bytes)),
+                ),
               ),
-            ),
-            Positioned(
-              top: 8,
-              right: 8,
-              child: IconButton(
-                icon: const Icon(Icons.close, color: Colors.white),
-                onPressed: () => Navigator.of(dialogContext).pop(),
+              Positioned(
+                top: 8,
+                right: 8,
+                child: IconButton(
+                  // Keep contrast even over a white image behind the control.
+                  style: IconButton.styleFrom(backgroundColor: Colors.black),
+                  icon: const Icon(Icons.close, color: Colors.white),
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

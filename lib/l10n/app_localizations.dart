@@ -114,6 +114,72 @@ abstract class AppLocalizations {
     Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
   ];
 
+  /// No description provided for @theme_palette.
+  ///
+  /// In en, this message translates to:
+  /// **'Colour theme'**
+  String get theme_palette;
+
+  /// No description provided for @theme_palette_gold.
+  ///
+  /// In en, this message translates to:
+  /// **'Gold'**
+  String get theme_palette_gold;
+
+  /// No description provided for @theme_palette_purple.
+  ///
+  /// In en, this message translates to:
+  /// **'Purple'**
+  String get theme_palette_purple;
+
+  /// No description provided for @theme_palette_orange.
+  ///
+  /// In en, this message translates to:
+  /// **'Orange'**
+  String get theme_palette_orange;
+
+  /// No description provided for @theme_palette_green.
+  ///
+  /// In en, this message translates to:
+  /// **'Green'**
+  String get theme_palette_green;
+
+  /// No description provided for @theme_palette_blue.
+  ///
+  /// In en, this message translates to:
+  /// **'Blue'**
+  String get theme_palette_blue;
+
+  /// No description provided for @theme_palette_red.
+  ///
+  /// In en, this message translates to:
+  /// **'Red'**
+  String get theme_palette_red;
+
+  /// No description provided for @theme_palette_teal.
+  ///
+  /// In en, this message translates to:
+  /// **'Teal'**
+  String get theme_palette_teal;
+
+  /// No description provided for @theme_palette_pink.
+  ///
+  /// In en, this message translates to:
+  /// **'Pink'**
+  String get theme_palette_pink;
+
+  /// No description provided for @theme_palette_indigo.
+  ///
+  /// In en, this message translates to:
+  /// **'Indigo'**
+  String get theme_palette_indigo;
+
+  /// No description provided for @theme_palette_cyan.
+  ///
+  /// In en, this message translates to:
+  /// **'Cyan'**
+  String get theme_palette_cyan;
+
   /// No description provided for @a_one_off_question_archives_itself_after_72_hours_anything.
   ///
   /// In en, this message translates to:

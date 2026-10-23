@@ -9,6 +9,39 @@ class AppLocalizationsRu extends AppLocalizations {
   AppLocalizationsRu([String locale = 'ru']) : super(locale);
 
   @override
+  String get theme_palette => 'Цветовая тема';
+
+  @override
+  String get theme_palette_gold => 'Золотой';
+
+  @override
+  String get theme_palette_purple => 'Фиолетовый';
+
+  @override
+  String get theme_palette_orange => 'Оранжевый';
+
+  @override
+  String get theme_palette_green => 'Зелёный';
+
+  @override
+  String get theme_palette_blue => 'Синий';
+
+  @override
+  String get theme_palette_red => 'Красный';
+
+  @override
+  String get theme_palette_teal => 'Бирюзовый';
+
+  @override
+  String get theme_palette_pink => 'Розовый';
+
+  @override
+  String get theme_palette_indigo => 'Индиго';
+
+  @override
+  String get theme_palette_cyan => 'Циан';
+
+  @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
       'Разовый вопрос. Автоматически архивируется через 72 часа; всё, что стоит сохранить, останется в памяти.';
 

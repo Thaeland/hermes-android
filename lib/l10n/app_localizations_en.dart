@@ -9,6 +9,39 @@ class AppLocalizationsEn extends AppLocalizations {
   AppLocalizationsEn([String locale = 'en']) : super(locale);
 
   @override
+  String get theme_palette => 'Colour theme';
+
+  @override
+  String get theme_palette_gold => 'Gold';
+
+  @override
+  String get theme_palette_purple => 'Purple';
+
+  @override
+  String get theme_palette_orange => 'Orange';
+
+  @override
+  String get theme_palette_green => 'Green';
+
+  @override
+  String get theme_palette_blue => 'Blue';
+
+  @override
+  String get theme_palette_red => 'Red';
+
+  @override
+  String get theme_palette_teal => 'Teal';
+
+  @override
+  String get theme_palette_pink => 'Pink';
+
+  @override
+  String get theme_palette_indigo => 'Indigo';
+
+  @override
+  String get theme_palette_cyan => 'Cyan';
+
+  @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
       'A one-off question. Archives itself after 72 hours; anything worth keeping is still remembered.';
 

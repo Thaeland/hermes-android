@@ -9,6 +9,39 @@ class AppLocalizationsZh extends AppLocalizations {
   AppLocalizationsZh([String locale = 'zh']) : super(locale);
 
   @override
+  String get theme_palette => '颜色主题';
+
+  @override
+  String get theme_palette_gold => '金色';
+
+  @override
+  String get theme_palette_purple => '紫色';
+
+  @override
+  String get theme_palette_orange => '橙色';
+
+  @override
+  String get theme_palette_green => '绿色';
+
+  @override
+  String get theme_palette_blue => '蓝色';
+
+  @override
+  String get theme_palette_red => '红色';
+
+  @override
+  String get theme_palette_teal => '青绿色';
+
+  @override
+  String get theme_palette_pink => '粉色';
+
+  @override
+  String get theme_palette_indigo => '靛蓝色';
+
+  @override
+  String get theme_palette_cyan => '青色';
+
+  @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
       '一次性问题。将在 72 小时后自动归档；任何值得保留的内容都会被记住。';
 
@@ -2698,6 +2731,39 @@ class AppLocalizationsZh extends AppLocalizations {
 /// The translations for Chinese, using the Han script (`zh_Hans`).
 class AppLocalizationsZhHans extends AppLocalizationsZh {
   AppLocalizationsZhHans() : super('zh_Hans');
+
+  @override
+  String get theme_palette => '颜色主题';
+
+  @override
+  String get theme_palette_gold => '金色';
+
+  @override
+  String get theme_palette_purple => '紫色';
+
+  @override
+  String get theme_palette_orange => '橙色';
+
+  @override
+  String get theme_palette_green => '绿色';
+
+  @override
+  String get theme_palette_blue => '蓝色';
+
+  @override
+  String get theme_palette_red => '红色';
+
+  @override
+  String get theme_palette_teal => '青绿色';
+
+  @override
+  String get theme_palette_pink => '粉色';
+
+  @override
+  String get theme_palette_indigo => '靛蓝色';
+
+  @override
+  String get theme_palette_cyan => '青色';
 
   @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>

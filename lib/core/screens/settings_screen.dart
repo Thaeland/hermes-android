@@ -14,6 +14,8 @@ import '../widgets/config_backup_card.dart';
 import '../widgets/mobile_push_settings.dart';
 import '../widgets/chat_density_settings_card.dart';
 import '../widgets/text_size_settings_card.dart';
+import '../widgets/theme_palette_picker.dart';
+import '../theme/hermes_theme.dart';
 import '../../main.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import '../services/app_update_service.dart';
@@ -23,7 +25,12 @@ import 'package:hermes_android/core/l10n/l10n.dart';
 
 class SettingsScreen extends StatefulWidget {
   final SavedConnection connection;
-  const SettingsScreen({required this.connection, super.key});
+  final DashboardClient? dashboardClient;
+  const SettingsScreen({
+    required this.connection,
+    this.dashboardClient,
+    super.key,
+  });
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -46,15 +53,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
-    _client = DashboardClient(
-      host: widget.connection.host,
-      port: widget.connection.dashboardPort,
-      pathPrefix: widget.connection.dashboardPrefix ?? "",
-      proxied: widget.connection.dashboardProxied,
-      useHttps: widget.connection.useHttps,
-      username: widget.connection.dashboardUsername,
-      password: widget.connection.dashboardPassword,
-    );
+    _client =
+        widget.dashboardClient ??
+        DashboardClient(
+          host: widget.connection.host,
+          port: widget.connection.dashboardPort,
+          pathPrefix: widget.connection.dashboardPrefix ?? "",
+          proxied: widget.connection.dashboardProxied,
+          useHttps: widget.connection.useHttps,
+          username: widget.connection.dashboardUsername,
+          password: widget.connection.dashboardPassword,
+        );
     _loadData();
   }
 
@@ -182,210 +191,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
   );
 
   Widget _buildBody() {
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    if (_error != null && _modelOptions == null) {
-      // Device-local controls remain available without the dashboard.
-      return ListView(
-        padding: const EdgeInsets.all(16),
-        children: [
-          Center(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(
-                    Icons.error_outline,
-                    size: 48,
-                    color: Colors.orange,
-                  ),
-                  const SizedBox(height: 16),
-                  Text(
-                    context.l10n.failed_to_load_settings,
-                    style: Theme.of(context).textTheme.titleMedium,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _error!,
-                    style: Theme.of(context).textTheme.bodySmall,
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 24),
-                  ElevatedButton(
-                    onPressed: _loadData,
-                    child: Text(context.l10n.retry),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          _buildSectionHeader(context.l10n.appearance),
-          _buildChatDensityCard(),
-          const SizedBox(height: 16),
-          MobilePushSettings(
-            connection: widget.connection,
-            connectionManager: context
-                .findAncestorStateOfType<HermesAppState>()!
-                .widget
-                .connManager,
-          ),
-          const SizedBox(height: 16),
-          _buildSectionHeader(context.l10n.about),
-          _AboutCard(),
-          const SizedBox(height: 16),
-          _buildSectionHeader(context.l10n.background_work),
-          const BackgroundWorkSettings(),
-          const SizedBox(height: 16),
-          _buildSectionHeader(context.l10n.notifications),
-          const _NotificationSettings(),
-        ],
-      );
-    }
-
+    final app = context.findAncestorStateOfType<HermesAppState>()!;
     return ListView(
       padding: const EdgeInsets.all(16),
       children: [
-        // ---- Section: Model ----
-        _buildSectionHeader(context.l10n.profile_default_model),
-        Text(
-          context.l10n.changes_the_default_for_use_the_selector_in_a_chat(
-            widget.connection.label,
-          ),
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-        const SizedBox(height: 8),
-        if (_modelInfo != null)
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Icon(
-                        Icons.smart_toy,
-                        color: Theme.of(context).colorScheme.primary,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        context.l10n.current_profile_default,
-                        style: Theme.of(context).textTheme.titleSmall,
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    context.l10n.model_via_provider(
-                      _modelInfo!['model'] ?? '???',
-                      _modelInfo!['provider'] ?? '???',
-                    ),
-                    style: Theme.of(context).textTheme.bodyMedium,
-                  ),
-                  if (_modelInfo!['effective_context_length'] != null &&
-                      _modelInfo!['effective_context_length'] != 0)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 4),
-                      child: Text(
-                        context.l10n.context_tokens(
-                          _modelInfo!['effective_context_length'],
-                        ),
-                        style: Theme.of(
-                          context,
-                        ).textTheme.bodySmall?.copyWith(color: Colors.grey),
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-        const SizedBox(height: 12),
-
-        // Provider picker
-        if (_providers.isNotEmpty) ...[
-          _buildDropdown<String>(
-            label: context.l10n.provider,
-            value:
-                _selectedProvider.isNotEmpty &&
-                    _providers.contains(_selectedProvider)
-                ? _selectedProvider
-                : null,
-            items: _providers
-                .map((p) => DropdownMenuItem(value: p, child: Text(p)))
-                .toList(),
-            onChanged: (val) {
-              setState(() {
-                _selectedProvider = val!;
-                // Reset model when switching providers
-                final models = _providerModels[val];
-                if (models != null && models.isNotEmpty) {
-                  _selectedModel = models.first['id'] as String? ?? '';
-                } else {
-                  _selectedModel = '';
-                }
-              });
-            },
-          ),
-          const SizedBox(height: 12),
-        ],
-
-        // Model picker
-        if (_selectedProvider.isNotEmpty &&
-            _providerModels.containsKey(_selectedProvider)) ...[
-          _buildDropdown<String>(
-            label: context.l10n.model,
-            value: _selectedModel,
-            items: _providerModels[_selectedProvider]!.map((m) {
-              final id = m['id'] as String? ?? '';
-              final name = m['name'] as String? ?? id;
-              return DropdownMenuItem(value: id, child: Text(name));
-            }).toList(),
-            onChanged: (val) {
-              setState(() => _selectedModel = val!);
-            },
-          ),
-          const SizedBox(height: 16),
-          SizedBox(
-            width: double.infinity,
-            child: FilledButton.icon(
-              onPressed: _applyModel,
-              icon: const Icon(Icons.check),
-              label: Text(context.l10n.set_profile_default),
-            ),
-          ),
-        ],
-        const SizedBox(height: 16),
-
-        // Success/error messages
-        if (_successMsg != null)
-          Card(
-            color: Colors.green.shade900,
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Text(
-                _successMsg!,
-                style: const TextStyle(color: Colors.white),
-              ),
-            ),
-          ),
-        if (_error != null && _modelOptions != null)
-          Card(
-            color: Colors.red.shade900,
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Text(_error!, style: const TextStyle(color: Colors.white)),
-            ),
-          ),
-
-        const SizedBox(height: 16),
-
         // ---- Section: Theme ----
         _buildSectionHeader(context.l10n.appearance),
-        _ThemeToggle(),
+        ThemeAppearanceSettings(
+          preferences: app.widget.connManager.prefs,
+          onChanged: app.refreshAppearancePreferences,
+        ),
         const SizedBox(height: 8),
         TextSizeSettingsCard(
           preferences: context
@@ -403,6 +218,156 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _VerboseToggle(),
         const SizedBox(height: 16),
 
+        if (_loading)
+          const Card(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Center(child: CircularProgressIndicator()),
+            ),
+          )
+        else if (_error != null && _modelOptions == null)
+          _buildModelLoadError()
+        else ...[
+          // ---- Section: Model ----
+          _buildSectionHeader(context.l10n.profile_default_model),
+          Text(
+            context.l10n.changes_the_default_for_use_the_selector_in_a_chat(
+              widget.connection.label,
+            ),
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: 8),
+          if (_modelInfo != null)
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.smart_toy,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          context.l10n.current_profile_default,
+                          style: Theme.of(context).textTheme.titleSmall,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      context.l10n.model_via_provider(
+                        _modelInfo!['model'] ?? '???',
+                        _modelInfo!['provider'] ?? '???',
+                      ),
+                      style: Theme.of(context).textTheme.bodyMedium,
+                    ),
+                    if (_modelInfo!['effective_context_length'] != null &&
+                        _modelInfo!['effective_context_length'] != 0)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          context.l10n.context_tokens(
+                            _modelInfo!['effective_context_length'],
+                          ),
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: HermesTokens.of(context).muted),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          const SizedBox(height: 12),
+
+          // Provider picker
+          if (_providers.isNotEmpty) ...[
+            _buildDropdown<String>(
+              label: context.l10n.provider,
+              value:
+                  _selectedProvider.isNotEmpty &&
+                      _providers.contains(_selectedProvider)
+                  ? _selectedProvider
+                  : null,
+              items: _providers
+                  .map((p) => DropdownMenuItem(value: p, child: Text(p)))
+                  .toList(),
+              onChanged: (val) {
+                setState(() {
+                  _selectedProvider = val!;
+                  // Reset model when switching providers
+                  final models = _providerModels[val];
+                  if (models != null && models.isNotEmpty) {
+                    _selectedModel = models.first['id'] as String? ?? '';
+                  } else {
+                    _selectedModel = '';
+                  }
+                });
+              },
+            ),
+            const SizedBox(height: 12),
+          ],
+
+          // Model picker
+          if (_selectedProvider.isNotEmpty &&
+              _providerModels.containsKey(_selectedProvider)) ...[
+            _buildDropdown<String>(
+              label: context.l10n.model,
+              value: _selectedModel,
+              items: _providerModels[_selectedProvider]!.map((m) {
+                final id = m['id'] as String? ?? '';
+                final name = m['name'] as String? ?? id;
+                return DropdownMenuItem(value: id, child: Text(name));
+              }).toList(),
+              onChanged: (val) {
+                setState(() => _selectedModel = val!);
+              },
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: _applyModel,
+                icon: const Icon(Icons.check),
+                label: Text(context.l10n.set_profile_default),
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
+
+          // Success/error messages
+          if (_successMsg != null)
+            Card(
+              color: HermesTokens.of(context).success,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Text(
+                  _successMsg!,
+                  style: TextStyle(
+                    color: foregroundFor(HermesTokens.of(context).success),
+                  ),
+                ),
+              ),
+            ),
+          if (_error != null && _modelOptions != null)
+            Card(
+              color: Theme.of(context).colorScheme.errorContainer,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Text(
+                  _error!,
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onErrorContainer,
+                  ),
+                ),
+              ),
+            ),
+
+          const SizedBox(height: 16),
+        ],
         // ---- Section: Notifications ----
         _buildSectionHeader(context.l10n.notifications),
         const _NotificationSettings(),
@@ -466,6 +431,40 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Widget _buildModelLoadError() {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.error_outline,
+              size: 48,
+              color: HermesTokens.of(context).warning,
+            ),
+            const SizedBox(height: 16),
+            Text(
+              context.l10n.failed_to_load_settings,
+              style: Theme.of(context).textTheme.titleMedium,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              _error!,
+              style: Theme.of(context).textTheme.bodySmall,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 24),
+            ElevatedButton(
+              onPressed: _loadData,
+              child: Text(context.l10n.retry),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   ConfigBackupIo _backupIo() {
     final app = context.findAncestorStateOfType<HermesAppState>()!;
     return ConfigBackupIo(connectionManager: app.widget.connManager);
@@ -494,9 +493,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       mode,
     );
     if (mounted) {
-      // Theme and text size are read at app root; refresh so a restored
-      // preference is visible without restarting the app.
-      context.findAncestorStateOfType<HermesAppState>()?.setState(() {});
+      // Re-read palette, brightness and text size without replacing any routes.
+      context
+          .findAncestorStateOfType<HermesAppState>()
+          ?.refreshAppearancePreferences();
     }
     return result;
   }
@@ -520,9 +520,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           width: 80,
           child: Text(
             label,
-            style: const TextStyle(
+            style: TextStyle(
               fontWeight: FontWeight.w500,
-              color: Colors.grey,
+              color: HermesTokens.of(context).muted,
             ),
           ),
         ),
@@ -655,7 +655,7 @@ class _AboutCardState extends State<_AboutCard> {
               context
                   .l10n
                   .browse_and_manage_your_hermes_agent_sessions_from_your_phone,
-              style: TextStyle(color: Colors.grey),
+              style: TextStyle(color: HermesTokens.of(context).muted),
             ),
             const Divider(height: 24),
             ListTile(
@@ -721,64 +721,6 @@ class _VerboseToggleState extends State<_VerboseToggle> {
         secondary: const Icon(Icons.terminal),
         value: _verbose,
         onChanged: _set,
-      ),
-    );
-  }
-}
-
-class _ThemeToggle extends StatefulWidget {
-  @override
-  State<_ThemeToggle> createState() => _ThemeToggleState();
-}
-
-class _ThemeToggleState extends State<_ThemeToggle> {
-  String _mode = 'system';
-
-  @override
-  void initState() {
-    super.initState();
-    _loadMode();
-  }
-
-  Future<void> _loadMode() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() => _mode = prefs.getString('theme_mode') ?? 'system');
-  }
-
-  Future<void> _setMode(String mode) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('theme_mode', mode);
-    if (!mounted) return;
-    setState(() => _mode = mode);
-    final rootCtx = context.findAncestorStateOfType<HermesAppState>();
-    rootCtx?.setState(() {});
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
-      child: SegmentedButton<String>(
-        segments: [
-          ButtonSegment(
-            value: 'system',
-            label: Text(context.l10n.system),
-            icon: Icon(Icons.brightness_auto, size: 18),
-          ),
-          ButtonSegment(
-            value: 'dark',
-            label: Text(context.l10n.dark),
-            icon: Icon(Icons.dark_mode, size: 18),
-          ),
-          ButtonSegment(
-            value: 'light',
-            label: Text(context.l10n.light),
-            icon: Icon(Icons.light_mode, size: 18),
-          ),
-        ],
-        selected: {_mode},
-        onSelectionChanged: (s) => _setMode(s.first),
-        style: ButtonStyle(visualDensity: VisualDensity.compact),
       ),
     );
   }
@@ -888,7 +830,7 @@ class _VoicePickerState extends State<_VoicePicker> {
           padding: EdgeInsets.all(16),
           child: Text(
             context.l10n.no_tts_voices_found_ninstall_google_text_to_speech_and,
-            style: TextStyle(color: Colors.grey),
+            style: TextStyle(color: HermesTokens.of(context).muted),
           ),
         ),
       );
@@ -999,7 +941,10 @@ class _SessionSourcesFilterState extends State<_SessionSourcesFilter> {
             title: Text(label),
             subtitle: Text(
               source,
-              style: const TextStyle(fontSize: 12, color: Colors.grey),
+              style: TextStyle(
+                fontSize: 12,
+                color: HermesTokens.of(context).muted,
+              ),
             ),
             value: isVisible,
             onChanged: (val) => _toggle(source, val ?? true),

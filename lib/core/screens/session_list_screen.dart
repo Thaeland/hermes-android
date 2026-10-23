@@ -14,6 +14,7 @@ import '../services/local_chat_pin_store.dart';
 import '../services/session_search_client.dart';
 import '../services/session_search_preferences.dart';
 import '../services/ws_client.dart';
+import '../theme/hermes_theme.dart';
 import '../widgets/session_name_dialog.dart';
 import 'chat_screen.dart';
 import 'settings_screen.dart';
@@ -1099,6 +1100,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = HermesTokens.of(context);
     return Scaffold(
       appBar: AppBar(
         title: Text(
@@ -1114,9 +1116,9 @@ class _SessionListScreenState extends State<SessionListScreen> {
         actions: [
           _buildProfileSelector(),
           if (!_healthOk)
-            const Padding(
-              padding: EdgeInsets.only(right: 8),
-              child: Icon(Icons.warning_amber, color: Colors.orange, size: 20),
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Icon(Icons.warning_amber, color: tokens.warning, size: 20),
             ),
           IconButton(
             icon: const Icon(Icons.refresh),
@@ -1128,13 +1130,14 @@ class _SessionListScreenState extends State<SessionListScreen> {
       floatingActionButton: FloatingActionButton(
         tooltip: context.l10n.new_chat,
         onPressed: _createNewSession,
-        child: const Icon(Icons.chat, color: Colors.black),
+        child: Icon(Icons.chat, color: tokens.onAccent),
       ),
       body: _buildBody(),
     );
   }
 
   Widget _buildDrawer() {
+    final tokens = HermesTokens.of(context);
     return Drawer(
       child: SafeArea(
         child: Column(
@@ -1143,7 +1146,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
             Container(
               width: double.infinity,
               padding: const EdgeInsets.fromLTRB(20, 24, 20, 16),
-              color: Colors.black,
+              color: tokens.raised,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
@@ -1154,14 +1157,14 @@ class _SessionListScreenState extends State<SessionListScreen> {
                       fontFamily: 'Cinzel',
                       fontSize: 22,
                       fontWeight: FontWeight.w700,
-                      color: const Color(0xFFD4AF37),
+                      color: tokens.accent,
                       letterSpacing: 4,
                     ),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     widget.connection.label,
-                    style: TextStyle(fontSize: 12, color: Colors.grey[500]),
+                    style: TextStyle(fontSize: 12, color: tokens.muted),
                   ),
                 ],
               ),
@@ -1228,6 +1231,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
   }
 
   Widget _buildBody() {
+    final tokens = HermesTokens.of(context);
     if (!_healthOk) {
       return Center(
         child: Column(
@@ -1268,7 +1272,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.error_outline, size: 48, color: Colors.orange),
+            Icon(Icons.error_outline, size: 48, color: tokens.warning),
             const SizedBox(height: 16),
             Text(
               context.l10n.connection_issue,
@@ -1298,7 +1302,7 @@ class _SessionListScreenState extends State<SessionListScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.chat_bubble_outline, size: 48, color: Colors.grey),
+            Icon(Icons.chat_bubble_outline, size: 48, color: tokens.muted),
             const SizedBox(height: 16),
             Text(
               context.l10n.no_sessions_yet,
@@ -1603,8 +1607,8 @@ class _SessionListScreenState extends State<SessionListScreen> {
                       ? Icons.chat
                       : Icons.chat_bubble_outline,
                   color: locallyPinned || session.isActive
-                      ? const Color(0xFFD4AF37)
-                      : Colors.grey,
+                      ? tokens.accent
+                      : tokens.muted,
                 ),
                 trailing: isDeleting || isBranching || isRenaming
                     ? const SizedBox(
@@ -1693,9 +1697,9 @@ class _SessionListScreenState extends State<SessionListScreen> {
                         session.preview,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Colors.grey[500],
-                        ),
+                        style: Theme.of(
+                          context,
+                        ).textTheme.bodySmall?.copyWith(color: tokens.muted),
                       ),
                   ],
                 ),
