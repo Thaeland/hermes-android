@@ -952,8 +952,41 @@ class AppLocalizationsEs extends AppLocalizations {
   String get memory => 'Memoria';
 
   @override
+  String get memory_about_you => 'Sobre ti';
+
+  @override
+  String get memory_agent_notes => 'Notas del agente';
+
+  @override
+  String get memory_builtin_scope =>
+      'Datos guardados en USER.md y MEMORY.md de este perfil. Los proveedores de memoria externos (incluido MemPalace) no se muestran aquí.';
+
+  @override
+  String get memory_read_only =>
+      'Solo lectura. Pide a Hermes en el chat que corrija u olvide un dato.';
+
+  @override
+  String get memory_unavailable =>
+      'Este servidor o perfil no puede proporcionar datos guardados. Comprueba el perfil seleccionado y actualiza Hermes si es necesario.';
+
+  @override
+  String get memory_load_error =>
+      'Comprueba la conexión y la autenticación del panel e inténtalo de nuevo.';
+
+  @override
+  String get memory_read_full_fact => 'Leer el dato completo';
+
+  @override
+  String get memory_full_fact_requires_update =>
+      'Los datos completos requieren un servidor Hermes más reciente. Actualiza Hermes y recarga la lista.';
+
+  @override
+  String get memory_fact_detail_error =>
+      'No se pudo cargar el dato completo. Puede haber cambiado; actualiza la lista e inténtalo de nuevo.';
+
+  @override
   String get memory_entries_are_cross_session_facts_the_agent_remembers_they =>
-      'Las entradas de memoria son datos entre sesiones que el agente recuerda.\nSe configuran en ~/.hermes/config.yaml';
+      'Los datos guardados aparecerán aquí cuando Hermes los recuerde.';
 
   @override
   String get merge => 'Combinar';

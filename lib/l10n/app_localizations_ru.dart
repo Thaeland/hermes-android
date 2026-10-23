@@ -944,8 +944,41 @@ class AppLocalizationsRu extends AppLocalizations {
   String get memory => 'Память';
 
   @override
+  String get memory_about_you => 'О вас';
+
+  @override
+  String get memory_agent_notes => 'Заметки агента';
+
+  @override
+  String get memory_builtin_scope =>
+      'Факты из USER.md и MEMORY.md этого профиля. Внешние хранилища памяти (включая MemPalace) здесь не отображаются.';
+
+  @override
+  String get memory_read_only =>
+      'Только чтение. Попросите Hermes в чате исправить или забыть факт.';
+
+  @override
+  String get memory_unavailable =>
+      'Этот шлюз или профиль не может предоставить сохранённые факты. Проверьте выбранный профиль и при необходимости обновите Hermes.';
+
+  @override
+  String get memory_load_error =>
+      'Проверьте подключение и авторизацию панели управления и повторите попытку.';
+
+  @override
+  String get memory_read_full_fact => 'Прочитать факт целиком';
+
+  @override
+  String get memory_full_fact_requires_update =>
+      'Для полных фактов нужен более новый шлюз Hermes. Обновите Hermes и список.';
+
+  @override
+  String get memory_fact_detail_error =>
+      'Не удалось загрузить полный факт. Возможно, он изменился; обновите список и повторите попытку.';
+
+  @override
   String get memory_entries_are_cross_session_facts_the_agent_remembers_they =>
-      'Записи памяти — это факты между сессиями, которые помнит агент.\nОни настраиваются в ~/.hermes/config.yaml';
+      'Сохранённые факты появятся здесь, когда Hermes их запомнит.';
 
   @override
   String get merge => 'Объединить';

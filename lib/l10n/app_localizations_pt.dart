@@ -952,8 +952,41 @@ class AppLocalizationsPt extends AppLocalizations {
   String get memory => 'Memória';
 
   @override
+  String get memory_about_you => 'Sobre si';
+
+  @override
+  String get memory_agent_notes => 'Notas do agente';
+
+  @override
+  String get memory_builtin_scope =>
+      'Factos guardados em USER.md e MEMORY.md deste perfil. Os fornecedores de memória externos (incluindo MemPalace) não são apresentados aqui.';
+
+  @override
+  String get memory_read_only =>
+      'Só de leitura. Peça ao Hermes no chat para corrigir ou esquecer um facto.';
+
+  @override
+  String get memory_unavailable =>
+      'Este gateway ou perfil não pode fornecer os factos guardados. Verifique o perfil selecionado e atualize o Hermes, se necessário.';
+
+  @override
+  String get memory_load_error =>
+      'Verifique a ligação e a autenticação do painel e tente novamente.';
+
+  @override
+  String get memory_read_full_fact => 'Ler o facto completo';
+
+  @override
+  String get memory_full_fact_requires_update =>
+      'Os factos completos requerem um gateway Hermes mais recente. Atualize o Hermes e a lista.';
+
+  @override
+  String get memory_fact_detail_error =>
+      'Não foi possível carregar o facto completo. Pode ter sido alterado; atualize a lista e tente novamente.';
+
+  @override
   String get memory_entries_are_cross_session_facts_the_agent_remembers_they =>
-      'As entradas de memória são fatos entre sessões que o agente lembra.\nElas são configuradas em ~/.hermes/config.yaml';
+      'Os factos guardados aparecerão aqui quando o Hermes os memorizar.';
 
   @override
   String get merge => 'Mesclar';
@@ -3704,8 +3737,41 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String get memory => 'Memória';
 
   @override
+  String get memory_about_you => 'Sobre você';
+
+  @override
+  String get memory_agent_notes => 'Notas do agente';
+
+  @override
+  String get memory_builtin_scope =>
+      'Fatos salvos em USER.md e MEMORY.md deste perfil. Provedores de memória externos (incluindo MemPalace) não são exibidos aqui.';
+
+  @override
+  String get memory_read_only =>
+      'Somente leitura. Peça ao Hermes no chat para corrigir ou esquecer um fato.';
+
+  @override
+  String get memory_unavailable =>
+      'Este gateway ou perfil não pode fornecer os fatos salvos. Confira o perfil selecionado e atualize o Hermes, se necessário.';
+
+  @override
+  String get memory_load_error =>
+      'Confira a conexão e a autenticação do painel e tente novamente.';
+
+  @override
+  String get memory_read_full_fact => 'Ler o fato completo';
+
+  @override
+  String get memory_full_fact_requires_update =>
+      'Os fatos completos exigem um gateway Hermes mais recente. Atualize o Hermes e a lista.';
+
+  @override
+  String get memory_fact_detail_error =>
+      'Não foi possível carregar o fato completo. Ele pode ter mudado; atualize a lista e tente novamente.';
+
+  @override
   String get memory_entries_are_cross_session_facts_the_agent_remembers_they =>
-      'As entradas de memória são fatos entre sessões que o agente lembra.\nElas são configuradas em ~/.hermes/config.yaml';
+      'Os fatos salvos aparecerão aqui quando o Hermes os memorizar.';
 
   @override
   String get merge => 'Mesclar';

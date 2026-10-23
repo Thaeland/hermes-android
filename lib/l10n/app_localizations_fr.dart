@@ -953,8 +953,41 @@ class AppLocalizationsFr extends AppLocalizations {
   String get memory => 'Mémoire';
 
   @override
+  String get memory_about_you => 'À votre sujet';
+
+  @override
+  String get memory_agent_notes => 'Notes de l’agent';
+
+  @override
+  String get memory_builtin_scope =>
+      'Faits enregistrés dans USER.md et MEMORY.md de ce profil. Les fournisseurs de mémoire externes (dont MemPalace) ne sont pas affichés ici.';
+
+  @override
+  String get memory_read_only =>
+      'Lecture seule. Demandez à Hermes dans le chat de corriger ou d’oublier un fait.';
+
+  @override
+  String get memory_unavailable =>
+      'Cette passerelle ou ce profil ne peut pas fournir les faits enregistrés. Vérifiez le profil sélectionné et mettez Hermes à jour si nécessaire.';
+
+  @override
+  String get memory_load_error =>
+      'Vérifiez la connexion et l’authentification du tableau de bord, puis réessayez.';
+
+  @override
+  String get memory_read_full_fact => 'Lire le fait complet';
+
+  @override
+  String get memory_full_fact_requires_update =>
+      'Les faits complets nécessitent une passerelle Hermes plus récente. Mettez Hermes à jour et actualisez la liste.';
+
+  @override
+  String get memory_fact_detail_error =>
+      'Impossible de charger le fait complet. Il a peut-être changé ; actualisez la liste et réessayez.';
+
+  @override
   String get memory_entries_are_cross_session_facts_the_agent_remembers_they =>
-      'Les entrées de mémoire sont des faits inter-sessions que l\'agent retient.\nElles se configurent dans ~/.hermes/config.yaml';
+      'Les faits enregistrés apparaîtront ici quand Hermes les aura mémorisés.';
 
   @override
   String get merge => 'Fusionner';

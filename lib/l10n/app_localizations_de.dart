@@ -954,8 +954,41 @@ class AppLocalizationsDe extends AppLocalizations {
   String get memory => 'Gedächtnis';
 
   @override
+  String get memory_about_you => 'Über dich';
+
+  @override
+  String get memory_agent_notes => 'Agent-Notizen';
+
+  @override
+  String get memory_builtin_scope =>
+      'Gespeicherte Fakten aus USER.md und MEMORY.md dieses Profils. Externe Speicheranbieter (einschließlich MemPalace) werden hier nicht angezeigt.';
+
+  @override
+  String get memory_read_only =>
+      'Nur Lesen. Bitte Hermes im Chat, einen Fakt zu korrigieren oder zu vergessen.';
+
+  @override
+  String get memory_unavailable =>
+      'Dieses Gateway oder Profil kann keine gespeicherten Fakten liefern. Prüfe das gewählte Profil und aktualisiere Hermes bei Bedarf.';
+
+  @override
+  String get memory_load_error =>
+      'Prüfe die Dashboard-Verbindung und Anmeldung und versuche es erneut.';
+
+  @override
+  String get memory_read_full_fact => 'Vollständigen Fakt lesen';
+
+  @override
+  String get memory_full_fact_requires_update =>
+      'Vollständige Fakten erfordern ein neueres Hermes-Gateway. Aktualisiere Hermes und lade die Liste neu.';
+
+  @override
+  String get memory_fact_detail_error =>
+      'Der vollständige Fakt konnte nicht geladen werden. Er wurde möglicherweise geändert. Aktualisiere die Liste und versuche es erneut.';
+
+  @override
   String get memory_entries_are_cross_session_facts_the_agent_remembers_they =>
-      'Gedächtniseinträge sind sitzungsübergreifende Fakten, die sich der Agent merkt.\nSie werden in ~/.hermes/config.yaml konfiguriert';
+      'Gespeicherte Fakten erscheinen hier, sobald Hermes sie sich merkt.';
 
   @override
   String get merge => 'Zusammenführen';

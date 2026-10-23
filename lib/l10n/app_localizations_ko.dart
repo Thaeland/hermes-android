@@ -919,8 +919,40 @@ class AppLocalizationsKo extends AppLocalizations {
   String get memory => '메모리';
 
   @override
+  String get memory_about_you => '사용자 정보';
+
+  @override
+  String get memory_agent_notes => '에이전트 메모';
+
+  @override
+  String get memory_builtin_scope =>
+      '이 프로필의 USER.md 및 MEMORY.md에 저장된 정보입니다. MemPalace를 포함한 외부 메모리 제공업체의 정보는 표시되지 않습니다.';
+
+  @override
+  String get memory_read_only =>
+      '읽기 전용입니다. 채팅에서 Hermes에게 정보를 수정하거나 잊어 달라고 요청하세요.';
+
+  @override
+  String get memory_unavailable =>
+      '이 게이트웨이 또는 프로필에서 저장된 정보를 가져올 수 없습니다. 선택한 프로필을 확인하고 필요한 경우 Hermes를 업데이트하세요.';
+
+  @override
+  String get memory_load_error => '대시보드 연결과 인증을 확인한 후 다시 시도하세요.';
+
+  @override
+  String get memory_read_full_fact => '전체 정보 읽기';
+
+  @override
+  String get memory_full_fact_requires_update =>
+      '전체 정보를 보려면 더 최신 Hermes 게이트웨이가 필요합니다. Hermes를 업데이트하고 새로고침하세요.';
+
+  @override
+  String get memory_fact_detail_error =>
+      '전체 정보를 불러올 수 없습니다. 정보가 변경되었을 수 있습니다. 목록을 새로고침하고 다시 시도하세요.';
+
+  @override
   String get memory_entries_are_cross_session_facts_the_agent_remembers_they =>
-      '메모리 항목은 에이전트가 기억하는 세션 간 정보입니다.\n~/.hermes/config.yaml에서 설정할 수 있습니다.';
+      'Hermes가 기억한 정보가 여기에 표시됩니다.';
 
   @override
   String get merge => '병합';

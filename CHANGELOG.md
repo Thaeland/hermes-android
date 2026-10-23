@@ -4,6 +4,18 @@ All notable changes since v1.0.7 are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The [README](README.md)
 shows only the three latest releases.
 
+## [Unreleased]
+
+### Fixed
+
+- More → Memory now displays saved facts, not memory configuration options.
+  About you opens the connected profile’s `USER.md` entries; Agent notes shows
+  its `MEMORY.md` entries. Refresh, selectable text and on-demand full reads of
+  long facts are read-only. External memory providers such as MemPalace are
+  explicitly outside this view.
+- Missing or unsupported saved-memory APIs show an actionable error rather than
+  falling back to configuration or falsely reporting an empty memory store.
+
 ## [2.1.32] - 2026-10-23
 
 ### Fixed
