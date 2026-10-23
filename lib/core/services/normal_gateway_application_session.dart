@@ -450,12 +450,35 @@ class NormalGatewayChatOwner {
     _draftToRestore = null;
   }
 
-  /// Only successful canonical reads taken before admission may establish a
-  /// baseline. A held route read from a prior generation cannot seed a turn.
+  /// Observe a successful latest-window read, never an older-only paging merge.
+  /// Active overlays and their admission baseline remain generation-owned.
+  /// A later read can retire a completed projection even when the first
+  /// post-settlement read lagged persistence, but only with fresh durable IDs.
   void observeHistory(List<Map<String, dynamic>> rows) {
     if (snapshot.hasActiveTurn) return;
     _history = rows.map((row) => Map<String, dynamic>.from(row)).toList();
     _historyKnown = true;
+    if (_retireCompletedProjection(rows)) _notify();
+  }
+
+  bool _retireCompletedProjection(List<Map<String, dynamic>> fresh) {
+    if (phase != NormalGatewayTurnPhase.completed ||
+        _floor == null ||
+        !fresh.any((row) => _terminalRow(row, _floor!))) {
+      return false;
+    }
+    final changed =
+        _display.isNotEmpty ||
+        _priorDisplay.isNotEmpty ||
+        _timeline.runs.isNotEmpty ||
+        _tools.isNotEmpty ||
+        _subagents.isNotEmpty;
+    _display.clear();
+    _priorDisplay.clear();
+    _timeline = _timeline.clear();
+    _tools.clear();
+    _subagents.clear();
+    return changed;
   }
 
   void _notify() {
@@ -1247,14 +1270,10 @@ class NormalGatewayChatOwner {
       _historyKnown = true;
       _history = fresh;
       // An old/empty sliding page must not erase the received final response.
-      if (phase == NormalGatewayTurnPhase.completed &&
-          (_floor != null && fresh.any((row) => _terminalRow(row, _floor!)) ||
-              _canonicalTurnVisible(fresh))) {
+      _retireCompletedProjection(fresh);
+      if (_unmaterializedSubmissionVisible(fresh)) {
         _display.clear();
         _priorDisplay.clear();
-        _timeline = _timeline.clear();
-        _tools.clear();
-        _subagents.clear();
       }
       _notify();
     } catch (_) {
@@ -1262,20 +1281,47 @@ class NormalGatewayChatOwner {
     }
   }
 
-  bool _canonicalTurnVisible(List<Map<String, dynamic>> fresh) {
-    // Presentation-only replacement AFTER a live terminal frame was durably
-    // settled. Never used as history-only completion evidence.
-    if (_display.isEmpty || _display.first['role'] != 'user') return false;
-    final user = fresh.lastIndexWhere((row) => row['role'] == 'user');
-    return user >= 0 &&
-        fresh[user]['content'] == _display.first['content'] &&
-        fresh
-            .skip(user + 1)
-            .any(
-              (row) =>
-                  const {'assistant', 'agent'}.contains(row['role']) &&
-                  (row['content']?.toString().isNotEmpty ?? false),
-            );
+  bool _unmaterializedSubmissionVisible(List<Map<String, dynamic>> fresh) {
+    // Compatibility for a correlated lifecycle that supplied no streamed
+    // presentation at all while initial history was pending. Deduplicate its
+    // empty optimistic submission only; there is no reply/tool/reasoning here
+    // to retire. Never use text matching for active-turn settlement or to
+    // discard any materialized presentation when its durable floor is unknown.
+    if (phase != NormalGatewayTurnPhase.completed ||
+        _floor != null ||
+        _wireTurnId == null ||
+        _timeline.runs.isNotEmpty ||
+        _tools.isNotEmpty ||
+        _subagents.isNotEmpty ||
+        _display.isEmpty) {
+      return false;
+    }
+    final optimistic = [..._priorDisplay, ..._display];
+    if (optimistic.any(
+      (row) =>
+          row['role'] != 'user' &&
+          ((row['content']?.toString().isNotEmpty ?? false) ||
+              (row['_gateway_reasoning']?.toString().isNotEmpty ?? false)),
+    )) {
+      return false;
+    }
+    final users = optimistic.where((row) => row['role'] == 'user').toList();
+    final canonicalUsers = fresh.where((row) => row['role'] == 'user').toList();
+    if (users.isEmpty || canonicalUsers.length < users.length) return false;
+    final tail = canonicalUsers
+        .skip(canonicalUsers.length - users.length)
+        .toList();
+    for (var i = 0; i < users.length; i++) {
+      if (users[i]['content'] != tail[i]['content']) return false;
+    }
+    final lastUser = fresh.lastIndexWhere((row) => row['role'] == 'user');
+    return fresh
+        .skip(lastUser + 1)
+        .any(
+          (row) =>
+              const {'assistant', 'agent'}.contains(row['role']) &&
+              (row['content']?.toString().isNotEmpty ?? false),
+        );
   }
 
   void _close() {

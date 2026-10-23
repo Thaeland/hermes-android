@@ -114,6 +114,114 @@ void main() {
   });
 
   test(
+    'late latest history retires settled presentation only beyond its durable floor',
+    () async {
+      final f = _Fixture();
+      addTearDown(f.close);
+      await f.start();
+      f.emit('message.start', {}, turnId: 'A');
+      f.emit('message.delta', {'text': 'Wire reply'}, turnId: 'A');
+      f.emit('tool.start', {
+        'tool': 'read_file',
+        'tool_id': 'optimistic',
+      }, turnId: 'A');
+      f.emit('subagent.start', {'id': 'child', 'task': 'Task'}, turnId: 'A');
+      f.emit('turn.end', {'status': 'completed'}, turnId: 'A');
+      await _flush();
+      expect(f.owner.snapshot.hasActiveTurn, isFalse);
+      final runs = f.owner.snapshot.timeline.runs.map((run) => run.id).toList();
+      for (final rows in <List<Map<String, dynamic>>>[
+        [],
+        [
+          {'id': 9, 'role': 'assistant', 'content': 'Old reply'},
+        ],
+        [
+          {'id': 11, 'role': 'user', 'content': 'User only'},
+        ],
+        [
+          {
+            'id': 12,
+            'role': 'assistant',
+            'content': 'Tool intermediate',
+            'tool_calls': [
+              {'id': 'tc'},
+            ],
+          },
+        ],
+        [
+          {
+            'id': 13,
+            'role': 'assistant',
+            'content': 'Interim',
+            'interim': true,
+          },
+        ],
+        [
+          {'role': 'assistant', 'content': 'No durable identity'},
+        ],
+      ]) {
+        f.owner.observeHistory(rows);
+        expect(
+          f.owner.snapshot.displayRows.last['content'],
+          'Wire reply',
+          reason: '$rows',
+        );
+        expect(f.owner.snapshot.tools, hasLength(1));
+        expect(f.owner.snapshot.timeline.runs.map((run) => run.id), runs);
+      }
+      f.owner.observeHistory([
+        {'id': 20, 'role': 'agent', 'content': 'Canonical different reply'},
+      ]);
+      expect(f.owner.snapshot.displayRows, isEmpty);
+      expect(f.owner.snapshot.timeline.runs, isEmpty);
+      expect(f.owner.snapshot.tools, isEmpty);
+      expect(f.owner.snapshot.subagents, isEmpty);
+      expect(f.owner.snapshot.historyRows.single['id'], 20);
+    },
+  );
+
+  test(
+    'late history cannot erase an active overlay or change its baseline',
+    () async {
+      final f = _Fixture();
+      addTearDown(f.close);
+      await f.start();
+      f.emit('message.delta', {'text': 'Still running'});
+      f.emit('tool.start', {'tool': 'read_file', 'tool_id': 'live'});
+      f.owner.observeHistory([
+        {'id': 100, 'role': 'assistant', 'content': 'A late route response'},
+      ]);
+      expect(f.owner.snapshot.displayRows.last['content'], 'Still running');
+      expect(f.owner.snapshot.tools, hasLength(1));
+      expect(f.owner.snapshot.rowFloor, 10);
+      expect(f.owner.snapshot.historyRows.single['id'], 10);
+    },
+  );
+
+  test(
+    'unknown settled floor cannot retire projection on old matching prompt text',
+    () async {
+      final f = _Fixture();
+      addTearDown(f.close);
+      await f.start(seedHistory: false);
+      f.rows = [
+        {'id': 1, 'role': 'user', 'content': 'private prompt'},
+        {'id': 2, 'role': 'assistant', 'content': 'Old identical prompt reply'},
+      ];
+      f.emit('message.start', {}, turnId: 'A');
+      f.emit('message.delta', {'text': 'Wire reply'}, turnId: 'A');
+      f.emit('turn.end', {'status': 'completed'}, turnId: 'A');
+      await _flush();
+      expect(f.owner.snapshot.rowFloor, isNull);
+      expect(f.owner.snapshot.displayRows.last['content'], 'Wire reply');
+      f.owner.observeHistory([
+        {'id': 100, 'role': 'assistant', 'content': 'Arbitrary old assistant'},
+      ]);
+      expect(f.owner.snapshot.displayRows.last['content'], 'Wire reply');
+    },
+  );
+
+  test(
     'pre-wire rejection clears receipt; post-wire loss never resends',
     () async {
       final rejected = _Fixture()..emitOnSubmit = false;

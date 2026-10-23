@@ -113,6 +113,69 @@ void main() {
   );
 
   testWidgets(
+    'late latest history retires a settled optimistic timeline on real route reopen',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1000, 2400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final controller = GatewayTurnApplicationController();
+      addTearDown(controller.close);
+      final remote = _Remote()..history = [];
+      await _open(tester, controller, remote);
+      await tester.enterText(find.byType(TextField), 'One prompt');
+      await tester.tap(find.byTooltip('Send'));
+      await tester.pump();
+      await tester.pump();
+      remote.event('message.start', {}, turnId: 'A');
+      remote.event('message.delta', {'text': 'Wire reply'}, turnId: 'A');
+      remote.event('tool.start', {
+        'tool': 'read_file',
+        'tool_id': 'optimistic-only',
+      }, turnId: 'A');
+      remote.event('message.complete', {'text': 'Wire reply'}, turnId: 'A');
+      // A correlated lifecycle can finish before HTTP persistence is visible.
+      // Stock ID-less terminals are separately covered by reconciliation tests.
+      remote.event('turn.end', {'status': 'completed'}, turnId: 'A');
+      remote.rpc.complete();
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+      final owner = controller
+          .normalSessionFor(_connection)
+          .findChat('stored-chat')!;
+      expect(controller.hasActiveTurn, isFalse);
+      expect(find.text('Wire reply'), findsOneWidget);
+      expect(find.byType(GatewayActivityCard), findsOneWidget);
+      expect(owner.snapshot.tools, hasLength(1));
+      final before = remote.historyRequests;
+      remote.history = [
+        {'id': 1, 'role': 'user', 'content': 'One prompt'},
+        {'id': 2, 'role': 'assistant', 'content': 'Canonical reply'},
+      ];
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      await _open(
+        tester,
+        controller,
+        remote,
+        id: 'stored-chat',
+        key: const ValueKey('late-canonical'),
+      );
+      await tester.pump();
+      expect(remote.historyRequests, greaterThan(before));
+      expect(find.text('One prompt'), findsOneWidget);
+      expect(find.text('Canonical reply'), findsOneWidget);
+      expect(find.text('Wire reply'), findsNothing);
+      expect(find.byType(GatewayActivityCard), findsNothing);
+      expect(owner.snapshot.displayRows, isEmpty);
+      expect(owner.snapshot.tools, isEmpty);
+      expect(owner.snapshot.timeline.runs, isEmpty);
+      expect(remote.submissions, 1);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    },
+  );
+
+  testWidgets(
     'retained owner preserves timeline order across snapshots and route reattachment',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(1000, 2400));
@@ -358,9 +421,10 @@ Future<void> _open(
     testApiClient: ApiClient(
       baseUrl: _connection.baseUrl,
       apiKey: 'fixture',
-      httpClient: MockClient(
-        (_) async => http.Response(remote.historyJson, 200),
-      ),
+      httpClient: MockClient((_) async {
+        remote.historyRequests++;
+        return http.Response(remote.historyJson, 200);
+      }),
     ),
     testRemotePromptSubmit: remote.submit,
     testNormalResume:
@@ -403,12 +467,16 @@ class _Remote {
   bool emitOnSent = true;
   bool completed = false;
   String finalText = '';
+  int historyRequests = 0;
+  List<Map<String, dynamic>>? history;
   String get historyJson => jsonEncode({
-    'data': completed
-        ? [
-            {'id': 2, 'role': 'assistant', 'content': finalText},
-          ]
-        : [],
+    'data':
+        history ??
+        (completed
+            ? [
+                {'id': 2, 'role': 'assistant', 'content': finalText},
+              ]
+            : []),
   });
   Future<void> submit({
     required String sessionId,
@@ -422,11 +490,11 @@ class _Remote {
     return rpc.future;
   }
 
-  void event(String type, Map<String, dynamic> data) {
+  void event(String type, Map<String, dynamic> data, {String? turnId}) {
     if (type == 'message.complete' || type == 'turn.end') {
       completed = true;
       finalText = data['text']?.toString() ?? 'Final';
     }
-    onEvent!(StreamEvent(type: type, data: data));
+    onEvent!(StreamEvent(type: type, data: data, turnId: turnId));
   }
 }
