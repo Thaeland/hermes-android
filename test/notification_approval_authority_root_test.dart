@@ -688,6 +688,9 @@ List<String> _currentBubbles(WidgetTester tester, State state) {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  setUpAll(() async {
+    await Directory('review-evidence').create(recursive: true);
+  });
   HttpOverrides? previous;
   setUp(() {
     SharedPreferences.setMockInitialValues({
