@@ -395,6 +395,62 @@ void main() {
   }
 
   test(
+    'real wire: pre-ACK resume failure delivered after ACK cannot retire B',
+    () async {
+      gateway.holdSubmitAck = true;
+      final controller = GatewayTurnApplicationController();
+      addTearDown(controller.close);
+      final session = controller.normalSessionFor(gateway.connection);
+      await session.ready;
+      final chat = session.chatFor(
+        'local',
+        storedSessionId: 'stored',
+        title: 'B',
+      );
+      chat.observeHistory(gateway.rows);
+      final submission = chat.submitPrepared(
+        reservation: chat.reserve()!,
+        text: 'B',
+        localContent: 'B',
+      );
+      submission.ignore();
+      await gateway.submitted.future;
+      final turnId = chat.turnId;
+      gateway.holdResumeReply = true;
+      gateway.running = false;
+      gateway.inflight = {'status': 'error', 'error': 'Old A retained error'};
+      final readStarted = gateway.nextResume = Completer<void>();
+      gateway.event('turn.error', {'message': 'Old A wire error'});
+      await readStarted.future;
+      expect(gateway.releaseResumeReply, isNotNull);
+      gateway.running = true;
+      gateway.inflight = null;
+      gateway.holdResumeReply = false;
+      gateway.releaseSubmitAck!();
+      await submission;
+      expect(chat.snapshot.hasActiveTurn, isTrue);
+      // The response was encoded before the ACK, not when it is released.
+      gateway.releaseResumeReply!();
+      await _until(
+        () =>
+            !chat.snapshot.hasActiveTurn ||
+            gateway.requests
+                    .where((r) => r['method'] == 'session.resume')
+                    .length >=
+                3,
+      );
+      final receipts = await session.pendingStore.load(session.scope);
+      expect(chat.snapshot.hasActiveTurn, isTrue);
+      expect(chat.snapshot.error, isNull);
+      expect(receipts.single.turnId, turnId);
+      expect(
+        gateway.requests.where((r) => r['method'] == 'prompt.submit'),
+        hasLength(1),
+      );
+    },
+  );
+
+  test(
     'real wire: old idle error before B ACK cannot retire its receipt',
     () async {
       gateway.holdSubmitAck = true;
@@ -533,6 +589,8 @@ class _Gateway {
   final historyPaths = <String>[];
   bool holdSubmitAck = false;
   void Function()? releaseSubmitAck;
+  bool holdResumeReply = false;
+  void Function()? releaseResumeReply;
   bool running = true;
   Map<String, dynamic>? inflight;
   final rows = <Map<String, dynamic>>[
@@ -596,29 +654,30 @@ class _Gateway {
               method == 'session.resume' &&
                   (rejectResume || createFresh && !created);
           try {
-            void reply() => ws.add(
-              jsonEncode({
-                'jsonrpc': '2.0',
-                'id': frame['id'],
-                if (rejected)
-                  'error': {
-                    'code': method == 'prompt.submit' ? 4001 : 4007,
-                    'message': 'session not found',
-                  }
-                else
-                  'result': method == 'session.resume'
-                      ? {
-                          'session_id': runtime,
-                          'running': running,
-                          if (inflight != null) 'inflight': inflight,
-                        }
-                      : method == 'session.create'
-                      ? {'session_id': runtime, 'stored_session_id': 'stored'}
-                      : {'ok': true},
-              }),
-            );
+            final encodedReply = jsonEncode({
+              'jsonrpc': '2.0',
+              'id': frame['id'],
+              if (rejected)
+                'error': {
+                  'code': method == 'prompt.submit' ? 4001 : 4007,
+                  'message': 'session not found',
+                }
+              else
+                'result': method == 'session.resume'
+                    ? {
+                        'session_id': runtime,
+                        'running': running,
+                        if (inflight != null) 'inflight': inflight,
+                      }
+                    : method == 'session.create'
+                    ? {'session_id': runtime, 'stored_session_id': 'stored'}
+                    : {'ok': true},
+            });
+            void reply() => ws.add(encodedReply);
             if (method == 'prompt.submit' && holdSubmitAck) {
               releaseSubmitAck = reply;
+            } else if (method == 'session.resume' && holdResumeReply) {
+              releaseResumeReply = reply;
             } else {
               reply();
             }

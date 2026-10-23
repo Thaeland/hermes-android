@@ -1058,6 +1058,10 @@ class NormalGatewayChatOwner {
       }
       final stored = storedSessionId;
       if (stored == null) return; // no safe recovery without a durable identity
+      // Recovery may attach while the submit wait is pending, but that read
+      // cannot become settlement authority merely by arriving after the ACK.
+      // Generation plus this immutable observation boundary identify its epoch.
+      final submissionWasPending = _submissionPending;
       final resumed = await (_session.client == null
           ? _session._resume(
               localSessionId: localSessionId,
@@ -1067,14 +1071,17 @@ class NormalGatewayChatOwner {
               localSessionId: localSessionId,
               storedSessionId: stored,
               acceptsResult: () =>
-                  _current(generation) && snapshot.hasActiveTurn,
+                  _current(generation) &&
+                  snapshot.hasActiveTurn &&
+                  !submissionWasPending &&
+                  !_submissionPending,
             ));
       if (!_current(generation) || !snapshot.hasActiveTurn || _settling) return;
       if (!_session._canRecover) return;
-      // A terminal may precede prompt.submit's acknowledgement, or belong to
-      // the preceding turn. Do not inspect idle/retained state until this
-      // submission has finished its request/terminal wait (or disconnected).
-      if (_submissionPending) return;
+      // The submit completion queues a fresh recovery. Never inspect retained
+      // errors, idle status or history from a pre-wait observation, even if its
+      // response is delivered after this submission's wait has finished.
+      if (submissionWasPending || _submissionPending) return;
       final status = (resumed.inflight?['status'] ?? resumed.status)
           ?.toString()
           .toLowerCase();
