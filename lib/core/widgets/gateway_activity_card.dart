@@ -49,8 +49,8 @@ class GatewayActivityCard extends StatefulWidget {
 class _GatewayActivityCardState extends State<GatewayActivityCard> {
   final ExpansibleController _tileController = ExpansibleController();
 
-  /// What the card opens to on its own: open while tools are running, closed
-  /// once the turn settles. `null` until the user overrules it by tapping.
+  /// A manual choice lasts for this chat visit; running tools never force the
+  /// list open. The caller retains it across lazy-list eviction, not chat exits.
   bool? _userExpanded;
 
   @override
@@ -66,7 +66,15 @@ class _GatewayActivityCardState extends State<GatewayActivityCard> {
   bool get _hasRunningActivity =>
       widget.activities.any((activity) => !activity.isTerminal);
 
-  bool get _autoExpanded => _hasRunningActivity || widget.verbose;
+  bool get _autoExpanded => widget.verbose;
+
+  GatewayToolActivity? get _previewActivity {
+    // Prefer work still in flight, even when a parallel call finished later.
+    for (final activity in widget.activities.reversed) {
+      if (!activity.isTerminal) return activity;
+    }
+    return widget.activities.lastOrNull;
+  }
 
   /// What a freshly built tile opens to: a remembered choice beats the
   /// automatic behaviour, which is what carries a pin across a remount.
@@ -110,6 +118,7 @@ class _GatewayActivityCardState extends State<GatewayActivityCard> {
   @override
   Widget build(BuildContext context) {
     final activities = widget.activities;
+    final preview = _previewActivity;
     final active = _hasRunningActivity;
     final failures = activities.where((activity) => activity.isFailed).length;
     final subtitle = active
@@ -168,6 +177,15 @@ class _GatewayActivityCardState extends State<GatewayActivityCard> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(subtitle),
+                  if (!_expanded && preview != null)
+                    Text(
+                      context.l10n.activity_name_status(
+                        preview.displayName,
+                        preview.statusLabel,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   Text(
                     latestTime,
                     style: Theme.of(context).textTheme.bodySmall,

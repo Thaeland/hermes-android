@@ -4,6 +4,29 @@ All notable changes since v1.0.7 are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The [README](README.md)
 shows only the three latest releases.
 
+## [2.1.32] - 2026-10-23
+
+### Fixed
+
+- Tool sections start collapsed on each chat visit, including while a turn is
+  running. The collapsed header shows the newest in-flight call, or the latest
+  call if none are running, with group status, failures and observed timing
+  retained (PR #172).
+- Manual expansion survives streaming updates and scrolling during a visit.
+  Leaving and reopening the chat resets the choice; verbose mode remains an
+  explicit open default.
+
+### Validation
+
+- Static analysis and all 1,795 Flutter tests passed before release preparation.
+  Regression tests cover concurrent calls, failures, scrolling and reopening
+  through the stored session identity. Physical-device validation is not claimed.
+
+### Thanks
+
+- Hermes Agent assisted with implementation, independent review and regression
+  tests. Existing community credits remain in the README and earlier entries.
+
 ## [2.1.31] - 2026-10-23
 
 ### Added
