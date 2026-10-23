@@ -1,0 +1,304 @@
+import 'package:flutter_test/flutter_test.dart';
+import 'package:hermes_android/core/models/chat_timeline.dart';
+import 'package:hermes_android/core/models/gateway_activity.dart';
+import 'package:hermes_android/core/models/gateway_insight.dart';
+import 'package:hermes_android/core/utils/chat_display_items.dart';
+import 'package:hermes_android/core/utils/chat_history_scroll.dart';
+
+GatewayToolActivity tool(
+  String id, {
+  bool complete = false,
+  String? identity,
+  DateTime? at,
+}) => GatewayToolActivity(
+  name: 'terminal',
+  toolId: id,
+  identity: identity,
+  phase: complete
+      ? GatewayToolActivityPhase.completed
+      : GatewayToolActivityPhase.running,
+  lastActivityAt: at,
+  lastActivityTimeSource: at == null ? null : GatewayToolTimeSource.observed,
+);
+GatewayReasoningUpdate reasoning(String text, {bool replace = false}) =>
+    GatewayReasoningUpdate(
+      text: text,
+      mode: replace
+          ? GatewayReasoningEventMode.replace
+          : GatewayReasoningEventMode.append,
+      verbose: false,
+    );
+
+List<String> labels(List<dynamic> items) => items
+    .map(
+      (dynamic item) => switch (item) {
+        ChatToolActivityGroup g => g.activities.map((a) => a.toolId).join(','),
+        ChatReasoningItem r => 'reasoning:${r.text}',
+        Map<String, dynamic> m => m['_display_content'] as String,
+        _ => throw StateError('unexpected item'),
+      },
+    )
+    .toList();
+
+void main() {
+  test(
+    'new exposed reasoning deltas after tools are separate receipt runs',
+    () {
+      final assistant = <String, dynamic>{
+        'role': 'assistant',
+        'content': 'ABC',
+      };
+      final state = const ChatTimeline()
+          .appendText(assistant, 'A')
+          .reasoning(assistant, reasoning('R1'))
+          .tool(assistant, tool('t1'))
+          .appendText(assistant, 'B')
+          .reasoning(assistant, reasoning('R2'))
+          .tool(assistant, tool('t2'))
+          .appendText(assistant, 'C');
+      expect(
+        labels(buildChatDisplayItems(messages: [assistant], timeline: state)),
+        ['A', 'reasoning:R1', 't1', 'B', 'reasoning:R2', 't2', 'C'],
+      );
+      final snapshot = state.reasoning(
+        assistant,
+        reasoning('R1R2', replace: true),
+      );
+      expect(
+        labels(
+          buildChatDisplayItems(messages: [assistant], timeline: snapshot),
+        ),
+        ['A', 'reasoning:R1', 't1', 'B', 'reasoning:R2', 't2', 'C'],
+      );
+    },
+  );
+  test('hydration clears references without reusing reasoning identities', () {
+    final scope = Object();
+    final initial = const ChatTimeline().reasoning(scope, reasoning('R'));
+    final next = initial.clear().reasoning(Object(), reasoning('next R'));
+    expect(next.runs.single.id, isNot(initial.runs.single.id));
+  });
+
+  test(
+    'earlier preview completion cannot pull late tools before later commentary',
+    () {
+      final a = <String, dynamic>{'role': 'assistant', 'content': 'A rendered'};
+      final b = <String, dynamic>{'role': 'assistant', 'content': 'B'};
+      final pending = <String, dynamic>{'role': 'assistant', 'content': ''};
+      final state = const ChatTimeline()
+          .appendText(a, 'A')
+          .appendText(b, 'B')
+          .tool(pending, tool('t'))
+          .reassignScope(pending, a)
+          .textSnapshot(a, 'A rendered', preservePosition: true);
+      expect(labels(buildChatDisplayItems(messages: [a, b], timeline: state)), [
+        'A rendered',
+        'B',
+        't',
+      ]);
+    },
+  );
+
+  test(
+    'durable call IDs match exact references rather than activity queue position',
+    () {
+      final items = buildChatDisplayItems(
+        messages: [
+          {'id': 1, 'role': 'tool', 'tool_call_id': 'one', 'content': 'ok'},
+          {'id': 2, 'role': 'assistant', 'content': 'middle'},
+          {'id': 3, 'role': 'tool', 'tool_call_id': 'two', 'content': 'ok'},
+        ],
+        toolActivities: [tool('two'), tool('one')],
+      );
+      expect(labels(items), ['one', 'middle', 'two']);
+    },
+  );
+  test(
+    'receipt order, adjacent batches, ID updates and immutable prior state',
+    () {
+      final assistant = <String, dynamic>{
+        'role': 'assistant',
+        'content': 'ABC',
+      };
+      final t1 = tool('t1');
+      final t2 = tool('t2');
+      final t3 = tool('t3');
+      final before = const ChatTimeline()
+          .appendText(assistant, 'A')
+          .reasoning(assistant, reasoning('R'))
+          .tool(assistant, t1)
+          .tool(assistant, t2)
+          .appendText(assistant, 'B')
+          .tool(assistant, t3)
+          .appendText(assistant, 'C');
+      final now = DateTime.utc(2026, 10, 23, 1, 2, 3);
+      final after = before.tool(assistant, tool('t1', complete: true, at: now));
+      final items = buildChatDisplayItems(
+        messages: [assistant],
+        toolActivities: [t1, t2, t3],
+        timeline: after,
+      );
+      expect(labels(items), ['A', 'reasoning:R', 't1,t2', 'B', 't3', 'C']);
+      expect(after.runs.map((r) => r.id), before.runs.map((r) => r.id));
+      expect(before.runs[2].activity!.isTerminal, false);
+      final group = items[2] as ChatToolActivityGroup;
+      expect(group.activities.first.isTerminal, true);
+      expect(group.latestKnownActivity!.lastActivityAt, now);
+      expect(
+        group.latestKnownActivity!.lastActivityTimeSource,
+        GatewayToolTimeSource.observed,
+      );
+      expect(() => after.runs.clear(), throwsUnsupportedError);
+    },
+  );
+
+  test('late ID updates an explicit reference, never a same-name run', () {
+    final scope = Object();
+    final noId = GatewayToolActivity(
+      name: 'terminal',
+      phase: GatewayToolActivityPhase.generating,
+    );
+    final initial = const ChatTimeline()
+        .tool(scope, noId)
+        .appendText(scope, 'B')
+        .tool(scope, tool('other'));
+    final after = initial.tool(
+      scope,
+      tool('late', identity: noId.identity, complete: true),
+    );
+    expect(after.runs, hasLength(3));
+    expect(after.runs.first.id, noId.identity);
+    expect(after.runs.first.activity!.toolId, 'late');
+    expect(after.runs.last.activity!.toolId, 'other');
+    expect(after.runs.last.activity!.isTerminal, false);
+  });
+
+  test(
+    'token whitespace and snapshots retain boundaries without duplicating prose',
+    () {
+      final scope = Object();
+      var state = const ChatTimeline()
+          .appendText(scope, '  ```dart\n')
+          .appendText(scope, '  value\n```\n')
+          .tool(scope, tool('t'))
+          .appendText(scope, '\nB ');
+      final ids = state.runs.map((r) => r.id).toList();
+      final snapshot = state.forScope(scope).map((r) => r.text).join();
+      expect(state.textSnapshot(scope, snapshot), same(state));
+      state = state.textSnapshot(scope, '${snapshot}C');
+      expect(state.runs.map((r) => r.id), ids);
+      expect(state.runs.first.text, '  ```dart\n  value\n```\n');
+      expect(state.runs.last.text, '\nB C');
+      state = state.textSnapshot(scope, 'Transformed');
+      expect(
+        state.runs
+            .where((r) => r.kind == ChatTimelineKind.text)
+            .map((r) => r.text),
+        ['Transformed'],
+      );
+      expect(state.runs.last.activity!.toolId, 't');
+    },
+  );
+
+  test(
+    'reasoning snapshots replace in their own scope with stable identity',
+    () {
+      final a = Object();
+      final b = Object();
+      final initial = const ChatTimeline()
+          .reasoning(a, reasoning('old '))
+          .appendText(a, 'A')
+          .reasoning(b, reasoning('private? No: explicitly exposed.'));
+      final next = initial.reasoning(a, reasoning('snapshot', replace: true));
+      expect(next.runs.first.id, initial.runs.first.id);
+      expect(next.forScope(a).first.text, 'snapshot');
+      expect(next.forScope(b).single.text, 'private? No: explicitly exposed.');
+    },
+  );
+
+  test(
+    'preview reassignment combines late reasoning and retains tool positions',
+    () {
+      final a = Object();
+      final pending = Object();
+      final state = const ChatTimeline()
+          .appendText(a, 'A')
+          .reasoning(a, reasoning('old '))
+          .tool(pending, tool('t'))
+          .reasoning(pending, reasoning('latest'));
+      final next = state.reassignScope(pending, a, replaceReasoning: true);
+      expect(next.forScope(pending), isEmpty);
+      expect(next.runs.map((r) => r.kind), [
+        ChatTimelineKind.text,
+        ChatTimelineKind.reasoning,
+        ChatTimelineKind.tool,
+      ]);
+      expect(next.runs[1].id, state.runs[1].id);
+      expect(next.runs[1].text, 'latest');
+    },
+  );
+
+  test(
+    'presentation never mutates canonical history or inserts request markers',
+    () {
+      final user = <String, dynamic>{'role': 'user', 'content': 'Question'};
+      final assistant = <String, dynamic>{'role': 'assistant', 'content': 'AB'};
+      final messages = [user, assistant];
+      final state = const ChatTimeline()
+          .appendText(assistant, 'A')
+          .tool(assistant, tool('t'))
+          .reasoning(assistant, reasoning('R'))
+          .appendText(assistant, 'B');
+      buildChatDisplayItems(
+        messages: messages,
+        timeline: state,
+        toolActivities: [tool('t')],
+      );
+      expect(messages, [
+        {'role': 'user', 'content': 'Question'},
+        {'role': 'assistant', 'content': 'AB'},
+      ]);
+      expect(buildRestChatHistory(messages), messages);
+    },
+  );
+
+  test(
+    'durable rows replace optimistic projection, even if old references remain',
+    () {
+      final optimistic = <String, dynamic>{
+        'role': 'assistant',
+        'content': 'AB',
+      };
+      final state = const ChatTimeline()
+          .appendText(optimistic, 'A')
+          .tool(optimistic, tool('t'))
+          .appendText(optimistic, 'B');
+      final durable = <Map<String, dynamic>>[
+        {'id': 1, 'role': 'assistant', 'content': 'A'},
+        {'id': 2, 'role': 'tool', 'content': 'ok', 'tool_call_id': 't'},
+        {'id': 3, 'role': 'assistant', 'content': 'B'},
+      ];
+      expect(
+        labels(
+          buildChatDisplayItems(
+            messages: durable,
+            timeline: const ChatTimeline(),
+            toolActivities: [tool('t', complete: true)],
+          ),
+        ),
+        ['A', 't', 'B'],
+      );
+      // Replacing row identities must never project the old optimistic prose.
+      expect(
+        labels(
+          buildChatDisplayItems(
+            messages: durable,
+            timeline: state,
+            toolActivities: [tool('t', complete: true)],
+          ),
+        ),
+        ['A', 't', 'B'],
+      );
+    },
+  );
+}
