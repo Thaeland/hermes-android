@@ -376,6 +376,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final ToolActivityGroupPins _toolActivityPins = ToolActivityGroupPins();
   final List<GatewaySubagentActivity> _subagentActivities = [];
   DelegatedTaskController? _openTaskController;
+  int _automaticScrollGeneration = 0;
   final Map<String, GatewayNotification> _gatewayNotifications = {};
   final Map<String, Timer> _notificationTimers = {};
   late final List<GatewayNotice> _gatewayNotices;
@@ -1318,7 +1319,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _applyScrollTarget(ChatScrollTarget target) {
-    if (!_scrollController.hasClients) return;
+    if (_openTaskController != null || !_scrollController.hasClients) return;
     final maxExtent = _scrollController.position.maxScrollExtent;
     _scrollController.jumpTo(maxExtent);
     _syncEndAffordance(_scrollController.position);
@@ -1329,8 +1330,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _scheduleScrollTarget(ChatScrollTarget? target) {
+    if (_openTaskController != null) return;
+    final generation = _automaticScrollGeneration;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
+      if (!_canApplyAutomaticScroll(generation)) return;
       if (target != null) {
         _applyScrollTarget(target);
       } else if (_scrollController.hasClients) {
@@ -1340,11 +1343,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _scheduleStreamingFollow() {
-    if (_streamFollowScheduled) return;
+    if (_openTaskController != null || _streamFollowScheduled) return;
+    final generation = _automaticScrollGeneration;
     _streamFollowScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _streamFollowScheduled = false;
-      if (!mounted) return;
+      if (!_canApplyAutomaticScroll(generation)) return;
       final target = _scrollCoordinator.streamingContentChanged();
       if (target != null) {
         _applyScrollTarget(target);
@@ -1353,6 +1357,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
     });
   }
+
+  bool _canApplyAutomaticScroll(int generation) =>
+      mounted &&
+      _openTaskController == null &&
+      generation == _automaticScrollGeneration;
 
   void _scheduleInitialEndAlignment() {
     if (_scrollCoordinator.consumeInitialEndAlignment() == null) {
@@ -1366,11 +1375,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _scheduleNextInitialEndFrame() {
-    if (_initialEndFrameScheduled || _initialEndFramesRemaining <= 0) return;
+    if (_openTaskController != null ||
+        _initialEndFrameScheduled ||
+        _initialEndFramesRemaining <= 0) {
+      return;
+    }
+    final generation = _automaticScrollGeneration;
     _initialEndFrameScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _initialEndFrameScheduled = false;
-      if (!mounted || _initialEndFramesRemaining <= 0) return;
+      if (!_canApplyAutomaticScroll(generation) ||
+          _initialEndFramesRemaining <= 0) {
+        return;
+      }
       _initialEndFramesRemaining -= 1;
 
       if (!_scrollController.hasClients) {
@@ -1492,6 +1509,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Future<void> _loadOlderMessages() async {
     if (_loadingOlder || !_historyWindow.hasOlder) return;
+    final scrollGeneration = _automaticScrollGeneration;
     final responseGeneration = _responseGeneration;
     final offset = _historyWindow.olderOffset;
     final sessionId = _storedSessionKey;
@@ -1520,7 +1538,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _extractToolMessages(_historyWindow.rows);
       setState(() => _messages = _historyWindow.rows);
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted || !_scrollController.hasClients) return;
+        if (!_canApplyAutomaticScroll(scrollGeneration) ||
+            !_scrollController.hasClients) {
+          return;
+        }
         final delta = _scrollController.position.maxScrollExtent - oldExtent;
         _scrollController.jumpTo(
           (oldPixels + delta).clamp(
@@ -3741,6 +3762,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           DashboardTaskHistory.fromConnection(widget.connection),
     );
     _openTaskController = controller;
+    // Fence queued callbacks too, without changing the parent's sticky follow
+    // intent or deferring a jump until dismissal. Content keeps arriving.
+    _automaticScrollGeneration++;
     try {
       await showDelegatedTaskTimeline(context, controller);
     } finally {

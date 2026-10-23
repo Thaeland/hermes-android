@@ -11,6 +11,7 @@ import 'package:hermes_android/core/services/connection_manager.dart';
 import 'package:hermes_android/core/services/ws_client.dart';
 import 'package:hermes_android/core/widgets/delegated_task_timeline.dart';
 import 'package:hermes_android/core/widgets/gateway_insight_card.dart';
+import 'package:hermes_android/core/widgets/gateway_activity_card.dart';
 import 'package:hermes_android/core/widgets/delegated_task_labels.dart';
 import 'package:hermes_android/core/services/delegated_task_history.dart';
 import 'delegated_task_spec_regression_test.dart' show fixture, delegationRows;
@@ -512,9 +513,14 @@ void main() {
     },
   );
 
-  for (final width in [430.0, 1000.0]) {
+  for (final (width, completeWhileOpen) in [
+    (430.0, true),
+    (1000.0, true),
+    (430.0, false),
+    (1000.0, false),
+  ]) {
     testWidgets(
-      'ChatScreen task tap at width $width retains mounted parent, composer and scroll; no child RPC',
+      'ChatScreen parent stream and queued follow stay frozen under task modal at width $width; complete while open=$completeWhileOpen',
       (tester) async {
         tester.view.physicalSize = Size(width, 1000);
         tester.view.devicePixelRatio = 1;
@@ -523,6 +529,8 @@ void main() {
         final hook = TestDesktopAsyncEventHook();
         final requests = <Uri>[];
         var childSourceCount = 0;
+        final submit = Completer<void>();
+        late StreamCallback parentEvent;
         final history = FakeHistory()
           ..data = [
             {'id': 1, 'role': 'agent', 'content': 'Child answer'},
@@ -537,7 +545,7 @@ void main() {
                 label: 'c',
                 host: 'parent.fixture',
                 port: 8642,
-                apiKey: 'fixture',
+                apiKey: 'unused',
               ),
               session: const Session(
                 id: 'parent',
@@ -551,7 +559,7 @@ void main() {
               ),
               testApiClient: ApiClient(
                 baseUrl: 'http://parent.fixture',
-                apiKey: 'fixture',
+                apiKey: 'unused',
                 httpClient: MockClient((request) async {
                   requests.add(request.url);
                   expectSync(request.method, 'GET');
@@ -571,6 +579,17 @@ void main() {
                 }),
               ),
               testDesktopAsyncEventHook: hook,
+              testRemotePromptSubmit:
+                  ({
+                    required sessionId,
+                    required text,
+                    required onEvent,
+                    required onSent,
+                  }) {
+                    parentEvent = onEvent;
+                    onSent();
+                    return submit.future;
+                  },
               testTaskHistorySource: () {
                 childSourceCount++;
                 return history;
@@ -580,6 +599,11 @@ void main() {
           ),
         );
         await tester.pumpAndSettle();
+        final composer = find.byType(TextField).first;
+        await tester.enterText(composer, 'Continue parent');
+        await tester.tap(find.byTooltip('Send'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
         hook.handler!(
           StreamEvent(
             type: 'subagent.start',
@@ -595,7 +619,6 @@ void main() {
         final row = find.byKey(const ValueKey('delegated-task-runtime'));
         await tester.ensureVisible(row);
         await tester.pump();
-        final composer = find.byType(TextField).first;
         await tester.enterText(composer, 'Keep this draft');
         final parentState = chatKey.currentState;
         final parentScrollable = find
@@ -607,8 +630,19 @@ void main() {
         final position = tester
             .state<ScrollableState>(parentScrollable)
             .position;
+        // Programmatic positioning must not change the sticky follow intent.
+        // The parent is near the end but not at it when inspection opens.
+        position.jumpTo(position.maxScrollExtent - 10);
+        await tester.pump();
         final offset = position.pixels;
+        expect(offset, lessThan(position.maxScrollExtent));
         final requestsBefore = requests.length;
+        const queuedText = 'Queued parent text\n\n';
+        // Hold the real stream's scheduled post-frame follow until AFTER the
+        // task tap opens the modal synchronously (no intervening pump).
+        parentEvent(
+          StreamEvent(type: 'message.delta', data: {'text': queuedText}),
+        );
         await tester.tap(row);
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 350));
@@ -620,6 +654,56 @@ void main() {
         expect(childSourceCount, 1);
         expect(history.offsets, [0]);
         expect(chatKey.currentState, same(parentState));
+        expect(position.pixels, offset, reason: 'pre-open queued callback');
+        const liveText = 'Parent text while inspecting\n\n';
+        parentEvent(
+          StreamEvent(type: 'message.delta', data: {'text': liveText}),
+        );
+        await tester.pump();
+        expect(position.pixels, offset, reason: 'parent text');
+        parentEvent(
+          StreamEvent(
+            type: 'reasoning.delta',
+            data: {'text': 'Parent exposed reasoning while inspecting'},
+          ),
+        );
+        await tester.pump();
+        expect(position.pixels, offset, reason: 'parent reasoning');
+        parentEvent(
+          StreamEvent(
+            type: 'tool.start',
+            data: {
+              'tool': 'terminal',
+              'tool_id': 'parent-tool',
+              'label': 'Parent tool while inspecting',
+            },
+          ),
+        );
+        await tester.pump();
+        expect(position.pixels, offset, reason: 'parent tool');
+        parentEvent(
+          StreamEvent(
+            type: 'tool.complete',
+            data: {
+              'tool': 'terminal',
+              'tool_id': 'parent-tool',
+              'summary': 'Parent tool completed while inspecting',
+            },
+          ),
+        );
+        await tester.pump();
+        expect(position.pixels, offset, reason: 'parent tool completion');
+        const finalText =
+            '$queuedText${liveText}Parent completed while inspecting';
+        if (completeWhileOpen) {
+          parentEvent(
+            StreamEvent(type: 'message.complete', data: {'text': finalText}),
+          );
+          submit.complete();
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 300));
+          expect(position.pixels, offset, reason: 'parent completion target');
+        }
         hook.handler!(
           StreamEvent(
             type: 'subagent.complete',
@@ -649,6 +733,42 @@ void main() {
         );
         expect(position.pixels, offset);
         expect(history.closed, isTrue);
+        if (!completeWhileOpen) {
+          // Inspection did not cancel sticky follow. A NEW post-dismissal
+          // parent event follows normally; dismissal itself never jumps.
+          parentEvent(
+            StreamEvent(type: 'message.complete', data: {'text': finalText}),
+          );
+          submit.complete();
+          await tester.pumpAndSettle();
+          expect(position.pixels, greaterThan(offset));
+          expect(position.pixels, closeTo(position.maxScrollExtent, 1));
+        }
+        // Only scroll application was suppressed, never stream content.
+        position.jumpTo(position.maxScrollExtent);
+        await tester.pump();
+        expect(
+          tester
+              .widgetList<MessageBubble>(find.byType(MessageBubble))
+              .map((bubble) => bubble.content),
+          contains(finalText),
+        );
+        expect(
+          tester
+              .widgetList<GatewayReasoningCard>(
+                find.byType(GatewayReasoningCard),
+              )
+              .map((card) => card.text),
+          contains('Parent exposed reasoning while inspecting'),
+        );
+        expect(find.byType(GatewayActivityCard), findsOneWidget);
+        final parentTool = tester
+            .widget<GatewayActivityCard>(find.byType(GatewayActivityCard))
+            .activities
+            .single;
+        expect(parentTool.toolId, 'parent-tool');
+        expect(parentTool.isTerminal, isTrue);
+        expect(parentTool.detail, 'Parent tool completed while inspecting');
         // A late task progress event cannot regress failure or target another ID.
         hook.handler!(
           StreamEvent(
@@ -657,7 +777,14 @@ void main() {
           ),
         );
         await tester.pump();
-        expect(find.textContaining('Failed'), findsWidgets);
+        expect(
+          tester
+              .widget<GatewaySubagentCard>(find.byType(GatewaySubagentCard))
+              .activities
+              .single
+              .failed,
+          isTrue,
+        );
         await tester.pumpWidget(const SizedBox());
       },
     );
