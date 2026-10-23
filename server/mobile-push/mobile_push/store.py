@@ -1,0 +1,394 @@
+"""SQLite events and transactional delivery leases. No network in observer callbacks."""
+
+from __future__ import annotations
+
+import contextlib
+import hashlib
+import json
+import os
+import secrets
+import sqlite3
+import time
+import uuid
+from pathlib import Path
+
+from .config import Policy, Rejected
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS registrations (
+ installation TEXT PRIMARY KEY, provider TEXT NOT NULL, user_id TEXT NOT NULL,
+ generation INTEGER NOT NULL, status TEXT NOT NULL, nonce TEXT NOT NULL,
+ endpoint TEXT NOT NULL, keys_json TEXT NOT NULL, kinds_json TEXT NOT NULL,
+ sessions_json TEXT NOT NULL, challenge_hash TEXT NOT NULL, challenge_expires INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS events (
+ cursor INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT UNIQUE NOT NULL,
+ provider TEXT NOT NULL, user_id TEXT NOT NULL, dedup TEXT NOT NULL,
+ kind TEXT NOT NULL, session_id TEXT, turn_id TEXT, request_id TEXT,
+ installation TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
+ cancelled INTEGER NOT NULL DEFAULT 0, UNIQUE(provider,user_id,dedup)
+);
+CREATE TABLE IF NOT EXISTS outbox (
+ id INTEGER PRIMARY KEY, event_id TEXT NOT NULL REFERENCES events(event_id) ON DELETE CASCADE,
+ installation TEXT NOT NULL REFERENCES registrations(installation), generation INTEGER NOT NULL,
+ payload TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL,
+ lease_token TEXT, lease_until INTEGER NOT NULL DEFAULT 0, done INTEGER NOT NULL DEFAULT 0,
+ UNIQUE(event_id,installation,generation)
+);
+CREATE INDEX IF NOT EXISTS outbox_due ON outbox(next_at,lease_until);
+CREATE INDEX IF NOT EXISTS events_principal ON events(provider,user_id,cursor);
+CREATE TABLE IF NOT EXISTS attention (
+ session_id TEXT NOT NULL, request_id TEXT NOT NULL, resolved INTEGER NOT NULL,
+ expires_at INTEGER NOT NULL, PRIMARY KEY(session_id,request_id)
+);
+"""
+
+
+class Store:
+    def __init__(self, path: Path, clock=time.time):
+        self.path = path
+        self.clock = clock
+        path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        os.chmod(path.parent, 0o700)
+        fd = os.open(path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+        os.close(fd)
+        os.chmod(path, 0o600)
+        with self.connection() as db:
+            db.execute("PRAGMA journal_mode=WAL")
+            db.executescript(SCHEMA)
+
+    @contextlib.contextmanager
+    def connection(self):
+        with contextlib.closing(sqlite3.connect(self.path, timeout=0.025)) as db:
+            db.row_factory = sqlite3.Row
+            db.execute("PRAGMA foreign_keys=ON")
+            with db:
+                yield db
+
+    @contextlib.contextmanager
+    def transaction(self):
+        with self.connection() as db:
+            db.execute("BEGIN IMMEDIATE")
+            yield db
+
+    def now(self):
+        return int(self.clock())
+
+    @staticmethod
+    def owner(row, principal):
+        if row is None or (row["provider"], row["user_id"]) != principal:
+            raise Rejected(404, "Registration not found")
+
+    def registration(self, principal, installation):
+        with self.connection() as db:
+            row = db.execute(
+                "SELECT * FROM registrations WHERE installation=?", (installation,)
+            ).fetchone()
+            self.owner(row, principal)
+            return dict(row)
+
+    def put(self, principal, installation, body, policy: Policy):
+        now = self.now()
+        challenge = secrets.token_urlsafe(32)
+        with self.transaction() as db:
+            previous = db.execute(
+                "SELECT * FROM registrations WHERE installation=?", (installation,)
+            ).fetchone()
+            if previous:
+                self.owner(previous, principal)
+                if previous["nonce"] == body["registration_nonce"]:
+                    raise Rejected(409, "A fresh registration_nonce is required")
+            elif (
+                db.execute("SELECT count(*) FROM registrations").fetchone()[0]
+                >= policy.max_registrations
+            ):
+                raise Rejected(429, "Registration capacity reached")
+            generation = previous["generation"] + 1 if previous else 1
+            db.execute("DELETE FROM outbox WHERE installation=?", (installation,))
+            db.execute(
+                "UPDATE events SET cancelled=1 WHERE installation=? AND kind='challenge'",
+                (installation,),
+            )
+            values = (
+                installation,
+                *principal,
+                generation,
+                "pending",
+                body["registration_nonce"],
+                body["endpoint"],
+                json.dumps(body["keys"]),
+                json.dumps(body["event_kinds"]),
+                json.dumps(body["session_ids"]),
+                hashlib.sha256(challenge.encode()).hexdigest(),
+                now + policy.challenge_ttl,
+            )
+            db.execute(
+                "INSERT OR REPLACE INTO registrations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", values
+            )
+            event_id = self._event(
+                db,
+                principal,
+                f"challenge:{installation}:{generation}",
+                "challenge",
+                now,
+                now + policy.challenge_ttl,
+                installation=installation,
+            )
+            hint = self.hint(
+                event_id,
+                "challenge",
+                generation,
+                body["registration_nonce"],
+                now + policy.challenge_ttl,
+                challenge=challenge,
+            )
+            self._queue(db, installation, generation, event_id, hint, now)
+            self._prune(db, policy, now)
+        return {
+            "generation": generation,
+            "status": "pending",
+            "registration_nonce": body["registration_nonce"],
+        }
+
+    def confirm(self, principal, installation, generation, challenge, policy):
+        with self.transaction() as db:
+            row = db.execute(
+                "SELECT * FROM registrations WHERE installation=?", (installation,)
+            ).fetchone()
+            self.owner(row, principal)
+            if (
+                row["generation"] != generation
+                or row["status"] != "pending"
+                or row["challenge_expires"] <= self.now()
+                or not secrets.compare_digest(
+                    row["challenge_hash"], hashlib.sha256(challenge.encode()).hexdigest()
+                )
+            ):
+                raise Rejected(409, "Challenge expired, invalid or superseded")
+            if any(not policy.allowed(principal, sid) for sid in json.loads(row["sessions_json"])):
+                raise Rejected(403, "Session scope is no longer authorised")
+            db.execute(
+                "UPDATE registrations SET status='active',challenge_hash='' WHERE installation=?",
+                (installation,),
+            )
+            db.execute("DELETE FROM outbox WHERE installation=?", (installation,))
+        return {"generation": generation, "status": "active"}
+
+    @staticmethod
+    def revoke_in(db, row):
+        db.execute(
+            "UPDATE registrations SET generation=generation+1,status='revoked',"
+            "challenge_hash='',endpoint='',keys_json='{}' WHERE installation=?",
+            (row["installation"],),
+        )
+        db.execute("DELETE FROM outbox WHERE installation=?", (row["installation"],))
+        db.execute(
+            "UPDATE events SET cancelled=1 WHERE installation=? AND kind='challenge'",
+            (row["installation"],),
+        )
+
+    def revoke(self, principal, installation):
+        with self.transaction() as db:
+            row = db.execute(
+                "SELECT * FROM registrations WHERE installation=?", (installation,)
+            ).fetchone()
+            self.owner(row, principal)
+            self.revoke_in(db, row)
+        return {"generation": row["generation"] + 1, "status": "revoked"}
+
+    @staticmethod
+    def hint(event_id, kind, generation, nonce, expires, **extra):
+        return {
+            "schema": 1,
+            "event_id": event_id,
+            "kind": kind,
+            "generation": generation,
+            "registration_nonce": nonce,
+            "expires_at": expires,
+            **extra,
+        }
+
+    @staticmethod
+    def _queue(db, installation, generation, event_id, hint, now):
+        db.execute(
+            "INSERT OR IGNORE INTO outbox(event_id,installation,generation,payload,next_at) VALUES(?,?,?,?,?)",
+            (event_id, installation, generation, json.dumps(hint, separators=(",", ":")), now),
+        )
+
+    @staticmethod
+    def _event(
+        db,
+        principal,
+        dedup,
+        kind,
+        now,
+        expires,
+        session_id=None,
+        turn_id=None,
+        request_id=None,
+        installation=None,
+    ):
+        event_id = uuid.uuid4().hex
+        db.execute(
+            "INSERT OR IGNORE INTO events(event_id,provider,user_id,dedup,kind,session_id,turn_id,"
+            "request_id,installation,created_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                event_id,
+                *principal,
+                dedup,
+                kind,
+                session_id,
+                turn_id,
+                request_id,
+                installation,
+                now,
+                expires,
+            ),
+        )
+        row = db.execute(
+            "SELECT event_id FROM events WHERE provider=? AND user_id=? AND dedup=?",
+            (*principal, dedup),
+        ).fetchone()
+        return row[0]
+
+    def targets(self):
+        # WAL readers remain available while the sender holds a write transaction.
+        with self.connection() as db:
+            return {
+                row["installation"]: row["generation"]
+                for row in db.execute(
+                    "SELECT installation,generation FROM registrations WHERE status='active'"
+                )
+            }
+
+    def record(self, event, policy: Policy):
+        now = self.now()
+        expires = event.get("expires_at", now + policy.ttl)
+        if expires <= now:
+            return
+        kind, sid = event["kind"], event["session_id"]
+        request_id = event.get("request_id")
+        with self.transaction() as db:
+            self._prune(db, policy, now)
+            if request_id:
+                attention = db.execute(
+                    "SELECT resolved FROM attention WHERE session_id=? AND request_id=?",
+                    (sid, request_id),
+                ).fetchone()
+                if kind == "input" and attention and attention[0]:
+                    return
+                resolved = int(kind == "input_resolved")
+                db.execute(
+                    "INSERT INTO attention VALUES(?,?,?,?) ON CONFLICT(session_id,request_id) "
+                    "DO UPDATE SET resolved=max(resolved,excluded.resolved),expires_at=excluded.expires_at",
+                    (sid, request_id, resolved, now + policy.ttl * 2),
+                )
+                if resolved:
+                    self._cancel_attention(db, sid, request_id)
+            if kind in {"turn_done", "turn_error"}:
+                self._cancel_attention(db, sid)
+                db.execute("UPDATE attention SET resolved=1 WHERE session_id=?", (sid,))
+            registrations = db.execute(
+                "SELECT * FROM registrations WHERE status='active'"
+            ).fetchall()
+            for row in registrations:
+                principal = (row["provider"], row["user_id"])
+                targets = event.get("registration_generations")
+                if targets is not None and targets.get(row["installation"]) != row["generation"]:
+                    continue
+                if (
+                    not policy.allowed(principal, sid)
+                    or sid not in json.loads(row["sessions_json"])
+                    or kind not in json.loads(row["kinds_json"])
+                ):
+                    continue
+                event_id = self._event(
+                    db,
+                    principal,
+                    event["dedup"],
+                    kind,
+                    now,
+                    expires,
+                    sid,
+                    event.get("turn_id"),
+                    request_id,
+                )
+                hint = self.hint(event_id, kind, row["generation"], row["nonce"], expires)
+                self._queue(db, row["installation"], row["generation"], event_id, hint, now)
+            self._prune(db, policy, now)
+
+    @staticmethod
+    def _cancel_attention(db, sid, request_id=None):
+        query = "UPDATE events SET cancelled=1 WHERE session_id=? AND kind='input'"
+        args = [sid]
+        if request_id:
+            query += " AND request_id=?"
+            args.append(request_id)
+        db.execute(query, args)
+        db.execute(
+            "DELETE FROM outbox WHERE event_id IN (SELECT event_id FROM events WHERE cancelled=1)"
+        )
+
+    @staticmethod
+    def _prune(db, policy, now):
+        db.execute("DELETE FROM events WHERE expires_at<=?", (now,))
+        db.execute(
+            "DELETE FROM events WHERE cursor NOT IN (SELECT cursor FROM events ORDER BY cursor DESC LIMIT ?)",
+            (policy.max_events,),
+        )
+        db.execute("DELETE FROM attention WHERE expires_at<=?", (now,))
+        db.execute(
+            "DELETE FROM attention WHERE rowid NOT IN (SELECT rowid FROM attention ORDER BY rowid DESC LIMIT ?)",
+            (policy.max_events,),
+        )
+
+    def events(self, principal, after, limit, policy, durable):
+        with self.connection() as db:
+            rows = db.execute(
+                "SELECT * FROM events WHERE provider=? AND user_id=? AND cursor>? "
+                "AND expires_at>? AND cancelled=0 ORDER BY cursor LIMIT ?",
+                (*principal, after, self.now(), policy.max_events),
+            ).fetchall()
+        visible = []
+        cursor = after
+        for row in rows:
+            if row["kind"] != "challenge" and (
+                not policy.allowed(principal, row["session_id"]) or not durable(row["session_id"])
+            ):
+                cursor = row["cursor"]
+                continue
+            if len(visible) == limit:
+                return {"events": visible, "next_cursor": cursor, "has_more": True}
+            cursor = row["cursor"]
+            event = {
+                key: row[key] for key in ("cursor", "event_id", "kind", "created_at", "expires_at")
+            }
+            for key in ("session_id", "turn_id", "request_id"):
+                if row[key]:
+                    event[key] = row[key]
+            if row["installation"]:
+                event["installation_id"] = row["installation"]
+            visible.append(event)
+        return {"events": visible, "next_cursor": cursor, "has_more": False}
+
+    def claim(self, policy):
+        now = self.now()
+        with self.transaction() as db:
+            self._prune(db, policy, now)
+            db.execute(
+                "UPDATE outbox SET done=1,payload='' WHERE attempts>=? AND lease_until<=?",
+                (policy.max_attempts, now),
+            )
+            row = db.execute(
+                "SELECT * FROM outbox WHERE done=0 AND next_at<=? AND lease_until<=? AND attempts<? "
+                "ORDER BY id LIMIT 1",
+                (now, now, policy.max_attempts),
+            ).fetchone()
+            if not row:
+                return None
+            token = uuid.uuid4().hex
+            db.execute(
+                "UPDATE outbox SET lease_token=?,lease_until=?,attempts=attempts+1 WHERE id=?",
+                (token, now + 30, row["id"]),
+            )
+            return {**dict(row), "lease_token": token}
