@@ -10,6 +10,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/fake_voice_composer_adapter.dart';
+import 'support/completed_stock_turn.dart';
 
 void main() {
   setUp(() {
@@ -52,16 +53,15 @@ void main() {
               startedAt: 1,
             ),
             testApiClient: apiClient,
-            testRemotePromptSubmit:
-                ({
-                  required sessionId,
-                  required text,
-                  required onEvent,
-                  required onSent,
-                }) async {
-                  submitted += 1;
-                  onSent();
-                },
+            testRemotePromptSubmit: completedStockTurn(({
+              required sessionId,
+              required text,
+              required onEvent,
+              required onSent,
+            }) async {
+              submitted += 1;
+              onSent();
+            }),
             testVoiceComposerAdapter: FakeVoiceComposerAdapter(),
           ),
         ),
@@ -154,16 +154,15 @@ void main() {
               startedAt: 1,
             ),
             testApiClient: apiClient,
-            testRemotePromptSubmit:
-                ({
-                  required sessionId,
-                  required text,
-                  required onEvent,
-                  required onSent,
-                }) async {
-                  await failSubmit.future;
-                  throw StateError('submit rejected');
-                },
+            testRemotePromptSubmit: completedStockTurn(({
+              required sessionId,
+              required text,
+              required onEvent,
+              required onSent,
+            }) async {
+              await failSubmit.future;
+              throw StateError('submit rejected');
+            }),
             testVoiceComposerAdapter: FakeVoiceComposerAdapter(),
           ),
         ),
@@ -233,16 +232,15 @@ void main() {
               startedAt: 1,
             ),
             testApiClient: apiClient,
-            testRemotePromptSubmit:
-                ({
-                  required sessionId,
-                  required text,
-                  required onEvent,
-                  required onSent,
-                }) async {
-                  submitted += 1;
-                  onSent();
-                },
+            testRemotePromptSubmit: completedStockTurn(({
+              required sessionId,
+              required text,
+              required onEvent,
+              required onSent,
+            }) async {
+              submitted += 1;
+              onSent();
+            }),
             testVoiceComposerAdapter: FakeVoiceComposerAdapter(),
           ),
         ),
@@ -322,16 +320,15 @@ void main() {
             startedAt: 1,
           ),
           testApiClient: apiClient,
-          testRemotePromptSubmit:
-              ({
-                required sessionId,
-                required text,
-                required onEvent,
-                required onSent,
-              }) async {
-                onSent();
-                await submitGate.future;
-              },
+          testRemotePromptSubmit: completedStockTurn(({
+            required sessionId,
+            required text,
+            required onEvent,
+            required onSent,
+          }) async {
+            onSent();
+            await submitGate.future;
+          }),
           testVoiceComposerAdapter: FakeVoiceComposerAdapter(),
         ),
       ),
@@ -350,8 +347,10 @@ void main() {
     await tester.pump();
 
     await tester.tap(find.byTooltip('Stop response'));
-    await httpClient.refreshedMessagesUri.future;
+    // The fixture now supplies the server terminal receipt. A stop RPC ack
+    // alone must not settle an app-owned stock turn.
     submitGate.complete();
+    await httpClient.refreshedMessagesUri.future;
     await tester.pumpAndSettle();
 
     expect(find.text('Stale transcript row'), findsNothing);

@@ -23,6 +23,7 @@ import '../services/chat_density_preference.dart';
 import '../services/chat_history_window.dart';
 import '../services/desktop_gateway_client.dart';
 import '../services/gateway_turn_application_controller.dart';
+import '../services/normal_gateway_application_session.dart';
 import '../services/gateway_turn_coordinator.dart';
 import '../services/gateway_turn_recovery.dart';
 import '../services/gateway_turn_ui_projection.dart';
@@ -211,6 +212,7 @@ typedef TestComposerDraftReader =
 @visibleForTesting
 class TestDesktopConnectionHook {
   void Function(DesktopConnectionState state)? handler;
+  DesktopConnectionState currentState = DesktopConnectionState.disconnected;
 }
 
 /// Test seam for session-scoped terminal events that arrive after the
@@ -268,6 +270,9 @@ class ChatScreen extends StatefulWidget {
 
   @visibleForTesting
   final TestRemotePromptSubmit? testRemotePromptSubmit;
+
+  @visibleForTesting
+  final NormalGatewayResume? testNormalResume;
 
   @visibleForTesting
   final Future<String?> Function()? testServerFilePicker;
@@ -337,6 +342,7 @@ class ChatScreen extends StatefulWidget {
     this.testApiClient,
     this.testAttachmentDraftService,
     this.testRemotePromptSubmit,
+    this.testNormalResume,
     this.testServerFilePicker,
     this.testRemoteAttachmentUpload,
     this.testInitialAttachmentDrafts = const [],
@@ -381,6 +387,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   late final Future<ChatModelOverrideStore> _chatModelStore;
   late final Future<void> _sessionModelRestore;
   DesktopGatewayClient? _desktopGateway;
+  GatewayTurnApplicationController? _localTurnController;
+  NormalGatewayApplicationSession? _normalSession;
+  NormalGatewayChatOwner? _normalChat;
+  Object? _normalSubscription;
+  Object? _normalReservation;
+  String? _normalTurnId;
+  NormalGatewayTurnPhase? _normalPhase;
+  final Set<String> _normalInputSeen = {};
+  final Set<String> _normalMaterializedIds = {};
+  final Set<StreamEvent> _normalAuxiliarySeen = {};
+  final Set<StreamEvent> _normalInputUpdatesSeen = {};
+  final Set<String> _normalPendingRequestIds = {};
+  final Map<String, String> _normalPendingRequestMethods = {};
   GatewayTurnApplicationSession? _turnApplicationSession;
   Object? _turnApplicationAsyncEventRegistration;
   Object? _turnApplicationSettledRegistration;
@@ -414,46 +433,31 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _recoveringTurn = false;
   bool _legacyTransportFallback = false;
   bool _stockGatewayFallback = false;
-  bool _legacyHistoryResyncPending = false;
-  bool _legacyHistoryResyncing = false;
 
-  /// Set when a submitted legacy prompt loses its socket before completion.
-  /// The server keeps the turn running detached, so authoritative history is
-  /// polled until a terminal row beyond the pre-submit durable ID appears.
-  bool _pendingReattachResync = false;
-  bool _reattachResyncing = false;
-  bool _reattachImmediateRetryRequested = false;
-  bool _legacyDesktopPromptSubmitted = false;
-  int _reattachGeneration = 0;
-  int _reattachMessageIdWatermark = 0;
-  int _reattachLegacyTerminalWatermark = 0;
-  int _reattachRetryAttempt = 0;
-  Timer? _reattachRetryTimer;
-  static const _reattachRetryBaseDelay = Duration(milliseconds: 500);
-  static const _reattachRetryMaxDelay = Duration(seconds: 30);
+  /// View-only admission gate; all reconnect work belongs to the app owner.
+  bool get _pendingReattachResync => _normalChat?.snapshot.reconciling ?? false;
 
   /// Backstop for [releaseClientAfterStreamSettles] on the dispose path: a
   /// stream that never settles must not hold this screen's HTTP client open
   /// for the life of the process.
   static const _detachedStreamCloseDeadline = Duration(minutes: 30);
 
-  /// Bumped every time authoritative history replaces [_messages]. The submit
-  /// catch path compares it against the value captured at send time to tell
-  /// whether a reattach resync already made the server history
-  /// authoritative before it restores the composer.
-  int _historyGeneration = 0;
+  /// Fences route-owned preparation and the existing REST/v2 UI callbacks.
+  /// Stock turn and recovery generations live exclusively on the app owner.
   int _responseGeneration = 0;
   bool _deferredHistoryRefreshPending = false;
   bool _deferredHistoryRefreshing = false;
   bool _stopResponseInFlight = false;
   bool _approvalDialogOpen = false;
   bool _approvalRouteOpen = false;
+  Route<bool>? _approvalPromptRoute;
   String? _activeApprovalServerRequestId;
   final Set<String> _cancelledInteractiveRequestIds = {};
   final List<_PendingSensitivePrompt> _sensitivePromptQueue = [];
   final Set<String> _expiredSensitivePromptIds = {};
   _PendingSensitivePrompt? _activeSensitivePrompt;
   bool _sensitivePromptRouteOpen = false;
+  Route<GatewaySensitivePromptDialogResult>? _sensitivePromptRoute;
   final List<_PendingClarifyPrompt> _clarifyPromptQueue = [];
   _PendingClarifyPrompt? _activeClarifyPrompt;
   bool _clarifyPromptRouteOpen = false;
@@ -584,13 +588,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (widget.connection.desktopGatewayUrl?.trim().isNotEmpty == true ||
         hasDashboardAuth) {
       try {
-        _desktopGateway = DesktopGatewayClient.fromConnection(
-          widget.connection,
-        );
-        _desktopGateway!.setAsyncEventListener(_handleDesktopAsyncEvent);
-        _desktopGateway!.setConnectionListener(_onDesktopConnectionChanged);
-        _desktopGateway!.setSessionBoundListener(_onSessionBound);
-        unawaited(_ensureDesktopSession());
+        _attachNormalSession();
+        _desktopGateway = _normalSession!.client;
       } on ArgumentError {
         // The regular mobile chat remains usable; selection surfaces the
         // actionable configuration error when Desktop attachments are needed.
@@ -599,9 +598,21 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     // Test seam: with no real gateway, hand the same handler to the test
     // hook so it can simulate reconnect transitions.
-    widget.testDesktopConnectionHook?.handler = _onDesktopConnectionChanged;
+    if (widget.testRemotePromptSubmit != null && _normalSession == null) {
+      _attachNormalSession();
+    }
+    widget.testDesktopConnectionHook?.handler = (state) {
+      widget.testDesktopConnectionHook?.currentState = state;
+      _normalSession?.connectionChanged(state);
+      if (_normalSession == null) _onDesktopConnectionChanged(state);
+    };
     widget.testDesktopAsyncEventHook?.handler = (event) {
-      _handleDesktopAsyncEvent(widget.session.id, event);
+      if (_normalSession != null &&
+          (_turnApplicationSession == null || _legacyTransportFallback)) {
+        _normalSession!.receiveEvent(widget.session.id, event);
+      } else {
+        _handleDesktopAsyncEvent(widget.session.id, event);
+      }
     };
     // The experimental recovery-v2 session.open contract carries no cwd.
     // Project drafts must use stock session.create(cwd), or the server files
@@ -632,6 +643,263 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _initVoice();
     _recoverLostImage();
     _scrollController.addListener(_onScroll);
+    if (_desktopGateway != null) unawaited(_ensureDesktopSession());
+  }
+
+  void _attachNormalSession() {
+    final controller =
+        widget.turnApplicationController ??
+        (widget.testRemotePromptSubmit != null
+            ? (_localTurnController ??= GatewayTurnApplicationController())
+            : GatewayTurnApplicationController.standalone);
+    final testClient = widget.testApiClient;
+    _normalSession = controller.normalSessionFor(
+      widget.connection,
+      submit: widget.testRemotePromptSubmit,
+      resume: widget.testNormalResume,
+      history: testClient == null
+          ? null
+          : (id) => testClient.getMessages(
+              id,
+              limit: ChatHistoryWindow.pageSize,
+              latest: true,
+            ),
+      notifications: _turnNotifications,
+    );
+    _normalChat = _normalSession!.chatFor(
+      widget.session.id,
+      storedSessionId: widget.session.isLocalDraft
+          ? null
+          : _normalSession!.findChat(widget.session.id)?.storedSessionId ??
+                widget.testStoredSessionKey?.call(widget.session.id) ??
+                widget.session.id,
+      title: _sessionTitle,
+      workingDirectory: widget.projectWorkingDirectory,
+    );
+    if (_textController.text.isNotEmpty || widget.initialComposerText != null) {
+      _normalChat!.invalidateDraftRecovery();
+    }
+    _normalSubscription = _normalChat!.subscribe(_applyNormalSnapshot);
+  }
+
+  void _applyNormalSnapshot(NormalGatewayChatSnapshot snapshot) {
+    if (!mounted) return;
+    final rejectedDraft = snapshot.rejectedDraft;
+    if (rejectedDraft != null &&
+        widget.initialComposerText == null &&
+        _composerRevision == _clearedComposerRevision) {
+      _restoreComposerAfterRejectedSend(rejectedDraft);
+    }
+    _normalInputUpdatesSeen.retainAll(snapshot.inputUpdates);
+    final updatedInputIds = <String>{};
+    for (final event in snapshot.inputUpdates) {
+      if (_normalInputUpdatesSeen.add(event)) {
+        final id = (event.data['id'] ?? event.data['request_id'])?.toString();
+        if (id != null) updatedInputIds.add(id);
+        _handleDesktopGatewayEvent(event, _responseGeneration);
+      }
+    }
+    _normalInputSeen.retainAll(
+      snapshot.pendingInput.map(
+        (event) => '${event.type}:${jsonEncode(event.data)}',
+      ),
+    );
+    _normalAuxiliarySeen.retainAll(snapshot.auxiliaryEvents);
+    for (final event in snapshot.auxiliaryEvents) {
+      if (_normalAuxiliarySeen.add(event)) {
+        _handleDesktopAsyncEvent(widget.session.id, event);
+      }
+    }
+    if (snapshot.turnId == null &&
+        snapshot.pendingInput.isEmpty &&
+        _normalPendingRequestIds.isEmpty) {
+      _desktopConnectionState = snapshot.connectionState;
+      return;
+    }
+    final justDetached =
+        _desktopConnectionState == DesktopConnectionState.connected &&
+        snapshot.connectionState != DesktopConnectionState.connected &&
+        snapshot.wireEmitted &&
+        snapshot.hasActiveTurn;
+    final justFailed =
+        snapshot.phase == NormalGatewayTurnPhase.failed &&
+        _normalPhase != NormalGatewayTurnPhase.failed &&
+        snapshot.wireEmitted;
+    _normalPhase = snapshot.phase;
+    if ((justDetached || justFailed) &&
+        _normalTurnId != null &&
+        ModalRoute.of(context)?.isCurrent == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            justFailed
+                ? context.l10n.the_detached_reply_failed_2(snapshot.error ?? '')
+                : context
+                      .l10n
+                      .connection_switched_the_running_reply_continues_on_the_server_and,
+          ),
+          persist: false,
+        ),
+      );
+    }
+    final newTurn = snapshot.turnId != _normalTurnId;
+    if (newTurn) {
+      _normalTurnId = snapshot.turnId;
+      _responseGeneration++;
+      _normalInputSeen.clear();
+      _scrollCoordinator.beginStreaming(isNearEnd: _isNearEnd());
+    }
+    final bindingChanged =
+        snapshot.storedSessionId != null &&
+        _storedSessionId != snapshot.storedSessionId;
+    _storedSessionId = snapshot.storedSessionId;
+    if (bindingChanged) unawaited(_refreshProjectName());
+    final pendingIds = snapshot.pendingInput
+        .map(
+          (event) =>
+              (event.data['server_request_id'] ??
+                      event.data['request_id'] ??
+                      event.data['id'])
+                  ?.toString(),
+        )
+        .whereType<String>()
+        .toSet();
+    for (final removed in _normalPendingRequestIds.difference(pendingIds)) {
+      if (updatedInputIds.contains(removed)) continue;
+      _handleDesktopGatewayEvent(
+        StreamEvent(
+          type: 'request.cancel',
+          data: {
+            'id': removed,
+            'method': _normalPendingRequestMethods[removed],
+          },
+        ),
+        _responseGeneration,
+      );
+    }
+    _normalPendingRequestMethods.clear();
+    for (final event in snapshot.pendingInput) {
+      final id =
+          (event.data['server_request_id'] ??
+                  event.data['request_id'] ??
+                  event.data['id'])
+              ?.toString();
+      if (id != null) {
+        _normalPendingRequestMethods[id] = event.type.split('.').first;
+      }
+    }
+    _normalPendingRequestIds
+      ..clear()
+      ..addAll(pendingIds);
+    _normalMaterializedIds.retainAll(
+      snapshot.displayRows
+          .map((row) => row['_normal_projection_id'])
+          .whereType<String>(),
+    );
+    for (final row in snapshot.displayRows) {
+      final id = row['_normal_projection_id']?.toString();
+      if (id != null &&
+          (row['content']?.toString().isNotEmpty ?? false) &&
+          _normalMaterializedIds.add(id)) {
+        _registerMaterializedAssistantMessage();
+      }
+    }
+    setState(() {
+      _desktopConnectionState = snapshot.connectionState;
+      _loading = false;
+      _sending = snapshot.hasActiveTurn && !snapshot.reconciling;
+      _streaming =
+          snapshot.hasActiveTurn &&
+          !snapshot.reconciling &&
+          snapshot.phase != NormalGatewayTurnPhase.preparing;
+      _activeResponseTransport = snapshot.hasActiveTurn
+          ? _ResponseTransport.desktop
+          : _ResponseTransport.none;
+      _gatewayTurnStatus = snapshot.reconciling
+          ? const GatewayTurnStatus(
+              kind: 'recovery',
+              text: 'Recovering without resending',
+            )
+          : snapshot.status;
+      if (snapshot.historyRows.isNotEmpty) {
+        _acceptRecentMessages(
+          snapshot.historyRows
+              .map((row) => Map<String, dynamic>.from(row))
+              .toList(),
+        );
+      }
+      if (snapshot.displayRows.isNotEmpty) {
+        final floor = snapshot.rowFloor;
+        final base = _historyWindow.rows.where((row) {
+          final id = int.tryParse(row['id']?.toString() ?? '');
+          return snapshot.displayRows.first['role'] != 'user' ||
+              floor == null ||
+              id == null ||
+              id <= floor;
+        });
+        _messages = [
+          ...base,
+          ...snapshot.displayRows.map((row) => Map<String, dynamic>.from(row)),
+        ];
+      } else {
+        _acceptRecentMessages(
+          snapshot.historyRows
+              .map((row) => Map<String, dynamic>.from(row))
+              .toList(),
+        );
+        _messages = _historyWindow.rows;
+      }
+      for (final tool in snapshot.tools) {
+        final index = _toolActivities.indexWhere(
+          (old) => old.identity == tool.identity,
+        );
+        if (index < 0) {
+          _toolActivities.add(tool);
+        } else {
+          _toolActivities[index] = tool;
+        }
+      }
+      _subagentActivities
+        ..clear()
+        ..addAll(snapshot.subagents);
+    });
+    if (snapshot.hasActiveTurn) {
+      _scheduleStreamingFollow();
+    } else {
+      _scheduleScrollTarget(_scrollCoordinator.endStreaming());
+    }
+    if (snapshot.phase == NormalGatewayTurnPhase.failed) {
+      _awaitingVoiceReply = false;
+    }
+    if (snapshot.phase == NormalGatewayTurnPhase.completed &&
+        _awaitingVoiceReply) {
+      final rows = snapshot.displayRows.isNotEmpty
+          ? snapshot.displayRows
+          : snapshot.historyRows;
+      for (final row in rows.reversed) {
+        if (row['role'] == 'user') break;
+        final text = row['content']?.toString() ?? '';
+        if (const {'assistant', 'agent'}.contains(row['role']) &&
+            row['_gateway_interim'] != true &&
+            text.isNotEmpty) {
+          _awaitingVoiceReply = false;
+          unawaited(_speakAssistantText(text).catchError((Object _) {}));
+          break;
+        }
+      }
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || ModalRoute.of(context)?.isCurrent != true) return;
+      final currentInputs =
+          _normalChat?.snapshot.pendingInput ?? const <StreamEvent>[];
+      for (final event in snapshot.pendingInput) {
+        if (!currentInputs.contains(event)) continue;
+        final key = '${event.type}:${jsonEncode(event.data)}';
+        if (_normalInputSeen.add(key)) {
+          _handleDesktopGatewayEvent(event, _responseGeneration);
+        }
+      }
+    });
   }
 
   String get _connectionIdentity =>
@@ -642,9 +910,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   String get _gatewayNoticeIdentity =>
       '$_connectionIdentity|${widget.session.id}';
 
-  void _onComposerChanged() => _composerRevision += 1;
+  void _onComposerChanged() {
+    _composerRevision += 1;
+    _normalChat?.invalidateDraftRecovery();
+  }
+
+  bool get _usesNormalInputOwner =>
+      _normalSession != null &&
+      (_turnApplicationSession == null || _legacyTransportFallback);
+
+  String get _normalLocalSessionKey =>
+      _normalChat?.localSessionId ?? widget.session.id;
 
   String get _storedSessionKey =>
+      _normalChat?.storedSessionId ??
       _desktopGateway?.storedSessionKeyFor(widget.session.id) ??
       widget.testStoredSessionKey?.call(widget.session.id) ??
       widget.session.id;
@@ -690,6 +969,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void _onSessionBound(String localSessionId, String storedSessionId) {
     if (localSessionId != widget.session.id) return;
     if (!mounted) return;
+    _normalChat?.bindStoredSession(storedSessionId);
     setState(() => _storedSessionId = storedSessionId);
     unawaited(_refreshProjectName());
   }
@@ -730,14 +1010,34 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // ModalRoute establishes a dependency on visibility. A lower duplicate
+    // route becoming current must replay pending input even if the server is
+    // blocked waiting for that answer and sends no further stream frames.
+    final current = ModalRoute.of(context)?.isCurrent == true;
+    if (current && _normalChat != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && ModalRoute.of(context)?.isCurrent == true) {
+          _applyNormalSnapshot(_normalChat!.snapshot);
+        }
+      });
+    }
+  }
+
+  @override
   void dispose() {
+    final normalChat = _normalChat;
+    final reservation = _normalReservation;
+    final subscription = _normalSubscription;
+    if (subscription != null) normalChat?.unsubscribe(subscription);
+    if (reservation != null) normalChat?.cancelPreparation(reservation);
     WidgetsBinding.instance.removeObserver(this);
     chatDensitySelection.removeListener(_onChatDensityChanged);
     _projectNameRefreshGeneration += 1;
     pendingNotificationApprovals.removeListener(
       _consumePendingNotificationApproval,
     );
-    _clearPendingReattachResync();
     widget.testDesktopConnectionHook?.handler = null;
     widget.testDesktopAsyncEventHook?.handler = null;
     _savedGatewayNotices[_gatewayNoticeIdentity] = List.unmodifiable(
@@ -758,9 +1058,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         List<AttachmentDraft>.from(_attachmentDrafts),
       ),
     );
-    _desktopGateway?.setAsyncEventListener(null);
-    _desktopGateway?.setSessionBoundListener(null);
-    _desktopGateway?.close();
+    // Route disposal only unsubscribes; it never closes the app-owned socket.
+    if (_localTurnController != null) unawaited(_localTurnController!.close());
     final registration = _turnApplicationAsyncEventRegistration;
     if (registration != null) {
       _turnApplicationSession?.removeAsyncEventListener(
@@ -827,6 +1126,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         state == AppLifecycleState.hidden ||
         state == AppLifecycleState.detached) {
       _appInBackground = true;
+      _normalSession?.setLifecycle(background: true);
       // Persist the draft on the way out: a process kill must not lose it.
       unawaited(
         ComposerDraftStore.save(
@@ -835,28 +1135,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           text: _composerDraftForPersistence,
         ),
       );
-      _pauseReattachRetry();
-      if (_legacyTransportFallback && (_sending || _streaming)) {
-        _legacyHistoryResyncPending = true;
-      }
     } else if (state == AppLifecycleState.resumed) {
       _appInBackground = false;
-      unawaited(_turnNotifications.cancelAll());
-      if (_pendingReattachResync) {
-        // The transport's autonomous loop is normally enough, but an app
-        // resume is also an explicit recovery signal. Force the session path
-        // to restart a socket immediately after any prolonged offline period;
-        // the history retry itself remains gated on the connected callback.
-        unawaited(_ensureDesktopSession());
-        _requestImmediateReattachResync();
-      } else if (_desktopGateway != null) {
-        unawaited(_ensureDesktopSession());
+      if (_normalChat?.snapshot.reconciling == true) {
+        widget.testDesktopSessionEnsured?.call();
       }
-      if (_legacyTransportFallback) {
-        unawaited(_resyncLegacyHistoryAfterResume());
-      } else if (_turnApplicationSession != null) {
-        unawaited(_recoverPendingTurn());
-      }
+      _normalSession?.setLifecycle(background: false);
+      if (_normalChat?.snapshot.turnId != null) return;
+      if (_desktopGateway != null) unawaited(_ensureDesktopSession());
+      if (_turnApplicationSession != null) unawaited(_recoverPendingTurn());
     }
   }
 
@@ -877,41 +1164,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// eventual `connected` transition actually re-binds and refetches.
   void _onDesktopConnectionChanged(DesktopConnectionState state) {
     if (!mounted) return;
-    final previousState = _desktopConnectionState;
-    final connectionChanged = previousState != state;
-    final lostSubmittedLegacyPrompt =
-        previousState == DesktopConnectionState.connected &&
-        _legacyDesktopPromptSubmitted &&
-        (state == DesktopConnectionState.reconnecting ||
-            state == DesktopConnectionState.disconnected);
-    if (lostSubmittedLegacyPrompt) {
-      final newlyPending = !_pendingReattachResync;
-      _markPendingReattachResync();
-      if (newlyPending) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              context
-                  .l10n
-                  .connection_switched_the_running_reply_continues_on_the_server_and,
-            ),
-            persist: false,
-          ),
-        );
-      }
-    }
-    if (state != DesktopConnectionState.connected) _pauseReattachRetry();
+    final changed = _desktopConnectionState != state;
     setState(() => _desktopConnectionState = state);
-    if (connectionChanged && state == DesktopConnectionState.connected) {
+    if (changed && state == DesktopConnectionState.connected) {
       unawaited(_refreshProjectName());
-      _requestImmediateReattachResync();
-      // A notification tap that landed before this route-local gateway was
-      // ready stays pending; retry it now that the connection is back.
       _consumePendingNotificationApproval();
     }
   }
 
   Future<void> _ensureDesktopSession() async {
+    if (_normalChat?.snapshot.hasActiveTurn == true) {
+      _normalChat!.requestRecovery();
+      return;
+    }
     if (!shouldEstablishLegacyDesktopSession(
       widget.session,
       legacyTransportFallback: _legacyTransportFallback,
@@ -926,7 +1191,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     try {
       await gateway.ensureSession(
-        widget.session.id,
+        _normalLocalSessionKey,
         workingDirectory: widget.projectWorkingDirectory,
       );
     } catch (_) {
@@ -982,7 +1247,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         sessionId: _storedSessionId ?? _storedSessionKey,
         title: title,
       );
-      if (mounted) setState(() => _sessionTitle = savedTitle);
+      if (mounted) {
+        _normalChat?.title = savedTitle;
+        setState(() => _sessionTitle = savedTitle);
+      }
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1159,6 +1427,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     GatewayApprovalRequest request,
     String? serverRequestId,
   ) {
+    if (_normalSession != null && _normalChat?.snapshot.turnId != null) return;
     if (!_appInBackground || serverRequestId == null) return;
     final command = request.command.trim();
     final body = command.isEmpty
@@ -1188,6 +1457,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// Mirrors a clarify/sudo/secret prompt to a native notification while the
   /// app is in the background. The dialog itself stays queued for the return.
   void _notifyInputRequest({required String eventId, required String body}) {
+    if (_normalSession != null && _normalChat?.snapshot.turnId != null) return;
     if (!_appInBackground) return;
     final trimmed = body.trim();
     unawaited(
@@ -1210,6 +1480,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// only native notice class (credits.depleted / credits.restored); every
   /// other notice posts as a plugin notice while the app is away.
   void _notifyGatewayNotice(GatewayNotification notification) {
+    if (_normalSession != null &&
+        (_turnApplicationSession == null || _legacyTransportFallback)) {
+      return;
+    }
     if (!_appInBackground) return;
     final isCredits =
         notification.key == 'credits.depleted' ||
@@ -1238,6 +1512,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// insights; mirror them to a native notification while the app is away —
   /// completions as background work, reviews as gateway notices.
   void _notifyBackgroundNotice(GatewayNotice notice) {
+    if (_normalSession != null &&
+        (_turnApplicationSession == null || _legacyTransportFallback)) {
+      return;
+    }
     if (!_appInBackground) return;
     final isBackground = notice.kind == GatewayNoticeKind.background;
     unawaited(
@@ -1397,7 +1675,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     try {
       final batch = await _historyWindow.fetchRecent(
         (offset) => _client.getMessages(
-          sessionId ?? widget.session.id,
+          sessionId ?? _normalChat?.storedSessionId ?? widget.session.id,
           limit: ChatHistoryWindow.pageSize,
           offset: offset,
           latest: true,
@@ -1415,20 +1693,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         return;
       }
       _historyWindow.acceptRecent(batch);
+      _normalChat?.observeHistory(batch.rows);
       final messages = _historyWindow.rows;
       _extractToolMessages(messages);
-      final completedPendingReattach =
-          _pendingReattachResync &&
-          _hasTerminalAssistantAfterWatermark(messages);
       setState(() {
         _messages = messages;
         // Server history is now authoritative; a submit catch that starts
         // after this point must not clobber it with composer-restore.
-        _historyGeneration++;
         _loading = false;
       });
       _scheduleInitialEndAlignment();
-      if (completedPendingReattach) _clearPendingReattachResync();
+      if (_normalChat?.snapshot.turnId != null) {
+        _applyNormalSnapshot(_normalChat!.snapshot);
+      }
     } catch (e) {
       if (!mounted) return;
       if (responseGeneration != _responseGeneration) {
@@ -1448,7 +1725,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         }
         setState(() {
           _messages = [];
-          _historyGeneration++;
           _loading = false;
         });
         _scheduleInitialEndAlignment();
@@ -1564,7 +1840,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _acceptRecentMessages(messages);
       setState(() {
         _messages = _historyWindow.rows;
-        _historyGeneration += 1;
         _error = null;
       });
       _scheduleInitialEndAlignment();
@@ -1582,241 +1857,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           !_pendingReattachResync) {
         unawaited(_refreshDeferredHistoryIfIdle());
       }
-    }
-  }
-
-  /// Reattach resync: the socket came back after a mid-turn drop. Re-bind
-  /// the session on the fresh socket (single-flights with the client's own
-  /// reconnect rebind) and refetch history so a reply that completed
-  /// server-side while the socket was down lands in the transcript.
-  ///
-  /// Two production-ordering facts shape this:
-  /// - WsClient rejects every pending RPC the instant the socket closes,
-  ///   so the submit catch fires BEFORE the reconnect — the composer may
-  ///   already be restored and the optimistic turn stripped by the time
-  ///   this runs. The detached server turn may also still be settling, so
-  ///   a single immediate fetch can read history that lacks the reply.
-  ///   Retry with capped exponential backoff until authoritative terminal
-  ///   evidence lands; there is no attempt-count deadline.
-  /// - The watermark is NOT a list index, length, or assistant count: stock
-  ///   `prompt.submit` persists the user row SYNCHRONOUSLY before the
-  ///   model worker starts, so the first refetch after the optimistic turn
-  ///   was stripped can grow by exactly one — the user row alone. Waiting
-  ///   on length would then end the resync while the assistant reply is
-  ///   still detached and in flight, with no listener or retry left to
-  ///   ever surface it. The endpoint also returns a capped latest-history
-  ///   window, whose length and role counts can remain constant as old rows
-  ///   roll off. The authoritative signal is therefore a terminal assistant
-  ///   row (role assistant/agent, no tool_calls) with a durable numeric row
-  ///   ID beyond the highest ID present before the drop.
-  /// - Retry timers pause while disconnected or backgrounded and resume
-  ///   immediately on reconnect/resume. Delay is capped at 30 seconds, but
-  ///   the recovery itself remains pending until terminal evidence arrives.
-  /// - A newly created stock session lives in the DB under the gateway-
-  ///   minted STORED key, not the mobile session id (the mobile id never
-  ///   survives into gateway-side lookups). Fetching by `widget.session.id`
-  ///   404s and would wipe the transcript, so the refetch targets
-  ///   `storedSessionKeyFor()` after the rebind, falling back to the
-  ///   mobile id only when no stored binding exists.
-  /// - A 404 here NEVER clears the transcript: it means the stored row
-  ///   isn't readable yet (turn still settling), not that the chat is
-  ///   empty. Only a successful fetch replaces `_messages`.
-  static int? _messageRowId(Map<String, dynamic> message) {
-    final raw = message['id'];
-    if (raw is int) return raw;
-    if (raw is num && raw.isFinite && raw == raw.truncate()) {
-      return raw.toInt();
-    }
-    return int.tryParse(raw?.toString() ?? '');
-  }
-
-  static int _highestMessageRowId(Iterable<Map<String, dynamic>> messages) {
-    var highest = 0;
-    for (final message in messages) {
-      final id = _messageRowId(message);
-      if (id != null && id > highest) highest = id;
-    }
-    return highest;
-  }
-
-  static bool _isTerminalAssistant(Map<String, dynamic> message) {
-    final role = message['role'];
-    if (role != 'assistant' && role != 'agent') return false;
-    final toolCalls = message['tool_calls'];
-    return toolCalls is! List || toolCalls.isEmpty;
-  }
-
-  static int _legacyTerminalCount(
-    Iterable<Map<String, dynamic>> messages,
-  ) => messages.where((message) {
-    if (_messageRowId(message) != null || !_isTerminalAssistant(message)) {
-      return false;
-    }
-    // Exclude the local optimistic assistant placeholder captured at detach.
-    return message['content']?.toString().isNotEmpty ?? false;
-  }).length;
-
-  bool _hasTerminalAssistantAfterWatermark(
-    Iterable<Map<String, dynamic>> messages,
-  ) {
-    var legacyTerminalCount = 0;
-    for (final message in messages) {
-      if (!_isTerminalAssistant(message)) continue;
-      final id = _messageRowId(message);
-      if (id != null) {
-        if (id > _reattachMessageIdWatermark) return true;
-      } else if (message['content']?.toString().isNotEmpty ?? false) {
-        legacyTerminalCount += 1;
-      }
-    }
-    // Conservative fallback for legacy gateways that omit durable row IDs.
-    // It may retry longer under capped-window rollover, but never accepts an
-    // old terminal row or a tool-call intermediate as fresh completion.
-    return legacyTerminalCount > _reattachLegacyTerminalWatermark;
-  }
-
-  void _markPendingReattachResync() {
-    if (_pendingReattachResync) return;
-    _reattachRetryTimer?.cancel();
-    _reattachRetryTimer = null;
-    _pendingReattachResync = true;
-    _reattachGeneration += 1;
-    _reattachMessageIdWatermark = _highestMessageRowId(_messages);
-    _reattachLegacyTerminalWatermark = _legacyTerminalCount(_messages);
-    _reattachRetryAttempt = 0;
-    _reattachImmediateRetryRequested = false;
-  }
-
-  void _pauseReattachRetry() {
-    _reattachRetryTimer?.cancel();
-    _reattachRetryTimer = null;
-    _reattachImmediateRetryRequested = false;
-  }
-
-  void _clearPendingReattachResync() {
-    _pauseReattachRetry();
-    _pendingReattachResync = false;
-    _legacyDesktopPromptSubmitted = false;
-    _reattachMessageIdWatermark = 0;
-    _reattachLegacyTerminalWatermark = 0;
-    _reattachRetryAttempt = 0;
-    _reattachGeneration += 1;
-  }
-
-  bool get _canRunReattachResync =>
-      mounted &&
-      _pendingReattachResync &&
-      !_appInBackground &&
-      _desktopConnectionState == DesktopConnectionState.connected;
-
-  Duration _nextReattachRetryDelay() {
-    var milliseconds = _reattachRetryBaseDelay.inMilliseconds;
-    for (var i = 0; i < _reattachRetryAttempt; i += 1) {
-      milliseconds *= 2;
-      if (milliseconds >= _reattachRetryMaxDelay.inMilliseconds) {
-        milliseconds = _reattachRetryMaxDelay.inMilliseconds;
-        break;
-      }
-    }
-    _reattachRetryAttempt += 1;
-    return Duration(milliseconds: milliseconds);
-  }
-
-  void _scheduleReattachRetry(int generation) {
-    if (!_canRunReattachResync || generation != _reattachGeneration) return;
-    _reattachRetryTimer?.cancel();
-    _reattachRetryTimer = Timer(_nextReattachRetryDelay(), () {
-      _reattachRetryTimer = null;
-      if (generation != _reattachGeneration) return;
-      _requestImmediateReattachResync();
-    });
-  }
-
-  void _requestImmediateReattachResync() {
-    if (!_canRunReattachResync) return;
-    _reattachRetryTimer?.cancel();
-    _reattachRetryTimer = null;
-    if (_reattachResyncing) {
-      _reattachImmediateRetryRequested = true;
-      return;
-    }
-    unawaited(_resyncAfterReattach(_reattachGeneration));
-  }
-
-  Future<void> _resyncAfterReattach(int generation) async {
-    if (_reattachResyncing ||
-        !_canRunReattachResync ||
-        generation != _reattachGeneration) {
-      return;
-    }
-    _reattachResyncing = true;
-    _reattachImmediateRetryRequested = false;
-    try {
-      await _ensureDesktopSession();
-      if (!_canRunReattachResync || generation != _reattachGeneration) return;
-      final messages = await _getRecentMessages(_storedSessionKey);
-      if (!_canRunReattachResync || generation != _reattachGeneration) return;
-      final completed = _hasTerminalAssistantAfterWatermark(messages);
-      _acceptRecentMessages(messages);
-      setState(() {
-        _messages = _historyWindow.rows;
-        _historyGeneration += 1;
-        _loading = false;
-        _error = null;
-      });
-      _scheduleInitialEndAlignment();
-      if (completed) _clearPendingReattachResync();
-    } catch (_) {
-      // A temporary 404 or transport failure is not an empty transcript and
-      // not terminal turn evidence. Keep the current UI and retry later.
-      if (mounted && generation == _reattachGeneration) {
-        setState(() => _loading = false);
-      }
-    } finally {
-      _reattachResyncing = false;
-      if (_canRunReattachResync) {
-        // A terminal event can clear generation A while its history request is
-        // still in flight, then a later turn can create generation B. Hand the
-        // single-flight slot directly to B instead of discarding its queued
-        // reconnect request when A finally unwinds.
-        if (generation != _reattachGeneration ||
-            _reattachImmediateRetryRequested) {
-          _reattachImmediateRetryRequested = false;
-          _requestImmediateReattachResync();
-        } else {
-          _scheduleReattachRetry(generation);
-        }
-      }
-    }
-  }
-
-  Future<void> _resyncLegacyHistoryAfterResume() async {
-    if (!mounted ||
-        !_legacyTransportFallback ||
-        !_legacyHistoryResyncPending ||
-        _appInBackground ||
-        _legacyHistoryResyncing ||
-        _loading ||
-        _sending ||
-        _streaming) {
-      return;
-    }
-
-    _legacyHistoryResyncing = true;
-    try {
-      final messages = await _getRecentMessages(widget.session.id);
-      if (!mounted || _appInBackground) return;
-      _acceptRecentMessages(messages);
-      setState(() {
-        _messages = _historyWindow.rows;
-        _legacyHistoryResyncPending = false;
-      });
-      _scheduleInitialEndAlignment();
-    } catch (_) {
-      // Keep the pending watermark so the next resume can retry. The composer
-      // remains usable and the normal screen reload path still fetches history.
-    } finally {
-      _legacyHistoryResyncing = false;
     }
   }
 
@@ -2326,7 +2366,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     String dataUrl,
   ) async {
     final attachment = await desktopGateway.attachFile(
-      sessionId: widget.session.id,
+      sessionId: _normalLocalSessionKey,
       name: draft.name,
       dataUrl: dataUrl,
     );
@@ -2663,13 +2703,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     try {
       if (desktopGateway != null) {
         await desktopGateway.setSessionModel(
-          sessionId: widget.session.id,
+          sessionId: _normalLocalSessionKey,
           provider: choice.provider,
           model: choice.model,
         );
         if (!mounted || _pendingReattachResync) return;
         await desktopGateway.setSessionReasoning(
-          sessionId: widget.session.id,
+          sessionId: _normalLocalSessionKey,
           effort: selection.reasoningEffort,
         );
       } else {
@@ -2751,6 +2791,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     // Own this submission before the first await. Only the captured prompt is
     // consumed; setup, uploads and stream callbacks must not clear newer text.
+    if (_normalChat != null &&
+        (_turnApplicationSession == null || _legacyTransportFallback)) {
+      final reservation = _normalChat!.reserve();
+      if (reservation == null) return;
+      _normalReservation = reservation;
+    }
     _preparingSend = true;
     setState(() => _sending = true);
     _clearComposerForSend(text);
@@ -2760,6 +2806,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (!mounted) return;
       _restoreComposerAfterRejectedSend(text);
       _handleSendError(error);
+      final reservation = _normalReservation;
+      if (reservation != null) _normalChat?.cancelPreparation(reservation);
+      _normalReservation = null;
       return;
     } finally {
       _preparingSend = false;
@@ -2962,61 +3011,34 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     required List<AttachmentDraft> attachments,
     required bool speakResponse,
   }) async {
-    final desktopGateway = _desktopGateway;
-    final testRemotePromptSubmit = widget.testRemotePromptSubmit;
-    if (desktopGateway == null && testRemotePromptSubmit == null) {
-      _showAttachmentError(
-        context.l10n.desktop_gateway_is_not_configured_for_this_connection,
-      );
+    final chat = _normalChat;
+    if (chat == null) return;
+    final reservation = _normalReservation ?? chat.reserve();
+    if (reservation == null) {
+      _restoreComposerAfterRejectedSend(text);
       return;
     }
+    _normalReservation = reservation;
+    final desktopGateway = _desktopGateway;
+    final responseGeneration = _responseGeneration;
+    var handedOff = false;
     _awaitingVoiceReply = speakResponse && _voiceReplyEnabled;
-    final responseGeneration = ++_responseGeneration;
-    // History generation at send time: if a reattach resync replaces
-    // _messages while this submit is in flight, the catch path below must
-    // not clobber the fresh server history with composer-restore.
-    final historyAtSend = _historyGeneration;
-    _activeResponseTransport = _ResponseTransport.desktop;
-    var turnAdded = false;
-    var promptSubmitted = false;
-
-    setState(() {
-      _sending = true;
-      _gatewayTurnStatus = GatewayTurnStatus(
-        kind: 'upload',
-        text: context.l10n.preparing_attachments,
-      );
-    });
-
-    // Stock-gateway coverage: this transport carries every stock send and
-    // every stored chat, and never enters the recovery-v2 coordinator —
-    // register the turn app-wide so the keep-alive can bound itself to it.
-    // Released in the finally at the end of this method, so every settle
-    // and error path ends it exactly once.
-    final turnController = widget.turnApplicationController;
-    final legacyTurnToken = turnController?.beginLegacyTurn();
     try {
-      // Local drafts skip the eager legacy bind while recovery-v2 capability
-      // detection is pending. Once this send has selected the legacy path,
-      // bind a Project draft *before* model overrides, file.attach or prompt
-      // can create a default-cwd session. Stock Hermes derives membership
-      // from the cwd supplied on session.create; a later ensure cannot move it.
       final projectCwd = widget.projectWorkingDirectory?.trim();
-      if (widget.session.isLocalDraft &&
-          projectCwd != null &&
-          projectCwd.isNotEmpty) {
+      if (widget.session.isLocalDraft && projectCwd?.isNotEmpty == true) {
         if (desktopGateway != null) {
           await desktopGateway.ensureSession(
-            widget.session.id,
+            _normalLocalSessionKey,
             workingDirectory: projectCwd,
           );
         } else {
           await widget.testLegacyProjectSessionEnsure?.call(
             widget.session.id,
-            projectCwd,
+            projectCwd!,
           );
         }
       }
+      if (!mounted || responseGeneration != _responseGeneration) return;
       if (desktopGateway != null) {
         await _applySessionModelOverride(desktopGateway);
       }
@@ -3024,166 +3046,82 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       await _attachmentSendCoordinator.uploadThenSubmit(
         drafts: attachments,
         upload: ({required draft, required dataUrl}) async {
+          if (!mounted || responseGeneration != _responseGeneration) {
+            throw StateError('Attachment preparation was cancelled.');
+          }
           if (desktopGateway == null) {
-            final testUpload = widget.testRemoteAttachmentUpload;
-            if (testUpload == null) {
+            final upload = widget.testRemoteAttachmentUpload;
+            if (upload == null) {
               throw StateError('Test remote transport does not upload files');
             }
-            return testUpload(draft: draft, dataUrl: dataUrl);
+            return upload(draft: draft, dataUrl: dataUrl);
           }
           return _uploadAttachmentDraft(desktopGateway, draft, dataUrl);
         },
         onChanged: (draft) {
           if (!mounted || responseGeneration != _responseGeneration) return;
           setState(() {
-            if (draft.status == AttachmentDraftStatus.uploading) {
-              final index = attachments.indexOf(draft);
-              _gatewayTurnStatus = GatewayTurnStatus(
-                kind: 'upload',
-                text: context.l10n.uploading(
-                  index + 1,
-                  draft.name,
-                  attachments.length,
-                ),
-              );
-            }
+            _gatewayTurnStatus = GatewayTurnStatus(
+              kind: 'upload',
+              text: context.l10n.preparing_attachments,
+            );
           });
         },
         submitPrompt: (refTexts) async {
           if (!mounted || responseGeneration != _responseGeneration) return;
-          if (attachments.any((draft) => draft.atlasIntakeAccepted == false)) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text(
-                  context
-                      .l10n
-                      .file_attached_document_catalog_registration_is_pending,
-                ),
-              ),
-            );
-          }
           final prompt = [
             text,
             refTexts.join('\n'),
           ].where((part) => part.trim().isNotEmpty).join('\n\n');
-          final attachmentLabels = attachments
-              .map(
-                (attachment) =>
-                    '[${context.l10n.attached_file}: ${attachment.name}]',
-              )
+          final labels = attachments
+              .map((file) => '[${context.l10n.attached_file}: ${file.name}]')
               .join('\n');
           final localContent = [
             text,
-            attachmentLabels,
+            labels,
           ].where((part) => part.trim().isNotEmpty).join('\n\n');
+          final testSubmit = widget.testRemotePromptSubmit;
+          final knownStored =
+              widget.testStoredSessionKey?.call(widget.session.id) ??
+              _storedSessionId ??
+              (widget.session.isLocalDraft && desktopGateway != null
+                  ? null
+                  : widget.session.id);
           _commitComposerForSend();
-          _scrollCoordinator.beginStreaming(isNearEnd: _isNearEnd());
-          setState(() {
-            _streaming = true;
-            _gatewayTurnStatus = GatewayTurnStatus(
-              kind: 'starting',
-              text: context.l10n.starting_hermes,
-            );
-            _attachmentDrafts.clear();
-            _messages.add({'role': 'user', 'content': localContent});
-            _messages.add({
-              'role': 'assistant',
-              'content': '',
-              '_gateway_pending_response': true,
-            });
-            turnAdded = true;
-          });
-          _scheduleStreamingFollow();
-          void onEvent(StreamEvent event) {
-            _handleDesktopGatewayEvent(event, responseGeneration);
-          }
-
-          void markPromptSent() {
-            promptSubmitted = true;
-            if (mounted && responseGeneration == _responseGeneration) {
-              _legacyDesktopPromptSubmitted = true;
-            }
-          }
-
-          try {
-            if (testRemotePromptSubmit != null) {
-              await testRemotePromptSubmit(
-                sessionId: widget.session.id,
-                text: prompt,
-                onEvent: onEvent,
-                onSent: markPromptSent,
-              );
-            } else {
-              await desktopGateway!.submitPrompt(
-                sessionId: widget.session.id,
-                text: prompt,
-                onEvent: onEvent,
-                onSent: markPromptSent,
-              );
-            }
-          } finally {
-            _legacyDesktopPromptSubmitted = false;
-          }
+          _attachmentDrafts.clear();
+          handedOff = true;
+          _normalReservation = null;
+          // All post-handoff callbacks and error/recovery handling live on the
+          // app owner. This await's UI continuation is fenced on reattachment.
+          await chat.submitPrepared(
+            reservation: reservation,
+            text: prompt,
+            localContent: localContent,
+            submit: testSubmit,
+            knownStoredSessionId: knownStored,
+            rawDraftText: text,
+            canRestoreDraft: _composerRevision == _clearedComposerRevision,
+          );
         },
       );
       if (!mounted || responseGeneration != _responseGeneration) return;
-      setState(() {
-        final assistant = _lastAssistantMessage();
-        if (assistant != null) {
-          assistant['_gateway_pending_response'] = false;
-        }
-        _streaming = false;
-        _sending = false;
-        _gatewayTurnStatus = null;
-        _activeResponseTransport = _ResponseTransport.none;
-      });
-      unawaited(_refreshDeferredHistoryIfIdle());
-      unawaited(_resyncLegacyHistoryAfterResume());
-      _scheduleScrollTarget(_scrollCoordinator.endStreaming());
-      if (_awaitingVoiceReply) {
-        _awaitingVoiceReply = false;
-        final assistantText = _messages.isNotEmpty
-            ? _messages.last['content']?.toString()
-            : null;
-        if (assistantText != null && assistantText.isNotEmpty) {
-          await _speakAssistantText(assistantText);
-        }
-      }
     } catch (error) {
       if (!mounted || responseGeneration != _responseGeneration) return;
-      _scrollCoordinator.cancelStreaming();
-      // A reattach resync replaced _messages while this submit was in
-      // flight: the server history is now authoritative (it already
-      // carries the user prompt and, if the detached turn finished, the
-      // reply). Restoring the composer and stripping the local turn would
-      // clobber it, so skip the restore and just surface the error state.
-      final resyncLanded = turnAdded && _historyGeneration != historyAtSend;
-      if (!resyncLanded && !promptSubmitted) {
+      // Only definitely pre-wire rejection restores this route's captured
+      // revision. Post-wire errors are absorbed as unresolved by the owner.
+      if (!chat.snapshot.wireEmitted) {
+        _restoreComposerAfterRejectedSend(text);
         setState(() {
-          if (turnAdded &&
-              _messages.isNotEmpty &&
-              _messages.last['role'] == 'assistant' &&
-              (_messages.last['content']?.toString().isEmpty ?? true)) {
-            _messages.removeLast();
-          }
-          if (turnAdded &&
-              _messages.isNotEmpty &&
-              _messages.last['role'] == 'user') {
-            _messages.removeLast();
-          }
-          _restoreComposerAfterRejectedSend(text);
           _attachmentDrafts
             ..clear()
             ..addAll(attachments);
         });
+        _handleSendError(error);
+        unawaited(_refreshDeferredHistoryIfIdle());
       }
-      _handleSendError(error);
-      unawaited(_refreshDeferredHistoryIfIdle());
-      unawaited(_resyncLegacyHistoryAfterResume());
     } finally {
-      if (turnController != null && legacyTurnToken != null) {
-        turnController.endLegacyTurn(legacyTurnToken);
-      }
+      if (!handedOff) chat.cancelPreparation(reservation);
+      if (identical(_normalReservation, reservation)) _normalReservation = null;
     }
   }
 
@@ -3562,7 +3500,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _handleDesktopGatewayEvent(event, _responseGeneration);
       return;
     }
-    if (_handlePendingReattachTerminalEvent(event)) return;
+    if (const {
+      'message.complete',
+      'turn.end',
+      'turn.error',
+      'error',
+    }.contains(event.type)) {
+      return;
+    }
     if (event.type == 'notification.show') {
       final notification = GatewayNotification.fromEventData(event.data);
       if (notification == null) return;
@@ -3614,63 +3559,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _scheduleStreamingFollow();
   }
 
-  bool _handlePendingReattachTerminalEvent(StreamEvent event) {
-    const terminalTypes = {
-      'message.complete',
-      'turn.end',
-      'turn.error',
-      'error',
-    };
-    if (!terminalTypes.contains(event.type)) return false;
-    // Active turns receive terminal events through prompt.submit. The async
-    // bridge intentionally duplicates only these frames so detached legacy
-    // recovery can still observe them after reconnect.
-    if (!_pendingReattachResync) return true;
-
-    final status = event.data['status']?.toString().trim().toLowerCase();
-    final rawError = event.data['error'] ?? event.data['message'];
-    final error = rawError?.toString().trim() ?? '';
-    const failureStatuses = {
-      'error',
-      'failed',
-      'interrupted',
-      'cancelled',
-      'canceled',
-    };
-    final failed =
-        event.type == 'error' ||
-        event.type == 'turn.error' ||
-        failureStatuses.contains(status);
-    if (failed) {
-      _clearPendingReattachResync();
-      setState(() {
-        _sending = false;
-        _streaming = false;
-        _gatewayTurnStatus = null;
-      });
-      final messenger = ScaffoldMessenger.of(context);
-      messenger
-        ..removeCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(
-            content: Text(
-              error.isEmpty
-                  ? context.l10n.the_detached_reply_failed
-                  : context.l10n.the_detached_reply_failed_2(error),
-            ),
-            persist: false,
-          ),
-        );
-      return true;
-    }
-
-    // A success event says history should now contain the durable terminal
-    // row. Fetch immediately, but let the row-ID watermark remain the sole
-    // completion authority in case persistence trails the event slightly.
-    _requestImmediateReattachResync();
-    return true;
-  }
-
   void _upsertSubagent(String eventType, Map<String, dynamic> data) {
     final update = GatewaySubagentActivity.fromGatewayEvent(eventType, data);
     if (update == null || !mounted) return;
@@ -3697,6 +3585,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     String choice, {
     String? requestId,
   }) async {
+    if (requestId != null &&
+        await _normalSession?.tryRespondToApproval(
+              sessionId: widget.session.id,
+              requestId: requestId,
+              choice: choice,
+            ) ==
+            true) {
+      return;
+    }
     final handled =
         await _turnApplicationSession?.tryRespondToApproval(
           sessionId: widget.session.id,
@@ -3710,7 +3607,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       throw StateError('The Desktop gateway session is no longer connected');
     }
     await gateway.respondToApproval(
-      sessionId: widget.session.id,
+      sessionId: _normalLocalSessionKey,
       choice: choice,
       serverRequestId: requestId,
     );
@@ -3860,6 +3757,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       throw StateError('The Desktop gateway session is no longer connected');
     }
     await gateway.respondToSudo(requestId: requestId, password: password);
+    _normalSession?.forgetAnsweredInput(requestId);
   }
 
   Future<void> _respondToGatewaySecret({
@@ -3878,9 +3776,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       throw StateError('The Desktop gateway session is no longer connected');
     }
     await gateway.respondToSecret(requestId: requestId, value: value);
+    _normalSession?.forgetAnsweredInput(requestId);
   }
 
   bool _ownsGatewayApproval(String requestId) {
+    if (_normalSession?.ownsApprovalRequest(
+          sessionId: widget.session.id,
+          requestId: requestId,
+        ) ==
+        true) {
+      return true;
+    }
     final turnSession = _turnApplicationSession;
     if (turnSession != null &&
         turnSession.ownsApprovalRequest(
@@ -3913,6 +3819,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _notifyApprovalRequest(request, serverRequestId);
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (_usesNormalInputOwner &&
+          mounted &&
+          ModalRoute.of(context)?.isCurrent != true) {
+        _normalInputSeen.clear();
+        _approvalDialogOpen = false;
+        _activeApprovalServerRequestId = null;
+        return;
+      }
       final wasCancelledBeforeOpen =
           serverRequestId != null &&
           _cancelledInteractiveRequestIds.remove(serverRequestId);
@@ -3935,7 +3849,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
 
       _approvalRouteOpen = true;
-      final responded = await showDialog<bool>(
+      final approvalRoute = DialogRoute<bool>(
         context: context,
         barrierDismissible: false,
         builder: (dialogContext) => GatewayApprovalDialog(
@@ -3946,6 +3860,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           ),
         ),
       );
+      _approvalPromptRoute = approvalRoute;
+      final responded = await Navigator.of(
+        context,
+        rootNavigator: true,
+      ).push(approvalRoute);
+      _approvalPromptRoute = null;
       _approvalRouteOpen = false;
       _approvalDialogOpen = false;
       final wasCancelled =
@@ -4021,6 +3941,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (_usesNormalInputOwner &&
+          mounted &&
+          ModalRoute.of(context)?.isCurrent != true) {
+        _normalInputSeen.clear();
+        _activeSensitivePrompt = null;
+        return;
+      }
       if (!mounted ||
           pending.responseGeneration != _responseGeneration ||
           _expiredSensitivePromptIds.contains(pending.request.requestId) ||
@@ -4039,7 +3966,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
 
       _sensitivePromptRouteOpen = true;
-      final result = await showDialog<GatewaySensitivePromptDialogResult>(
+      final sensitiveRoute = DialogRoute<GatewaySensitivePromptDialogResult>(
         context: context,
         barrierDismissible: true,
         builder: (_) => GatewaySensitivePromptDialog(
@@ -4056,6 +3983,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           },
         ),
       );
+      _sensitivePromptRoute = sensitiveRoute;
+      final result = await Navigator.of(
+        context,
+        rootNavigator: true,
+      ).push(sensitiveRoute);
+      _sensitivePromptRoute = null;
       _sensitivePromptRouteOpen = false;
       _expiredSensitivePromptIds.remove(pending.request.requestId);
 
@@ -4100,10 +4033,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
     if (_activeSensitivePrompt?.request.requestId == requestId &&
         _sensitivePromptRouteOpen) {
-      Navigator.of(
-        context,
-        rootNavigator: true,
-      ).pop(GatewaySensitivePromptDialogResult.expired);
+      final route = _sensitivePromptRoute;
+      if (route != null && route.isActive) {
+        route.navigator?.removeRoute(
+          route,
+          GatewaySensitivePromptDialogResult.expired,
+        );
+      }
     } else if (_activeSensitivePrompt?.request.requestId != requestId) {
       _expiredSensitivePromptIds.remove(requestId);
     }
@@ -4137,7 +4073,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     if (method == 'approval') {
       if (_activeApprovalServerRequestId == requestId && _approvalRouteOpen) {
-        Navigator.of(context, rootNavigator: true).pop(false);
+        final route = _approvalPromptRoute;
+        if (route != null && route.isActive) {
+          route.navigator?.removeRoute(route, false);
+        }
       } else if (_activeApprovalServerRequestId != requestId) {
         _cancelledInteractiveRequestIds.remove(requestId);
       }
@@ -4211,6 +4150,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (_usesNormalInputOwner &&
+          mounted &&
+          ModalRoute.of(context)?.isCurrent != true) {
+        _normalInputSeen.clear();
+        _activeClarifyPrompt = null;
+        return;
+      }
       if (!mounted ||
           pending.responseGeneration != _responseGeneration ||
           _cancelledInteractiveRequestIds.remove(pending.request.requestId) ||
@@ -4286,6 +4232,37 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Future<void> _stopResponse() async {
     if (!_streaming) return;
+    final normal = _normalChat;
+    if (normal?.snapshot.hasActiveTurn == true) {
+      if (_stopResponseInFlight) return;
+      final turn = normal!.turnId;
+      setState(() {
+        _stopResponseInFlight = true;
+        _awaitingVoiceReply = false;
+      });
+      try {
+        final requested = await normal.interrupt();
+        if (!mounted || turn != normal.turnId) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              requested
+                  ? 'Stop requested. Waiting for Hermes to finish.'
+                  : 'The running turn could not be reached. Reconnecting without resending.',
+            ),
+          ),
+        );
+      } catch (error) {
+        if (mounted && turn == normal.turnId) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Could not request stop: $error')),
+          );
+        }
+      } finally {
+        if (mounted) setState(() => _stopResponseInFlight = false);
+      }
+      return;
+    }
 
     final transport = _activeResponseTransport;
     final activeClientTurnId = _activeClientTurnId;
@@ -4329,7 +4306,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           } else {
             interrupted =
                 await _desktopGateway?.interruptPrompt(
-                  sessionId: widget.session.id,
+                  sessionId: _normalLocalSessionKey,
                 ) ??
                 false;
           }
@@ -5185,14 +5162,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final model = _sessionModel;
     if (!_sessionModelOverride || provider == null || model == null) return;
     await desktopGateway.setSessionModel(
-      sessionId: widget.session.id,
+      sessionId: _normalLocalSessionKey,
       provider: provider,
       model: model,
     );
     final effort = _sessionReasoningEffort;
     if (effort != null) {
       await desktopGateway.setSessionReasoning(
-        sessionId: widget.session.id,
+        sessionId: _normalLocalSessionKey,
         effort: effort,
       );
     }

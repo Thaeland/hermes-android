@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'support/completed_stock_turn.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -795,7 +796,7 @@ Future<void> _pumpChat(
           startedAt: 1,
         ),
         testApiClient: apiClient,
-        testRemotePromptSubmit: remoteSubmit,
+        testRemotePromptSubmit: completedStockTurn(remoteSubmit),
         testServerFilePicker: serverFilePicker,
         testInitialAttachmentDrafts: initialDrafts,
       ),

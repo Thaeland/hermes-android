@@ -12,6 +12,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/fake_voice_composer_adapter.dart';
+import 'support/completed_stock_turn.dart';
 
 class _HistoryHttpClient extends http.BaseClient {
   _HistoryHttpClient(this.rows);
@@ -97,7 +98,19 @@ Widget _chat(
       httpClient: httpClient,
     ),
     testDesktopConnectionHook: connectionHook,
-    testRemotePromptSubmit: remoteSubmit,
+    testRemotePromptSubmit: completedStockTurn(remoteSubmit),
+    testNormalResume:
+        ({required localSessionId, required storedSessionId}) async {
+          if (connectionHook?.currentState !=
+              DesktopConnectionState.connected) {
+            throw StateError('Fixture socket is disconnected');
+          }
+          onSessionEnsured?.call();
+          return const ResumedGatewaySession(
+            runtimeSessionId: 'history-runtime',
+            running: false,
+          );
+        },
     testDesktopSessionEnsured: onSessionEnsured,
     testVoiceComposerAdapter: FakeVoiceComposerAdapter(),
   ),

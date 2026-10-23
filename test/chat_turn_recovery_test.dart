@@ -18,6 +18,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/fake_voice_composer_adapter.dart';
+import 'support/completed_stock_turn.dart';
 import 'package:hermes_android/l10n/app_localizations.dart';
 
 const _clientTurnId = '123e4567-e89b-42d3-a456-426614174000';
@@ -955,7 +956,13 @@ Future<void> _pumpChat(
         session: chatSession,
         testApiClient: apiClient,
         testTurnApplicationSession: turnSession,
-        testRemotePromptSubmit: testRemotePromptSubmit,
+        testRemotePromptSubmit: completedStockTurn(testRemotePromptSubmit),
+        testNormalResume:
+            ({required localSessionId, required storedSessionId}) async =>
+                const ResumedGatewaySession(
+                  runtimeSessionId: 'fixture-runtime',
+                  running: false,
+                ),
         testRemoteAttachmentUpload: testRemoteAttachmentUpload,
         testAttachmentDraftService: attachmentDraftService,
         testInitialAttachmentDrafts: initialDrafts,
@@ -1283,8 +1290,12 @@ class _ResyncChatHttpClient extends http.BaseClient {
       messageRequestCount += 1;
       final messages = includeCompletedTurn
           ? <Map<String, dynamic>>[
-              {'role': 'user', 'content': 'Finish in background'},
-              {'role': 'assistant', 'content': 'Server-side final response'},
+              {'id': 1, 'role': 'user', 'content': 'Finish in background'},
+              {
+                'id': 2,
+                'role': 'assistant',
+                'content': 'Server-side final response',
+              },
             ]
           : <Map<String, dynamic>>[];
       return http.StreamedResponse(

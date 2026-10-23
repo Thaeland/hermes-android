@@ -137,21 +137,22 @@ void main() {
     expect(sink.shown, isEmpty);
   });
 
-  testWidgets('returning to the app clears the pending notifications', (
-    tester,
-  ) async {
-    await pumpChat(tester);
+  testWidgets(
+    'returning to the app preserves completion and attention notifications',
+    (tester) async {
+      await pumpChat(tester);
 
-    background(tester);
-    await tester.pump();
-    turnSession.settle(_completedState());
-    await tester.pump();
+      background(tester);
+      await tester.pump();
+      turnSession.settle(_completedState());
+      await tester.pump();
 
-    foreground(tester);
-    await tester.pump();
+      foreground(tester);
+      await tester.pump();
 
-    expect(sink.cancelAllCount, greaterThanOrEqualTo(1));
-  });
+      expect(sink.cancelAllCount, 0);
+    },
+  );
 
   testWidgets(
     'a failed turn settling in the background posts the failure notification',

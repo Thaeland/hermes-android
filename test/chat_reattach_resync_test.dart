@@ -19,6 +19,7 @@ import 'package:hermes_android/core/screens/chat_screen.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
 import 'package:hermes_android/core/services/desktop_gateway_client.dart';
 import 'package:hermes_android/core/services/ws_client.dart';
+import 'package:hermes_android/core/services/gateway_turn_application_controller.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -96,7 +97,8 @@ void main() {
         JsonRpcError('prompt.submit', 'Desktop gateway connection closed'),
       );
       await tester.pump();
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
       expect(
         tester.widget<TextField>(find.byType(TextField)).controller!.text,
         isEmpty,
@@ -207,7 +209,8 @@ void main() {
       JsonRpcError('prompt.submit', 'Desktop gateway connection closed'),
     );
     await tester.pump();
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
 
     history.includeCompletedTurn = true;
     hook.handler?.call(DesktopConnectionState.connected);
@@ -220,7 +223,8 @@ void main() {
     expect(find.text('Server-side final response'), findsOneWidget);
 
     metadataRelease.complete();
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
     expect(find.text('Metadata arrived later'), findsOneWidget);
   });
 
@@ -271,7 +275,8 @@ void main() {
         JsonRpcError('prompt.submit', 'Desktop gateway connection closed'),
       );
       await tester.pump();
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
 
       // Reconnect: the stored row is NOT readable yet — the first resync
       // fetch 404s. The transcript must survive (never cleared by a
@@ -345,7 +350,8 @@ void main() {
         JsonRpcError('prompt.submit', 'Desktop gateway connection closed'),
       );
       await tester.pump();
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
 
       hook.handler?.call(DesktopConnectionState.connected);
       hook.handler?.call(DesktopConnectionState.connected);
@@ -428,7 +434,8 @@ void main() {
         JsonRpcError('prompt.submit', 'Desktop gateway connection closed'),
       );
       await tester.pump();
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
 
       hook.handler?.call(DesktopConnectionState.connected);
       await tester.pump();
@@ -532,7 +539,8 @@ void main() {
         JsonRpcError('prompt.submit', 'Desktop gateway connection closed'),
       );
       await tester.pump();
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
 
       hook.handler?.call(DesktopConnectionState.connected);
       await tester.pump();
@@ -601,7 +609,8 @@ void main() {
       JsonRpcError('prompt.submit', 'Desktop gateway connection closed'),
     );
     await tester.pump();
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
 
     hook.handler?.call(DesktopConnectionState.connected);
     await tester.pump();
@@ -679,7 +688,8 @@ void main() {
       JsonRpcError('prompt.submit', 'Desktop gateway connection closed'),
     );
     await tester.pump();
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
 
     hook.handler?.call(DesktopConnectionState.connected);
     await tester.pump();
@@ -740,7 +750,8 @@ void main() {
       await tester.enterText(find.byType(TextField), 'Plain failure');
       await tester.tap(find.byTooltip('Send'));
       await tester.pump();
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
 
       // No reconnect happened, so the classic restore behavior stands.
       expect(
@@ -792,7 +803,8 @@ void main() {
         JsonRpcError('prompt.submit', 'Desktop gateway connection closed'),
       );
       await tester.pump();
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
 
       hook.handler?.call(DesktopConnectionState.connected);
       await tester.pump();
@@ -813,7 +825,8 @@ void main() {
         reason: 'model changes must not race the authoritative history fetch',
       );
       await tester.tap(find.byTooltip('Chat actions'));
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
       final refreshItem = find.ancestor(
         of: find.text('Refresh'),
         matching: find.byType(PopupMenuItem<String>),
@@ -823,7 +836,8 @@ void main() {
         isFalse,
       );
       await tester.tapAt(Offset.zero);
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
 
       asyncHook.handler?.call(
         StreamEvent(
@@ -930,8 +944,9 @@ void main() {
 
       expect(
         history.messageRequestCount,
-        3,
-        reason: 'generation B must run as soon as stale generation A unwinds',
+        4,
+        reason:
+            'generation B must run when A unwinds; the failed A turn also refreshes its durable pre-submit baseline',
       );
       expect(find.text('Server-side final response'), findsOneWidget);
       final settledCount = history.messageRequestCount;
@@ -978,7 +993,8 @@ void main() {
         JsonRpcError('session.resume', 'Desktop gateway connection closed'),
       );
       await tester.pump();
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
       hook.handler?.call(DesktopConnectionState.connected);
       await tester.pump(const Duration(seconds: 3));
       expect(history.messageRequestCount, 1);
@@ -1019,7 +1035,8 @@ void main() {
     hook.handler?.call(DesktopConnectionState.reconnecting);
     await tester.pump();
     hook.handler?.call(DesktopConnectionState.connected);
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
 
     // Idle drop: no snackbar, no extra ensure, no extra history fetch.
     expect(
@@ -1044,18 +1061,23 @@ Future<void> _pumpChat(
   String? storedKey,
   TestProjectOverviewLoader? projectOverviewLoader,
 }) async {
+  final connection = SavedConnection(
+    id: 'reattach-fixture',
+    label: 'Reattach fixture',
+    host: 'reattach.fixture',
+    port: 8642,
+    apiKey: 'fixture',
+  );
+  final controller = GatewayTurnApplicationController();
+  controller.setLifecycle(background: false, backgroundWorkEnabled: false);
+  addTearDown(controller.close);
   await tester.pumpWidget(
     MaterialApp(
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       home: ChatScreen(
-        connection: SavedConnection(
-          id: 'reattach-fixture',
-          label: 'Reattach fixture',
-          host: 'reattach.fixture',
-          port: 8642,
-          apiKey: 'reattach-key',
-        ),
+        connection: connection,
+        turnApplicationController: controller,
         session: const Session(
           id: 'reattach-session',
           title: 'Reattach chat',
@@ -1068,6 +1090,22 @@ Future<void> _pumpChat(
         ),
         testApiClient: apiClient,
         testRemotePromptSubmit: remoteSubmit,
+        testNormalResume:
+            ({required localSessionId, required storedSessionId}) async {
+              final state = controller
+                  .normalSessionFor(connection)
+                  .findChat(localSessionId)!
+                  .snapshot
+                  .connectionState;
+              if (state != DesktopConnectionState.connected) {
+                throw StateError('Fixture socket is disconnected');
+              }
+              ensureCount();
+              return const ResumedGatewaySession(
+                runtimeSessionId: 'fixture-runtime',
+                running: false,
+              );
+            },
         testDesktopConnectionHook: hook,
         testDesktopAsyncEventHook: asyncHook,
         testDesktopSessionEnsured: ensureCount,
@@ -1079,7 +1117,8 @@ Future<void> _pumpChat(
   );
   await tester.pump();
   await tester.pump(const Duration(milliseconds: 100));
-  await tester.pumpAndSettle();
+  await tester.pump();
+  await tester.pump(const Duration(milliseconds: 100));
 }
 
 class _ReattachChatHttpClient extends http.BaseClient {

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
@@ -7,6 +8,9 @@ import 'desktop_gateway_client.dart';
 import 'gateway_turn_coordinator.dart';
 import 'gateway_turn_journal.dart';
 import 'gateway_turn_recovery.dart';
+import 'normal_gateway_application_session.dart';
+import 'connection_manager.dart';
+import 'turn_notification_service.dart';
 
 typedef GatewayTurnApplicationSessionFactory =
     GatewayTurnApplicationSession Function(SavedConnection connection);
@@ -125,8 +129,15 @@ abstract interface class GatewayTurnApplicationSession {
 /// whole application is disposed. A changed connection configuration receives
 /// a distinct scope without retaining plaintext credentials in the key.
 class GatewayTurnApplicationController {
+  /// Legacy embedders without an injected root still get a process owner,
+  /// never a socket whose lifetime is tied to a ChatScreen route.
+  static final standalone = GatewayTurnApplicationController();
   final GatewayTurnApplicationSessionFactory _sessionFactory;
   final Map<String, GatewayTurnApplicationSession> _sessions = {};
+  final Map<String, NormalGatewayApplicationSession> _normalSessions = {};
+  final Map<String, String> _normalScopeByConnection = {};
+  bool _background = false;
+  bool _backgroundWorkEnabled = true;
   final Map<Object, void Function()> _activityListeners = {};
   final Set<GatewayTurnApplicationSession> _forwardedSessions = {};
   final Set<Object> _legacyTurns = {};
@@ -155,12 +166,89 @@ class GatewayTurnApplicationController {
     return session;
   }
 
+  /// Stock and recovery-v2 lifetimes are separate; existing v2 callers keep
+  /// their contract while normal chats retain their socket above Navigator.
+  NormalGatewayApplicationSession normalSessionFor(
+    SavedConnection connection, {
+    NormalGatewayPromptSubmit? submit,
+    NormalGatewayResume? resume,
+    NormalGatewayHistory? history,
+    TurnNotificationService? notifications,
+  }) {
+    if (_closed) throw StateError('Gateway turn application owner is closed.');
+    final key = _connectionScopeKey(connection);
+    final old = _normalScopeByConnection[connection.id];
+    if (old != null && old != key) {
+      final previous = _normalSessions.remove(old);
+      if (previous != null) unawaited(previous.close());
+      _notifyActivityListeners();
+    }
+    _normalScopeByConnection[connection.id] = key;
+    return _normalSessions.putIfAbsent(key, () {
+      final session = submit == null
+          ? NormalGatewayApplicationSession.fromConnection(
+              connection,
+              scope: key,
+              onActivityChanged: _notifyActivityListeners,
+            )
+          : NormalGatewayApplicationSession(
+              connection: connection,
+              scope: key,
+              submit: submit,
+              resume:
+                  resume ??
+                  ({required localSessionId, required storedSessionId}) async {
+                    throw StateError('Test gateway is disconnected.');
+                  },
+              history: history ?? (id) async => [],
+              notifications: notifications,
+              onActivityChanged: _notifyActivityListeners,
+            );
+      session.setLifecycle(
+        background: _background,
+        backgroundWorkEnabled: _backgroundWorkEnabled,
+      );
+      return session;
+    });
+  }
+
+  Iterable<NormalGatewayChatActivity> get activeChatActivities =>
+      _normalSessions.values.expand((session) => session.activeChatActivities);
+
+  void setLifecycle({required bool background, bool? backgroundWorkEnabled}) {
+    _background = background;
+    if (backgroundWorkEnabled != null) {
+      _backgroundWorkEnabled = backgroundWorkEnabled;
+    }
+    for (final session in _normalSessions.values) {
+      session.setLifecycle(
+        background: background,
+        backgroundWorkEnabled: _backgroundWorkEnabled,
+      );
+    }
+  }
+
+  void revokeConnection(String connectionId) {
+    final scope = _normalScopeByConnection.remove(connectionId);
+    final session = _normalSessions.remove(scope);
+    if (session != null) unawaited(session.close());
+    _notifyActivityListeners();
+  }
+
+  void retainConnections(Set<String> connectionIds) {
+    for (final id in _normalScopeByConnection.keys.toList(growable: false)) {
+      if (!connectionIds.contains(id)) revokeConnection(id);
+    }
+  }
+
   /// True while any retained session has an unresolved turn OR a legacy
   /// (stock-gateway) send is in flight. The app-root keep-alive policy
   /// uses this to bound the foreground service to user-visible work
   /// instead of merely-live sockets.
   bool get hasActiveTurn =>
-      _legacyTurns.isNotEmpty || _sessions.values.any((s) => s.hasActiveTurn);
+      _legacyTurns.isNotEmpty ||
+      _sessions.values.any((s) => s.hasActiveTurn) ||
+      _normalSessions.values.any((s) => s.hasActiveTurn);
 
   /// Registers a legacy (stock-gateway) send as an app-wide active turn.
   /// Stock gateways — and every stored chat on any gateway — submit
@@ -222,10 +310,11 @@ class GatewayTurnApplicationController {
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
-    final hadTrackedTurns =
-        _legacyTurns.isNotEmpty ||
-        _sessions.values.any((session) => session.hasActiveTurn);
+    final hadTrackedTurns = hasActiveTurn;
     final sessions = _sessions.values.toList(growable: false);
+    final normalSessions = _normalSessions.values.toList(growable: false);
+    _normalSessions.clear();
+    _normalScopeByConnection.clear();
     _legacyTurns.clear();
     _sessions.clear();
     // Listeners must observe the true→false flip even when both a legacy
@@ -233,6 +322,9 @@ class GatewayTurnApplicationController {
     if (hadTrackedTurns) _notifyActivityListeners();
     Object? firstError;
     StackTrace? firstStack;
+    for (final session in normalSessions) {
+      await session.close();
+    }
     for (final session in sessions) {
       try {
         await session.close();
@@ -522,6 +614,11 @@ String _connectionScopeKey(SavedConnection connection) {
         utf8.encode(
           jsonEncode(<String, Object?>{
             'id': connection.id,
+            'host': connection.host,
+            'port': connection.port,
+            'https': connection.useHttps,
+            'gateway_prefix': connection.gatewayPrefix,
+            'profile': connection.gatewayProfile,
             'desktop_gateway_url': connection.desktopGatewayUrl,
             'dashboard_username': connection.dashboardUsername,
             'dashboard_prefix': connection.dashboardPrefix,
