@@ -18,6 +18,32 @@ void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
   test(
+    'binding notifies real canonical changes but not duplicate route aliases',
+    () async {
+      final f = _Fixture();
+      addTearDown(f.close);
+      await f.session.ready;
+      final owner = f.chat('local');
+      var notifications = 0;
+      owner.subscribe((_) => notifications++);
+      owner.bindStoredSession('stored');
+      expect(notifications, 2);
+      expect(identical(f.session.findChat('stored'), owner), isTrue);
+      expect(identical(f.chat('stored', stored: 'stored'), owner), isTrue);
+      expect(identical(f.chat('local', stored: 'stored'), owner), isTrue);
+      expect(
+        notifications,
+        2,
+        reason: 'same canonical binding must not fan out during route mount',
+      );
+      owner.bindStoredSession('canonical-tip');
+      expect(notifications, 3);
+      expect(owner.storedSessionId, 'canonical-tip');
+      expect(identical(f.session.findChat('canonical-tip'), owner), isTrue);
+    },
+  );
+
+  test(
     'duplicate routes and durable/local aliases share synchronous admission',
     () async {
       final f = _Fixture();

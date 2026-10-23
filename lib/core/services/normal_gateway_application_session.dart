@@ -228,10 +228,14 @@ class NormalGatewayApplicationSession {
     if (other != null && !identical(other, owner)) {
       throw StateError('Durable chat alias already owned.');
     }
+    final changed = owner.storedSessionId != stored || !identical(other, owner);
     owner.storedSessionId = stored;
     _aliases[stored] = owner;
     client?.bindStoredSession(owner.localSessionId, stored);
-    owner._notify();
+    // A notification route can attach to this same owner while its previous
+    // ChatScreen remains mounted. An unchanged binding is not a state change,
+    // and synchronous fan-out here would dirty that sibling during its build.
+    if (changed) owner._notify();
   }
 
   Future<void> _restore() async {

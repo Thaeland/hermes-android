@@ -21,6 +21,52 @@ void main() {
   setUp(() => SharedPreferences.setMockInitialValues({'verbose_mode': false}));
 
   testWidgets(
+    'notification-style push keeps both real ChatScreens mounted without build-time notifications',
+    (tester) async {
+      final controller = GatewayTurnApplicationController();
+      addTearDown(controller.close);
+      final remote = _Remote();
+      await _open(tester, controller, remote);
+      await tester.enterText(find.byType(TextField), 'One prompt');
+      await tester.tap(find.byTooltip('Send'));
+      await tester.pump();
+      await tester.pump();
+      remote.event('message.delta', {'text': 'Active B'});
+      await tester.pump();
+      final owner = controller
+          .normalSessionFor(_connection)
+          .findChat('local-chat')!;
+      final turn = owner.turnId;
+      await _open(
+        tester,
+        controller,
+        remote,
+        id: 'stored-chat',
+        key: const ValueKey('notification-route'),
+        push: true,
+      );
+      expect(tester.takeException(), isNull);
+      expect(find.byType(ChatScreen, skipOffstage: false), findsNWidgets(2));
+      expect(find.text('Active B'), findsOneWidget);
+      expect(owner.turnId, turn);
+      expect(owner.snapshot.hasActiveTurn, isTrue);
+      expect(remote.submissions, 1);
+      remote.event('message.delta', {'text': ' continued'});
+      await tester.pump();
+      expect(find.text('Active B continued'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      Navigator.of(tester.element(find.byType(ChatScreen))).pop();
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
+      expect(find.text('Active B continued'), findsOneWidget);
+      expect(remote.submissions, 1);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    },
+  );
+
+  testWidgets(
     'pop/reopen restores owner deltas and tools, terminal while absent settles',
     (tester) async {
       final controller = GatewayTurnApplicationController();
@@ -291,49 +337,63 @@ Future<void> _open(
   String id = 'local-chat',
   Key? key,
   Future<void> Function(String, String)? prepare,
+  bool push = false,
 }) async {
-  await tester.pumpWidget(
-    MaterialApp(
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
-      supportedLocales: AppLocalizations.supportedLocales,
-      home: ChatScreen(
-        key: key,
-        connection: _connection,
-        session: Session(
-          id: id,
-          title: 'Owner chat',
-          model: 'fixture',
-          source: 'test',
-          messageCount: 0,
-          isActive: true,
-          preview: '',
-          startedAt: 1,
-          isLocalDraft: prepare != null,
-        ),
-        projectWorkingDirectory: prepare == null ? null : '/project',
-        turnApplicationController: controller,
-        testApiClient: ApiClient(
-          baseUrl: _connection.baseUrl,
-          apiKey: 'fixture',
-          httpClient: MockClient(
-            (_) async => http.Response(remote.historyJson, 200),
-          ),
-        ),
-        testRemotePromptSubmit: remote.submit,
-        testNormalResume:
-            ({required localSessionId, required storedSessionId}) async =>
-                ResumedGatewaySession(
-                  runtimeSessionId: 'runtime',
-                  running: !remote.completed,
-                ),
-        testStoredSessionKey: (_) => 'stored-chat',
-        testLegacyProjectSessionEnsure: prepare,
-        testVoiceComposerAdapter: FakeVoiceComposerAdapter(),
+  final screen = ChatScreen(
+    key: key,
+    connection: _connection,
+    session: Session(
+      id: id,
+      title: 'Owner chat',
+      model: 'fixture',
+      source: 'test',
+      messageCount: 0,
+      isActive: true,
+      preview: '',
+      startedAt: 1,
+      isLocalDraft: prepare != null,
+    ),
+    projectWorkingDirectory: prepare == null ? null : '/project',
+    turnApplicationController: controller,
+    testApiClient: ApiClient(
+      baseUrl: _connection.baseUrl,
+      apiKey: 'fixture',
+      httpClient: MockClient(
+        (_) async => http.Response(remote.historyJson, 200),
       ),
     ),
+    testRemotePromptSubmit: remote.submit,
+    testNormalResume:
+        ({required localSessionId, required storedSessionId}) async =>
+            ResumedGatewaySession(
+              runtimeSessionId: 'runtime',
+              running: !remote.completed,
+            ),
+    testStoredSessionKey: (_) => 'stored-chat',
+    testLegacyProjectSessionEnsure: prepare,
+    testVoiceComposerAdapter: FakeVoiceComposerAdapter(),
   );
+  if (push) {
+    unawaited(
+      Navigator.of(
+        tester.element(find.byType(ChatScreen)),
+      ).push<void>(MaterialPageRoute(builder: (_) => screen)),
+    );
+  } else {
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: screen,
+      ),
+    );
+  }
   await tester.pump();
   await tester.pump();
+  if (push) {
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump();
+  }
 }
 
 class _Remote {
