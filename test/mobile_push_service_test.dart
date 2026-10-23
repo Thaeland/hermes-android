@@ -44,10 +44,12 @@ class Fixture {
   late final SavedConnection connection;
   int capsStatus = 200;
   int? registrationFence = 1;
+  bool capsEnabled = true;
   bool permission = true;
   bool failRevoke = false;
   String? failCommand;
   Future<http.Response> Function(http.Request)? onPut;
+  Future<http.Response> Function(http.Request)? onCapabilities;
   Future<http.Response> Function(http.Request)? onConfirm;
   List<Map<String, dynamic>> feed = [];
   int eventPageSize = 100;
@@ -66,6 +68,7 @@ class Fixture {
       dashboardPrefix: '/dash',
       dashboardUsername: 'fixture-user',
       dashboardPassword: 'fixture-password',
+      gatewayProfile: 'selected-work-profile',
     );
     connection = manager.getConnections().single;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
@@ -208,6 +211,7 @@ class Fixture {
         pathPrefix: c.dashboardPrefix!,
         username: c.dashboardUsername,
         password: c.dashboardPassword,
+        gatewayProfile: c.gatewayProfile,
         httpClient: MockClient((request) async {
           requests.add(request);
           if (request.url.path == '/dash/auth/password-login') {
@@ -226,13 +230,15 @@ class Fixture {
             isTrue,
           );
           expect(request.headers['Cookie'], 'hermes_session_at=fixture-cookie');
+          expect(request.url.queryParameters['profile'], c.gatewayProfile);
           expect(request.headers.containsKey('Authorization'), isFalse);
           if (request.url.path.endsWith('/capabilities')) {
+            if (onCapabilities != null) return onCapabilities!(request);
             return http.Response(
               jsonEncode({
                 'schema': 1,
                 'registration_fence': registrationFence,
-                'enabled': true,
+                'enabled': capsEnabled,
                 'transports': ['webpush'],
                 'vapid_public_key': base64Url
                     .encode([4, ...List<int>.filled(64, 1)])
@@ -479,6 +485,73 @@ void main() {
       expect(f.requests.where((r) => r.method == 'PUT'), isEmpty);
     },
   );
+  test('disabled selected profile gates permission and registration', () async {
+    await f.service.initialize(f.manager);
+    f.capsEnabled = false;
+    await expectLater(
+      f.service.enable(f.connection, 'test.distributor', ['durable-session']),
+      throwsFormatException,
+    );
+    expect(f.methods, isNot(contains('permission')));
+    expect(f.methods, isNot(contains('enable')));
+    expect(f.requests.where((r) => r.method == 'PUT'), isEmpty);
+  });
+  for (final boundary in ['capabilities', 'PUT']) {
+    test('profile edit invalidates held $boundary authority', () async {
+      final entered = Completer<void>();
+      final released = Completer<http.Response>();
+      if (boundary == 'capabilities') {
+        await f.service.initialize(f.manager);
+        f.onCapabilities = (_) {
+          entered.complete();
+          return released.future;
+        };
+      } else {
+        f.seed();
+        f.onPut = (_) {
+          entered.complete();
+          return released.future;
+        };
+      }
+      final flight = boundary == 'capabilities'
+          ? f.service.enable(f.connection, 'test.distributor', [
+              'durable-session',
+            ])
+          : f.service.initialize(f.manager);
+      await entered.future;
+      await f.manager.updateConnection(
+        f.connection.id,
+        f.connection.label,
+        'https://fixture.invalid',
+        443,
+        f.connection.apiKey,
+        gatewayProfile: 'different-selected-profile',
+      );
+      released.complete(
+        boundary == 'capabilities'
+            ? http.Response(
+                jsonEncode({
+                  'schema': 1,
+                  'registration_fence': 1,
+                  'enabled': true,
+                  'transports': ['webpush'],
+                  'vapid_public_key': base64Url
+                      .encode([4, ...List<int>.filled(64, 1)])
+                      .replaceAll('=', ''),
+                }),
+                200,
+              )
+            : f.pending(),
+      );
+      await flight;
+      expect(f.methods, isNot(contains('permission')));
+      expect(f.methods, isNot(contains('enable')));
+      expect(f.methods, isNot(contains('generation')));
+      expect(f.methods, isNot(contains('activate')));
+      expect(f.service.active, isFalse);
+      expect(f.requests.where((r) => r.url.path.endsWith('/events')), isEmpty);
+    });
+  }
   test(
     'registration must echo exact durable revision before accepting generation',
     () async {

@@ -1388,6 +1388,9 @@ class DashboardClient {
 
   String get baseUrl => _baseUrl;
 
+  /// Selected connection profile; generic API helpers deliberately do not add it.
+  String? get gatewayProfile => _gatewayProfile;
+
   bool get _usesPasswordAuth =>
       (_username?.isNotEmpty ?? false) && (_password?.isNotEmpty ?? false);
 

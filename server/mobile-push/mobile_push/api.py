@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field
 
-from .config import Rejected, identifier, validate_keys
+from .config import Profile, Rejected, identifier, validate_keys
 from .store import Store
 from .transport import validate_endpoint
 
@@ -77,16 +77,16 @@ def guarded(function, *args):
 Identity = Annotated[tuple[str, str], Depends(principal)]
 
 
-def create_router(profile):
+def create_router(profile_source):
     router = APIRouter(route_class=BoundedRoute)
-    stores = []
 
-    def store():
-        if not stores:
-            stores.append(Store(profile.database))
-        return stores[0]
+    def profile_for_request(identity: Identity):
+        # Resolve only AFTER verified principal authentication, within the host's
+        # request-local scope. Capture an immutable Profile for the whole request,
+        # never a query-derived path or a shared "current" profile/store slot.
+        return guarded(profile_source) if callable(profile_source) else profile_source
 
-    def policy_for(identity):
+    def policy_for(profile, identity):
         policy = profile.policy()
         if not policy.enabled:
             raise Rejected(503, "Mobile push disabled")
@@ -95,7 +95,7 @@ def create_router(profile):
         return policy
 
     @router.get("/capabilities")
-    def capabilities(identity: Identity):
+    def capabilities(identity: Identity, profile: Profile = Depends(profile_for_request)):
         def read():
             policy = profile.policy()
             enabled = policy.enabled and policy.admitted(identity)
@@ -110,9 +110,14 @@ def create_router(profile):
         return guarded(read)
 
     @router.put("/registrations/{installation_id}")
-    def register(installation_id: str, body: Registration, identity: Identity):
+    def register(
+        installation_id: str,
+        body: Registration,
+        identity: Identity,
+        profile: Profile = Depends(profile_for_request),
+    ):
         def update():
-            policy = policy_for(identity)
+            policy = policy_for(profile, identity)
             if not identifier(installation_id) or not all(
                 identifier(sid) for sid in body.session_ids
             ):
@@ -129,39 +134,49 @@ def create_router(profile):
                 raise Rejected(403, "Session scope not authorised or not durable")
             validate_keys(body.keys.model_dump())
             validate_endpoint(body.endpoint, policy)
-            return store().put(identity, installation_id, body.model_dump(), policy)
+            return Store(profile.database).put(identity, installation_id, body.model_dump(), policy)
 
         return guarded(update)
 
     @router.post("/registrations/{installation_id}/confirm")
-    def confirm(installation_id: str, body: Confirmation, identity: Identity):
+    def confirm(
+        installation_id: str,
+        body: Confirmation,
+        identity: Identity,
+        profile: Profile = Depends(profile_for_request),
+    ):
         def activate():
-            policy = policy_for(identity)
-            return store().confirm(
+            policy = policy_for(profile, identity)
+            return Store(profile.database).confirm(
                 identity, installation_id, body.generation, body.challenge, policy
             )
 
         return guarded(activate)
 
     @router.delete("/registrations/{installation_id}")
-    def revoke(installation_id: str, identity: Identity):
+    def revoke(
+        installation_id: str,
+        identity: Identity,
+        profile: Profile = Depends(profile_for_request),
+    ):
         def remove():
             # Revocation remains possible after an operator disables/removes a grant.
             if not identifier(installation_id):
                 raise Rejected(422, "Invalid installation ID")
-            return store().revoke(identity, installation_id, profile.policy)
+            return Store(profile.database).revoke(identity, installation_id, profile.policy)
 
         return guarded(remove)
 
     @router.get("/events")
     def events(
         identity: Identity,
+        profile: Profile = Depends(profile_for_request),
         after: int = Query(default=0, ge=0, le=9223372036854775807),
         limit: int = Query(default=100, ge=1, le=200),
     ):
         def read():
-            policy = policy_for(identity)
-            return store().events(identity, after, limit, policy, profile.durable)
+            policy = policy_for(profile, identity)
+            return Store(profile.database).events(identity, after, limit, policy, profile.durable)
 
         return guarded(read)
 

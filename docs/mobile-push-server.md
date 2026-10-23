@@ -15,6 +15,12 @@ operator's session database for writing or registers a real push endpoint.
   The integration suite was exercised against source revision `d923a5eb`: the real
   `PluginManager` loads the same physical source in two profile homes, preserves
   worker context, disposes each owner independently and reloads unchanged source.
+- Dashboard mounts must run Hermes' async `_plugin_route_secret_scope` dependency
+  and expose `agent.secret_scope.current_secret_scope_home()`. That host-stamped
+  home, resolved after profile-name validation, is the sole request resource scope.
+  An unscoped mount returns **503** before advertising capabilities or accessing a
+  store; older hosts lacking this seam cannot load this API. A home override or
+  process `HERMES_HOME` alone is not evidence of a vetted request scope.
 - A running Hermes dashboard/API backend that sets a **verified**
   `request.state.session.provider` and `.user_id`. A legacy/shared dashboard token,
   gateway JSON-RPC token, arbitrary bearer token or client identity header is **not**
@@ -111,8 +117,23 @@ refuses automatic backend Python import from an untrusted project directory.
 `dashboard/manifest.json` declares `api: plugin_api.py`; its router is mounted at
 `/api/plugins/mobile-push`. The tiny hidden dashboard bundle intentionally adds no UI.
 
-The profile home is captured immutably at registration/API load. ACLs, endpoint
-exceptions, key path and enabled policy are re-read on operations and before sends;
+The lifecycle runtime captures its profile home immutably at registration. The
+dashboard router is mounted **once**, but resolves an immutable Profile for **each
+verified request**, from the host's vetted secret-scope home (including the launch
+profile). It never derives paths from the raw query, changes process environment,
+or keeps a shared mutable "current profile". Capabilities, durable-session reads,
+registration/confirmation, events and DELETE all use that request's policy and
+`plugin-data/mobile-push/outbox.sqlite3`. There is no router-wide store/worker cache;
+database connections are bounded and closed after each operation. DELETE remains
+available for owned revocations after push is disabled, only in the vetted home.
+
+Android explicitly forwards the saved connection's `gatewayProfile` as `profile`
+on **every** push request, including capabilities, confirmation, revoke, event
+paging and bounded authentication retries. The generic DashboardClient helpers do
+not add it automatically. Local connection-binding/epoch checks still invalidate
+held capability and handshake responses if the selected saved profile changes.
+
+ACLs, endpoint exceptions, key path and enabled policy are re-read on operations and before sends;
 update this JSON by an atomic private-file replacement. Enabling after a disabled
 startup requires a lifecycle-process restart to acquire hooks/worker. Disabling the
 JSON policy halts sends but keeps pending bounded state until expiry. Unload stops
@@ -389,12 +410,21 @@ export HERMES_AGENT_SITE_PACKAGES=/absolute/path/to/matching-hermes-environment/
 # Repeat the pytest command above with these variables set.
 ```
 
-No source checkout means the three host integration tests are explicitly skipped;
-the ordinary protocol/crypto tests still run. With the inspected source/dependency
-paths set, the full suite ran with **80 passed** on Python 3.14.7, including real
-manager/loader lifecycle tests and an actual TLS loopback receiver. The integrated
-checkout was independently rerun on Python 3.11.15 with the minimum-version TLS
-fixture compatibility fix: **80 passed**, including all three real-host tests.
+No source checkout means the host integration tests are explicitly skipped;
+release/review verification requires the full suite with zero skips. The
+once-mounted real-dashboard regressions switch two disposable homes with opposite
+policies in both directions, distinct VAPID keys, colliding installation/session
+IDs, independent proofs/events/outboxes, disabled-profile revocation, policy/ACL
+reload and read-only durable-session checks. Each operation is also held across a
+concurrent request for the other home. A paired real PluginManager/worker test
+checks that each lifecycle owner's hooks, sends and teardown match the same files
+used by the once-mounted dashboard routes. Fixture authentication supplies the
+verified session; no test claims an installed provider automatically does so.
+
+The paired profile-scope revision was verified with **116 passed, zero skipped**
+on Python 3.11.15 against Hermes `d923a5eb`, including all 19 real-host tests. The
+ordinary crypto tests use an actual TLS loopback receiver. Earlier pre-profile
+baselines ran with 80 passed on both Python 3.14.7 and Python 3.11.15.
 The fenced protocol extends these with a real uvicorn/FastAPI/SQLite loopback test
 matrix: old pre-commit handler released after recovery, endpoint renewal, disable,
 or fresh consent, with both open and abandoned TCP connections. Snapshot assertions

@@ -9,6 +9,13 @@ class MobilePushApi {
   final DashboardClient client;
   static const prefix = 'plugins/mobile-push';
 
+  // Explicit on EVERY operation, including retries/revokes/event reads. Merely
+  // constructing DashboardClient(gatewayProfile: ...) does not scope generic HTTP.
+  Map<String, String> _query([Map<String, String> extra = const {}]) => {
+    'profile': ?client.gatewayProfile,
+    ...extra,
+  };
+
   /// Match Registration.session_ids and config.IDENTIFIER exactly. Validate all
   /// supplied tokens before deduplicating; never trim/drop a malformed ID into a
   /// different subscription scope, or prompt for permission on an invalid one.
@@ -26,7 +33,10 @@ class MobilePushApi {
   }
 
   Future<Map<String, dynamic>> capabilities() async {
-    final result = await client.apiGet('$prefix/capabilities');
+    final result = await client.apiGet(
+      '$prefix/capabilities',
+      queryParameters: _query(),
+    );
     final key = result['vapid_public_key'];
     if (result['schema'] != 1 ||
         result['registration_fence'] != 1 ||
@@ -48,6 +58,7 @@ class MobilePushApi {
     Map<String, dynamic> state,
   ) => client.apiPut(
     '$prefix/registrations/${Uri.encodeComponent(state['installation'] as String)}',
+    queryParameters: _query(),
     body: {
       'endpoint': state['endpoint'],
       'keys': state['keys'],
@@ -69,13 +80,15 @@ class MobilePushApi {
     String challenge,
   ) => client.apiPost(
     '$prefix/registrations/${Uri.encodeComponent(installation)}/confirm',
+    queryParameters: _query(),
     body: {'generation': generation, 'challenge': challenge},
   );
   Future<void> revoke(String installation) => client.apiDelete(
     '$prefix/registrations/${Uri.encodeComponent(installation)}',
+    queryParameters: _query(),
   );
   Future<Map<String, dynamic>> events(String cursor) => client.apiGet(
     '$prefix/events',
-    queryParameters: {'after': cursor, 'limit': '100'},
+    queryParameters: _query({'after': cursor, 'limit': '100'}),
   );
 }
