@@ -734,29 +734,61 @@ class NormalGatewayChatOwner {
     _draftToRestore = null;
   }
 
+  /// Capture immediately BEFORE the physical offset-zero latest GET. Carry the
+  /// same token through success, failure and any multi-page/callback awaits.
+  NormalGatewayHistoryRead beginHistoryRead(String stored) =>
+      _root._captureHistoryRead(stored, ++_session._historyObservation);
+
+  /// Older paging owns a cursor, not a new latest observation. A newer accepted
+  /// success invalidates this fence; merely issuing/failing a read does not.
+  NormalGatewayHistoryRead historyReadFence(String stored) =>
+      _root._captureHistoryRead(stored, _root._historyObservation);
+
+  NormalGatewayHistoryRead _captureHistoryRead(
+    String stored,
+    int observation,
+  ) => NormalGatewayHistoryRead._(
+    this,
+    localSessionId,
+    storedSessionId,
+    stored,
+    _generation,
+    observation,
+  );
+
   /// Accept only a fresh latest batch, never a retained/older paging window.
   /// Reads during a turn cannot seed its admission baseline or replace it.
-  void observeHistory(List<Map<String, dynamic>> rows) {
-    if (_redirect != null) return _root.observeHistory(rows);
-    if (_session._closed || snapshot.hasActiveTurn) return;
-    _acceptHistory(
-      _GatewayHistoryObservation(rows, ++_session._historyObservation),
-    );
+  /// Tokenless calls remain a TRUSTED external-observation compatibility seam:
+  /// they assert freshness at ingress, not physical request-start freshness.
+  /// Production physical readers must supply their pre-I/O [read].
+  bool observeHistory(
+    List<Map<String, dynamic>> rows, {
+    NormalGatewayHistoryRead? read,
+  }) {
+    if (_redirect != null) return _root.observeHistory(rows, read: read);
+    if (_session._closed || snapshot.hasActiveTurn) return false;
+    final captured =
+        read ?? beginHistoryRead(storedSessionId ?? localSessionId);
+    if (!identical(captured._owner, this) ||
+        !_acceptHistory(_GatewayHistoryObservation(rows, captured))) {
+      return false;
+    }
     _retireSettledPresentation(rows);
     _retireCompletedPresentation(rows);
     _notify();
+    return captured.isCurrent;
   }
 
   Future<_GatewayHistoryObservation> _readLatestHistory(String stored) async {
-    // Allocate before physical I/O. Arrival cannot promote a read above a
-    // newer accepted observation (including another client's latest batch).
-    final observation = ++_session._historyObservation;
+    final read = beginHistoryRead(stored);
     final rows = await _session._history(stored);
-    return _GatewayHistoryObservation(rows, observation);
+    return _GatewayHistoryObservation(rows, read);
   }
 
   bool _acceptHistory(_GatewayHistoryObservation fresh) {
-    if (fresh.observation < _historyObservation) return false;
+    if (!identical(fresh.read._owner, this) || !fresh.read.isCurrent) {
+      return false;
+    }
     _history = fresh.rows.map((row) => Map<String, dynamic>.from(row)).toList();
     _historyKnown = true;
     _historyObservation = fresh.observation;
@@ -2082,10 +2114,43 @@ class NormalGatewayChatOwner {
       handle.save(text, isCurrent: isCurrent);
 }
 
+/// Session/account-scoped physical read authority. A redirect is NOT permission
+/// to lend a losing owner's in-flight read to the winner. Admission and close
+/// invalidate synchronously; only accepted success advances freshness.
+class NormalGatewayHistoryRead {
+  const NormalGatewayHistoryRead._(
+    this._owner,
+    this._local,
+    this._binding,
+    this._stored,
+    this._generation,
+    this._observation,
+  );
+  final NormalGatewayChatOwner _owner;
+  final String _local;
+  final String? _binding;
+  final String _stored;
+  final int _generation;
+  final int _observation;
+
+  bool get isAttached =>
+      !_owner._session._closed &&
+      _owner._redirect == null &&
+      _owner.localSessionId == _local &&
+      _owner.storedSessionId == _binding &&
+      (_binding ?? _local) == _stored;
+
+  bool get isSuperseded => _observation < _owner._historyObservation;
+
+  bool get isCurrent =>
+      isAttached && _owner._generation == _generation && !isSuperseded;
+}
+
 class _GatewayHistoryObservation {
-  const _GatewayHistoryObservation(this.rows, this.observation);
+  const _GatewayHistoryObservation(this.rows, this.read);
   final List<Map<String, dynamic>> rows;
-  final int observation;
+  final NormalGatewayHistoryRead read;
+  int get observation => read._observation;
 }
 
 /// Received historical output, not a second admission or canonical transcript.

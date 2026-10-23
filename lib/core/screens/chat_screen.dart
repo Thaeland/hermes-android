@@ -95,6 +95,31 @@ bool shouldEstablishLegacyDesktopSession(
   required bool legacyTransportFallback,
 }) => !session.isLocalDraft || legacyTransportFallback;
 
+/// Route identity and resource ownership around one physical history flight.
+/// Offset paging captures a fence without allocating latest-read authority.
+class _ChatHistoryRead {
+  const _ChatHistoryRead({
+    required this.owner,
+    required this.account,
+    required this.localSessionId,
+    required this.authority,
+    required this.sessionId,
+    required this.routeSessionId,
+    required this.responseGeneration,
+    required this.observation,
+    required this.windowRevision,
+  });
+  final NormalGatewayChatOwner? owner;
+  final Object account;
+  final String localSessionId;
+  final NormalGatewayHistoryRead? authority;
+  final String sessionId;
+  final String routeSessionId;
+  final int responseGeneration;
+  final int observation;
+  final int windowRevision;
+}
+
 class _ModelChoice {
   final String provider;
   final String model;
@@ -385,6 +410,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _presentation.reasoningPins;
   final ChatHistoryWindow _historyWindow = ChatHistoryWindow();
   bool _loadingOlder = false;
+  int _historyReadIssued = 0;
+  int _historyReadAccepted = 0;
+  int _historyWindowRevision = 0;
+  _ChatHistoryRead? _loadingHistoryRead;
+  _ChatHistoryRead? _olderHistoryRead;
+  _ChatHistoryRead? _deferredHistoryRead;
   final List<GatewayToolActivity> _toolActivities = [];
 
   /// Expansion choices for tool-activity cards, keyed by group id so they
@@ -1732,85 +1763,155 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
   }
 
+  // Value equality permits harmless SavedConnection rehydration, but fences
+  // credential/profile/origin replacement even when a parent retains State.
+  // This record is private in-memory authority, never logged or persisted.
+  Object get _historyAccountKey {
+    final c = widget.connection;
+    return (
+      c.id,
+      c.host,
+      c.port,
+      c.useHttps,
+      c.apiKey,
+      c.gatewayPrefix,
+      c.gatewayProfile,
+      c.desktopGatewayUrl,
+      c.dashboardUsername,
+      c.dashboardPassword,
+      c.dashboardPrefix,
+      c.dashboardPort,
+      c.dashboardProxied,
+    );
+  }
+
+  _ChatHistoryRead _beginHistoryRead(String sessionId, {bool older = false}) {
+    final owner = _normalChat;
+    return _ChatHistoryRead(
+      owner: owner,
+      account: _historyAccountKey,
+      localSessionId: widget.session.id,
+      authority: older
+          ? owner?.historyReadFence(sessionId)
+          : owner?.beginHistoryRead(sessionId),
+      sessionId: sessionId,
+      routeSessionId: _storedSessionKey,
+      responseGeneration: _responseGeneration,
+      observation: older ? _historyReadAccepted : ++_historyReadIssued,
+      windowRevision: _historyWindowRevision,
+    );
+  }
+
+  bool _historyReadAttached(_ChatHistoryRead read) =>
+      mounted &&
+      read.account == _historyAccountKey &&
+      read.localSessionId == widget.session.id &&
+      identical(read.owner, _normalChat) &&
+      read.routeSessionId == _storedSessionKey &&
+      (read.authority?.isAttached ?? true);
+
+  bool _canApplyHistoryRead(_ChatHistoryRead read) =>
+      _historyReadAttached(read) &&
+      read.responseGeneration == _responseGeneration &&
+      read.observation >= _historyReadAccepted &&
+      (read.authority?.isCurrent ?? true);
+
+  bool _acceptHistoryRead(
+    _ChatHistoryRead read,
+    List<Map<String, dynamic>> latest,
+  ) {
+    if (!_canApplyHistoryRead(read)) return false;
+    if (read.owner != null &&
+        !read.owner!.observeHistory(latest, read: read.authority)) {
+      return false;
+    }
+    // Owner delivery invokes arbitrary subscribers synchronously. A new turn,
+    // binding, close or newer successful read there invalidates this callback.
+    if (!_canApplyHistoryRead(read)) return false;
+    _historyReadAccepted = read.observation;
+    return true;
+  }
+
+  void _finishHistoryLoading(_ChatHistoryRead read) {
+    // Release only this loader's resource, even when its result was superseded.
+    // It must never clear a newer route loader or publish stale error/status.
+    if (!mounted || !identical(_loadingHistoryRead, read)) return;
+    _loadingHistoryRead = null;
+    if (_historyReadAttached(read) &&
+        read.responseGeneration == _responseGeneration) {
+      setState(() => _loading = false);
+    }
+  }
+
   Future<void> _fetchMessages({String? sessionId}) async {
     if (_pendingReattachResync && sessionId == null) return;
-    final responseGeneration = _responseGeneration;
+    final read = _beginHistoryRead(
+      sessionId ?? _normalChat?.storedSessionId ?? widget.session.id,
+    );
+    _loadingHistoryRead = read;
     setState(() {
       _loading = true;
       _error = null;
     });
-
+    List<Map<String, dynamic>>? latest;
     try {
-      final batch = await _historyWindow.fetchRecent(
-        (offset) => _client.getMessages(
-          sessionId ?? _normalChat?.storedSessionId ?? widget.session.id,
+      final batch = await _historyWindow.fetchRecent((offset) async {
+        final rows = await _client.getMessages(
+          read.sessionId,
           limit: ChatHistoryWindow.pageSize,
           offset: offset,
           latest: true,
-        ),
-        shouldContinue: () =>
-            mounted && responseGeneration == _responseGeneration,
-      );
-      if (!mounted) return;
-      // A remote turn can start while history is still hydrating. Its local
-      // optimistic messages and stream are newer than this response, so never
-      // replace them with a stale transcript page.
-      if (responseGeneration != _responseGeneration) {
-        setState(() => _loading = false);
+        );
+        // Only offset zero carries latest authority. Additional cold pages
+        // are context, never a new read-start sequence or admission snapshot.
+        if (offset == 0) latest = rows;
+        return rows;
+      }, shouldContinue: () => _canApplyHistoryRead(read));
+      if (!_historyReadAttached(read)) return;
+      if (read.responseGeneration != _responseGeneration) {
         _deferHistoryRefresh();
         return;
       }
+      if (!_acceptHistoryRead(read, latest!)) return;
       _historyWindow.acceptRecent(batch);
-      _normalChat?.observeHistory(batch.rows);
+      _historyWindowRevision++;
       final messages = _historyWindow.rows;
       _extractToolMessages(messages);
       setState(() {
         _messages = messages;
-        // Server history is now authoritative; a submit catch that starts
-        // after this point must not clobber it with composer-restore.
-        _loading = false;
+        _error = null;
       });
       _scheduleInitialEndAlignment();
       if (_normalChat?.snapshot.turnId != null) {
-        _applyNormalSnapshot(_normalChat!.snapshot);
+        _applyNormalSnapshot(_normalChat!.snapshot, hydrateHistory: false);
       }
     } catch (e) {
-      if (!mounted) return;
-      if (responseGeneration != _responseGeneration) {
-        setState(() => _loading = false);
+      if (!_historyReadAttached(read)) return;
+      if (read.responseGeneration != _responseGeneration) {
         _deferHistoryRefresh();
         return;
       }
+      if (!_canApplyHistoryRead(read)) return;
       final errStr = e.toString();
       if (errStr.contains('404') || errStr.contains('not found')) {
-        if (_pendingReattachResync) {
-          setState(() => _loading = false);
-          return;
-        }
-        if (_messages.isNotEmpty) {
-          setState(() => _loading = false);
-          return;
-        }
-        setState(() {
-          _messages = [];
-          _loading = false;
-        });
+        if (_pendingReattachResync || _messages.isNotEmpty) return;
+        setState(() => _messages = []);
         _scheduleInitialEndAlignment();
         return;
       }
-      setState(() {
-        _error = errStr;
-        _loading = false;
-      });
+      setState(() => _error = errStr);
+    } finally {
+      _finishHistoryLoading(read);
     }
   }
 
-  Future<List<Map<String, dynamic>>> _getRecentMessages(String sessionId) =>
-      _client.getMessages(
-        sessionId,
-        limit: ChatHistoryWindow.pageSize,
-        latest: true,
-      );
+  Future<List<Map<String, dynamic>>> _getRecentMessages(
+    _ChatHistoryRead read,
+  ) => _client.getMessages(
+    read.sessionId,
+    limit: ChatHistoryWindow.pageSize,
+    latest: true,
+  );
 
   void _acceptRecentMessages(List<Map<String, dynamic>> recent) {
     _historyWindow.acceptRecent(
@@ -1820,15 +1921,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         recent.length == ChatHistoryWindow.pageSize,
       ),
     );
+    _historyWindowRevision++;
     _extractToolMessages(_historyWindow.rows);
   }
 
   Future<void> _loadOlderMessages() async {
     if (_loadingOlder || !_historyWindow.hasOlder) return;
     final scrollGeneration = _automaticScrollGeneration;
-    final responseGeneration = _responseGeneration;
     final offset = _historyWindow.olderOffset;
-    final sessionId = _storedSessionKey;
+    final read = _beginHistoryRead(_storedSessionKey, older: true);
+    _olderHistoryRead = read;
     final oldExtent = _scrollController.hasClients
         ? _scrollController.position.maxScrollExtent
         : 0.0;
@@ -1838,19 +1940,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     setState(() => _loadingOlder = true);
     try {
       final older = await _client.getMessages(
-        sessionId,
+        read.sessionId,
         limit: ChatHistoryWindow.pageSize,
         offset: offset,
         latest: true,
       );
-      if (!mounted ||
-          sessionId != _storedSessionKey ||
-          responseGeneration != _responseGeneration ||
+      if (!_canApplyHistoryRead(read) ||
+          read.windowRevision != _historyWindowRevision ||
+          offset != _historyWindow.olderOffset ||
           _sending ||
           _streaming) {
         return;
       }
       _historyWindow.acceptOlder(older);
+      final acceptedRevision = ++_historyWindowRevision;
       _extractToolMessages(_historyWindow.rows, replacePresentation: false);
       setState(() => _messages = _historyWindow.rows);
       final normalSnapshot = _normalChat?.snapshot;
@@ -1858,7 +1961,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _applyNormalSnapshot(normalSnapshot!, hydrateHistory: false);
       }
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!_canApplyAutomaticScroll(scrollGeneration) ||
+        if (!_canApplyHistoryRead(read) ||
+            acceptedRevision != _historyWindowRevision ||
+            _sending ||
+            _streaming ||
+            !_canApplyAutomaticScroll(scrollGeneration) ||
             !_scrollController.hasClients) {
           return;
         }
@@ -1873,7 +1980,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     } catch (_) {
       // Leave the control available for a retry without hiding loaded rows.
     } finally {
-      if (mounted) setState(() => _loadingOlder = false);
+      if (mounted && identical(_olderHistoryRead, read)) {
+        _olderHistoryRead = null;
+        setState(() => _loadingOlder = false);
+      }
     }
   }
 
@@ -1899,12 +2009,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     _deferredHistoryRefreshPending = false;
     _deferredHistoryRefreshing = true;
-    final responseGeneration = _responseGeneration;
+    final read = _beginHistoryRead(_storedSessionKey);
+    _deferredHistoryRead = read;
     var retryAfterSettlement = false;
     try {
-      final messages = await _getRecentMessages(_storedSessionKey);
-      if (!mounted) return;
-      if (responseGeneration != _responseGeneration ||
+      final messages = await _getRecentMessages(read);
+      if (!_historyReadAttached(read)) return;
+      if (read.responseGeneration != _responseGeneration ||
           _sending ||
           _streaming ||
           _stopResponseInFlight ||
@@ -1913,8 +2024,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         retryAfterSettlement = true;
         return;
       }
+      if (!_acceptHistoryRead(read, messages)) return;
       _acceptRecentMessages(messages);
-      _normalChat?.observeHistory(messages);
       setState(() {
         _messages = _historyWindow.rows;
         _error = null;
@@ -1925,13 +2036,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
       _scheduleInitialEndAlignment();
     } catch (_) {
-      // Keep the refresh pending. A later terminal/rollback transition can
-      // retry without turning background hydration into a composer blocker.
-      _deferredHistoryRefreshPending = true;
+      // A stale failure cannot resurrect pending work after a newer success.
+      if (_historyReadAttached(read) &&
+          read.observation >= _historyReadAccepted &&
+          !(read.authority?.isSuperseded ?? false)) {
+        _deferredHistoryRefreshPending = true;
+        retryAfterSettlement = read.responseGeneration != _responseGeneration;
+      }
     } finally {
-      _deferredHistoryRefreshing = false;
+      if (identical(_deferredHistoryRead, read)) {
+        _deferredHistoryRead = null;
+        _deferredHistoryRefreshing = false;
+      }
       if (retryAfterSettlement &&
-          mounted &&
+          _historyReadAttached(read) &&
           !_sending &&
           !_streaming &&
           !_stopResponseInFlight &&
@@ -3066,14 +3184,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       },
       onDone: () async {
         if (!mounted || responseGeneration != _responseGeneration) return;
-        // Refresh messages to get the final server-side state
+        // Refresh messages to get the final server-side state. The token is
+        // retained across both HTTP and attachment cleanup, including failure.
+        final read = _beginHistoryRead(widget.session.id);
         try {
-          final messages = await _getRecentMessages(widget.session.id);
-          if (!mounted || responseGeneration != _responseGeneration) return;
+          final messages = await _getRecentMessages(read);
+          if (!_canApplyHistoryRead(read)) return;
           if (pendingImage != null) {
             await _attachmentDraftService.removeCachedFile(pendingImage);
           }
-          if (!mounted || responseGeneration != _responseGeneration) return;
+          if (!_acceptHistoryRead(read, messages)) return;
           _acceptRecentMessages(messages);
           setState(() {
             _messages = _historyWindow.rows;
@@ -3100,7 +3220,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             }
           }
         } catch (_) {
-          if (!mounted || responseGeneration != _responseGeneration) return;
+          if (!_canApplyHistoryRead(read)) return;
           _scrollCoordinator.cancelStreaming();
           setState(() {
             if (_messages.isNotEmpty && _messages.last['role'] == 'assistant') {
@@ -3114,6 +3234,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           // The SSE response completed, so the server accepted the prompt.
           // A follow-up history read failing must not resurrect it as a draft.
           _deferHistoryRefresh();
+        } finally {
+          // Completing this REST operation is independent of the freshness of
+          // its history GET. If a newer success superseded that GET, release
+          // only the still-owned stream latch, without touching its transcript,
+          // error, status or scroll. Never strand Send behind a discarded read.
+          if (_historyReadAttached(read) &&
+              responseGeneration == _responseGeneration &&
+              _activeResponseTransport == _ResponseTransport.rest) {
+            setState(() {
+              _streaming = false;
+              _sending = false;
+              _activeResponseTransport = _ResponseTransport.none;
+            });
+          }
         }
       },
       onError: (error) {
