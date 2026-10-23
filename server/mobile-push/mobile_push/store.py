@@ -82,8 +82,12 @@ class Store:
                 )
             db.executemany(
                 "INSERT OR IGNORE INTO registration_nonces VALUES(?,?)",
-                [(row["installation"], self.nonce_hash(row["nonce"]))
-                 for row in db.execute("SELECT installation,nonce FROM registrations WHERE nonce!=''")],
+                [
+                    (row["installation"], self.nonce_hash(row["nonce"]))
+                    for row in db.execute(
+                        "SELECT installation,nonce FROM registrations WHERE nonce!=''"
+                    )
+                ],
             )
 
     @contextlib.contextmanager
@@ -138,10 +142,13 @@ class Store:
                     raise Rejected(409, "Installation revoked; enable with a new installation ID")
                 if revision <= previous["registration_revision"]:
                     raise Rejected(409, "Registration revision superseded")
-                if previous["nonce"] == body["registration_nonce"] or db.execute(
-                    "SELECT 1 FROM registration_nonces WHERE installation=? AND nonce_hash=?",
-                    (installation, self.nonce_hash(body["registration_nonce"])),
-                ).fetchone():
+                if (
+                    previous["nonce"] == body["registration_nonce"]
+                    or db.execute(
+                        "SELECT 1 FROM registration_nonces WHERE installation=? AND nonce_hash=?",
+                        (installation, self.nonce_hash(body["registration_nonce"])),
+                    ).fetchone()
+                ):
                     raise Rejected(409, "A fresh unused registration_nonce is required")
             elif (
                 db.execute("SELECT count(*) FROM registrations").fetchone()[0]

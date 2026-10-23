@@ -204,8 +204,11 @@ def test_real_password_cookie_mounted_api_and_encrypted_ack_recovery(
     assert client.put(path, json=body).status_code == 409
     # Lost ACK recovery rotates already-consented native authority; require a
     # genuinely new TLS-decrypted proof, never re-use a consumed challenge.
-    body = {**body, "registration_revision": 2,
-            "registration_nonce": "tls_recovered_nonce_0123456789"}
+    body = {
+        **body,
+        "registration_revision": 2,
+        "registration_nonce": "tls_recovered_nonce_0123456789",
+    }
     recovered = client.put(path, json=body)
     assert recovered.status_code == 200
     assert recovered.json()["generation"] == first.json()["generation"] + 1
@@ -233,23 +236,34 @@ def test_real_mounted_ack_recovery_after_client_process_death(env, mounted):
     assert first.status_code == 200
     proof = challenge(mounted.other)
     assert client.put(path, json=env.body).status_code == 409
-    recovery_body = {**env.body, "registration_revision": 2,
-                     "registration_nonce": "process_recovered_nonce_012345"}
+    recovery_body = {
+        **env.body,
+        "registration_revision": 2,
+        "registration_nonce": "process_recovered_nonce_012345",
+    }
     recovered = client.put(path, json=recovery_body)
     assert recovered.status_code == 200
     assert recovered.json()["generation"] == first.json()["generation"] + 1
     fresh = challenge(mounted.other)
     assert fresh["challenge"] != proof["challenge"]
     confirm = PREFIX + "/registrations/phone/confirm?profile=other-profile"
-    assert client.post(confirm, json={"generation": first.json()["generation"],
-                                     "challenge": proof["challenge"]}).status_code == 409
+    assert (
+        client.post(
+            confirm,
+            json={"generation": first.json()["generation"], "challenge": proof["challenge"]},
+        ).status_code
+        == 409
+    )
     body = {"generation": recovered.json()["generation"], "challenge": fresh["challenge"]}
     # Confirmation commits; process dies before native active persistence.
     assert client.post(confirm, json=body).json()["status"] == "active"
     assert client.put(path, json=recovery_body).status_code == 409
     assert client.post(confirm, json=body).status_code == 409
-    recovery_body = {**recovery_body, "registration_revision": 3,
-                     "registration_nonce": "confirm_recovered_nonce_012345"}
+    recovery_body = {
+        **recovery_body,
+        "registration_revision": 3,
+        "registration_nonce": "confirm_recovered_nonce_012345",
+    }
     third = client.put(path, json=recovery_body)
     assert third.status_code == 200
     fresh = challenge(mounted.other)
