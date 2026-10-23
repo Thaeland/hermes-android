@@ -109,15 +109,44 @@ void main() {
     },
   );
 
+  test(
+    'cold-open tool tip without root reference discloses actual missing ancestors',
+    () async {
+      final requests = <Uri>[];
+      final history = historyFor('tool', requests);
+      final page = await history.fetch('tip-tool', 0);
+      expect(page.sessionId, 'tip-tool');
+      expect(page.lineage, ['tip-tool']);
+      expect(
+        page.rows.map((row) => row['content']),
+        contains('AFTER rotation: actual child completion'),
+      );
+      expect(
+        page.rows.map((row) => row['content']),
+        isNot(contains('BEFORE rotation')),
+      );
+      expect(page.limitation, TaskHistoryProblem.partialAncestors);
+      expect(
+        requests
+            .where((uri) => uri.path.endsWith('/messages'))
+            .map((uri) => uri.path),
+        ['/api/sessions/tip-tool/messages'],
+      );
+      expect(
+        requests.map((uri) => uri.path),
+        contains('/api/sessions/child-tool'),
+      );
+      expect(requests.length, lessThanOrEqualTo(4));
+      history.close();
+    },
+  );
+
   testWidgets(
-    'completed tool tip discloses ancestors omitted by the real messages route',
+    'cold-open completed tool tip visibly discloses ancestors omitted by the real messages route',
     (tester) async {
       final requests = <Uri>[];
       final controller = DelegatedTaskController(
-        task: activity(
-          'tool',
-          'child-tool',
-        ).merge(activity('tool', 'tip-tool', complete: true)),
+        task: activity('tool', 'tip-tool', complete: true),
         history: historyFor('tool', requests),
       );
       await tester.pumpWidget(
@@ -166,6 +195,110 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     },
   );
+
+  testWidgets(
+    'cold-open running tool tip ancestor warning does not pause polling',
+    (tester) async {
+      final requests = <Uri>[];
+      final controller = DelegatedTaskController(
+        task: activity('tool', 'tip-tool'),
+        history: historyFor('tool', requests),
+      )..start();
+      await tester.pump();
+      expect(controller.limitation, TaskHistoryProblem.partialAncestors);
+      expect(controller.canonicalSessionId, 'tip-tool');
+      final count = requests.length;
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pump();
+      expect(requests.length, greaterThan(count));
+      controller.updateTask(activity('tool', 'tip-tool', complete: true));
+      await tester.pump();
+      final completedCount = requests.length;
+      await tester.pump(const Duration(seconds: 10));
+      expect(requests, hasLength(completedCount));
+      expect(controller.limitation, TaskHistoryProblem.partialAncestors);
+      controller.dispose();
+    },
+  );
+
+  for (final marker in ['_delegate_from', '_branched_from', '_reset_from']) {
+    for (final direct in [false, true]) {
+      test(
+        'cold-open tool $marker ${direct ? 'root does not inherit parent-chat compression warning' : 'inherited grandparent proves missing compression ancestors'}',
+        () async {
+          final requests = <Uri>[];
+          final history = historyFor(
+            'tool',
+            requests,
+            changeDetail: (row) {
+              row['model_config'] = {
+                marker: direct && row['id'] == 'tip-tool'
+                    ? 'child-tool'
+                    : 'parent-tool',
+              };
+            },
+          );
+          final page = await history.fetch('tip-tool', 0);
+          expect(
+            page.limitation,
+            direct ? null : TaskHistoryProblem.partialAncestors,
+          );
+          expect(requests.length, lessThanOrEqualTo(4));
+          if (direct) {
+            // A direct fork marker is conclusive even when the referenced
+            // parent chat has compressed: do not inspect its history at all.
+            expect(
+              requests.any((uri) => uri.path.endsWith('/child-tool')),
+              isFalse,
+            );
+          }
+          expect(
+            requests
+                .where((uri) => uri.path.endsWith('/messages'))
+                .map((uri) => uri.path),
+            ['/api/sessions/tip-tool/messages'],
+          );
+          history.close();
+        },
+      );
+    }
+  }
+
+  for (final invalid in [
+    'prefix',
+    'profile',
+    'source-change',
+    'changed-marker',
+  ]) {
+    test('cold-open ancestor proof checks $invalid metadata', () async {
+      final requests = <Uri>[];
+      final history = historyFor(
+        'tool',
+        requests,
+        changeDetail: (row) {
+          if (row['id'] != 'child-tool') return;
+          switch (invalid) {
+            case 'prefix':
+              row['id'] = 'child-tool-longer';
+            case 'profile':
+              row['profile'] = 'other';
+            case 'source-change':
+              row['source'] = 'subagent';
+            case 'changed-marker':
+              row['model_config'] = {'_delegate_from': 'other-parent'};
+          }
+        },
+      );
+      final read = history.fetch('tip-tool', 0);
+      if (invalid == 'prefix' || invalid == 'profile') {
+        await expectLater(read, throwsA(isA<TaskHistoryUnavailable>()));
+      } else {
+        expect((await read).limitation, isNull);
+      }
+      expect(requests.length, lessThanOrEqualTo(4));
+      history.close();
+    });
+  }
 
   testWidgets(
     'tool ancestor warning retains known rows and polls the live verified tip',

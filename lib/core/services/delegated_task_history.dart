@@ -201,6 +201,10 @@ class DashboardTaskHistory implements TaskHistorySource {
         throw const TaskHistoryUnavailable(TaskHistoryProblem.incompatible);
       }
       final tip = await detail(path.first, fresh: true);
+      final missingAncestors =
+          tip['end_reason'] != 'compression' &&
+          tip['source'] == 'tool' &&
+          (path.length > 1 || await _hasCompressionParent(tip, detail));
       return TaskHistoryPage(
         rows: messages.cast<Map<String, dynamic>>(),
         sessionId: path.first,
@@ -212,7 +216,7 @@ class DashboardTaskHistory implements TaskHistorySource {
             ? TaskHistoryProblem.partialCompression
             // Stock tool-source messages omit ancestors even at a verified
             // tip. A short page proves only this segment is exhausted.
-            : path.length > 1 && tip['source'] == 'tool'
+            : missingAncestors
             ? TaskHistoryProblem.partialAncestors
             : null,
       );
@@ -269,44 +273,72 @@ class DashboardTaskHistory implements TaskHistorySource {
       );
       if (parentId == null) break;
       final parent = await detail(parentId);
-      final ended = parent['ended_at'];
-      final started = child['started_at'];
-      final parentStarted = parent['started_at'];
-      // publish_compression_child creates the child just BEFORE stamping the
-      // parent's ended_at in the same transaction (not after that timestamp).
-      if (parent['end_reason'] != 'compression' ||
-          ended is! num ||
-          started is! num ||
-          parentStarted is! num ||
-          !ended.isFinite ||
-          !started.isFinite ||
-          !parentStarted.isFinite ||
-          ended < parentStarted ||
-          started < parentStarted ||
-          child['source'] is! String ||
-          child['source'] != parent['source'] ||
-          !child.containsKey('model_config') ||
-          !parent.containsKey('model_config')) {
-        break;
-      }
-      final config = decodeTaskJson(child['model_config']);
-      final parentConfig = decodeTaskJson(parent['model_config']);
-      if ((config != null && config is! Map) ||
-          (parentConfig != null && parentConfig is! Map)) {
-        break;
-      }
-      // Rotation copies _session_init_model_config and source, including tool.
-      // Inherited grandparent markers do not fork THIS edge; direct markers do.
-      if (const ['_delegate_from', '_branched_from', '_reset_from'].any((key) {
-        final marker = config is Map ? config[key] : null;
-        final inherited = parentConfig is Map ? parentConfig[key] : null;
-        return marker == parentId || marker != inherited;
-      })) {
-        break;
-      }
+      if (!_isCompressionEdge(child, parent)) break;
       current = parentId;
     }
     throw const TaskHistoryUnavailable(TaskHistoryProblem.identityUnproven);
+  }
+
+  /// The advertised reference can already be the tip, making its verified
+  /// task path a singleton. One proven compression edge is enough to disclose
+  /// missing ancestors; never fetch ancestor messages or scan for siblings.
+  Future<bool> _hasCompressionParent(
+    Map<String, dynamic> tip,
+    Future<Map<String, dynamic>> Function(String id) detail,
+  ) async {
+    final parentId = GatewaySubagentActivity.opaqueId(tip['parent_session_id']);
+    if (parentId == null || parentId == tip['id']) return false;
+    final config = decodeTaskJson(tip['model_config']);
+    // A newly delegated/branched/reset task is not its parent's compression
+    // continuation, even when that parent chat subsequently compressed.
+    if (config is Map && _forkMarkers.any((key) => config[key] == parentId)) {
+      return false;
+    }
+    return _isCompressionEdge(tip, await detail(parentId));
+  }
+
+  static const _forkMarkers = [
+    '_delegate_from',
+    '_branched_from',
+    '_reset_from',
+  ];
+
+  bool _isCompressionEdge(
+    Map<String, dynamic> child,
+    Map<String, dynamic> parent,
+  ) {
+    final parentId = parent['id'];
+    final ended = parent['ended_at'];
+    final started = child['started_at'];
+    final parentStarted = parent['started_at'];
+    // Publication inserts the child just BEFORE stamping parent closure.
+    if (parent['end_reason'] != 'compression' ||
+        ended is! num ||
+        started is! num ||
+        parentStarted is! num ||
+        !ended.isFinite ||
+        !started.isFinite ||
+        !parentStarted.isFinite ||
+        ended < parentStarted ||
+        started < parentStarted ||
+        child['source'] is! String ||
+        child['source'] != parent['source'] ||
+        !child.containsKey('model_config') ||
+        !parent.containsKey('model_config')) {
+      return false;
+    }
+    final config = decodeTaskJson(child['model_config']);
+    final parentConfig = decodeTaskJson(parent['model_config']);
+    if ((config != null && config is! Map) ||
+        (parentConfig != null && parentConfig is! Map)) {
+      return false;
+    }
+    // Inherited grandparent markers are valid only when copied unchanged.
+    return !_forkMarkers.any((key) {
+      final marker = config is Map ? config[key] : null;
+      final inherited = parentConfig is Map ? parentConfig[key] : null;
+      return marker == parentId || marker != inherited;
+    });
   }
 
   @override
