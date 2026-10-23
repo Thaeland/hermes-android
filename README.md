@@ -35,6 +35,16 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
 - Previous upstream releases remain available from the
   [Releases](https://github.com/rusty4444/hermes-android/releases) page.
 
+## Background-work development branch
+
+The unreleased background-turns work adds app-owned Remote Gateway turns,
+receipt-ordered chat presentation, per-chat ongoing notifications and optional
+encrypted UnifiedPush. See the [background-work guide](docs/android-background-work.md)
+for behaviour, limits and phone acceptance checks, and the separate
+[Android push](docs/mobile-push-android.md) and
+[server companion](docs/mobile-push-server.md) setup guides. These changes are not
+included in the published v2.1.30 APKs.
+
 ## Remote Gateway edition highlights
 
 - One Desktop Gateway JSON-RPC session for text, images, and files.
