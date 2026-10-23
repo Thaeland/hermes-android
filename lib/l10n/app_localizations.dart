@@ -4480,6 +4480,12 @@ abstract class AppLocalizations {
   /// **'Partial history: this task continued after compression, but this gateway has not exposed a verifiable newer reference. The final reply may be missing. Automatic refresh is paused; use Refresh to retry.'**
   String get task_partial_compression;
 
+  /// No description provided for @task_partial_ancestors.
+  ///
+  /// In en, this message translates to:
+  /// **'Partial history: this gateway omits compression ancestors for this task. Earlier task segments may be missing. Known rows are retained; use Refresh to retry.'**
+  String get task_partial_ancestors;
+
   /// No description provided for @task_missing_reference.
   ///
   /// In en, this message translates to:

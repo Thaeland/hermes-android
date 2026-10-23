@@ -109,6 +109,113 @@ void main() {
     },
   );
 
+  testWidgets(
+    'completed tool tip discloses ancestors omitted by the real messages route',
+    (tester) async {
+      final requests = <Uri>[];
+      final controller = DelegatedTaskController(
+        task: activity(
+          'tool',
+          'child-tool',
+        ).merge(activity('tool', 'tip-tool', complete: true)),
+        history: historyFor('tool', requests),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: Scaffold(body: DelegatedTaskTimeline(controller: controller)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(controller.canonicalSessionId, 'tip-tool');
+      expect(controller.unavailable, isNull);
+      expect(controller.hasOlder, isFalse);
+      expect(
+        controller.rows.map((row) => row['content']),
+        contains('AFTER rotation: actual child completion'),
+      );
+      expect(
+        controller.rows.map((row) => row['content']),
+        isNot(contains('BEFORE rotation')),
+      );
+      expect(controller.limitation, TaskHistoryProblem.partialAncestors);
+      expect(
+        find
+            .textContaining('Earlier task segments may be missing')
+            .hitTestable(),
+        findsOneWidget,
+      );
+      expect(find.textContaining('verifiable newer reference'), findsNothing);
+      expect(find.textContaining('Automatic refresh is paused'), findsNothing);
+      final count = requests.length;
+      await tester.pump(const Duration(seconds: 10));
+      expect(requests, hasLength(count));
+      await tester.tap(find.byTooltip('Refresh task history'));
+      await tester.pumpAndSettle();
+      expect(requests.length, greaterThan(count));
+      expect(controller.limitation, TaskHistoryProblem.partialAncestors);
+      expect(
+        requests.every(
+          (uri) =>
+              uri.path.startsWith('/api/sessions/') &&
+              !uri.path.endsWith('/latest-descendant'),
+        ),
+        isTrue,
+      );
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets(
+    'tool ancestor warning retains known rows and polls the live verified tip',
+    (tester) async {
+      final requests = <Uri>[];
+      final controller = DelegatedTaskController(
+        task: activity('tool', 'child-tool'),
+        history: historyFor('tool', requests),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: Scaffold(body: DelegatedTaskTimeline(controller: controller)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(controller.limitation, TaskHistoryProblem.partialCompression);
+      final pausedCount = requests.length;
+      await tester.pump(const Duration(seconds: 10));
+      expect(requests, hasLength(pausedCount));
+
+      controller.updateTask(activity('tool', 'tip-tool'));
+      await tester.pumpAndSettle();
+      expect(controller.limitation, TaskHistoryProblem.partialAncestors);
+      expect(controller.task.isComplete, isFalse);
+      expect(
+        controller.rows.map((row) => row['content']),
+        containsAll([
+          'BEFORE rotation',
+          'AFTER rotation: actual child completion',
+        ]),
+      );
+      final activeCount = requests.length;
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pumpAndSettle();
+      final polledCount = requests.length;
+      expect(polledCount, greaterThan(activeCount));
+      expect(controller.limitation, TaskHistoryProblem.partialAncestors);
+
+      controller.updateTask(activity('tool', 'tip-tool', complete: true));
+      await tester.pumpAndSettle();
+      final completedCount = requests.length;
+      expect(completedCount, greaterThan(polledCount));
+      await tester.pump(const Duration(seconds: 10));
+      expect(requests, hasLength(completedCount));
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
   for (final source in ['subagent', 'tool']) {
     test(
       'real $source rotation preserves inherited marker and includes final completion via latest reference',
@@ -128,7 +235,11 @@ void main() {
         );
         expect(page.sessionId, 'tip-$source');
         expect(page.lineage, ['tip-$source', 'child-$source']);
-        expect(page.partial, isFalse);
+        expect(page.partial, source == 'tool');
+        expect(
+          page.limitation,
+          source == 'tool' ? TaskHistoryProblem.partialAncestors : null,
+        );
         final transcript = parseTaskTranscript(page.rows);
         expect(
           transcript.map((row) => row.text),
@@ -186,7 +297,14 @@ void main() {
         controller.updateTask(activity(source, 'tip-$source', complete: true));
         await tester.pumpAndSettle();
         expect(controller.canonicalSessionId, 'tip-$source');
-        expect(controller.limitation, isNull);
+        expect(
+          controller.limitation,
+          source == 'tool' ? TaskHistoryProblem.partialAncestors : null,
+        );
+        expect(
+          controller.rows.map((row) => row['content']),
+          contains('BEFORE rotation'),
+        );
         expect(
           controller.rows.map((row) => row['content']),
           contains('AFTER rotation: actual child completion'),
@@ -206,7 +324,7 @@ void main() {
           latestChildId: 'child-$source',
         );
         expect(page.sessionId, 'tip-$source');
-        expect(page.partial, isFalse);
+        expect(page.partial, source == 'tool');
         history.close();
       },
     );

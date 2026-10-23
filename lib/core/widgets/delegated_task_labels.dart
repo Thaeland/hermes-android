@@ -12,6 +12,7 @@ String taskHistoryProblemLabel(
   TaskHistoryProblem.incompatible => l10n.task_incompatible_history,
   TaskHistoryProblem.identityUnproven => l10n.task_identity_unproven,
   TaskHistoryProblem.partialCompression => l10n.task_partial_compression,
+  TaskHistoryProblem.partialAncestors => l10n.task_partial_ancestors,
   TaskHistoryProblem.missingReference => l10n.task_missing_reference,
   TaskHistoryProblem.missingRowIdentity => l10n.task_missing_row_identity,
   TaskHistoryProblem.notReady => l10n.task_history_not_ready,

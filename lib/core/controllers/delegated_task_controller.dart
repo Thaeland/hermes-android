@@ -160,7 +160,7 @@ class DelegatedTaskController extends ChangeNotifier {
       } else {
         _window.acceptRecent(page.rows);
       }
-      limitation = page.partial ? TaskHistoryProblem.partialCompression : null;
+      limitation = page.limitation;
       _hasRead = true;
       _finalRetries = 0;
     } on TaskHistoryUnavailable catch (failure) {
@@ -181,7 +181,7 @@ class DelegatedTaskController extends ChangeNotifier {
         !_foreground ||
         _closed ||
         unavailable != null ||
-        limitation != null) {
+        limitation == TaskHistoryProblem.partialCompression) {
       return;
     }
     if (!_task.isComplete || (error != null && _finalRetries <= 3)) {

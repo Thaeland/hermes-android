@@ -2598,6 +2598,10 @@ class AppLocalizationsJa extends AppLocalizations {
       'Partial history: this task continued after compression, but this gateway has not exposed a verifiable newer reference. The final reply may be missing. Automatic refresh is paused; use Refresh to retry.';
 
   @override
+  String get task_partial_ancestors =>
+      'Partial history: this gateway omits compression ancestors for this task. Earlier task segments may be missing. Known rows are retained; use Refresh to retry.';
+
+  @override
   String get task_missing_reference =>
       'Task transcript unavailable: this server did not retain its session reference.';
 

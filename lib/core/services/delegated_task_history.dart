@@ -13,6 +13,7 @@ enum TaskHistoryProblem {
   incompatible,
   identityUnproven,
   partialCompression,
+  partialAncestors,
   missingReference,
   missingRowIdentity,
   notReady,
@@ -37,7 +38,7 @@ class TaskHistoryPage {
     required this.sessionId,
     required this.offset,
     required this.lineage,
-    this.partial = false,
+    this.limitation,
   });
   final List<Map<String, dynamic>> rows;
   final String sessionId;
@@ -45,7 +46,8 @@ class TaskHistoryPage {
 
   /// Verified compression path, newest segment first and task root last.
   final List<String> lineage;
-  final bool partial;
+  final TaskHistoryProblem? limitation;
+  bool get partial => limitation != null;
 }
 
 abstract interface class TaskHistorySource {
@@ -206,7 +208,13 @@ class DashboardTaskHistory implements TaskHistorySource {
         lineage: path,
         // Stock resume/latest-descendant exclude inherited delegation markers
         // and tool sources. The original may be only a partial snapshot.
-        partial: tip['end_reason'] == 'compression',
+        limitation: tip['end_reason'] == 'compression'
+            ? TaskHistoryProblem.partialCompression
+            // Stock tool-source messages omit ancestors even at a verified
+            // tip. A short page proves only this segment is exhausted.
+            : path.length > 1 && tip['source'] == 'tool'
+            ? TaskHistoryProblem.partialAncestors
+            : null,
       );
     } on DashboardHttpException catch (error) {
       if (error.statusCode == 401 || error.statusCode == 403) {
