@@ -220,6 +220,10 @@ void main() {
 
       expect(find.text('Tool activity'), findsOneWidget);
       expect(find.textContaining('Search files'), findsOneWidget);
+      expect(find.text('Search files: Working'), findsOneWidget);
+      expect(find.text('Scanning gateway event handlers'), findsNothing);
+      await tester.tap(find.text('Tool activity'));
+      await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('Working'), findsOneWidget);
       expect(find.text('Scanning gateway event handlers'), findsOneWidget);
     });
