@@ -939,8 +939,41 @@ class AppLocalizationsEn extends AppLocalizations {
   String get memory => 'Memory';
 
   @override
+  String get memory_about_you => 'About you';
+
+  @override
+  String get memory_agent_notes => 'Agent notes';
+
+  @override
+  String get memory_builtin_scope =>
+      'Saved facts from this profile’s USER.md and MEMORY.md. External memory providers (including MemPalace) are not shown here.';
+
+  @override
+  String get memory_read_only =>
+      'Read-only. Ask Hermes in chat to correct or forget a fact.';
+
+  @override
+  String get memory_unavailable =>
+      'This gateway or profile cannot provide saved memory facts. Check the selected profile and update Hermes if needed.';
+
+  @override
+  String get memory_load_error =>
+      'Check your dashboard connection and authentication, then try again.';
+
+  @override
+  String get memory_read_full_fact => 'Read full fact';
+
+  @override
+  String get memory_full_fact_requires_update =>
+      'Full facts require a newer Hermes gateway. Update Hermes and refresh.';
+
+  @override
+  String get memory_fact_detail_error =>
+      'The full fact could not be loaded. It may have changed; refresh the list and try again.';
+
+  @override
   String get memory_entries_are_cross_session_facts_the_agent_remembers_they =>
-      'Memory entries are cross-session facts the agent remembers.\nThey are configured in ~/.hermes/config.yaml';
+      'Saved facts will appear here after Hermes remembers them.';
 
   @override
   String get merge => 'Merge';

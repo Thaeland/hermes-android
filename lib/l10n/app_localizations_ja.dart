@@ -922,8 +922,39 @@ class AppLocalizationsJa extends AppLocalizations {
   String get memory => 'メモリ';
 
   @override
+  String get memory_about_you => 'あなたについて';
+
+  @override
+  String get memory_agent_notes => 'エージェントのメモ';
+
+  @override
+  String get memory_builtin_scope =>
+      'このプロファイルの USER.md と MEMORY.md に保存された情報です。MemPalace などの外部メモリはここには表示されません。';
+
+  @override
+  String get memory_read_only => '読み取り専用です。修正や削除はチャットで Hermes に依頼してください。';
+
+  @override
+  String get memory_unavailable =>
+      'このゲートウェイまたはプロファイルから保存情報を取得できません。プロファイルを確認し、必要に応じて Hermes を更新してください。';
+
+  @override
+  String get memory_load_error => 'ダッシュボードの接続と認証を確認して、もう一度お試しください。';
+
+  @override
+  String get memory_read_full_fact => '情報の全文を読む';
+
+  @override
+  String get memory_full_fact_requires_update =>
+      '全文の表示には新しい Hermes ゲートウェイが必要です。Hermes を更新し、一覧を再読み込みしてください。';
+
+  @override
+  String get memory_fact_detail_error =>
+      '全文を読み込めませんでした。情報が変更された可能性があります。一覧を更新して、もう一度お試しください。';
+
+  @override
   String get memory_entries_are_cross_session_facts_the_agent_remembers_they =>
-      'メモリは、エージェントが記憶するセッション横断の事実です。\n~/.hermes/config.yaml で設定します';
+      'Hermes が記憶した情報がここに表示されます。';
 
   @override
   String get merge => 'マージ';

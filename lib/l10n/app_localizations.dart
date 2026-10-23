@@ -1672,10 +1672,64 @@ abstract class AppLocalizations {
   /// **'Memory'**
   String get memory;
 
+  /// No description provided for @memory_about_you.
+  ///
+  /// In en, this message translates to:
+  /// **'About you'**
+  String get memory_about_you;
+
+  /// No description provided for @memory_agent_notes.
+  ///
+  /// In en, this message translates to:
+  /// **'Agent notes'**
+  String get memory_agent_notes;
+
+  /// No description provided for @memory_builtin_scope.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved facts from this profile’s USER.md and MEMORY.md. External memory providers (including MemPalace) are not shown here.'**
+  String get memory_builtin_scope;
+
+  /// No description provided for @memory_read_only.
+  ///
+  /// In en, this message translates to:
+  /// **'Read-only. Ask Hermes in chat to correct or forget a fact.'**
+  String get memory_read_only;
+
+  /// No description provided for @memory_unavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'This gateway or profile cannot provide saved memory facts. Check the selected profile and update Hermes if needed.'**
+  String get memory_unavailable;
+
+  /// No description provided for @memory_load_error.
+  ///
+  /// In en, this message translates to:
+  /// **'Check your dashboard connection and authentication, then try again.'**
+  String get memory_load_error;
+
+  /// No description provided for @memory_read_full_fact.
+  ///
+  /// In en, this message translates to:
+  /// **'Read full fact'**
+  String get memory_read_full_fact;
+
+  /// No description provided for @memory_full_fact_requires_update.
+  ///
+  /// In en, this message translates to:
+  /// **'Full facts require a newer Hermes gateway. Update Hermes and refresh.'**
+  String get memory_full_fact_requires_update;
+
+  /// No description provided for @memory_fact_detail_error.
+  ///
+  /// In en, this message translates to:
+  /// **'The full fact could not be loaded. It may have changed; refresh the list and try again.'**
+  String get memory_fact_detail_error;
+
   /// No description provided for @memory_entries_are_cross_session_facts_the_agent_remembers_they.
   ///
   /// In en, this message translates to:
-  /// **'Memory entries are cross-session facts the agent remembers.\nThey are configured in ~/.hermes/config.yaml'**
+  /// **'Saved facts will appear here after Hermes remembers them.'**
   String get memory_entries_are_cross_session_facts_the_agent_remembers_they;
 
   /// No description provided for @merge.

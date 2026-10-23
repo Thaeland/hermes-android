@@ -160,7 +160,10 @@ sanitized implementation and validation record.
 - **Model settings** — view and change the configured Hermes model where the dashboard exposes model settings.
 - **Cron management** — list, trigger, pause/resume, create, edit, and delete scheduled Hermes cron jobs.
 - **Skills browser** — view available Hermes skills with descriptions and trigger conditions.
-- **Memory viewer** — inspect conversation memory across sessions.
+- **Memory viewer:** More → Memory opens saved facts about you from `USER.md`,
+  with a separate Agent notes tab for `MEMORY.md`. Reads follow the connection’s
+  Hermes profile; long facts can be read in full. The view is read-only and does
+  not enumerate external providers such as MemPalace. See [Saved memory facts](docs/MEMORY_FACTS.md).
 - **Verbose mode toggle** — show raw message metadata (role, tool calls, timestamps) in chat.
 - **Task inspection:** read recorded delegated-task history without joining or
   controlling the child runtime. The viewer preserves the parent chat and draft.

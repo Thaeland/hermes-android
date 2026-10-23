@@ -915,8 +915,38 @@ class AppLocalizationsZh extends AppLocalizations {
   String get memory => '记忆';
 
   @override
+  String get memory_about_you => '关于你';
+
+  @override
+  String get memory_agent_notes => '助手笔记';
+
+  @override
+  String get memory_builtin_scope =>
+      '此配置档案的 USER.md 和 MEMORY.md 中保存的事实。这里不显示外部记忆服务（包括 MemPalace）的内容。';
+
+  @override
+  String get memory_read_only => '仅供查看。可在聊天中请 Hermes 更正或忘记某条事实。';
+
+  @override
+  String get memory_unavailable =>
+      '此网关或配置档案无法提供已保存的事实。请检查所选配置档案，并在需要时更新 Hermes。';
+
+  @override
+  String get memory_load_error => '请检查仪表盘连接和身份验证，然后重试。';
+
+  @override
+  String get memory_read_full_fact => '阅读完整事实';
+
+  @override
+  String get memory_full_fact_requires_update =>
+      '查看完整事实需要更新的 Hermes 网关。请更新 Hermes 并刷新列表。';
+
+  @override
+  String get memory_fact_detail_error => '无法加载完整事实。它可能已更改；请刷新列表后重试。';
+
+  @override
   String get memory_entries_are_cross_session_facts_the_agent_remembers_they =>
-      '记忆条目是 Agent 跨会话记住的事实。\n它们在 ~/.hermes/config.yaml 中进行配置';
+      'Hermes 记住的事实会显示在这里。';
 
   @override
   String get merge => '合并';
@@ -3576,8 +3606,38 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get memory => '记忆';
 
   @override
+  String get memory_about_you => '关于你';
+
+  @override
+  String get memory_agent_notes => '助手笔记';
+
+  @override
+  String get memory_builtin_scope =>
+      '此配置档案的 USER.md 和 MEMORY.md 中保存的事实。这里不显示外部记忆服务（包括 MemPalace）的内容。';
+
+  @override
+  String get memory_read_only => '仅供查看。可在聊天中请 Hermes 更正或忘记某条事实。';
+
+  @override
+  String get memory_unavailable =>
+      '此网关或配置档案无法提供已保存的事实。请检查所选配置档案，并在需要时更新 Hermes。';
+
+  @override
+  String get memory_load_error => '请检查仪表盘连接和身份验证，然后重试。';
+
+  @override
+  String get memory_read_full_fact => '阅读完整事实';
+
+  @override
+  String get memory_full_fact_requires_update =>
+      '查看完整事实需要更新的 Hermes 网关。请更新 Hermes 并刷新列表。';
+
+  @override
+  String get memory_fact_detail_error => '无法加载完整事实。它可能已更改；请刷新列表后重试。';
+
+  @override
   String get memory_entries_are_cross_session_facts_the_agent_remembers_they =>
-      '记忆条目是 Agent 跨会话记住的事实。\n它们在 ~/.hermes/config.yaml 中进行配置';
+      'Hermes 记住的事实会显示在这里。';
 
   @override
   String get merge => '合并';
