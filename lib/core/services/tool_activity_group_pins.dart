@@ -54,6 +54,16 @@ class ToolActivityGroupPins {
     }
   }
 
+  void mergeMissingFrom(ToolActivityGroupPins other) {
+    for (final entry in other._pins.entries) {
+      _pins.putIfAbsent(entry.key, () => entry.value);
+    }
+    for (final entry in other._aliases.entries) {
+      _aliases.putIfAbsent(entry.key, () => entry.value);
+    }
+    _trim();
+  }
+
   /// Forgets every choice, for when the conversation itself is replaced.
   void clear() {
     _pins.clear();

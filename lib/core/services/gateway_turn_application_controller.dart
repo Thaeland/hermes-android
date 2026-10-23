@@ -10,6 +10,7 @@ import 'gateway_turn_journal.dart';
 import 'gateway_turn_recovery.dart';
 import 'normal_gateway_application_session.dart';
 import 'connection_manager.dart';
+import 'chat_presentation_state.dart';
 import 'turn_notification_service.dart';
 
 typedef GatewayTurnApplicationSessionFactory =
@@ -136,6 +137,8 @@ class GatewayTurnApplicationController {
   final Map<String, GatewayTurnApplicationSession> _sessions = {};
   final Map<String, NormalGatewayApplicationSession> _normalSessions = {};
   final Map<String, String> _normalScopeByConnection = {};
+  final Map<String, ChatPresentationRegistry> _presentations = {};
+  final Map<String, String> _presentationScopes = {};
   bool _background = false;
   bool _backgroundWorkEnabled = true;
   final Map<Object, void Function()> _activityListeners = {};
@@ -166,6 +169,20 @@ class GatewayTurnApplicationController {
     return session;
   }
 
+  ChatPresentationRegistry presentationFor(SavedConnection connection) {
+    if (_closed) throw StateError('Gateway turn application owner is closed.');
+    final key = _connectionScopeKey(connection);
+    final previous = _presentationScopes[connection.id];
+    if (previous != null && previous != key) {
+      _presentations.remove(previous)?.close();
+    }
+    _presentationScopes[connection.id] = key;
+    return _presentations.putIfAbsent(
+      key,
+      () => ChatPresentationRegistry(connection.id),
+    );
+  }
+
   /// Stock and recovery-v2 lifetimes are separate; existing v2 callers keep
   /// their contract while normal chats retain their socket above Navigator.
   NormalGatewayApplicationSession normalSessionFor(
@@ -189,11 +206,13 @@ class GatewayTurnApplicationController {
           ? NormalGatewayApplicationSession.fromConnection(
               connection,
               scope: key,
+              presentation: presentationFor(connection),
               onActivityChanged: _notifyActivityListeners,
             )
           : NormalGatewayApplicationSession(
               connection: connection,
               scope: key,
+              presentation: presentationFor(connection),
               submit: submit,
               resume:
                   resume ??
@@ -229,6 +248,7 @@ class GatewayTurnApplicationController {
   }
 
   void revokeConnection(String connectionId) {
+    _presentations.remove(_presentationScopes.remove(connectionId))?.close();
     final scope = _normalScopeByConnection.remove(connectionId);
     final session = _normalSessions.remove(scope);
     if (session != null) unawaited(session.close());
@@ -236,6 +256,9 @@ class GatewayTurnApplicationController {
   }
 
   void retainConnections(Set<String> connectionIds) {
+    for (final id in _presentationScopes.keys.toList(growable: false)) {
+      if (!connectionIds.contains(id)) revokeConnection(id);
+    }
     for (final id in _normalScopeByConnection.keys.toList(growable: false)) {
       if (!connectionIds.contains(id)) revokeConnection(id);
     }
@@ -311,6 +334,11 @@ class GatewayTurnApplicationController {
     if (_closed) return;
     _closed = true;
     final hadTrackedTurns = hasActiveTurn;
+    for (final presentation in _presentations.values) {
+      presentation.close();
+    }
+    _presentations.clear();
+    _presentationScopes.clear();
     final sessions = _sessions.values.toList(growable: false);
     final normalSessions = _normalSessions.values.toList(growable: false);
     _normalSessions.clear();

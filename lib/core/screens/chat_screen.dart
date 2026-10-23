@@ -17,7 +17,7 @@ import 'package:share_plus/share_plus.dart';
 import '../controllers/voice_composer_controller.dart';
 import '../services/connection_manager.dart';
 import '../services/attachment_draft_service.dart';
-import '../services/composer_draft_store.dart';
+import '../services/chat_presentation_state.dart';
 import '../services/chat_model_override_store.dart';
 import '../services/chat_density_preference.dart';
 import '../services/chat_history_window.dart';
@@ -367,14 +367,21 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   List<Map<String, dynamic>> _messages = [];
   ChatTimeline _timeline = const ChatTimeline();
-  final Map<String, bool> _reasoningExpansionPins = {};
+  late final ChatPresentationRegistry _presentationRegistry;
+  late final ChatPresentationState _presentation;
+  late final ComposerDraftWriter _draftWriter;
+  late final GatewayTurnApplicationController _viewController;
+  String _lastComposerText = '';
+  bool _restoringComposer = false;
+  ToolActivityGroupPins get _reasoningExpansionPins =>
+      _presentation.reasoningPins;
   final ChatHistoryWindow _historyWindow = ChatHistoryWindow();
   bool _loadingOlder = false;
   final List<GatewayToolActivity> _toolActivities = [];
 
   /// Expansion choices for tool-activity cards, keyed by group id so they
   /// survive the list reordering and row eviction that a streaming turn causes.
-  final ToolActivityGroupPins _toolActivityPins = ToolActivityGroupPins();
+  ToolActivityGroupPins get _toolActivityPins => _presentation.toolPins;
   final List<GatewaySubagentActivity> _subagentActivities = [];
   final Map<String, GatewayNotification> _gatewayNotifications = {};
   final Map<String, Timer> _notificationTimers = {};
@@ -415,7 +422,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final _textController = TextEditingController();
   int _composerRevision = 0;
   int _clearedComposerRevision = 0;
-  String? _pendingComposerPrompt;
+
   final _imagePicker = ImagePicker();
   final List<AttachmentDraft> _attachmentDrafts = [];
   String? _sessionModel;
@@ -514,35 +521,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _sessionTitle = widget.session.title;
     WidgetsBinding.instance.addObserver(this);
     _projectName = _normalisedProjectName(widget.projectName);
+    _viewController =
+        widget.turnApplicationController ??
+        (widget.testRemotePromptSubmit != null
+            ? (_localTurnController ??= GatewayTurnApplicationController())
+            : GatewayTurnApplicationController.standalone);
+    _presentationRegistry = _viewController.presentationFor(widget.connection);
+    _presentation = _presentationRegistry.chatFor(widget.session.id);
+    _draftWriter = _presentation.openWriter();
     _textController.addListener(_onComposerChanged);
     if (widget.initialComposerText case final shared?) {
       _textController.text = shared;
       _textController.selection = TextSelection.collapsed(
         offset: shared.length,
-      );
-    } else {
-      // Restore this session's draft: leaving the chat must never lose it.
-      final composerRevision = _composerRevision;
-      final readDraft =
-          widget.testComposerDraftReader ?? ComposerDraftStore.read;
-      unawaited(
-        readDraft(
-          connectionId: widget.connection.id,
-          sessionId: widget.session.id,
-        ).then((draft) {
-          if (!mounted || draft == null) return;
-          // The user may have started typing while the read was in flight:
-          // even if they cleared or sent that newer text, never resurrect the
-          // older stored value just because the composer is empty again.
-          if (_composerRevision != composerRevision ||
-              _textController.text.isNotEmpty) {
-            return;
-          }
-          _textController.text = draft;
-          _textController.selection = TextSelection.collapsed(
-            offset: draft.length,
-          );
-        }),
       );
     }
     _turnNotifications =
@@ -604,6 +595,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (widget.testRemotePromptSubmit != null && _normalSession == null) {
       _attachNormalSession();
     }
+    if (widget.initialComposerText == null) unawaited(_restoreComposerDraft());
     widget.testDesktopConnectionHook?.handler = (state) {
       widget.testDesktopConnectionHook?.currentState = state;
       _normalSession?.connectionChanged(state);
@@ -650,11 +642,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _attachNormalSession() {
-    final controller =
-        widget.turnApplicationController ??
-        (widget.testRemotePromptSubmit != null
-            ? (_localTurnController ??= GatewayTurnApplicationController())
-            : GatewayTurnApplicationController.standalone);
+    final controller = _viewController;
     final testClient = widget.testApiClient;
     _normalSession = controller.normalSessionFor(
       widget.connection,
@@ -924,6 +912,38 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void _onComposerChanged() {
     _composerRevision += 1;
     _normalChat?.invalidateDraftRecovery();
+    final text = _textController.text;
+    if (!_restoringComposer && text != _lastComposerText) {
+      _draftWriter.edit(text);
+    }
+    _lastComposerText = text;
+  }
+
+  Future<void> _restoreComposerDraft() async {
+    final revision = _composerRevision;
+    final draft = await _draftWriter.read(
+      reader: widget.testComposerDraftReader,
+    );
+    if (!mounted ||
+        !_draftWriter.isCurrent ||
+        draft == null ||
+        _composerRevision != revision ||
+        _textController.text.isNotEmpty) {
+      return;
+    }
+    _setRestoredComposer(draft);
+  }
+
+  void _setRestoredComposer(String text) {
+    _restoringComposer = true;
+    try {
+      _textController.value = TextEditingValue(
+        text: text,
+        selection: TextSelection.collapsed(offset: text.length),
+      );
+    } finally {
+      _restoringComposer = false;
+    }
   }
 
   bool get _usesNormalInputOwner =>
@@ -981,6 +1001,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (localSessionId != widget.session.id) return;
     if (!mounted) return;
     _normalChat?.bindStoredSession(storedSessionId);
+    _presentationRegistry.bind(localSessionId, storedSessionId);
     setState(() => _storedSessionId = storedSessionId);
     unawaited(_refreshProjectName());
   }
@@ -1070,7 +1091,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       ),
     );
     // Route disposal only unsubscribes; it never closes the app-owned socket.
-    if (_localTurnController != null) unawaited(_localTurnController!.close());
+
     final registration = _turnApplicationAsyncEventRegistration;
     if (registration != null) {
       _turnApplicationSession?.removeAsyncEventListener(
@@ -1092,13 +1113,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         boundRegistration,
       );
     }
-    unawaited(
-      ComposerDraftStore.save(
-        connectionId: widget.connection.id,
-        sessionId: widget.session.id,
-        text: _composerDraftForPersistence,
-      ),
-    );
+    final draftSaved = _draftWriter.close();
+    unawaited(draftSaved.then((_) => _localTurnController?.close()));
     _textController.dispose();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
@@ -1139,13 +1155,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _appInBackground = true;
       _normalSession?.setLifecycle(background: true);
       // Persist the draft on the way out: a process kill must not lose it.
-      unawaited(
-        ComposerDraftStore.save(
-          connectionId: widget.connection.id,
-          sessionId: widget.session.id,
-          text: _composerDraftForPersistence,
-        ),
-      );
+      unawaited(_draftWriter.flush());
     } else if (state == AppLifecycleState.resumed) {
       _appInBackground = false;
       if (_normalChat?.snapshot.reconciling == true) {
@@ -2969,6 +2979,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             }
             assistant['content'] = current + token;
             _timeline = _timeline.appendText(assistant, token);
+            _retainReceiptPresentation();
           }
         });
         _scheduleStreamingFollow();
@@ -3348,6 +3359,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         final current = assistant['_gateway_reasoning']?.toString() ?? '';
         assistant['_gateway_reasoning'] = reasoning.applyTo(current);
         _timeline = _timeline.reasoning(assistant, reasoning);
+        _retainReceiptPresentation();
         assistant['_gateway_reasoning_verbose'] = reasoning.verbose;
         assistant['_gateway_reasoning_replaces'] =
             assistant['_gateway_reasoning_replaces'] == true ||
@@ -3404,6 +3416,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         if (current.isEmpty) _registerMaterializedAssistantMessage();
         assistant['content'] = '$current$token';
         _timeline = _timeline.appendText(assistant, token);
+        _retainReceiptPresentation();
       });
       _scheduleStreamingFollow();
       return;
@@ -3425,6 +3438,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         }
         assistant['content'] = transition.sealedText;
         _timeline = _timeline.textSnapshot(assistant, transition.sealedText);
+        _retainReceiptPresentation();
         if (transition.startsNewMessage) {
           assistant['_gateway_interim'] = true;
           assistant['_gateway_pending_response'] = false;
@@ -3461,6 +3475,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               completeText,
               preservePosition: !identical(assistant, pending),
             );
+            _retainReceiptPresentation();
           }
         }
       });
@@ -3531,6 +3546,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         replaceReasoning: pending['_gateway_reasoning_replaces'] == true,
       );
       _messages.removeAt(pendingIndex);
+      _retainReceiptPresentation();
       candidate.remove('_gateway_interim');
       return candidate;
     }
@@ -4414,58 +4430,29 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  String get _composerDraftForPersistence {
-    final pending = _pendingComposerPrompt;
-    return pending != null && _composerRevision == _clearedComposerRevision
-        ? pending
-        : _textController.text;
-  }
-
   /// Clear the visible draft immediately but retain the unsent prompt through
   /// cancellable setup. Leaving during an upload must not silently lose it.
   void _clearComposerForSend(String text) {
-    _pendingComposerPrompt = text;
-    _textController.clear();
+    _setRestoredComposer('');
     _clearedComposerRevision = _composerRevision;
-    unawaited(
-      ComposerDraftStore.save(
-        connectionId: widget.connection.id,
-        sessionId: widget.session.id,
-        text: text,
-      ),
-    );
+    _draftWriter.edit(text);
+    unawaited(_draftWriter.save(text));
   }
 
   /// Preparation finished: hand off the prompt without touching newer typing.
   void _commitComposerForSend() {
-    _pendingComposerPrompt = null;
-    unawaited(
-      ComposerDraftStore.save(
-        connectionId: widget.connection.id,
-        sessionId: widget.session.id,
-        text: _textController.text,
-      ),
-    );
+    unawaited(_draftWriter.save(_textController.text));
   }
 
   /// Restore only the send's untouched draft. A newer edit (including typing
   /// and then deleting) belongs to the user, not this failed submission.
   void _restoreComposerAfterRejectedSend(String text) {
-    _pendingComposerPrompt = null;
     if (text.trim().isEmpty) return;
+    if (!_draftWriter.isCurrent) return;
     if (_composerRevision == _clearedComposerRevision) {
-      _textController.value = TextEditingValue(
-        text: text,
-        selection: TextSelection.collapsed(offset: text.length),
-      );
+      _setRestoredComposer(text);
     }
-    unawaited(
-      ComposerDraftStore.save(
-        connectionId: widget.connection.id,
-        sessionId: widget.session.id,
-        text: _textController.text,
-      ),
-    );
+    unawaited(_draftWriter.save(_textController.text));
   }
 
   void _handleSendError(Object e, {bool removePendingUserMessage = false}) {
@@ -4527,6 +4514,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           assistant,
           idx >= 0 ? _toolActivities[idx] : update,
         );
+        // A late completion of an evicted tool is not a new receipt/card.
+        _toolActivities.removeWhere(
+          (a) =>
+              a.identity == update.identity &&
+              !_timeline.runs.any((r) => r.activity?.identity == a.identity),
+        );
+        _retainReceiptPresentation();
       }
       _gatewayTurnStatus = GatewayTurnStatus(
         kind: 'tool',
@@ -4537,6 +4531,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
 
     _scheduleStreamingFollow();
+  }
+
+  /// Retention belongs to receipt ingestion, before any ListView projection.
+  /// Do not change canonical/request accumulators to trim this view-only tail.
+  void _retainReceiptPresentation() {
+    _timeline = _timeline.retainScopes(
+      _messages.map((row) => row['_normal_projection_id'] ?? row),
+    );
+    _toolActivities.removeWhere(_timeline.excludesTool);
   }
 
   bool get _transcriptLoadBlocksComposer =>
@@ -5153,10 +5156,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               return GatewayReasoningCard(
                 key: ValueKey<String>('reasoning-${item.id}'),
                 id: item.id,
-                pinnedExpansion: _reasoningExpansionPins[item.id],
+                pinnedExpansion: item.id == null
+                    ? null
+                    : _reasoningExpansionPins[item.id!],
                 onPinChanged: (expanded) {
                   if (item.id != null) {
-                    _reasoningExpansionPins[item.id!] = expanded;
+                    _reasoningExpansionPins.pin(item.id!, expanded);
                   }
                 },
                 text: item.text,

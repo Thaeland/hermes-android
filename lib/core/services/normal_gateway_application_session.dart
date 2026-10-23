@@ -8,6 +8,7 @@ import '../models/gateway_activity.dart';
 import '../models/gateway_insight.dart';
 import 'connection_manager.dart';
 import 'composer_draft_store.dart';
+import 'chat_presentation_state.dart';
 import 'desktop_gateway_client.dart';
 import 'normal_gateway_pending_store.dart';
 import 'notification_prefs.dart';
@@ -118,6 +119,7 @@ class NormalGatewayApplicationSession {
   final NormalGatewayHistory _history;
   final TurnNotificationService notifications;
   final void Function()? onActivityChanged;
+  final ChatPresentationRegistry? presentation;
   final Map<String, NormalGatewayChatOwner> _aliases = {};
   late final Future<void> ready;
   bool _initialized = false;
@@ -137,6 +139,7 @@ class NormalGatewayApplicationSession {
     NormalGatewayHistory? history,
     TurnNotificationService? notifications,
     this.onActivityChanged,
+    this.presentation,
   }) : client = client,
        _historyClient = historyClient,
        pendingStore = pendingStore ?? NormalGatewayPendingStore(),
@@ -169,11 +172,13 @@ class NormalGatewayApplicationSession {
   factory NormalGatewayApplicationSession.fromConnection(
     SavedConnection connection, {
     required String scope,
+    ChatPresentationRegistry? presentation,
     void Function()? onActivityChanged,
   }) {
     return NormalGatewayApplicationSession(
       connection: connection,
       scope: scope,
+      presentation: presentation,
       client: DesktopGatewayClient.fromConnection(connection),
       historyClient: ApiClient(
         baseUrl: connection.baseUrl,
@@ -232,6 +237,7 @@ class NormalGatewayApplicationSession {
     owner.storedSessionId = stored;
     _aliases[stored] = owner;
     client?.bindStoredSession(owner.localSessionId, stored);
+    presentation?.bind(owner.localSessionId, stored);
     // A notification route can attach to this same owner while its previous
     // ChatScreen remains mounted. An unchanged binding is not a state change,
     // and synchronous fan-out here would dirty that sibling during its build.
@@ -905,6 +911,13 @@ class NormalGatewayChatOwner {
             assistant['_normal_projection_id']!,
             activity,
           );
+          _tools.removeWhere(
+            (tool) =>
+                tool.identity == activity.identity &&
+                !_timeline.runs.any(
+                  (run) => run.activity?.identity == tool.identity,
+                ),
+          );
         }
         if (_tools.length > 512) _tools.removeAt(0);
       }
@@ -944,6 +957,7 @@ class NormalGatewayChatOwner {
       ].map((row) => row['_normal_projection_id']).whereType<String>(),
     );
     final failure = _failure(event.data);
+    _tools.removeWhere(_timeline.excludesTool);
     final ownedLifecycleTerminal =
         wireTurn != null &&
         wireTurn == _wireTurnId &&
@@ -1167,6 +1181,11 @@ class NormalGatewayChatOwner {
           connectionId: _session.connection.id,
           sessionId: localSessionId,
           text: _draftToRestore!,
+          isCurrent: () =>
+              _current(owned) &&
+              _draftRestoreAllowed &&
+              _listeners.isEmpty &&
+              _session.presentation?.isClosed != true,
         );
         if (!_current(owned)) return;
       }

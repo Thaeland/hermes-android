@@ -41,6 +41,86 @@ List<String> labels(List<dynamic> items) => items
     .toList();
 
 void main() {
+  test('a pruned scope cannot reintroduce its late tool under a new scope', () {
+    final state = const ChatTimeline()
+        .tool('old', tool('old-tool'))
+        .appendText('new', 'new')
+        .retainScopes(['new']);
+    final late = state.tool('new', tool('old-tool', complete: true));
+    expect(late.runs, state.runs);
+  });
+
+  test(
+    'fully evicted scopes never render their canonical accumulators or fallback tools',
+    () {
+      final old = <String, dynamic>{
+        'role': 'assistant',
+        'content': 'evicted prose',
+        '_gateway_reasoning': 'evicted reasoning',
+      };
+      final live = <String, dynamic>{
+        'role': 'assistant',
+        'content': 'unbounded canonical accumulator',
+      };
+      final evicted = tool('evicted');
+      var state = const ChatTimeline()
+          .appendText(old, 'old')
+          .reasoning(old, reasoning('old reasoning'))
+          .tool(old, evicted);
+      for (var i = 0; i < 600; i++) {
+        state = state.appendText(live, 'new $i').tool(live, tool('t$i'));
+      }
+      final ids = state.runs.map((r) => r.id).toList();
+      final pending = <String, dynamic>{
+        'role': 'assistant',
+        'content': 'new target',
+      };
+      state = state.reassignScope(old, pending).retainScopes([pending, live]);
+      state = state.tool(live, tool('evicted', complete: true));
+      expect(state.runs.map((r) => r.id), ids);
+      final display = labels(
+        buildChatDisplayItems(
+          messages: [pending, live],
+          timeline: state,
+          toolActivities: [evicted],
+        ),
+      );
+      expect(display.length, ChatTimeline.maxRuns);
+      expect(
+        display.any((s) => s.contains('evicted') || s.contains('unbounded')),
+        isFalse,
+      );
+      expect(old['content'], 'evicted prose');
+    },
+  );
+
+  test(
+    'saturated identity tombstones reject ambiguous late terminals without fallback resurrection',
+    () {
+      final scope = <String, dynamic>{
+        'role': 'assistant',
+        'content': 'canonical',
+      };
+      var state = const ChatTimeline();
+      for (var i = 0; i < 2200; i++) {
+        state = state.appendText(scope, 'x').tool(scope, tool('t$i'));
+      }
+      final ids = state.runs.map((r) => r.id).toList();
+      final late = tool('t1200', complete: true);
+      state = state.tool(scope, late);
+      expect(state.runs.map((r) => r.id), ids);
+      final display = labels(
+        buildChatDisplayItems(
+          messages: [scope],
+          timeline: state,
+          toolActivities: [late],
+        ),
+      );
+      expect(display, isNot(contains('t1200')));
+      expect(display.length, ChatTimeline.maxRuns);
+    },
+  );
+
   test('stable presentation ids survive immutable snapshot row copies', () {
     final row = <String, dynamic>{
       'role': 'assistant',
@@ -84,11 +164,16 @@ void main() {
   );
 
   test('retained live view bounds text while preserving run identity', () {
-    final state = const ChatTimeline().appendText('live', 'x' * 2097152);
+    final source = 'x' * 2097152;
+    final state = const ChatTimeline().appendText('live', source);
     final bounded = state.retainScopes(['live']);
     expect(bounded.runs.single.text, hasLength(1048576));
     expect(bounded.runs.single.id, state.runs.single.id);
-    expect(state.runs.single.text, hasLength(2097152));
+    expect(state.runs.single.text.length, ChatTimeline.maxTextCodeUnits);
+    expect(
+      source.length,
+      2097152,
+    ); // The request/canonical source is untouched.
   });
 
   test(
