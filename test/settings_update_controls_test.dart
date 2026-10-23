@@ -35,7 +35,16 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Failed to load settings'), findsOneWidget);
-    await tester.ensureVisible(find.text('Check for updates on launch'));
+    await tester.scrollUntilVisible(
+      find.text('Check for updates on launch'),
+      300,
+      scrollable: find
+          .descendant(
+            of: find.byType(SettingsScreen),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
     await tester.pumpAndSettle();
     expect(find.text('Check for updates'), findsOneWidget);
     expect(find.text('Check for updates on launch'), findsOneWidget);

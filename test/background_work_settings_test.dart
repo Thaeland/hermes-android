@@ -157,7 +157,12 @@ void main() {
       await tester.scrollUntilVisible(
         find.text('Keep chats active in the background'),
         400,
-        scrollable: find.byType(Scrollable).last,
+        scrollable: find
+            .descendant(
+              of: find.byType(SettingsScreen),
+              matching: find.byType(Scrollable),
+            )
+            .first,
       );
       await tester.pumpAndSettle();
       await tester.tap(find.text('Keep chats active in the background'));
