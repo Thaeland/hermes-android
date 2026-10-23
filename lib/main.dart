@@ -182,7 +182,7 @@ class _StartupRecoveryApp extends StatelessWidget {
                   FilledButton.icon(
                     onPressed: () async {
                       try {
-                        await prefs.remove('saved_connections');
+                        await ConnectionManager(prefs).resetConnections();
                         final retry = await createConnectionManager(prefs);
                         onRecovered(retry);
                       } catch (retryError) {

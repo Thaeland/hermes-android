@@ -293,9 +293,13 @@ void main() {
         username: 'fixture-user',
         password: 'fixture-password',
       );
-      await second.entered.future;
+      // Whole-list ownership queues the sibling before snapshot capture.
+      // Its synchronous per-ID lease must still block consent between owners.
+      await enable(manager.getConnections().first);
+      expect(f.requests, isEmpty);
       first.release.complete();
       await one;
+      await second.entered.future;
       expect(f.connectionChanges, hasLength(1));
       await enable(manager.getConnections().first);
       expect(f.requests, isEmpty);
@@ -321,7 +325,10 @@ void main() {
         other.copyWith(gatewayProfile: 'imported'),
         original,
       ], replaceExisting: false);
-      final failed = expectLater(importing, throwsStateError);
+      final failed = expectLater(
+        importing,
+        throwsA(isA<CredentialStorageException>()),
+      );
       await gate.entered.future;
       expectOff();
       await enable(original);

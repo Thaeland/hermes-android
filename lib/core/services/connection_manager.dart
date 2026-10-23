@@ -23,8 +23,10 @@ export '../models/session.dart';
 /// The production implementation is backed by Android Keystore through
 /// `flutter_secure_storage`; tests use a deterministic in-memory fake.
 abstract interface class CredentialStore {
+  /// Last read-back only; callers needing authority must await [read].
   String? readCached(String key);
 
+  /// Read physical storage and refresh the cache, including removal on null.
   Future<String?> read(String key);
 
   Future<void> write(String key, String value);
@@ -143,6 +145,9 @@ class ConnectionManager {
   // stay retryable by a replacement manager, not strand this native lease until
   // process death. Retrying END never restores consent or releases a sibling.
   static final _pendingPushMutationEnds = <String, Map<String, dynamic>>{};
+  // saved_connections is one physical value across managers/store wrappers.
+  // Share ownership before reading a baseline, never secrets between stores.
+  static Future<void>? _savedListTail;
 
   final SharedPreferences prefs;
   final CredentialStore _credentialStore;
@@ -170,7 +175,7 @@ class ConnectionManager {
   /// Every legacy credential bundle is written and read back first. The
   /// SharedPreferences list is sanitized only after all read-backs match, so a
   /// partial secure-store failure leaves every legacy profile retryable.
-  Future<void> initialize() async {
+  Future<void> initialize() => _withSavedListTransaction([], () async {
     final maps = _readConnectionMaps();
     final connections = _connectionsFromMaps(maps);
     final hasLegacyFields = maps.any(
@@ -178,35 +183,48 @@ class ConnectionManager {
           map.containsKey('api_key') || map.containsKey('dashboard_password'),
     );
 
-    try {
-      for (final connection in connections) {
-        final credentials = _ConnectionCredentials.fromConnection(connection);
-        if (!credentials.isEmpty) {
-          await _writeAndVerifyCredentials(connection.id, credentials);
+    Future<void> migrateAndHydrate() async {
+      try {
+        for (final connection in connections) {
+          final credentials = _ConnectionCredentials.fromConnection(connection);
+          if (!credentials.isEmpty) {
+            await _writeAndVerifyCredentials(connection.id, credentials);
+          }
         }
-      }
 
-      for (final connection in connections) {
-        final encoded = await _credentialStore.read(
-          _credentialKey(connection.id),
+        for (final connection in connections) {
+          final encoded = await _credentialStore.read(
+            _credentialKey(connection.id),
+          );
+          if (encoded != null) {
+            _ConnectionCredentials.decode(encoded);
+          }
+        }
+
+        if (hasLegacyFields) {
+          await _saveAll(connections);
+        }
+      } on CredentialStorageException {
+        rethrow;
+      } catch (_) {
+        throw const CredentialStorageException(
+          'Connection credentials could not be migrated safely.',
         );
-        if (encoded != null) {
-          _ConnectionCredentials.decode(encoded);
-        }
       }
-
-      if (hasLegacyFields) {
-        await _saveAll(connections);
-      }
-    } on CredentialStorageException {
-      rethrow;
-    } catch (_) {
-      throw const CredentialStorageException(
-        'Connection credentials could not be migrated safely.',
-      );
     }
-  }
 
+    if (hasLegacyFields) {
+      await _withConnectionMutation(
+        connections.map((c) => c.id),
+        migrateAndHydrate,
+      );
+    } else {
+      await migrateAndHydrate();
+    }
+  });
+
+  /// Synchronous UI projection. Credentials are only as fresh as this store's
+  /// last read-back; mutations/export/push must refresh before using authority.
   List<SavedConnection> getConnections() {
     return _connectionsFromMaps(
       _readConnectionMaps(),
@@ -219,7 +237,10 @@ class ConnectionManager {
   /// Config export needs this: a freshly launched app has an empty credential
   /// cache, so [getConnections] alone would hand back connections with blank
   /// API keys and silently produce a useless backup.
-  Future<List<SavedConnection>> loadConnectionsWithSecrets() async {
+  Future<List<SavedConnection>> loadConnectionsWithSecrets() =>
+      _withSavedListTransaction([], _loadConnectionsWithSecrets);
+
+  Future<List<SavedConnection>> _loadConnectionsWithSecrets() async {
     final connections = _connectionsFromMaps(_readConnectionMaps());
     final hydrated = <SavedConnection>[];
     for (final connection in connections) {
@@ -242,6 +263,20 @@ class ConnectionManager {
     return hydrated;
   }
 
+  /// Refresh this store's cache without waiting for unrelated transactions.
+  /// Push must not mistake another wrapper's cold cache for revoked consent.
+  /// Callers fence the asynchronous read with the per-ID mutation epoch.
+  Future<void> refreshConnectionCredentials(String id) async {
+    try {
+      final encoded = await _credentialStore.read(_credentialKey(id));
+      if (encoded != null) _ConnectionCredentials.decode(encoded);
+    } catch (_) {
+      throw const CredentialStorageException(
+        'Connection credentials could not be read safely.',
+      );
+    }
+  }
+
   /// Writes a whole set of connections at once, preserving their ids.
   ///
   /// Every credential bundle is written and verified before the metadata list
@@ -251,45 +286,79 @@ class ConnectionManager {
   Future<void> importConnections(
     List<SavedConnection> incoming, {
     required bool replaceExisting,
-  }) async {
-    final current = _connectionsFromMaps(_readConnectionMaps());
-
+  }) {
     final ordered = List<SavedConnection>.of(incoming);
+    return _withSavedListTransaction(ordered.map((c) => c.id), () async {
+      final current = await _loadConnectionsWithSecrets();
 
-    final List<SavedConnection> next;
-    final removed = <SavedConnection>[];
-    if (replaceExisting) {
-      final keep = ordered.map((connection) => connection.id).toSet();
-      removed.addAll(
-        current.where((connection) => !keep.contains(connection.id)),
+      final List<SavedConnection> next;
+      final removed = <SavedConnection>[];
+      if (replaceExisting) {
+        final keep = ordered.map((connection) => connection.id).toSet();
+        removed.addAll(
+          current.where((connection) => !keep.contains(connection.id)),
+        );
+        next = ordered;
+      } else {
+        final incomingIds = ordered.map((connection) => connection.id).toSet();
+        next = <SavedConnection>[
+          ...ordered,
+          ...current.where(
+            (connection) => !incomingIds.contains(connection.id),
+          ),
+        ];
+      }
+
+      await _withConnectionMutation(
+        [...ordered, ...removed].map((connection) => connection.id),
+        () async {
+          final previous = <String, _ConnectionCredentials>{};
+          for (final connection in [...ordered, ...removed]) {
+            final encoded = await _credentialStore.read(
+              _credentialKey(connection.id),
+            );
+            previous[connection.id] = encoded == null
+                ? _ConnectionCredentials.fromConnection(
+                    current.where((c) => c.id == connection.id).firstOrNull ??
+                        connection.copyWith(
+                          apiKey: '',
+                          clearDashboardPassword: true,
+                        ),
+                  )
+                : _ConnectionCredentials.decode(encoded);
+          }
+          try {
+            for (final connection in ordered) {
+              await _writeAndVerifyCredentials(
+                connection.id,
+                _ConnectionCredentials.fromConnection(connection),
+              );
+            }
+            for (final connection in removed) {
+              await _writeAndVerifyCredentials(
+                connection.id,
+                const _ConnectionCredentials(
+                  apiKey: '',
+                  dashboardPassword: null,
+                ),
+              );
+            }
+            await _saveAll(next);
+          } catch (_) {
+            for (final entry in previous.entries) {
+              try {
+                await _writeAndVerifyCredentials(entry.key, entry.value);
+              } catch (_) {
+                // Keep native authority revoked if rollback is unavailable.
+              }
+            }
+            throw const CredentialStorageException(
+              'Imported connection credentials could not be saved safely.',
+            );
+          }
+        },
       );
-      next = ordered;
-    } else {
-      final incomingIds = ordered.map((connection) => connection.id).toSet();
-      next = <SavedConnection>[
-        ...ordered,
-        ...current.where((connection) => !incomingIds.contains(connection.id)),
-      ];
-    }
-
-    await _withConnectionMutation(
-      [...ordered, ...removed].map((connection) => connection.id),
-      () async {
-        for (final connection in ordered) {
-          await _writeAndVerifyCredentials(
-            connection.id,
-            _ConnectionCredentials.fromConnection(connection),
-          );
-        }
-        for (final connection in removed) {
-          await _writeAndVerifyCredentials(
-            connection.id,
-            const _ConnectionCredentials(apiKey: '', dashboardPassword: null),
-          );
-        }
-        await _saveAll(next);
-      },
-    );
+    });
   }
 
   Future<void> saveConnection(
@@ -305,7 +374,7 @@ class ConnectionManager {
     String? dashboardUsername,
     String? dashboardPassword,
     String? gatewayProfile,
-  }) async {
+  }) => _withSavedListTransaction([], () async {
     final normalized = SavedConnection.normalizeHostAndPort(host, port);
     final profile = gatewayProfile?.trim();
     final conn = SavedConnection(
@@ -324,7 +393,7 @@ class ConnectionManager {
       dashboardPassword: dashboardPassword,
       gatewayProfile: profile == null || profile.isEmpty ? null : profile,
     );
-    final current = getConnections();
+    final current = await _loadConnectionsWithSecrets();
     current.insert(0, conn);
     await _commitCredentialAndMetadata(
       connectionId: conn.id,
@@ -335,7 +404,7 @@ class ConnectionManager {
       nextCredentials: _ConnectionCredentials.fromConnection(conn),
       connections: current,
     );
-  }
+  });
 
   /// Updates all editable fields on an existing connection while preserving its
   /// id and list position. Empty optional strings clear their saved values.
@@ -353,8 +422,8 @@ class ConnectionManager {
     String? dashboardUsername,
     String? dashboardPassword,
     String? gatewayProfile,
-  }) async {
-    final current = getConnections();
+  }) => _withSavedListTransaction([connId], () async {
+    final current = await _loadConnectionsWithSecrets();
     final idx = current.indexWhere((c) => c.id == connId);
     if (idx < 0) return;
 
@@ -402,7 +471,7 @@ class ConnectionManager {
       nextCredentials: _ConnectionCredentials.fromConnection(current[idx]),
       connections: current,
     );
-  }
+  });
 
   /// Updates the dashboard port + basic-auth credentials on an existing
   /// connection. Empty strings clear the corresponding field.
@@ -414,8 +483,8 @@ class ConnectionManager {
     String? gatewayPrefix,
     String? dashboardPrefix,
     bool? dashboardProxied,
-  }) async {
-    final current = getConnections();
+  }) => _withSavedListTransaction([connId], () async {
+    final current = await _loadConnectionsWithSecrets();
     final idx = current.indexWhere((c) => c.id == connId);
     if (idx < 0) return;
     final previousCredentials = _ConnectionCredentials.fromConnection(
@@ -446,41 +515,101 @@ class ConnectionManager {
       nextCredentials: _ConnectionCredentials.fromConnection(current[idx]),
       connections: current,
     );
-  }
+  });
 
-  Future<void> updateApiKey(String connId, String apiKey) async {
-    final current = getConnections();
-    final idx = current.indexWhere((c) => c.id == connId);
-    if (idx < 0) return;
-    final previousCredentials = _ConnectionCredentials.fromConnection(
-      current[idx],
-    );
-    current[idx] = current[idx].copyWith(apiKey: apiKey);
-    await _commitCredentialAndMetadata(
-      connectionId: connId,
-      previousCredentials: previousCredentials,
-      nextCredentials: _ConnectionCredentials.fromConnection(current[idx]),
-      connections: current,
-    );
-  }
+  Future<void> updateApiKey(String connId, String apiKey) =>
+      _withSavedListTransaction([connId], () async {
+        final current = await _loadConnectionsWithSecrets();
+        final idx = current.indexWhere((c) => c.id == connId);
+        if (idx < 0) return;
+        final previousCredentials = _ConnectionCredentials.fromConnection(
+          current[idx],
+        );
+        current[idx] = current[idx].copyWith(apiKey: apiKey);
+        await _commitCredentialAndMetadata(
+          connectionId: connId,
+          previousCredentials: previousCredentials,
+          nextCredentials: _ConnectionCredentials.fromConnection(current[idx]),
+          connections: current,
+        );
+      });
 
-  Future<void> deleteConnection(String id) async {
-    final current = getConnections();
-    final index = current.indexWhere((connection) => connection.id == id);
-    if (index < 0) return;
-    final previousCredentials = _ConnectionCredentials.fromConnection(
-      current[index],
-    );
-    current.removeWhere((c) => c.id == id);
-    await _commitCredentialAndMetadata(
-      connectionId: id,
-      previousCredentials: previousCredentials,
-      nextCredentials: const _ConnectionCredentials(
-        apiKey: '',
-        dashboardPassword: null,
-      ),
-      connections: current,
-    );
+  Future<void> deleteConnection(String id) =>
+      _withSavedListTransaction([id], () async {
+        final current = await _loadConnectionsWithSecrets();
+        final index = current.indexWhere((connection) => connection.id == id);
+        if (index < 0) return;
+        final previousCredentials = _ConnectionCredentials.fromConnection(
+          current[index],
+        );
+        current.removeWhere((c) => c.id == id);
+        await _commitCredentialAndMetadata(
+          connectionId: id,
+          previousCredentials: previousCredentials,
+          nextCredentials: const _ConnectionCredentials(
+            apiKey: '',
+            dashboardPassword: null,
+          ),
+          connections: current,
+        );
+      });
+
+  /// Recovery resets metadata only, including corrupt legacy metadata. Native
+  /// consent must be revoked even if its saved ID cannot be decoded anymore.
+  Future<void> resetConnections() => _withSavedListTransaction([], () async {
+    final ids = <String>{};
+    try {
+      ids.addAll(_connectionsFromMaps(_readConnectionMaps()).map((c) => c.id));
+    } on CredentialStorageException {
+      // The sealed native binding is independent of damaged list metadata.
+    }
+    if (_nativePushSupported) {
+      final state = await _pushChannel.invokeMapMethod<String, dynamic>(
+        'snapshot',
+      );
+      final bound = state?['connection'];
+      if (bound is String && bound.isNotEmpty) ids.add(bound);
+    }
+    await _withConnectionMutation(ids, () async {
+      final previous = prefs.get(_key);
+      try {
+        if (!await prefs.remove(_key)) {
+          throw const CredentialStorageException(
+            'Saved connections could not be reset safely.',
+          );
+        }
+      } catch (_) {
+        await _restoreMetadata(previous);
+        rethrow;
+      }
+    });
+  });
+
+  Future<T> _withSavedListTransaction<T>(
+    Iterable<String> pendingIds,
+    Future<T> Function() action,
+  ) {
+    // Fence queued targeted edits synchronously, including initially-off starts.
+    // Import removals are discovered only after owning the current list.
+    final lease = ConnectionMutationBarrier.begin(pendingIds);
+    final previous = _savedListTail;
+    final completed = Completer<void>();
+    final tail = completed.future;
+    _savedListTail = tail;
+    Future<T> perform() async {
+      try {
+        if (previous != null) await previous;
+        await prefs.reload();
+        return await action();
+      } finally {
+        lease.release();
+        // A completed Future must not retain its disposed fake-async zone.
+        if (identical(_savedListTail, tail)) _savedListTail = null;
+        completed.complete();
+      }
+    }
+
+    return perform();
   }
 
   List<Map<String, dynamic>> _readConnectionMaps() {
@@ -627,6 +756,7 @@ class ConnectionManager {
   }
 
   Future<void> _saveAll(List<SavedConnection> list) async {
+    final previous = prefs.getStringList(_key);
     try {
       final saved = await prefs.setStringList(
         _key,
@@ -637,13 +767,34 @@ class ConnectionManager {
           'Connection metadata could not be saved safely.',
         );
       }
-    } on CredentialStorageException {
-      rethrow;
     } catch (_) {
+      await _restoreMetadata(previous);
       throw const CredentialStorageException(
         'Connection metadata could not be saved safely.',
       );
     }
+  }
+
+  Future<void> _restoreMetadata(Object? previous) async {
+    try {
+      switch (previous) {
+        case null:
+          await prefs.remove(_key);
+        case List<String>():
+          await prefs.setStringList(_key, previous);
+        case String():
+          await prefs.setString(_key, previous);
+        case bool():
+          await prefs.setBool(_key, previous);
+        case int():
+          await prefs.setInt(_key, previous);
+        case double():
+          await prefs.setDouble(_key, previous);
+      }
+    } catch (_) {
+      // Reload after rollback/ACK loss: optimistic metadata is not authority.
+    }
+    await prefs.reload();
   }
 
   static String _credentialKey(String connectionId) {

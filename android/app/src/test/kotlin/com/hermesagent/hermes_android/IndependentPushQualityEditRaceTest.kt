@@ -174,6 +174,64 @@ class IndependentPushQualityEditRaceTest {
         assertFalse(MobilePushStore.read(context).getBoolean("enabled"))
     }
 
+    /** Paired with connection_list_transactions_test's serialized metadata
+     * schedule. A commits before queued C can save/consent; C stays saved.
+     * Unlike the archived red transcript, a headless C post is now valid. */
+    @Test fun queuedCSurvivesSerializedListCommitAndPostsHeadlessly() {
+        begin("owned-A", listOf("older-account-A"))
+        end("owned-A") // A metadata acknowledged BEFORE C's snapshot/write
+        begin("save-C", listOf("saved-account"))
+        end("save-C")
+        enableAndActivate("concurrent-new-C-binding")
+        val saved = MobilePushStore.read(context)
+        val installation = saved.getString("installation")
+        receive(hint(saved.getString("nonce"), "before-unrelated-edit"), installation)
+        assertEquals(1, manager.activeNotifications.size)
+        manager.cancelAll() // reset positive control, not product revocation
+        begin("edit-A", listOf("older-account-A"))
+        end("edit-A") // paired Dart test establishes C remains saved
+        MobilePushBridge.detach()
+        val reloaded = MobilePushStore.read(context)
+        assertTrue(reloaded.getBoolean("enabled"))
+        assertTrue(reloaded.getBoolean("active"))
+        assertEquals("concurrent-new-C-binding", reloaded.getString("binding"))
+        assertEquals(0, reloaded.optJSONArray("revocations")?.length() ?: 0)
+        receive(hint(saved.getString("nonce"), "after-unrelated-edit"), installation)
+        assertEquals(1, manager.activeNotifications.size)
+    }
+
+    /** A replacement import which actually removes C must include it in BEGIN
+     * before any credential/metadata effects. The Dart half checks that write
+     * set is discovered from current metadata, not an old manager snapshot. */
+    @Test fun replacingListRevokesActuallyRemovedCBeforeHeadlessReceive() {
+        enableAndActivate("concurrent-new-C-binding")
+        val saved = MobilePushStore.read(context)
+        val installation = saved.getString("installation")
+        receive(hint(saved.getString("nonce"), "before-replace"), installation)
+        assertEquals(1, manager.activeNotifications.size)
+        begin("replace-A", listOf("older-account-A", "saved-account"))
+        assertEquals(0, manager.activeNotifications.size)
+        assertFalse(MobilePushStore.read(context).getBoolean("enabled"))
+        end("replace-A")
+        MobilePushBridge.detach()
+        val reloaded = MobilePushStore.read(context)
+        assertFalse(reloaded.getBoolean("enabled"))
+        assertFalse(reloaded.getBoolean("active"))
+        assertEquals(1, reloaded.getJSONArray("revocations").length())
+        receive(hint(saved.getString("nonce"), "after-replace"), installation)
+        assertEquals(0, manager.activeNotifications.size)
+    }
+
+    @Test fun terminalEndReplayAfterLostReplyCannotReleaseNewOwner() {
+        begin("finished-A")
+        end("finished-A") // physical effect succeeds; Dart loses the reply
+        begin("live-A")
+        end("finished-A") // finished-only outbox retry during live owner
+        assertThrows(IllegalStateException::class.java) { fence() }
+        end("live-A")
+        enableAndActivate("fresh-after-retry")
+    }
+
     @Test fun explicitDisableWhileInitiallyOffFencesAlreadyDispatchedEnable() {
         val pending = consent(fence())
         command("disable")

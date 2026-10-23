@@ -86,6 +86,17 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
       .toString();
   SavedConnection? _connection(String id) =>
       _manager?.getConnections().where((c) => c.id == id).firstOrNull;
+
+  Future<bool> _refreshCredentialCache(String id) async {
+    final manager = _manager;
+    final mutation = ConnectionMutationBarrier.capture(id);
+    if (!ConnectionMutationBarrier.isCurrent(id, mutation)) return false;
+    await manager?.refreshConnectionCredentials(id);
+    return !_closed &&
+        identical(manager, _manager) &&
+        ConnectionMutationBarrier.isCurrent(id, mutation);
+  }
+
   Future<Map<String, dynamic>> _call(
     String method, [
     Map<String, dynamic>? args,
@@ -186,12 +197,16 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
         binding(_connection(connection.id)!) == fingerprint;
     // A new opt-in started during an edit must not queue old consent to run
     // after that edit, even if the saved metadata still looks unchanged.
-    if (!current()) return;
+    if (_closed ||
+        !ConnectionMutationBarrier.isCurrent(connection.id, mutationEpoch)) {
+      return;
+    }
     final client = _clientFactory(connection);
     error = null;
     status = 'Checking server authorization';
     notifyListeners();
     try {
+      if (!await _refreshCredentialCache(connection.id) || !current()) return;
       await _manager!.finishPendingMobilePushChanges();
       if (!current()) return;
       final ticket = await _call('connectionFence', {
@@ -335,6 +350,13 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
     if (_closed || epoch != _epoch) return false;
     final live = await _call('snapshot');
     if (_closed || epoch != _epoch) return false;
+    if (!await _refreshCredentialCache(
+          expected['connection'] as String? ?? '',
+        ) ||
+        _closed ||
+        epoch != _epoch) {
+      return false;
+    }
     final c = _connection(expected['connection'] as String? ?? '');
     return c != null &&
         !ConnectionMutationBarrier.isPending(c.id) &&
@@ -355,6 +377,10 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
     // different origin/profile. Such records remain visibly pending.
     for (final raw in snapshot['revocations'] as List? ?? []) {
       final item = Map<String, dynamic>.from(raw as Map);
+      if (!await _refreshCredentialCache(item['connection'] as String)) {
+        continue;
+      }
+      if (_closed || epoch != _epoch) return;
       final c = _connection(item['connection'] as String);
       if (c == null ||
           ConnectionMutationBarrier.isPending(c.id) ||
@@ -383,6 +409,8 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
       notifyListeners();
       return;
     }
+    if (!await _refreshCredentialCache(connectionId)) return;
+    if (_closed || epoch != _epoch) return;
     final connection = _connection(connectionId);
     if (connection != null &&
         ConnectionMutationBarrier.isPending(connection.id)) {
