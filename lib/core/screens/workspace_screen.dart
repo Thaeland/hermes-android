@@ -1173,6 +1173,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     String? projectWorkingDirectory,
     String? initialComposerText,
     List<AttachmentDraft> initialAttachmentDrafts = const [],
+    VoidCallback? onArchiveCommitted,
   }) async {
     final report = widget.onOpenSession;
     if (report != null) {
@@ -1193,8 +1194,14 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
               initialComposerText: initialComposerText,
               initialAttachmentDrafts: initialAttachmentDrafts,
               turnApplicationController: widget.turnApplicationController,
-              sessionArchiver: (storedId, archived) =>
-                  _archiveSession(session.withStoredId(storedId), archived),
+              sessionArchiver: (storedId, archived) async {
+                final saved = await _archiveSession(
+                  session.withStoredId(storedId),
+                  archived,
+                );
+                onArchiveCommitted?.call();
+                return saved;
+              },
               testApiClient: widget.testChatApiClientFactory?.call(),
             ),
       ),
@@ -1770,7 +1777,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           );
         },
         onOpenSession: (session) => unawaited(() async {
-          await _openSession(session);
+          await _openSession(
+            session,
+            onArchiveCommitted: () {
+              unawaited(key.currentState?.refresh() ?? Future<void>.value());
+            },
+          );
           await key.currentState?.refresh();
         }()),
         onRename: _renameSession,

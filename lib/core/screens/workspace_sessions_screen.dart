@@ -954,7 +954,7 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
             projectsKnown: data.projectsKnown || reuseClaims,
           )
         : filterWorkspaceSessions(
-            sessions: classified(data.sessions),
+            sessions: classified(unionSessions),
             view: widget.view,
             claimedSessionIds: data.claimedSessionIds,
             archivedQuickChatIds: data.archivedQuickChatIds,

@@ -183,6 +183,146 @@ void main() {
     },
   );
 
+  for (final view in [
+    WorkspaceSessionView.search,
+    WorkspaceSessionView.unassigned,
+  ]) {
+    for (final aliased in [false, true]) {
+      testWidgets(
+        'standalone ${view.name} hides archived ${aliased ? 'lineage' : 'exact'} alias',
+        (tester) async {
+          await tester.pumpWidget(
+            _app(
+              Scaffold(
+                body: WorkspaceSessionsScreen(
+                  title: 'Standalone',
+                  view: view,
+                  onOpenSession: (_) => fail(
+                    'An archived conversation must not be actionable here',
+                  ),
+                  load: () async => WorkspaceSessionsData(
+                    sessions: [
+                      _row(
+                        aliased ? 'tip-1' : 'chat',
+                        root: aliased ? 'root' : null,
+                      ),
+                    ],
+                    archivedSessions: [
+                      _row(
+                        aliased ? 'tip-2' : 'chat',
+                        root: aliased ? 'root' : null,
+                        archived: true,
+                        started: 20,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+          await _tick(tester);
+          expect(find.text(_title), findsNothing);
+          expect(find.byType(HermesCard), findsNothing);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+
+    testWidgets(
+      'standalone ${view.name} refreshes after a late chat archive commit',
+      (tester) async {
+        _viewport(tester);
+        var archived = false;
+        var activeReads = 0;
+        var writes = 0;
+        final gate = Completer<http.Response>();
+        final started = tester.binding.clock.now();
+        final active = MockClient((request) async {
+          if (request.method == 'PATCH') {
+            writes++;
+            return gate.future;
+          }
+          if (request.url.path.endsWith('/chat')) {
+            return _json({'session': _jsonRow(archived)});
+          }
+          activeReads++;
+          return _page(
+            (request.url.queryParameters['offset'] ?? '0') == '0' && !archived
+                ? [_jsonRow(false)]
+                : [],
+          );
+        });
+        final archives = MockClient(
+          (_) async => _json({
+            'sessions': archived ? [_jsonRow(true)] : [],
+            'total': archived ? 1 : 0,
+          }),
+        );
+        await tester.pumpWidget(
+          _app(
+            WorkspaceScreen(
+              connection: _connection('standalone-${view.name}'),
+              testSessionsHttpClient: active,
+              testArchivedSessionsHttpClient: archives,
+              testChatApiClientFactory: () => ApiClient(
+                baseUrl: 'http://fixture.invalid:8642',
+                apiKey: 'fixture-token',
+                httpClient: MockClient(
+                  (request) async => request.url.path.endsWith('/messages')
+                      ? _json({
+                          'data': [
+                            {'id': 1, 'role': 'user', 'content': 'Question'},
+                            {'id': 2, 'role': 'assistant', 'content': 'Answer'},
+                          ],
+                        })
+                      : _json({'session': _jsonRow(archived)}),
+                ),
+              ),
+              turnSignalsLoader: (_) async => HomeTurnSignals.empty,
+            ),
+          ),
+        );
+        await _tick(tester);
+        if (view == WorkspaceSessionView.search) {
+          await tester.tap(find.byTooltip('Search all chats'));
+        } else {
+          await tester.tap(find.text('More').last);
+          await _tick(tester);
+          await tester.tap(find.text('Unassigned chats'));
+        }
+        await _tick(tester);
+        await tester.tap(find.text(_title));
+        await _tick(tester);
+        await _choose(tester, 'Archive chat');
+        expect(writes, 1);
+        await tester.pageBack();
+        await _tick(tester);
+        expect(find.byType(ChatScreen), findsNothing);
+        expect(
+          find.text(_title),
+          findsOneWidget,
+          reason: 'the return refresh precedes the commit',
+        );
+        final readsAfterPop = activeReads;
+        expect(
+          tester.binding.clock.now().difference(started),
+          lessThan(const Duration(seconds: 20)),
+        );
+        archived = true;
+        gate.complete(_json({'session': _jsonRow(true)}));
+        await _tick(tester);
+        expect(
+          activeReads,
+          greaterThan(readsAfterPop),
+          reason: 'the standalone owner receives a post-commit read',
+        );
+        expect(find.text(_title), findsNothing);
+        expect(writes, 1);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
   for (final restoring in [true, false]) {
     testWidgets(
       'old shared Home scan preserves ${restoring ? 'restoration' : 'archive'} for new search',
