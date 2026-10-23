@@ -26,7 +26,13 @@ class ConnectionMutationBarrier {
       _pending[id] = (_pending[id] ?? 0) + 1;
     }
     for (final listener in _listeners.toList()) {
-      listener();
+      try {
+        listener();
+      } catch (_) {
+        // Observers are best-effort: a failed authority read is not revocation.
+        // Keep delivering without blocking the caller's storage/recovery path
+        // or losing its release lease. Do not surface sensitive observer errors.
+      }
     }
     return ConnectionMutationLease._(ids);
   }
