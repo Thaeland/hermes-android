@@ -8,6 +8,49 @@ Session _row(String title) => Session.fromJson({'id': 'same', 'title': title});
 
 void main() {
   test(
+    'physical revisions are inherited, never allocated by subscribers',
+    () async {
+      final completions = <Completer<List<Session>>>[];
+      final scan = SharedSessionScan((publish) {
+        publish([_row('Progress')]);
+        final completion = Completer<List<Session>>();
+        completions.add(completion);
+        return completion.future;
+      });
+      addTearDown(scan.close);
+      final revisions = <int>[];
+      final first = scan.load(onRevision: revisions.add);
+      final joined = scan.load(
+        onRevision: revisions.add,
+        onProgress: (_) {
+          expect(revisions, hasLength(2));
+          expect(scan.isCurrent(revisions.last), isTrue);
+        },
+      );
+      expect(revisions.first, revisions.last);
+      expect(completions, hasLength(1));
+      completions.first.complete([_row('Complete')]);
+      await Future.wait([first, joined]);
+      final next = scan.load(onRevision: revisions.add);
+      expect(revisions.last, greaterThan(revisions.first));
+      expect(scan.isCurrent(revisions.first), isFalse);
+      scan.invalidate();
+      expect(scan.isCurrent(revisions.last), isFalse);
+      final fresh = scan.load(onRevision: revisions.add);
+      final freshJoined = scan.load(onRevision: revisions.add);
+      expect(revisions[3], revisions[4]);
+      expect(completions, hasLength(3));
+      completions.last.complete([_row('Fresh')]);
+      await Future.wait([fresh, freshJoined]);
+      completions[1].complete([_row('Obsolete')]);
+      await next;
+      expect(scan.isCurrent(revisions.last), isTrue);
+      scan.close();
+      expect(scan.isCurrent(revisions.last), isFalse);
+    },
+  );
+
+  test(
     'invalidated flights cannot replay into, publish to, or clear a new flight',
     () async {
       final completions = <Completer<List<Session>>>[];

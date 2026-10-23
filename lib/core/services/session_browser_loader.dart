@@ -17,11 +17,14 @@ class SharedSessionScan {
 
   SharedSessionScan(this.read);
 
-  Future<List<Session>> load({SessionScanProgress? onProgress}) async {
+  Future<List<Session>> load({
+    SessionScanProgress? onProgress,
+    void Function(int revision)? onRevision,
+  }) async {
     if (isClosed) throw StateError('Session browser is closed');
     var flight = _current;
     if (flight == null || flight.revision != _revision) {
-      flight = _SessionScanFlight(_revision);
+      flight = _SessionScanFlight(++_revision);
       final started = flight;
       _current = started;
       _flights.add(started);
@@ -40,6 +43,9 @@ class SharedSessionScan {
           });
     }
     try {
+      // A subscriber inherits the physical read's revision, before any replay.
+      // Joining an old read must never promote its cache-write authority.
+      onRevision?.call(flight.revision);
       if (onProgress != null) {
         flight.listeners.add(onProgress);
         if (flight.progress case final previous?) onProgress(previous);
@@ -53,6 +59,8 @@ class SharedSessionScan {
   }
 
   void invalidate() => _revision++;
+
+  bool isCurrent(int revision) => !isClosed && revision == _revision;
 
   void close() {
     _closed = true;
@@ -85,8 +93,12 @@ class SessionBrowserLoader {
     this.sessionsLoader,
   });
 
-  Future<List<Session>> load({SessionScanProgress? onProgress}) =>
-      _owner.load(onProgress: onProgress);
+  Future<List<Session>> load({
+    SessionScanProgress? onProgress,
+    void Function(int revision)? onRevision,
+  }) => _owner.load(onProgress: onProgress, onRevision: onRevision);
+
+  bool isCurrent(int revision) => _owner.isCurrent(revision);
 
   void invalidate() => _owner.invalidate();
   bool get _closed => _owner.isClosed;

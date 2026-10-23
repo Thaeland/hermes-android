@@ -368,6 +368,33 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     return _withConfirmedTitles(rows, revision);
   }
 
+  Future<List<Session>> _loadActiveSessions({
+    SessionScanProgress? onProgress,
+    bool fresh = false,
+  }) async {
+    final titleRevision = _sessionTitleRevision;
+    final owner = _sessionLoader;
+    if (fresh) owner.invalidate();
+    late int readRevision;
+    List<Session> accept(List<Session> rows, {bool complete = false}) {
+      final sessions = _withConfirmedTitles(rows, titleRevision);
+      if (mounted &&
+          owner.isCurrent(readRevision) &&
+          titleRevision == _sessionTitleRevision) {
+        setState(() => _knownSessions = sessions);
+        if (complete) _sessionsKnown = true;
+        _cacheSessionTitles(sessions);
+      }
+      return sessions;
+    }
+
+    final rows = await owner.load(
+      onRevision: (revision) => readRevision = revision,
+      onProgress: (rows) => onProgress?.call(accept(rows)),
+    );
+    return accept(rows, complete: true);
+  }
+
   List<Session> _withConfirmedTitles(List<Session> rows, int readRevision) => [
     for (final row in rows)
       if (_confirmedTitles[row.id] case final saved?
@@ -448,20 +475,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     // user opens; read the sessions once so rows are not all untitled. A
     // failed read degrades a row's title, never the timeline itself.
     if (!_sessionsKnown) {
-      final generation = _signalsGeneration;
-      final revision = _sessionTitleRevision;
       try {
-        final sessions = _withConfirmedTitles(
-          await _sessionLoader.load(),
-          revision,
-        );
-        if (mounted &&
-            generation == _signalsGeneration &&
-            revision == _sessionTitleRevision) {
-          _knownSessions = sessions;
-          _sessionsKnown = true;
-          _cacheSessionTitles(sessions);
-        }
+        await _loadActiveSessions();
       } catch (_) {}
     }
     final feed = await loader(widget.connection, _sessionTitles);
@@ -763,6 +778,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           load: _loadWorkspaceSessionsData,
           loadProgressively: (onProgress) =>
               _loadWorkspaceSessionsData(onProgress: onProgress),
+          reloadActive: (onProgress) => _loadWorkspaceSessionsData(
+            onProgress: onProgress,
+            freshActive: true,
+            includeArchives: false,
+          ),
           reloadArchives: (onProgress) =>
               _loadArchivedSessions(onProgress: onProgress, fresh: true),
           onOpenSession: (session) => unawaited(
@@ -788,6 +808,12 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           loadProgressively: (onProgress) => _loadWorkspaceSessionsData(
             kind: WorkspaceSessionKind.crons,
             onProgress: onProgress,
+          ),
+          reloadActive: (onProgress) => _loadWorkspaceSessionsData(
+            kind: WorkspaceSessionKind.crons,
+            onProgress: onProgress,
+            freshActive: true,
+            includeArchives: false,
           ),
           reloadArchives: (onProgress) =>
               _loadArchivedSessions(onProgress: onProgress, fresh: true),
@@ -887,6 +913,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     String? projectWorkingDirectory,
     String? initialComposerText,
     List<AttachmentDraft> initialAttachmentDrafts = const [],
+    Future<void> Function()? refreshBrowser,
   }) async {
     final report = widget.onOpenSession;
     if (report != null) {
@@ -911,6 +938,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       ),
     );
     if (!mounted) return;
+    if (refreshBrowser != null) {
+      unawaited(refreshBrowser());
+      return;
+    }
     final browser = isCronSession(session) ? _cronsKey : _chatsKey;
     unawaited(browser.currentState?.refresh() ?? Future<void>.value());
   }
@@ -1183,6 +1214,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   Future<WorkspaceSessionsData> _loadWorkspaceSessionsData({
     WorkspaceSessionKind kind = WorkspaceSessionKind.chats,
     void Function(WorkspaceSessionsData data)? onProgress,
+    bool freshActive = false,
+    bool includeArchives = true,
   }) async {
     final generation = ++_signalsGeneration;
     unawaited(_refreshTurnSignals(generation));
@@ -1194,7 +1227,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     var sessions = <Session>[];
     var archivedSessions = <Session>[];
     var activeLoading = true;
-    var archiveLoading = _dashboardReachable;
+    var archiveLoading = includeArchives && _dashboardReachable;
     var projectsLoading =
         kind == WorkspaceSessionKind.chats && _repository != null;
     var projectsKnown = !projectsLoading;
@@ -1243,20 +1276,16 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     }
 
     Future<void> readActive() async {
-      final revision = _sessionTitleRevision;
       void accept(List<Session> rows) {
         if (!mounted) return;
-        sessions = _withConfirmedTitles(rows, revision);
-        if (revision == _sessionTitleRevision) {
-          setState(() => _knownSessions = sessions);
-          _cacheSessionTitles(sessions);
-        }
+        sessions = rows;
         publish();
       }
 
       try {
-        accept(await _sessionLoader.load(onProgress: accept));
-        if (revision == _sessionTitleRevision) _sessionsKnown = true;
+        accept(
+          await _loadActiveSessions(onProgress: accept, fresh: freshActive),
+        );
       } catch (error) {
         sessionsError = error;
       } finally {
@@ -1267,7 +1296,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     }
 
     Future<void> readArchives() async {
-      if (!_dashboardReachable) return;
+      if (!archiveLoading) return;
       try {
         archivedSessions = await _loadArchivedSessions(
           onProgress: (rows) {
@@ -1366,7 +1395,20 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         pinStore: _pinStore,
         refreshInterval: widget.sessionsRefreshInterval,
         load: _loadWorkspaceSessionsData,
-        onOpenSession: (session) => unawaited(_openSession(session)),
+        loadProgressively: (onProgress) =>
+            _loadWorkspaceSessionsData(onProgress: onProgress),
+        reloadActive: (onProgress) => _loadWorkspaceSessionsData(
+          onProgress: onProgress,
+          freshActive: true,
+          includeArchives: false,
+        ),
+        onOpenSession: (session) => unawaited(
+          _openSession(
+            session,
+            refreshBrowser: () =>
+                key.currentState?.refresh() ?? Future<void>.value(),
+          ),
+        ),
         onRename: _renameSession,
         onPromote: (session) =>
             _moveChatToProject(session, sourceContext: key.currentContext),

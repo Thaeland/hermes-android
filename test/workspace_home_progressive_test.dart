@@ -109,8 +109,8 @@ void main() {
       final home = tester.state<WorkspaceSessionsScreenState>(
         find.byType(WorkspaceSessionsScreen),
       );
-      unawaited(home.refresh());
-      unawaited(home.refresh());
+      final refreshed = home.refresh();
+      expect(identical(home.refresh(), refreshed), isTrue);
       await tester.pump(const Duration(milliseconds: 1));
       expect(
         requested.where(
@@ -118,11 +118,15 @@ void main() {
               uri.queryParameters['limit'] == '100' &&
               uri.queryParameters['offset'] == '0',
         ),
-        hasLength(1),
+        // Explicit refresh now starts independently of the older aggregate.
+        // Both full scans remain held on their later page, preserving the
+        // original pin/Quick/retained-history harmful ordering.
+        hasLength(2),
       );
 
       laterPage.complete(_page([_row(100, pinned: true), _row(101)]));
       await tester.pumpAndSettle();
+      await refreshed;
       expect(
         requested.any((uri) => uri.queryParameters['offset'] == '100'),
         isTrue,
@@ -171,63 +175,78 @@ void main() {
     },
   );
 
-  testWidgets('explicit refreshes queue one fresh scan after the active read', (
-    tester,
-  ) async {
-    final held = Completer<http.Response>();
-    var fullReads = 0;
-    var firstReads = 0;
-    final client = MockClient((request) async {
-      if (request.url.queryParameters['limit'] == '5') {
-        firstReads++;
-        return _page([_row(0)]);
-      }
-      if (request.url.queryParameters['offset'] == '0') {
-        fullReads++;
-        return fullReads == 1
-            ? held.future
-            : _page([
-                {..._row(0), 'title': 'Fresh title'},
-              ]);
-      }
-      return _page([]);
-    });
-    await tester.pumpWidget(
-      MaterialApp(
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
-        supportedLocales: AppLocalizations.supportedLocales,
-        theme: hermesTheme(Brightness.dark),
-        home: WorkspaceScreen(
-          connection: SavedConnection(
-            id: 'queued',
-            label: 'Test',
-            host: 'example.invalid',
-            port: 8642,
-            apiKey: 'test-key',
+  testWidgets(
+    'explicit refreshes share a fresh scan independently of bootstrap',
+    (tester) async {
+      final held = Completer<http.Response>();
+      final freshHeld = Completer<http.Response>();
+      addTearDown(() {
+        if (!held.isCompleted) held.complete(_page([]));
+        if (!freshHeld.isCompleted) freshHeld.complete(_page([]));
+      });
+      var fullReads = 0;
+      var firstReads = 0;
+      final client = MockClient((request) async {
+        if (request.url.queryParameters['limit'] == '5') {
+          firstReads++;
+          return _page([_row(0)]);
+        }
+        if (request.url.queryParameters['offset'] == '0') {
+          fullReads++;
+          return fullReads == 1 ? held.future : freshHeld.future;
+        }
+        return _page([]);
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          theme: hermesTheme(Brightness.dark),
+          home: WorkspaceScreen(
+            connection: SavedConnection(
+              id: 'queued',
+              label: 'Test',
+              host: 'example.invalid',
+              port: 8642,
+              apiKey: 'test-key',
+            ),
+            testSessionsHttpClient: client,
+            turnSignalsLoader: (_) async => HomeTurnSignals.empty,
           ),
-          testSessionsHttpClient: client,
-          turnSignalsLoader: (_) async => HomeTurnSignals.empty,
         ),
-      ),
-    );
-    await tester.pump();
-    final browser = tester.state<WorkspaceSessionsScreenState>(
-      find.byType(WorkspaceSessionsScreen),
-    );
-    final refresh = browser.refresh();
-    expect(identical(browser.refresh(), refresh), isTrue);
-    await tester.pump();
-    expect(firstReads, 1);
-    expect(fullReads, 1);
-    expect(find.text('Chat 0'), findsOneWidget);
-    held.complete(_page([_row(0)]));
-    await tester.pumpAndSettle();
-    await refresh;
-    expect(firstReads, 2);
-    expect(fullReads, 2);
-    expect(find.text('Fresh title'), findsOneWidget);
-    expect(find.text('Chat 0'), findsNothing);
-  });
+      );
+      await tester.pump();
+      final browser = tester.state<WorkspaceSessionsScreenState>(
+        find.byType(WorkspaceSessionsScreen),
+      );
+      final refresh = browser.refresh();
+      expect(identical(browser.refresh(), refresh), isTrue);
+      var refreshCompleted = false;
+      unawaited(refresh.then((_) => refreshCompleted = true));
+      await tester.pump();
+      expect(firstReads, 2);
+      expect(fullReads, 2);
+      expect(find.text('Chat 0'), findsOneWidget);
+      held.complete(_page([_row(0)]));
+      for (var frame = 0; frame < 5; frame++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      expect(refreshCompleted, isFalse);
+      expect(find.text('Fresh title'), findsNothing);
+      freshHeld.complete(
+        _page([
+          {..._row(0), 'title': 'Fresh title'},
+        ]),
+      );
+      await tester.pumpAndSettle();
+      await refresh;
+      expect(refreshCompleted, isTrue);
+      expect(firstReads, 2);
+      expect(fullReads, 2);
+      expect(find.text('Fresh title'), findsOneWidget);
+      expect(find.text('Chat 0'), findsNothing);
+    },
+  );
 
   testWidgets(
     'opening Crons during a Chats scan shares and replays the pending request',
