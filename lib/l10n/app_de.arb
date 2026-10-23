@@ -746,5 +746,15 @@
   "task_status_pending": "Pending",
   "task_status_dispatched": "Dispatched",
   "task_status_unknown": "Unknown status: {status}",
-  "task_tasks_finished": "{count} delegated task(s) finished"
+  "task_tasks_finished": "{count} delegated task(s) finished",
+  "activity_status_unconfirmed": "Status unbestätigt",
+  "activity_recently_updated": "Kürzlich aktualisiert",
+  "activity_reconnecting": "Verbindung wird wiederhergestellt — Turn-Status wird geprüft",
+  "activity_outcome_unknown": "Das Ergebnis des Turns konnte nicht bestätigt werden. Öffne den Chat, um es zu prüfen.",
+  "activity_chat_updated_detail": "Das Gateway hat Chat-Aktivität aufgezeichnet; der aktuelle Turn-Status ist nicht verfügbar.",
+  "activity_updated": "Aktualisiert",
+  "activity_empty_title": "Keine aktuellen Aktivitäten",
+  "activity_empty_detail": "Hier erscheinen in dieser App gestartete Turns und Gateway-Chats, die in den letzten 7 Tagen aktualisiert wurden.",
+  "activity_read_error": "Die Aktivitätsansicht konnte ihre Turn-Aufzeichnungen oder Gateway-Chats nicht lesen. Prüfe die Verbindung und versuche es erneut.",
+  "activity_chat_unavailable": "Dieser Chat ist nicht mehr verfügbar oder das Gateway konnte nicht erreicht werden."
 }

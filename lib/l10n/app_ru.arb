@@ -746,5 +746,15 @@
   "task_status_pending": "Pending",
   "task_status_dispatched": "Dispatched",
   "task_status_unknown": "Unknown status: {status}",
-  "task_tasks_finished": "{count} delegated task(s) finished"
+  "task_tasks_finished": "{count} delegated task(s) finished",
+  "activity_status_unconfirmed": "Статус не подтверждён",
+  "activity_recently_updated": "Недавно обновлено",
+  "activity_reconnecting": "Переподключение — проверка статуса хода",
+  "activity_outcome_unknown": "Не удалось подтвердить результат хода. Откройте чат для проверки.",
+  "activity_chat_updated_detail": "Активность чата записана шлюзом; текущий статус хода недоступен.",
+  "activity_updated": "Обновлено",
+  "activity_empty_title": "Нет недавней активности",
+  "activity_empty_detail": "Здесь отображаются ходы, начатые в этом приложении, и чаты шлюза, обновлённые за последние 7 дней.",
+  "activity_read_error": "Раздел «Активность» не смог прочитать записи ходов или чаты шлюза. Проверьте подключение и повторите попытку.",
+  "activity_chat_unavailable": "Этот чат больше недоступен или не удалось связаться со шлюзом."
 }
