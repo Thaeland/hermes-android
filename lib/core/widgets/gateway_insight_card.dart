@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/gateway_insight.dart';
+import 'delegated_task_labels.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
 
@@ -102,11 +103,22 @@ class GatewaySubagentCard extends StatelessWidget {
       child: ExpansionTile(
         initiallyExpanded: !complete,
         leading: Icon(
-          complete ? Icons.hub_outlined : Icons.account_tree_outlined,
+          activities.any((task) => task.failed)
+              ? Icons.error_outline
+              : activities.any((task) => task.interrupted)
+              ? Icons.cancel_outlined
+              : complete
+              ? Icons.hub_outlined
+              : Icons.account_tree_outlined,
+          color: activities.any((task) => task.failed)
+              ? Theme.of(context).colorScheme.error
+              : null,
         ),
         title: Text(
           complete
-              ? context.l10n.delegated_tasks_completed(activities.length)
+              ? (activities.every((task) => task.succeeded)
+                    ? context.l10n.delegated_tasks_completed(activities.length)
+                    : context.l10n.task_tasks_finished(activities.length))
               : context.l10n.delegated_tasks_active(
                   activities.where((item) => !item.isComplete).length,
                 ),
@@ -122,20 +134,31 @@ class GatewaySubagentCard extends StatelessWidget {
               dense: true,
               leading: activity.isComplete
                   ? Icon(
-                      activity.status == 'failed' || activity.status == 'error'
+                      activity.failed
                           ? Icons.error_outline
-                          : activity.status == 'interrupted'
+                          : activity.status == 'cancelled'
+                          ? Icons.cancel_outlined
+                          : activity.interrupted
                           ? Icons.pause_circle_outline
-                          : Icons.check_circle_outline,
+                          : activity.succeeded
+                          ? Icons.check_circle_outline
+                          : Icons.help_outline,
+                      color: activity.failed
+                          ? Theme.of(context).colorScheme.error
+                          : null,
+                      semanticLabel: delegatedTaskStatus(
+                        context.l10n,
+                        activity,
+                      ),
                     )
                   : const SizedBox.square(
                       dimension: 18,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     ),
-              title: Text(activity.displayGoal),
+              title: Text(delegatedTaskGoal(context.l10n, activity)),
               subtitle: Text(
                 [
-                  activity.statusLabel,
+                  delegatedTaskStatus(context.l10n, activity),
                   if (activity.model != null) activity.model!,
                   if (activity.detail != null) activity.detail!,
                 ].join(' • '),

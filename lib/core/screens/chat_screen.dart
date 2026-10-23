@@ -18,6 +18,7 @@ import '../controllers/voice_composer_controller.dart';
 import '../controllers/delegated_task_controller.dart';
 import '../services/delegated_task_history.dart';
 import '../widgets/delegated_task_timeline.dart';
+import '../widgets/delegated_task_labels.dart';
 import '../services/connection_manager.dart';
 import '../services/attachment_draft_service.dart';
 import '../services/composer_draft_store.dart';
@@ -3722,7 +3723,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (!merged.isComplete) {
         _gatewayTurnStatus = GatewayTurnStatus(
           kind: 'subagent',
-          text: context.l10n.delegated_task(merged.displayGoal),
+          text: context.l10n.delegated_task(
+            delegatedTaskGoal(context.l10n, merged),
+          ),
         );
       }
     });

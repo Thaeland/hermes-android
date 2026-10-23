@@ -5,6 +5,8 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 
 import '../controllers/delegated_task_controller.dart';
 import '../services/delegated_task_history.dart';
+import '../l10n/l10n.dart';
+import 'delegated_task_labels.dart';
 
 /// A modal route keeps the parent chat, composer and scroll controller mounted.
 Future<void> showDelegatedTaskTimeline(
@@ -90,12 +92,12 @@ class _DelegatedTaskTimelineState extends State<DelegatedTaskTimeline>
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
-                    'Task timeline',
+                    context.l10n.task_timeline,
                     style: Theme.of(context).textTheme.titleLarge,
                   ),
                 ),
                 IconButton(
-                  tooltip: 'Refresh task history',
+                  tooltip: context.l10n.task_refresh_history,
                   onPressed:
                       controller.loading ||
                           controller.loadingOlder ||
@@ -107,7 +109,7 @@ class _DelegatedTaskTimelineState extends State<DelegatedTaskTimeline>
                 TextButton.icon(
                   onPressed: () => Navigator.of(context).pop(),
                   icon: const Icon(Icons.close),
-                  label: const Text('Close'),
+                  label: Text(context.l10n.close),
                 ),
               ],
             ),
@@ -127,27 +129,33 @@ class _DelegatedTaskTimelineState extends State<DelegatedTaskTimeline>
                   Card(
                     child: ExpansionTile(
                       key: PageStorageKey('task-preview-${task.id}'),
-                      title: const Text('Live preview from parent events'),
-                      subtitle: const Text(
-                        'Latest exposed preview only; not a recorded transcript row.',
-                      ),
+                      title: Text(context.l10n.task_live_preview),
+                      subtitle: Text(context.l10n.task_preview_explanation),
                       children: [
                         Padding(
                           padding: const EdgeInsets.all(12),
                           child: SelectableText(
-                            '${task.previewKind ?? 'Preview'}\n${task.livePreview}',
+                            '${task.previewKind ?? context.l10n.task_preview}\n${task.livePreview}',
                           ),
                         ),
                       ],
                     ),
                   ),
-                const Padding(
-                  padding: EdgeInsets.all(8),
-                  child: Text('Recorded task history'),
+                Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Text(context.l10n.task_recorded_history),
                 ),
                 if (controller.unavailable != null)
-                  _notice(controller.unavailable!),
-                if (controller.error != null) _notice(controller.error!),
+                  _notice(
+                    taskHistoryProblemLabel(
+                      context.l10n,
+                      controller.unavailable!,
+                    ),
+                  ),
+                if (controller.error != null)
+                  _notice(
+                    taskHistoryProblemLabel(context.l10n, controller.error!),
+                  ),
                 if (controller.unavailable != null || controller.error != null)
                   Align(
                     alignment: Alignment.centerLeft,
@@ -155,20 +163,18 @@ class _DelegatedTaskTimelineState extends State<DelegatedTaskTimeline>
                       onPressed: controller.loading
                           ? null
                           : () => unawaited(controller.refresh()),
-                      child: const Text('Retry'),
+                      child: Text(context.l10n.retry),
                     ),
                   ),
                 if (!controller.hasRead && controller.loading)
-                  const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Text('Loading task history…'),
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(context.l10n.task_loading_history),
                   ),
                 if (controller.hasRead && transcript.isEmpty)
-                  const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Text(
-                      'No recorded messages yet. The task may not have flushed its history; this does not mean it produced no work.',
-                    ),
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(context.l10n.task_empty_history),
                   ),
                 if (controller.hasOlder)
                   Align(
@@ -177,7 +183,7 @@ class _DelegatedTaskTimelineState extends State<DelegatedTaskTimeline>
                       onPressed: controller.loading || controller.loadingOlder
                           ? null
                           : () => unawaited(controller.loadOlder()),
-                      child: const Text('Load older'),
+                      child: Text(context.l10n.task_load_older),
                     ),
                   ),
                 for (final row in transcript)
@@ -204,18 +210,18 @@ class _DelegatedTaskTimelineState extends State<DelegatedTaskTimeline>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              task.displayGoal,
+              delegatedTaskGoal(context.l10n, task),
               style: Theme.of(context).textTheme.titleMedium,
             ),
-            Text('Status: ${task.statusLabel}'),
-            Text('Task: ${task.id}'),
-            if (task.childSessionId != null)
-              Text('Stored session: ${task.childSessionId}'),
-            if (task.delegationId != null)
-              Text('Delegation: ${task.delegationId}'),
-            const Text(
-              'Read-only · recorded history may appear after the task flushes. Refresh to check again.',
+            Text(
+              context.l10n.task_status(delegatedTaskStatus(context.l10n, task)),
             ),
+            Text(context.l10n.task_identity(task.id)),
+            if (task.childSessionId != null)
+              Text(context.l10n.task_stored_session(task.childSessionId!)),
+            if (task.delegationId != null)
+              Text(context.l10n.task_delegation(task.delegationId!)),
+            Text(context.l10n.task_read_only_notice),
           ],
         ),
       ),
@@ -235,32 +241,44 @@ class _TranscriptRow extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(
-              '${row.role} · row ${row.id}',
+              context.l10n.task_row_label(
+                taskTranscriptRole(context.l10n, row.role),
+                row.id,
+              ),
               style: Theme.of(context).textTheme.labelMedium,
             ),
             for (var i = 0; i < row.reasoning.length; i++)
               _detail(
                 'reasoning:${row.id}:${row.reasoningKeys[i]}',
-                'Reasoning',
+                context.l10n.reasoning,
                 row.reasoning[i],
               ),
             if (row.role != 'tool' && row.text.trim().isNotEmpty)
               MarkdownBody(
                 data: row.text,
                 selectable: true,
-                sizedImageBuilder: (config) => Text(config.alt ?? '[image]'),
+                sizedImageBuilder: (config) =>
+                    Text(config.alt ?? context.l10n.task_image_placeholder),
               ),
             for (var i = 0; i < row.calls.length; i++)
               _detail(
                 'call:${row.id}:${row.calls[i].id ?? i}',
-                'Tool call · ${row.calls[i].name}',
-                'Call ID: ${row.calls[i].id ?? 'not supplied'}\nArguments\n${row.calls[i].arguments}',
+                context.l10n.task_tool_call(row.calls[i].name),
+                context.l10n.task_call_details(
+                  row.calls[i].id ?? context.l10n.task_not_supplied,
+                  row.calls[i].arguments ?? context.l10n.task_missing_arguments,
+                ),
               ),
             if (row.role == 'tool')
               _detail(
                 'result:${row.id}',
-                'Tool result · ${row.toolName}',
-                'Call ID: ${row.toolId ?? 'not supplied'}\nResult\n${row.text}',
+                context.l10n.task_tool_result(
+                  row.toolName ?? context.l10n.task_role_tool,
+                ),
+                context.l10n.task_result_details(
+                  row.toolId ?? context.l10n.task_not_supplied,
+                  row.text,
+                ),
               ),
           ],
         ),

@@ -207,8 +207,9 @@ class GatewaySubagentActivity {
   });
 
   bool get isComplete => phase == GatewaySubagentPhase.completed;
-  String get displayGoal => goal.isEmpty ? 'Delegated task' : goal;
-  String get statusLabel => status ?? phase.name;
+  bool get failed => status == 'failed' || status == 'error';
+  bool get interrupted => status == 'interrupted' || status == 'cancelled';
+  bool get succeeded => isComplete && (status == null || status == 'completed');
 
   /// Opaque durable identifiers are validated losslessly, never trimmed,
   /// sanitised or truncated. They are not runtime subagent identifiers.

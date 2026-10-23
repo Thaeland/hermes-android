@@ -24,8 +24,8 @@ class DelegatedTaskController extends ChangeNotifier {
   bool get hasOlder => _window.hasOlder;
   bool loading = false;
   bool loadingOlder = false;
-  String? error;
-  String? unavailable;
+  TaskHistoryProblem? error;
+  TaskHistoryProblem? unavailable;
   bool get hasRead => _hasRead;
   bool _hasRead = false;
   bool _closed = false;
@@ -85,8 +85,7 @@ class DelegatedTaskController extends ChangeNotifier {
     if (older && !_window.hasOlder) return Future.value();
     final childId = GatewaySubagentActivity.opaqueId(_task.childSessionId);
     if (childId == null) {
-      unavailable =
-          'Task transcript unavailable: this server did not retain its session reference.';
+      unavailable = TaskHistoryProblem.missingReference;
       notifyListeners();
       return Future.value();
     }
@@ -137,7 +136,7 @@ class DelegatedTaskController extends ChangeNotifier {
       if (_closed || !_foreground || generation != _generation) return;
       if (page.any((row) => taskRowId(row) == null)) {
         throw const TaskHistoryUnavailable(
-          'Task transcript unavailable: this server did not supply durable message row identities.',
+          TaskHistoryProblem.missingRowIdentity,
         );
       }
       if (older) {
@@ -149,10 +148,12 @@ class DelegatedTaskController extends ChangeNotifier {
       _finalRetries = 0;
     } on TaskHistoryUnavailable catch (failure) {
       if (_closed || !_foreground || generation != _generation) return;
-      unavailable = failure.message;
+      unavailable = failure.reason;
     } catch (failure) {
       if (_closed || !_foreground || generation != _generation) return;
-      error = 'Could not refresh task history: $failure';
+      error = failure is TaskHistoryReadFailure
+          ? failure.reason
+          : TaskHistoryProblem.refreshFailed;
       _finalRetries++;
     }
   }

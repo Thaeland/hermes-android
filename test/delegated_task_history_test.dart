@@ -109,10 +109,7 @@ void main() {
         httpClient: MockClient((request) async {
           requests.add(request);
           expectSync(request.url.port, 9443);
-          expectSync(
-            request.url.path,
-            '/profile/default/api/sessions/child/messages',
-          );
+          expectSync(request.url.path, '/profile/default/api/sessions/child');
           expectSync(
             request.url.queryParameters.containsKey('profile'),
             isFalse,
@@ -268,6 +265,19 @@ void main() {
             );
           }
           expectSync(request.method, 'GET');
+          expectSync(request.headers['cookie'], 'hermes_session_at=fixture');
+          if (!request.url.path.endsWith('/messages')) {
+            expectSync(
+              request.url.toString(),
+              contains('/prefix/api/sessions/${Uri.encodeComponent(id)}?'),
+            );
+            expectSync(request.url.queryParameters, {'profile': 'profile &子'});
+            return http.Response(
+              jsonEncode({'id': id, 'profile': 'profile &子'}),
+              200,
+              headers: {'content-type': 'application/json; charset=utf-8'},
+            );
+          }
           expectSync(
             request.url.toString(),
             contains(
@@ -280,6 +290,7 @@ void main() {
             'offset': '0',
             'order': 'latest',
             'inline_images': 'false',
+            'include_compacted': 'true',
           });
           expectSync(request.headers['cookie'], 'hermes_session_at=fixture');
           expectSync(request.headers.containsKey('authorization'), isFalse);
@@ -531,7 +542,7 @@ void main() {
     source.failure = Exception('offline');
     await controller.refresh();
     expect(controller.rows, hasLength(2));
-    expect(controller.error, contains('offline'));
+    expect(controller.error, TaskHistoryProblem.refreshFailed);
     source.failure = null;
     await controller.refresh();
     expect(controller.error, isNull);
@@ -547,7 +558,7 @@ void main() {
     );
     await noId.refresh();
     expect(absent.offsets, isEmpty);
-    expect(noId.unavailable, contains('did not retain its session reference'));
+    expect(noId.unavailable, TaskHistoryProblem.missingReference);
     noId.dispose();
   });
 }
