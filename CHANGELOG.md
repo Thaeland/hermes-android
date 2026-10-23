@@ -4,6 +4,103 @@ All notable changes since v1.0.7 are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The [README](README.md)
 shows only the three latest releases.
 
+## [2.1.31] - 2026-10-23
+
+### Added
+
+- Tap a delegated-task row for a read-only timeline in a phone sheet or
+  wider-screen dialog above the parent chat. Inspect recorded messages,
+  actual tool call IDs, arguments/results and exposed reasoning. Refresh and
+  Load older use bounded authenticated Dashboard GETs; live previews carry
+  a separate label. Closing the viewer preserves the parent draft and scroll
+  position, without joining, watching or controlling the child runtime (PR #167).
+- Receipt-ordered live text, exposed reasoning and consecutive tool groups
+  across REST/SSE, Remote Gateway and app-owned stock turns. Late tool updates
+  update their original group. Stable expansion identities retain the reader's
+  choice as content arrives and previews become durable history (PR #168).
+- App-owned stock Gateway sessions retain user-started turns across chat-route
+  removal, reopening and concurrent chats. Network recovery and process-restart
+  pending markers reconcile against persisted history without resubmitting an
+  uncertain prompt. This path works without the experimental turn-recovery v2
+  contract.
+- Quiet ongoing status entries for individual active chats, backed by one
+  Android foreground service and its required disclosure. Settings includes
+  device-local background-work controls and a link to battery optimisation
+  settings. Turning protection off does not stop server work (PR #169).
+- Opt-in Google-free UnifiedPush through a native Android connector and the
+  separate `server/mobile-push` companion. Registration requires dashboard
+  authentication, operator authorisation, explicit consent, exact durable
+  session scopes and an encrypted challenge/confirmation. Generic encrypted
+  hints, persistent event deduplication, endpoint renewal and revocation keep
+  delivery separate from chat content and runtime authority (PR #170).
+
+### Fixed
+
+- Delegated-task recovery distinguishes spawn results from steer/stop/list
+  acknowledgements. A control acknowledgement cannot finish a running child or
+  stop its history refresh. Unknown statuses remain unresolved; failed,
+  interrupted and cancelled tasks keep distinct terminal presentation under
+  late progress. Mixed terminal groups say finished rather than implying success.
+- Task-history reads require the exact stored ID and selected profile, even
+  when the Dashboard resolves ID prefixes. Compression references
+  need bounded same-lineage proof; a late ancestor cannot replace a verified tip,
+  and an unrelated session or fork cannot supply another task's transcript.
+- Task transcripts request compacted rows and respect the Dashboard's public
+  content, commentary and reasoning projections, including empty/null values.
+  JSON-looking public prose stays prose; duplicate raw reasoning and encrypted
+  sidecars do not leak into the display. Missing tool arguments show an explanation.
+- Compression gaps now carry explicit **Partial history** warnings. A missing
+  verifiable newer segment can hide the final reply; omitted tool-source
+  ancestors can hide earlier work even when the final reply is present. Known
+  rows remain available, Refresh can retry, and reopening no longer implies
+  complete history. Old tasks without durable references show unavailable.
+- Preview completion preserves each reasoning run's receipt position, contents
+  and expansion identity, including reasoning on both sides of a tool group.
+  Ownership changes do not merge separate runs or reorder later commentary.
+- Notification authorisation reflects current Android permission grants and
+  revocations after resume. Passive initialisation does not repeat a permission
+  prompt or retain a stale denied/granted latch. Optional chat preferences do
+  not suppress Android's required foreground-service disclosure.
+- Stock-turn recovery distinguishes interrupted/failed outcomes from successful
+  completion. Canonical session identity retains per-chat drafts across
+  reattachment. Pre-wire setup failures release send/alert admission without
+  inventing a submitted turn or erasing a newer composer draft.
+- Mobile-push operations select the saved Hermes profile for capabilities,
+  registration, confirmation, revocation and event reads. Exact registration
+  and confirmation retries recover lost acknowledgements without granting
+  authority to pending, expired, revoked or superseded registrations.
+- App-root integration initialises push after credential hydration and the first
+  frame, checks queued tap authority after asynchronous lookups and opens the
+  session from that authenticated lookup. Background-policy changes reach the
+  active owner; native battery settings remain an explicit user action.
+- README setup now describes the dashboard's authenticated password/proxy flow,
+  the stock recovery path and the separate experimental exactly-once contract.
+  It no longer promises that returning to the app clears all notifications.
+
+### Compatibility and limits
+
+- The richer task transcript requires compatible authenticated Dashboard routes;
+  the API-server Bearer key alone cannot supply it. Snapshot polling does not
+  reconstruct missing child references or guarantee complete compression history.
+- UnifiedPush is off by default. Install and enable the companion in the intended
+  server profile, configure VAPID/operator policy and install a compatible Android
+  distributor before opting in. The APK does not install or configure a live
+  server. One installation binds one selected connection and an explicit session
+  allowlist; a push tap cannot approve an action or resubmit a prompt.
+- Android Force stop, OEM battery controls, Doze, offline devices, permissions
+  and distributor availability can prevent or delay delivery. A foreground
+  service does not guarantee uninterrupted networking. Reopen and reconcile
+  uncertain work; push is a hint rather than proof of a turn's current outcome.
+- Release identity is `2.1.31+2174`; split version codes are `21741`
+  (armeabi-v7a), `21742` (arm64-v8a) and `21743` (x86_64). The accepted base
+  upgrade floor remains `2127`. Store notes cover the base and all three splits.
+
+### Thanks
+
+- Hermes Agent assisted with implementation, review, documentation and regression
+  tests. This release builds on the community Remote Gateway and background
+  keep-alive contributions credited in earlier entries and the README.
+
 ## [2.1.30] - 2026-10-22
 
 ### Fixed
