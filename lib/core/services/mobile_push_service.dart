@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import 'connection_manager.dart';
+import 'connection_mutation_barrier.dart';
 import 'mobile_push_api.dart';
 import 'notification_prefs.dart';
 
@@ -175,17 +176,28 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
       );
     }
     final epoch = ++_epoch;
+    final mutationEpoch = ConnectionMutationBarrier.capture(connection.id);
     final fingerprint = binding(connection);
     bool current() =>
         !_closed &&
         epoch == _epoch &&
+        ConnectionMutationBarrier.isCurrent(connection.id, mutationEpoch) &&
         _connection(connection.id) != null &&
         binding(_connection(connection.id)!) == fingerprint;
+    // A new opt-in started during an edit must not queue old consent to run
+    // after that edit, even if the saved metadata still looks unchanged.
+    if (!current()) return;
     final client = _clientFactory(connection);
     error = null;
     status = 'Checking server authorization';
     notifyListeners();
     try {
+      await _manager!.finishPendingMobilePushChanges();
+      if (!current()) return;
+      final ticket = await _call('connectionFence', {
+        'connection': connection.id,
+      });
+      if (!current()) return;
       final caps = await MobilePushApi(client).capabilities();
       if (!current()) return;
       final permission =
@@ -198,6 +210,7 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
       }
       final prefs = notificationPrefs.value;
       final state = await _call('enable', {
+        'connection_fence': ticket['connection_fence'],
         'connection': connection.id,
         'binding': fingerprint,
         'distributor': distributor,
@@ -324,6 +337,7 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
     if (_closed || epoch != _epoch) return false;
     final c = _connection(expected['connection'] as String? ?? '');
     return c != null &&
+        !ConnectionMutationBarrier.isPending(c.id) &&
         binding(c) == expected['binding'] &&
         live['enabled'] == true &&
         live['installation'] == expected['installation'] &&
@@ -342,7 +356,11 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
     for (final raw in snapshot['revocations'] as List? ?? []) {
       final item = Map<String, dynamic>.from(raw as Map);
       final c = _connection(item['connection'] as String);
-      if (c == null || binding(c) != item['binding']) continue;
+      if (c == null ||
+          ConnectionMutationBarrier.isPending(c.id) ||
+          binding(c) != item['binding']) {
+        continue;
+      }
       final client = _clientFactory(c);
       try {
         await MobilePushApi(client).revoke(item['installation'] as String);
@@ -366,6 +384,10 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
       return;
     }
     final connection = _connection(connectionId);
+    if (connection != null &&
+        ConnectionMutationBarrier.isPending(connection.id)) {
+      return;
+    }
     if (connection == null || binding(connection) != snapshot['binding']) {
       // A removed/edited account cannot retain authority from a former login.
       ++_epoch;

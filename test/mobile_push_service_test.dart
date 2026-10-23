@@ -51,6 +51,10 @@ class Fixture {
   bool permission = true;
   bool failRevoke = false;
   String? failCommand;
+  final connectionFences = <String, String>{};
+  final connectionChanges = <String, Set<String>>{};
+  int fenceSequence = 0;
+  Future<void> Function(String, Map<String, dynamic>)? afterCommand;
   Future<http.Response> Function(http.Request)? onPut;
   Future<http.Response> Function(http.Request)? onCapabilities;
   Future<http.Response> Function(http.Request)? onConfirm;
@@ -89,6 +93,30 @@ class Fixture {
             );
           }
           switch (call.method) {
+            case 'connectionFence':
+              final id = args['connection'] as String;
+              if (connectionChanges.values.any((ids) => ids.contains(id))) {
+                throw PlatformException(code: 'account-change-pending');
+              }
+              return {
+                'connection_fence': connectionFences.putIfAbsent(
+                  id,
+                  () => 'fence-${++fenceSequence}',
+                ),
+              };
+            case 'beginConnectionChange':
+              final ids = Set<String>.from(args['connections'] as List);
+              connectionChanges[args['mutation'] as String] = ids;
+              for (final id in ids) {
+                connectionFences.remove(id);
+              }
+              if (ids.contains(native['connection'])) disableNative();
+              await afterCommand?.call(call.method, args);
+              return clone(native);
+            case 'endConnectionChange':
+              connectionChanges.remove(args['mutation']);
+              await afterCommand?.call(call.method, args);
+              return clone(native);
             case 'permission':
               return permission;
             case 'distributors':
@@ -99,6 +127,13 @@ class Fixture {
               native.addAll(args);
               return clone(native);
             case 'enable':
+              final id = args['connection'] as String;
+              if (connectionChanges.values.any((ids) => ids.contains(id)) ||
+                  connectionFences[id] == null ||
+                  args['connection_fence'] != connectionFences[id]) {
+                throw PlatformException(code: 'stale-account-consent');
+              }
+              connectionFences.remove(id);
               native.addAll({
                 ...args,
                 'enabled': true,
@@ -109,7 +144,9 @@ class Fixture {
                 'revision': 1,
                 'generation': 0,
               });
-              return clone(native);
+              final enabledState = clone(native);
+              await afterCommand?.call(call.method, args);
+              return enabledState;
             case 'recoverRegistration':
             case 'beginRegistration':
             case 'beginConfirmation':
@@ -165,23 +202,7 @@ class Fixture {
               native.remove('pending_until');
               return clone(native);
             case 'disable':
-              final revokes = native['revocations'] as List? ?? [];
-              if (native['enabled'] == true) {
-                revokes.add({
-                  'connection': native['connection'],
-                  'installation': native['installation'],
-                  'binding': native['binding'],
-                });
-              }
-              native.addAll({
-                'enabled': false,
-                'active': false,
-                'nonce': '',
-                'generation': 0,
-                'revocations': revokes,
-              });
-              native.remove('challenges');
-              native.remove('tap');
+              disableNative();
               return clone(native);
             case 'revoked':
               native['revocations'] = (native['revocations'] as List)
@@ -275,6 +296,34 @@ class Fixture {
     service.dispose();
     // Recreate the Dart controller, retaining only the native durable snapshot.
     createService();
+  }
+
+  void disableNative() {
+    final revokes = native['revocations'] as List? ?? [];
+    if (native['enabled'] == true) {
+      revokes.add({
+        'connection': native['connection'],
+        'installation': native['installation'],
+        'binding': native['binding'],
+      });
+    }
+    native.addAll({
+      'enabled': false,
+      'active': false,
+      'nonce': '',
+      'generation': 0,
+      'revocations': revokes,
+    });
+    for (final key in [
+      'challenges',
+      'tap',
+      'keys',
+      'endpoint',
+      'issued',
+      'seen',
+    ]) {
+      native.remove(key);
+    }
   }
 
   void createService() {

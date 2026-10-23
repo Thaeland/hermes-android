@@ -28,6 +28,12 @@ internal object MobilePushBridge {
     private var channel: MethodChannel? = null
     private var permissionResult: MethodChannel.Result? = null
     private val handler = Handler(Looper.getMainLooper())
+    // Process-local IPC tickets, scoped to the affected saved IDs. They survive
+    // Flutter detach/replacement, but not process death (nor can an old IPC).
+    // The BEGIN command durably revokes consent before credentials may change;
+    // no persisted "mutation pending" flag can strand fresh consent on restart.
+    private val connectionFences = mutableMapOf<String, String>()
+    private val connectionChanges = mutableMapOf<String, Set<String>>()
     fun attach(value: MethodChannel) { channel = value }
     fun detach() { channel = null; permissionResult?.success(false); permissionResult = null }
     private fun changed() { handler.post { channel?.invokeMethod("changed", null) } }
@@ -62,9 +68,33 @@ internal object MobilePushBridge {
         val expected = JSONObject(args)
         when (method) {
             "snapshot" -> { /* no mutation */ }
+            "connectionFence" -> {
+                val id = args["connection"] as String
+                check(connectionChanges.values.none { id in it }) { "Account change pending" }
+                return mapOf("connection_fence" to connectionFences.getOrPut(id) { UUID.randomUUID().toString() })
+            }
+            "beginConnectionChange" -> {
+                val mutation = args["mutation"] as String
+                val ids = (args["connections"] as List<*>).map { it as String }.toSet()
+                check(mutation.isNotEmpty() && ids.all { it.isNotEmpty() })
+                // All IDs are gated at once, before revoking or acknowledging
+                // BEGIN, including when consent is initially off.
+                check(connectionChanges[mutation] == null || connectionChanges[mutation] == ids)
+                connectionChanges[mutation] = ids
+                ids.forEach { connectionFences.remove(it) }
+                if (state.optBoolean("enabled") && state.optString("connection") in ids) {
+                    return command(context, "disable", mapOf("connection" to state.getString("connection")))
+                }
+                return map(state)
+            }
+            "endConnectionChange" -> {
+                connectionChanges.remove(args["mutation"] as String)
+                return map(state)
+            }
             "connectionChanged" -> {
+                connectionFences.remove(args["connection"] as String)
                 if (state.optBoolean("enabled") && state.optString("connection") == args["connection"]) {
-                    return command(context, "disable", emptyMap<Any, Any>())
+                    return command(context, "disable", mapOf("connection" to state.getString("connection")))
                 }
                 return map(state)
             }
@@ -73,6 +103,12 @@ internal object MobilePushBridge {
                 check(!state.optBoolean("enabled")) { "Disable the existing binding first" }
                 val sessions = JSONArray(args["sessions"] as List<*>)
                 check(MobilePushPolicy.validSessions(sessions)) { "Select 1-128 session IDs of 1-200 ASCII letters, digits, _ . : @ or -" }
+                val id = args["connection"] as String
+                check(connectionChanges.values.none { id in it } &&
+                    connectionFences[id] != null && connectionFences[id] == args["connection_fence"]) { "Stale account consent" }
+                // Consume the ticket: a delayed duplicate cannot recreate old
+                // consent after disable or a subsequent valid account enable.
+                connectionFences.remove(id)
                 check(allowed(context)) { "Notification permission required" }
                 val distributor = args["distributor"] as String
                 check(distributor in UnifiedPush.getDistributors(context))
@@ -91,6 +127,10 @@ internal object MobilePushBridge {
                 return map(fresh)
             }
             "disable" -> {
+                // Explicit opt-out fences all pending starts, even while OFF.
+                // Account mutation revokes only its affected connection IDs.
+                val connection = args["connection"] as? String
+                if (connection == null) connectionFences.clear() else connectionFences.remove(connection)
                 val id = state.optString("installation")
                 if (state.optBoolean("enabled") && id.isNotEmpty()) {
                     val revokes = state.optJSONArray("revocations") ?: JSONArray()

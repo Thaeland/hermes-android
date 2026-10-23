@@ -113,9 +113,11 @@ server-side. Local authority remains off regardless.
 
 ## Root integration API (app owner)
 
-`HermesAppState` installs the startup, serial validated-tap routing and teardown
-hooks after credential hydration and the first frame. Settings reuses the same
-app-lifetime service. The hooks below document that integration contract:
+`HermesAppState` in `main.dart` installs the startup, serial validated-tap routing
+and teardown hooks after credential hydration and the first frame. Settings reuses
+the same app-lifetime service. The hooks below document that lifecycle contract
+for app owners integrating the feature into another root; they are already
+installed in this app:
 
 ```dart
 final mobilePush = MobilePushService.shared;
