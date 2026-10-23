@@ -4,6 +4,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart' show IOClient;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -256,6 +258,9 @@ class ConnectionManager {
       ];
     }
 
+    for (final connection in [...ordered, ...removed]) {
+      await _invalidateMobilePushAuthority(connection.id);
+    }
     for (final connection in ordered) {
       await _writeAndVerifyCredentials(
         connection.id,
@@ -497,12 +502,29 @@ class ConnectionManager {
     );
   }
 
+  /// Revoke native push authority before editing/removing an account, including
+  /// while a registration/confirmation is still in flight. No push secret is
+  /// copied into connection metadata or backup/export payloads.
+  Future<void> _invalidateMobilePushAuthority(String connectionId) async {
+    if (kIsWeb || !Platform.isAndroid) return;
+    try {
+      await const MethodChannel(
+        'com.hermesagent.hermes_android/mobile_push',
+      ).invokeMethod<void>('connectionChanged', {'connection': connectionId});
+    } catch (_) {
+      throw const CredentialStorageException(
+        'Native push consent could not be invalidated safely. Retry the connection change.',
+      );
+    }
+  }
+
   Future<void> _commitCredentialAndMetadata({
     required String connectionId,
     required _ConnectionCredentials previousCredentials,
     required _ConnectionCredentials nextCredentials,
     required List<SavedConnection> connections,
   }) async {
+    await _invalidateMobilePushAuthority(connectionId);
     try {
       await _writeAndVerifyCredentials(connectionId, nextCredentials);
       await _saveAll(connections);
@@ -1341,6 +1363,7 @@ class DashboardClient {
   final String? _username;
   final String? _password;
   final String? _gatewayProfile;
+  String? get gatewayProfile => _gatewayProfile;
   String? _token;
   String? _cookie;
   int _authGeneration = 0;

@@ -6,10 +6,13 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hermes_android/core/l10n/l10n.dart';
 import 'package:hermes_android/core/screens/chat_screen.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
+import 'package:hermes_android/core/services/gateway_turn_application_controller.dart';
+import 'package:hermes_android/core/services/normal_gateway_application_session.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/fake_voice_composer_adapter.dart';
+import 'support/completed_stock_turn.dart';
 
 void main() {
   setUp(() {
@@ -21,6 +24,8 @@ void main() {
     (tester) async {
       final httpClient = _DelayedMessagesHttpClient();
       addTearDown(httpClient.release);
+      final controller = GatewayTurnApplicationController();
+      addTearDown(controller.close);
       final apiClient = ApiClient(
         baseUrl: 'http://large-session.fixture',
         apiKey: 'fixture-key',
@@ -52,16 +57,16 @@ void main() {
               startedAt: 1,
             ),
             testApiClient: apiClient,
-            testRemotePromptSubmit:
-                ({
-                  required sessionId,
-                  required text,
-                  required onEvent,
-                  required onSent,
-                }) async {
-                  submitted += 1;
-                  onSent();
-                },
+            turnApplicationController: controller,
+            testRemotePromptSubmit: completedStockTurn(({
+              required sessionId,
+              required text,
+              required onEvent,
+              required onSent,
+            }) async {
+              submitted += 1;
+              onSent();
+            }),
             testVoiceComposerAdapter: FakeVoiceComposerAdapter(),
           ),
         ),
@@ -94,6 +99,12 @@ void main() {
       await tester.pump();
 
       expect(submitted, 1);
+      final snapshot = _ownerSnapshot(controller, tester);
+      expect(snapshot.phase, NormalGatewayTurnPhase.completed);
+      expect(snapshot.rowFloor, isNull);
+      expect(snapshot.historyRows.last['content'], 'Fresh reply');
+      expect(snapshot.displayRows, isEmpty);
+      expect(snapshot.timeline.runs, isEmpty);
       expect(find.text('Prompt while history is loading'), findsOneWidget);
 
       httpClient.release();
@@ -154,16 +165,15 @@ void main() {
               startedAt: 1,
             ),
             testApiClient: apiClient,
-            testRemotePromptSubmit:
-                ({
-                  required sessionId,
-                  required text,
-                  required onEvent,
-                  required onSent,
-                }) async {
-                  await failSubmit.future;
-                  throw StateError('submit rejected');
-                },
+            testRemotePromptSubmit: completedStockTurn(({
+              required sessionId,
+              required text,
+              required onEvent,
+              required onSent,
+            }) async {
+              await failSubmit.future;
+              throw StateError('submit rejected');
+            }),
             testVoiceComposerAdapter: FakeVoiceComposerAdapter(),
           ),
         ),
@@ -202,6 +212,8 @@ void main() {
     (tester) async {
       final httpClient = _MultiTurnRaceHttpClient();
       addTearDown(httpClient.releaseAll);
+      final controller = GatewayTurnApplicationController();
+      addTearDown(controller.close);
       var submitted = 0;
       final apiClient = ApiClient(
         baseUrl: 'http://large-session.fixture',
@@ -233,16 +245,16 @@ void main() {
               startedAt: 1,
             ),
             testApiClient: apiClient,
-            testRemotePromptSubmit:
-                ({
-                  required sessionId,
-                  required text,
-                  required onEvent,
-                  required onSent,
-                }) async {
-                  submitted += 1;
-                  onSent();
-                },
+            turnApplicationController: controller,
+            testRemotePromptSubmit: completedStockTurn(({
+              required sessionId,
+              required text,
+              required onEvent,
+              required onSent,
+            }) async {
+              submitted += 1;
+              onSent();
+            }),
             testVoiceComposerAdapter: FakeVoiceComposerAdapter(),
           ),
         ),
@@ -272,6 +284,10 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Pre-second-turn snapshot'), findsNothing);
+      final snapshot = _ownerSnapshot(controller, tester);
+      expect(snapshot.historyRows.first['content'], 'Existing transcript row');
+      expect(snapshot.historyRows.last['content'], 'Second reply');
+      expect(snapshot.displayRows, isEmpty);
       expect(find.text('Existing transcript row'), findsOneWidget);
       expect(find.text('First turn'), findsOneWidget);
       expect(find.text('Second turn'), findsOneWidget);
@@ -322,16 +338,15 @@ void main() {
             startedAt: 1,
           ),
           testApiClient: apiClient,
-          testRemotePromptSubmit:
-              ({
-                required sessionId,
-                required text,
-                required onEvent,
-                required onSent,
-              }) async {
-                onSent();
-                await submitGate.future;
-              },
+          testRemotePromptSubmit: completedStockTurn(({
+            required sessionId,
+            required text,
+            required onEvent,
+            required onSent,
+          }) async {
+            onSent();
+            await submitGate.future;
+          }),
           testVoiceComposerAdapter: FakeVoiceComposerAdapter(),
         ),
       ),
@@ -350,14 +365,26 @@ void main() {
     await tester.pump();
 
     await tester.tap(find.byTooltip('Stop response'));
-    await httpClient.refreshedMessagesUri.future;
+    // The fixture now supplies the server terminal receipt. A stop RPC ack
+    // alone must not settle an app-owned stock turn.
     submitGate.complete();
+    await httpClient.refreshedMessagesUri.future;
     await tester.pumpAndSettle();
 
     expect(find.text('Stale transcript row'), findsNothing);
     expect(find.text('Existing transcript row'), findsOneWidget);
   });
 }
+
+NormalGatewayChatSnapshot _ownerSnapshot(
+  GatewayTurnApplicationController controller,
+  WidgetTester tester,
+) => controller
+    .normalSessionFor(
+      tester.widget<ChatScreen>(find.byType(ChatScreen)).connection,
+    )
+    .findChat('stored-large-session')!
+    .snapshot;
 
 class _DelayedMessagesHttpClient extends http.BaseClient {
   _DelayedMessagesHttpClient({

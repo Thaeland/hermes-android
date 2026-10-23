@@ -7,6 +7,7 @@ import 'package:hermes_android/core/l10n/l10n.dart';
 import 'package:hermes_android/core/screens/chat_screen.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
 import 'package:http/http.dart' as http;
+import 'package:hermes_android/core/services/ws_client.dart';
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -58,6 +59,12 @@ Widget _chat({
           }) async {
             onSent();
             await submit();
+            onEvent(
+              StreamEvent(
+                type: 'turn.end',
+                data: const {'status': 'completed'},
+              ),
+            );
           },
       testVoiceComposerAdapter: FakeVoiceComposerAdapter(),
     ),

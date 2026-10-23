@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -10,9 +11,12 @@ import 'core/services/config_backup_io.dart';
 import 'core/services/config_backup_service.dart';
 import 'core/services/connection_keepalive_service.dart';
 import 'core/services/connection_manager.dart';
+import 'core/services/desktop_gateway_client.dart';
+import 'core/services/background_work_prefs.dart';
 import 'core/services/gateway_turn_application_controller.dart';
 import 'core/services/local_chat_pin_store.dart';
 import 'core/services/notification_prefs.dart';
+import 'core/services/mobile_push_service.dart';
 import 'core/services/text_size_preference.dart';
 import 'core/services/turn_notification_service.dart';
 import 'core/screens/chat_screen.dart';
@@ -222,10 +226,18 @@ class HermesApp extends StatefulWidget {
   final ConnectionManager connManager;
   final AndroidShareIntentService? shareIntents;
   final AndroidLaunchIntentService? launchIntents;
+  final MobilePushService? mobilePush;
+
+  @visibleForTesting
+  final Future<Session?> Function(SavedConnection, String)?
+  testNotificationSessionLookup;
+
   const HermesApp({
     required this.connManager,
     this.shareIntents,
     this.launchIntents,
+    this.mobilePush,
+    this.testNotificationSessionLookup,
     super.key,
   });
 
@@ -272,6 +284,14 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
   final ConnectionKeepAliveService _keepAlive = ConnectionKeepAliveService();
 
   Object? _keepAliveTurnActivityToken;
+  bool _background = false;
+  bool _closingTurnOwner = false;
+  String? _ongoingSignature;
+  final Set<String> _ongoingChats = {};
+  Future<void> _ongoingWrites = Future<void>.value();
+  late final MobilePushService _mobilePush =
+      widget.mobilePush ?? MobilePushService.shared;
+  bool _routingMobilePush = false;
 
   /// Pushes from the app root (notification taps) need a navigator below the
   /// MaterialApp this state builds.
@@ -286,13 +306,16 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
     // backgrounded must end (or earn) the foreground service immediately,
     // not wait for the next resume.
     _keepAliveTurnActivityToken = _turnApplicationController
-        .addTurnActivityListener(
-          () => _keepAlive.onTurnActivityChanged(
-            _turnApplicationController.hasActiveTurn,
-          ),
-        );
+        .addTurnActivityListener(_onTurnActivityChanged);
+    backgroundWorkEnabled.addListener(_onBackgroundWorkPolicyChanged);
+    unawaited(BackgroundWorkPrefsStore.load());
+    _restoreNormalSessions();
     unawaited(NotificationPrefsStore.load());
     notificationResponseHandler = _handleNotificationResponse;
+    _mobilePush.addListener(_onMobilePushChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_initialiseMobilePushService());
+    });
     // A notification that launched a terminated app carries its tap/action in
     // the platform's launch details; route it once the first frame is up.
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -304,10 +327,161 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // Refresh OS authorisation passively after returning from Settings.
+      unawaited(TurnNotificationService.shared.ensureInitialized());
+      _background = false;
+      _restoreNormalSessions();
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
+      _background = true;
+    }
+    _turnApplicationController.setLifecycle(
+      background: _background,
+      backgroundWorkEnabled: backgroundWorkEnabled.value,
+    );
+    _syncOngoingChats();
     _keepAlive.onAppLifecycleState(
       state,
       hasActiveTurn: _turnApplicationController.hasActiveTurn,
     );
+  }
+
+  Future<void> _initialiseMobilePushService() async {
+    try {
+      await _mobilePush.initialize(widget.connManager);
+      if (mounted && !_closingTurnOwner) _onMobilePushChanged();
+    } catch (_) {
+      // Optional transport failure must not block startup or other intents.
+    }
+  }
+
+  void _onMobilePushChanged() {
+    if (!mounted ||
+        _closingTurnOwner ||
+        _routingMobilePush ||
+        !_mobilePush.hasPendingTap) {
+      return;
+    }
+    unawaited(_routeMobilePush());
+  }
+
+  Future<void> _routeMobilePush() async {
+    _routingMobilePush = true;
+    try {
+      while (mounted && !_closingTurnOwner && _mobilePush.hasPendingTap) {
+        final route = await _mobilePush.takePendingNotificationRoute();
+        if (!mounted || _closingTurnOwner) return;
+        if (route == null || !await _mobilePush.isRouteCurrent(route)) continue;
+        if (!mounted || _closingTurnOwner) return;
+        await _openNotificationSession(
+          route.connection,
+          route.sessionId,
+          pushRoute: route,
+        );
+      }
+    } catch (_) {
+      // Invalid/revoked taps never gain action authority or submit a prompt.
+    } finally {
+      _routingMobilePush = false;
+    }
+  }
+
+  void _restoreNormalSessions() {
+    final connections = widget.connManager.getConnections();
+    for (final connection in connections) {
+      if (DesktopGatewayClient.endpointDigestFor(connection) == null) continue;
+      unawaited(
+        _turnApplicationController
+            .normalSessionFor(connection)
+            .ready
+            .catchError((Object _) {}),
+      );
+    }
+    _turnApplicationController.retainConnections(
+      connections.map((connection) => connection.id).toSet(),
+    );
+  }
+
+  void _onTurnActivityChanged() {
+    if (_closingTurnOwner) return;
+    _keepAlive.onTurnActivityChanged(_turnApplicationController.hasActiveTurn);
+    _syncOngoingChats();
+  }
+
+  void _onBackgroundWorkPolicyChanged() {
+    final enabled = backgroundWorkEnabled.value;
+    _keepAlive.onPolicyChanged(enabled);
+    _turnApplicationController.setLifecycle(
+      background: _background,
+      backgroundWorkEnabled: enabled,
+    );
+    _syncOngoingChats();
+  }
+
+  void _syncOngoingChats() {
+    if (_closingTurnOwner) return;
+    final activities = _turnApplicationController.activeChatActivities.toList()
+      ..sort(
+        (a, b) => '${a.connectionId}:${a.localSessionId}'.compareTo(
+          '${b.connectionId}:${b.localSessionId}',
+        ),
+      );
+    final signature = jsonEncode([
+      _background,
+      backgroundWorkEnabled.value,
+      for (final activity in activities)
+        [
+          activity.connectionId,
+          activity.localSessionId,
+          activity.storedSessionId,
+          activity.title,
+          activity.turnId,
+          activity.status,
+        ],
+    ]);
+    if (signature == _ongoingSignature) return;
+    _ongoingSignature = signature;
+    _ongoingWrites = _ongoingWrites
+        .then((_) async {
+          if (_closingTurnOwner) return;
+          final service = TurnNotificationService.shared;
+          final current = _turnApplicationController.activeChatActivities
+              .toList();
+          if (!_background || !backgroundWorkEnabled.value) {
+            await service.cancelAllOngoingChats();
+            _ongoingChats.clear();
+            return;
+          }
+          final desired = <String>{};
+          for (final activity in current) {
+            final key = jsonEncode([
+              activity.connectionId,
+              activity.localSessionId,
+            ]);
+            desired.add(key);
+            await service.showOngoingChat(
+              connectionId: activity.connectionId,
+              localSessionId: activity.localSessionId,
+              storedSessionId: activity.storedSessionId,
+              title: activity.title,
+              turnId: activity.turnId,
+              status: activity.status,
+            );
+          }
+          for (final stale in _ongoingChats.difference(desired)) {
+            final identity = jsonDecode(stale) as List;
+            await service.cancelOngoingChat(
+              connectionId: identity[0] as String,
+              localSessionId: identity[1] as String,
+            );
+          }
+          _ongoingChats
+            ..clear()
+            ..addAll(desired);
+        })
+        .catchError((Object _) {});
   }
 
   /// The connection a notification response should act on: the last one the
@@ -329,6 +503,7 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
   /// request; otherwise the action is left pending for the chat that does, and
   /// every response lands the user on the session the notification was about.
   void _handleNotificationResponse(NotificationResponse response) {
+    if (!mounted || _closingTurnOwner) return;
     final route = NotificationRoute.fromResponse(response);
     // An explicit connection id must resolve: falling back to another backend
     // could answer an approval against the wrong gateway. Only legacy
@@ -353,14 +528,26 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
         choice: choice,
       );
       try {
-        final session = _turnApplicationController.sessionFor(connection);
         unawaited(
-          session
-              .tryRespondToApproval(
-                sessionId: sessionId,
-                choice: choice,
-                requestId: requestId,
-              )
+          (() async {
+                final normal = _turnApplicationController.normalSessionFor(
+                  connection,
+                );
+                if (await normal.tryRespondToApproval(
+                  sessionId: sessionId,
+                  choice: choice,
+                  requestId: requestId,
+                )) {
+                  return true;
+                }
+                return _turnApplicationController
+                    .sessionFor(connection)
+                    .tryRespondToApproval(
+                      sessionId: sessionId,
+                      choice: choice,
+                      requestId: requestId,
+                    );
+              })()
               .then((answered) {
                 // The request belongs to an open chat's route-local gateway:
                 // leave it pending so that screen answers it normally.
@@ -394,10 +581,35 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
   /// the session cannot be fetched (deleted, or outside the recent list).
   Future<void> _openNotificationSession(
     SavedConnection connection,
-    String? sessionId,
-  ) async {
+    String? sessionId, {
+    MobilePushRoute? pushRoute,
+  }) async {
+    if (!mounted || _closingTurnOwner) return;
     Session? session;
+    Session? retainedSession;
     if (sessionId != null && sessionId.isNotEmpty) {
+      final normal = _turnApplicationController.normalSessionFor(connection);
+      await normal.ready.catchError((Object _) {});
+      if (!mounted || _closingTurnOwner) return;
+      if (pushRoute != null && !await _mobilePush.isRouteCurrent(pushRoute)) {
+        return;
+      }
+      if (!mounted || _closingTurnOwner) return;
+      final owner = normal.findChat(sessionId);
+      sessionId = owner?.storedSessionId ?? sessionId;
+      if (owner != null) {
+        retainedSession = Session(
+          id: owner.localSessionId,
+          title: owner.title,
+          model: '',
+          source: 'mobile',
+          messageCount: 0,
+          isActive: owner.snapshot.hasActiveTurn,
+          preview: '',
+          startedAt: 0,
+          isLocalDraft: owner.storedSessionId == null,
+        );
+      }
       ApiClient? client;
       try {
         client = ApiClient(
@@ -405,14 +617,33 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
           apiKey: connection.apiKey,
           pathPrefix: connection.gatewayPrefix ?? '',
         );
-        session = await client.getSessionById(sessionId);
+        session =
+            (widget.testNotificationSessionLookup == null
+                ? await client.getSessionById(sessionId)
+                : await widget.testNotificationSessionLookup!(
+                    connection,
+                    sessionId,
+                  )) ??
+            retainedSession;
       } catch (_) {
-        session = null;
+        session = retainedSession;
       } finally {
         client?.close();
       }
     }
-    if (!mounted) return;
+    if (pushRoute != null) {
+      if (!await _mobilePush.isRouteCurrent(pushRoute)) return;
+      // Reject prefix resolution or a local alias without durable identity proof.
+      if (session?.id != pushRoute.sessionId) session = null;
+    }
+    final currentConnection = _connectionById(connection.id);
+    if (!mounted ||
+        _closingTurnOwner ||
+        currentConnection == null ||
+        MobilePushService.binding(currentConnection) !=
+            MobilePushService.binding(connection)) {
+      return;
+    }
     widget.connManager.prefs.setString(
       HomeScreenState._lastConnectionKey,
       connection.id,
@@ -480,6 +711,9 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     final token = _keepAliveTurnActivityToken;
+    _closingTurnOwner = true;
+    _mobilePush.removeListener(_onMobilePushChanged);
+    backgroundWorkEnabled.removeListener(_onBackgroundWorkPolicyChanged);
     if (token != null) {
       _turnApplicationController.removeTurnActivityListener(token);
       _keepAliveTurnActivityToken = null;
@@ -488,6 +722,13 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
     // service is up, the native side must not outlive its only controller.
     unawaited(_keepAlive.stop());
     unawaited(_turnApplicationController.close());
+    unawaited(
+      _ongoingWrites
+          .then<void>((_) async {
+            await TurnNotificationService.shared.cancelAllOngoingChats();
+          })
+          .catchError((Object _) {}),
+    );
     super.dispose();
   }
 }
@@ -573,6 +814,22 @@ class HomeScreenState extends State<HomeScreen> {
 
   void _refresh() {
     setState(() => _connections = widget.connManager.getConnections());
+    final controller = widget.turnApplicationController;
+    for (final connection in _connections) {
+      if (DesktopGatewayClient.endpointDigestFor(connection) == null) {
+        controller.revokeConnection(connection.id);
+      } else {
+        unawaited(
+          controller
+              .normalSessionFor(connection)
+              .ready
+              .catchError((Object _) {}),
+        );
+      }
+    }
+    controller.retainConnections(
+      _connections.map((connection) => connection.id).toSet(),
+    );
   }
 
   /// Public only so the import flow and its widget test can refresh Home after

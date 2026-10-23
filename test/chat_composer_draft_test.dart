@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'support/completed_stock_turn.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
@@ -103,7 +104,7 @@ Future<void> _pumpChat(
         session: _fixtureSession,
         initialComposerText: initialComposerText,
         testComposerDraftReader: draftReader,
-        testRemotePromptSubmit: remoteSubmit,
+        testRemotePromptSubmit: completedStockTurn(remoteSubmit),
         testApiClient: ApiClient(
           baseUrl: 'http://draft.fixture',
           apiKey: '',

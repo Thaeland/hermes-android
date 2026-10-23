@@ -152,10 +152,12 @@ class RemoteFileAttachment {
 class CreatedGatewaySession {
   final String runtimeSessionId;
   final String storedSessionId;
+  final bool hasEmptyHistory;
 
   const CreatedGatewaySession({
     required this.runtimeSessionId,
     required this.storedSessionId,
+    this.hasEmptyHistory = false,
   });
 }
 
@@ -1311,6 +1313,13 @@ class WsClient {
     return CreatedGatewaySession(
       runtimeSessionId: runtimeSessionId,
       storedSessionId: storedSessionId,
+      // Only explicit, well-typed creation evidence proves an empty baseline.
+      // Older gateways may omit these fields; that remains unknown history.
+      hasEmptyHistory:
+          payload['message_count'] is int &&
+          payload['message_count'] == 0 &&
+          payload['messages'] is List &&
+          (payload['messages'] as List).isEmpty,
     );
   }
 
