@@ -80,11 +80,15 @@ class TurnNotification {
 abstract class TurnNotificationSink {
   Future<void> initialize();
 
+  /// Reads current OS authorisation without displaying a permission prompt.
+  /// Returns null only when the platform has no notification permission gate.
+  Future<bool?> checkPermission();
+
   /// Asks the platform for permission to post notifications.
   ///
   /// Returns `true` when granted, `false` when denied, and `null` when the
-  /// platform has no runtime gate (iOS, Android < 13) — in which case posting
-  /// is already allowed.
+  /// platform has no notification implementation — in which case posting
+  /// has no permission gate here.
   Future<bool?> requestPermission();
 
   /// The tap or action that launched a terminated app, when the platform
@@ -126,6 +130,29 @@ class PluginTurnNotificationSink implements TurnNotificationSink {
         notificationResponseHandler?.call(response);
       },
     );
+  }
+
+  @override
+  Future<bool?> checkPermission() async {
+    final android = _plugin
+        .resolvePlatformSpecificImplementation<
+          AndroidFlutterLocalNotificationsPlugin
+        >();
+    if (android != null) {
+      return await android.areNotificationsEnabled() ?? false;
+    }
+
+    final ios = _plugin
+        .resolvePlatformSpecificImplementation<
+          IOSFlutterLocalNotificationsPlugin
+        >();
+    if (ios != null) {
+      final permissions = await ios.checkPermissions();
+      return permissions?.isEnabled == true ||
+          permissions?.isProvisionalEnabled == true;
+    }
+
+    return null;
   }
 
   @override
@@ -442,6 +469,7 @@ class TurnNotificationService {
   bool _permissionRequested = false;
   Future<void>? _initializing;
   Future<void>? _requestingPermission;
+  Future<void>? _refreshingPermission;
 
   TurnNotificationService({
     TurnNotificationSink? sink,
@@ -450,16 +478,15 @@ class TurnNotificationService {
 
   /// Whether the platform currently allows Hermes to post notifications.
   ///
-  /// `false` means Android 13+ denied POST_NOTIFICATIONS: turns still complete
-  /// but the OS drops every notification, so the UI can surface that instead of
-  /// leaving the user wondering why nothing arrives.
+  /// Refreshed by [ensureInitialized], including after returning from OS
+  /// Settings. A denial or unavailable permission check is not a grant.
   bool get permissionGranted => _permissionGranted;
 
-  /// One-shot initialisation of the Hermes notification channel.
+  /// Initialises once and passively refreshes current OS authorisation.
   ///
-  /// Safe to call repeatedly — once it has succeeded, subsequent calls are
-  /// no-ops. A failed attempt (platform channel unavailable, e.g. in tests)
-  /// degrades to a silent no-op and may be retried later.
+  /// Only explicit foreground callers may request permission, once after a
+  /// successful platform request. Later checks never re-prompt, even after a
+  /// denial. Failed platform operations degrade silently and may be retried.
   Future<void> ensureInitialized({bool requestPermission = false}) async {
     if (!_initialized) {
       final flight = _initializing ??= _initialize();
@@ -471,13 +498,27 @@ class TurnNotificationService {
     }
     // Background/headless callers never ask for UI permission. The foreground
     // app root or Settings explicitly opts in, even after headless init.
-    if (_initialized && requestPermission && !_permissionRequested) {
+    if (!_initialized) return;
+    if (requestPermission && !_permissionRequested) {
       final flight = _requestingPermission ??= _requestPermission();
       try {
         await flight;
       } finally {
         if (identical(_requestingPermission, flight)) {
           _requestingPermission = null;
+        }
+      }
+    } else {
+      // Join an active prompt rather than reading its pre-prompt state. Passive
+      // checks also coalesce, and cannot overwrite a newer request result.
+      final flight =
+          _requestingPermission ??
+          (_refreshingPermission ??= _refreshPermission());
+      try {
+        await flight;
+      } finally {
+        if (identical(_refreshingPermission, flight)) {
+          _refreshingPermission = null;
         }
       }
     }
@@ -494,11 +535,23 @@ class TurnNotificationService {
   }
 
   Future<void> _requestPermission() async {
+    // A headless refresh may already be reading the old grant. Let it finish
+    // before prompting so its late result cannot replace the user's answer.
+    await _refreshingPermission;
     try {
       _permissionGranted = await _sink.requestPermission() ?? true;
       _permissionRequested = true;
     } catch (_) {
       // Unknown is not a grant. Allow an explicit foreground retry later.
+      _permissionGranted = false;
+    }
+  }
+
+  Future<void> _refreshPermission() async {
+    try {
+      _permissionGranted = await _sink.checkPermission() ?? true;
+    } catch (_) {
+      // Unknown is not a grant, but a later passive check may recover.
       _permissionGranted = false;
     }
   }

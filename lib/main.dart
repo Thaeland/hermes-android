@@ -312,6 +312,8 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
+      // Refresh OS authorisation passively after returning from Settings.
+      unawaited(TurnNotificationService.shared.ensureInitialized());
       _background = false;
       _restoreNormalSessions();
     } else if (state == AppLifecycleState.paused ||
