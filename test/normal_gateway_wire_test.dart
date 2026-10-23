@@ -394,6 +394,105 @@ void main() {
     }
   }
 
+  for (final freshFails in [false, true]) {
+    test(
+      'real wire: epoch rejects stale runtime and drains fresh resume; failure=$freshFails',
+      () async {
+        gateway.holdSubmitAck = true;
+        final controller = GatewayTurnApplicationController();
+        addTearDown(controller.close);
+        final session = controller.normalSessionFor(gateway.connection);
+        await session.ready;
+        final chat = session.chatFor(
+          'local',
+          storedSessionId: 'stored',
+          title: 'B',
+        );
+        chat.observeHistory(gateway.rows);
+        final submission = chat.submitPrepared(
+          reservation: chat.reserve()!,
+          text: 'B',
+          localContent: 'B',
+        );
+        submission.ignore();
+        await gateway.submitted.future;
+        final turnId = chat.turnId;
+        final initialRuntime = gateway.runtime;
+        gateway.holdResumeReply = true;
+        gateway.resumeRuntime = 'pre-ack-runtime';
+        gateway.running = false;
+        gateway.inflight = {'status': 'error', 'error': 'Old A retained error'};
+        final oldRead = gateway.nextResume = Completer<void>();
+        gateway.event('turn.error', {'message': 'Old A wire error'});
+        await oldRead.future;
+        final releaseOld = gateway.releaseResumeReply!;
+        gateway.resumeRuntime = 'post-ack-runtime';
+        gateway.running = !freshFails;
+        gateway.inflight = freshFails
+            ? {'status': 'error', 'error': 'B fresh authoritative failure'}
+            : null;
+        gateway.releaseSubmitAck!();
+        await submission;
+        final freshRead = gateway.nextResume = Completer<void>();
+        releaseOld();
+        await freshRead.future;
+        final releaseFresh = gateway.releaseResumeReply!;
+        expect(
+          gateway.requests.where((r) => r['method'] == 'session.resume'),
+          hasLength(3),
+        );
+        expect(chat.snapshot.hasActiveTurn, isTrue);
+        expect(chat.snapshot.error, isNull);
+        expect(
+          (await session.pendingStore.load(session.scope)).single.turnId,
+          turnId,
+        );
+        expect(gateway.historyPaths, isEmpty);
+        gateway.event('message.delta', {
+          'text': 'STALE',
+        }, sessionId: 'pre-ack-runtime');
+        gateway.event('message.delta', {
+          'text': 'Current',
+        }, sessionId: initialRuntime);
+        await session.client!.getSessionReasoning('local');
+        expect(gateway.requests.last['params']['session_id'], initialRuntime);
+        expect(chat.snapshot.displayRows.last['content'], 'Current');
+        releaseFresh();
+        if (freshFails) {
+          await _until(() => !chat.snapshot.hasActiveTurn);
+          expect(chat.phase, NormalGatewayTurnPhase.failed);
+          expect(chat.snapshot.error, 'B fresh authoritative failure');
+          expect(await session.pendingStore.load(session.scope), isEmpty);
+        } else {
+          await _until(() => gateway.historyPaths.isNotEmpty);
+          await session.client!.getSessionReasoning('local');
+          gateway.event('message.delta', {
+            'text': 'STALE',
+          }, sessionId: initialRuntime);
+          gateway.event('message.delta', {
+            'text': '+fresh',
+          }, sessionId: 'post-ack-runtime');
+          await session.client!.getSessionReasoning('local');
+          expect(chat.snapshot.displayRows.last['content'], 'Current+fresh');
+          expect(chat.snapshot.hasActiveTurn, isTrue);
+          expect(
+            (await session.pendingStore.load(session.scope)).single.turnId,
+            turnId,
+          );
+        }
+        await session.client!.getSessionReasoning('local');
+        expect(
+          gateway.requests.last['params']['session_id'],
+          'post-ack-runtime',
+        );
+        expect(
+          gateway.requests.where((r) => r['method'] == 'prompt.submit'),
+          hasLength(1),
+        );
+      },
+    );
+  }
+
   test(
     'real wire: pre-ACK resume failure delivered after ACK cannot retire B',
     () async {
@@ -591,6 +690,7 @@ class _Gateway {
   void Function()? releaseSubmitAck;
   bool holdResumeReply = false;
   void Function()? releaseResumeReply;
+  String? resumeRuntime;
   bool running = true;
   Map<String, dynamic>? inflight;
   final rows = <Map<String, dynamic>>[
@@ -665,7 +765,7 @@ class _Gateway {
               else
                 'result': method == 'session.resume'
                     ? {
-                        'session_id': runtime,
+                        'session_id': resumeRuntime ?? runtime,
                         'running': running,
                         if (inflight != null) 'inflight': inflight,
                       }
