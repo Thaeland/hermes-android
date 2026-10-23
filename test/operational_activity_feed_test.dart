@@ -2,6 +2,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hermes_android/core/models/session.dart';
 import 'package:hermes_android/core/services/operational_activity_store.dart';
 import 'package:hermes_android/core/utils/activity_feed.dart';
+import 'package:hermes_android/core/theme/hermes_theme.dart';
 import 'package:hermes_android/core/utils/operational_activity_feed.dart';
 import 'package:hermes_android/l10n/app_localizations.dart';
 
@@ -150,6 +151,41 @@ void main() {
       );
       expect(result.groups.single.kind, ActivityGroupKind.completed);
       expect(result.groups.single.items.single.sessionId, 'tip');
+    },
+  );
+
+  test(
+    'v2 local bindings resolve canonical compression tips without a duplicate metadata row',
+    () {
+      final result = buildOperationalActivityFeed(
+        journalFeed: ActivityFeed(
+          groups: [
+            ActivityGroup(
+              kind: ActivityGroupKind.completed,
+              items: [
+                ActivityItem(
+                  sessionId: 'mobile-local',
+                  clientTurnId: 'turn',
+                  label: 'Completed',
+                  status: HermesStatus.completed,
+                  updatedAt: now,
+                ),
+              ],
+              totalCount: 1,
+            ),
+          ],
+          blockedCount: 0,
+          runningCount: 0,
+        ),
+        journalSessionAliases: {'mobile-local': 'stored'},
+        records: [],
+        sessions: [session('tip', root: 'stored')],
+        now: now,
+        l10n: l10n,
+      );
+      expect(result.groups.length, 1);
+      expect(result.groups.single.items.single.sessionId, 'tip');
+      expect(result.groups.single.items.single.title, 'Chat tip');
     },
   );
 

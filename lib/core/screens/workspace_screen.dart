@@ -280,6 +280,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   bool _activitySessionsStale = false;
   final Map<String, Session> _activitySessions = {};
   List<OperationalActivityRecord> _lastActivityRecords = const [];
+  Map<String, String> _lastJournalAliases = const {};
   ActivityFeed _lastJournalFeed = const ActivityFeed(
     groups: [],
     blockedCount: 0,
@@ -693,6 +694,13 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         final snapshot = await (_journal ??= GatewayTurnJournal())
             .loadSnapshot();
         if (!mounted) throw StateError('Workspace disposed');
+        _lastJournalAliases = {
+          for (final binding in snapshot.bindings)
+            if (binding.connectionId == connection.id &&
+                binding.endpointDigest == endpointDigest &&
+                binding.storedSessionId != null)
+              binding.localSessionId: binding.storedSessionId!,
+        };
         _lastJournalFeed = buildActivityFeed(
           snapshot: snapshot,
           now: DateTime.now(),
@@ -709,6 +717,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     }
     final feed = buildOperationalActivityFeed(
       journalFeed: _lastJournalFeed,
+      journalSessionAliases: _lastJournalAliases,
       records: _lastActivityRecords,
       sessions: _activitySessions.values,
       now: DateTime.now(),

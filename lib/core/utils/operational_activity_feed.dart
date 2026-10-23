@@ -14,6 +14,7 @@ ActivityFeed buildOperationalActivityFeed({
   required DateTime now,
   required AppLocalizations l10n,
   int groupLimit = kActivityGroupLimit,
+  Map<String, String> journalSessionAliases = const {},
 }) {
   if (groupLimit <= 0) throw ArgumentError.value(groupLimit, 'groupLimit');
   final buckets = <ActivityGroupKind, List<ActivityItem>>{
@@ -21,20 +22,38 @@ ActivityFeed buildOperationalActivityFeed({
   };
   final knownSessions = <String>{};
   final knownTurns = <String>{};
-  for (final group in journalFeed.groups) {
-    buckets[group.kind]!.addAll(group.items);
-    for (final item in group.items) {
-      knownSessions.add(item.sessionId);
-      knownTurns.add(item.clientTurnId);
-      if (item.turnId != null) knownTurns.add(item.turnId!);
-    }
-  }
   final sessionRows = sessions.toList(growable: false);
   final byId = <String, Session>{
     for (final session in sessionRows) session.id: session,
     for (final session in sessionRows)
       if (session.lineageRootId != null) session.lineageRootId!: session,
   };
+  for (final group in journalFeed.groups) {
+    for (final item in group.items) {
+      final storedId = journalSessionAliases[item.sessionId];
+      final session = byId[storedId] ?? byId[item.sessionId];
+      final sessionId = session?.id ?? storedId ?? item.sessionId;
+      buckets[group.kind]!.add(
+        ActivityItem(
+          sessionId: sessionId,
+          clientTurnId: item.clientTurnId,
+          turnId: item.turnId,
+          title: session?.title ?? item.title,
+          label: item.label,
+          status: item.status,
+          statusLabel: item.statusLabel,
+          updatedAt: item.updatedAt,
+        ),
+      );
+      knownSessions.addAll([
+        item.sessionId,
+        sessionId,
+        if (storedId != null) storedId,
+      ]);
+      knownTurns.add(item.clientTurnId);
+      if (item.turnId != null) knownTurns.add(item.turnId!);
+    }
+  }
   final floor = now.subtract(kActivityCompletedWindow).millisecondsSinceEpoch;
   for (final record in records) {
     if (knownTurns.contains(record.turnId)) continue;
