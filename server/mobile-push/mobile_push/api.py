@@ -41,6 +41,7 @@ class Keys(StrictModel):
 
 
 class Registration(StrictModel):
+    registration_revision: int = Field(ge=1, le=9007199254740991)
     endpoint: str = Field(min_length=8, max_length=2048)
     keys: Keys
     registration_nonce: str = Field(pattern=r"^[A-Za-z0-9_-]{16,128}$")
@@ -100,6 +101,7 @@ def create_router(profile):
             enabled = policy.enabled and policy.admitted(identity)
             return {
                 "schema": 1,
+                "registration_fence": 1,
                 "transports": ["webpush"],
                 "enabled": enabled,
                 "vapid_public_key": policy.public_key() if enabled else "",
@@ -145,7 +147,9 @@ def create_router(profile):
     def revoke(installation_id: str, identity: Identity):
         def remove():
             # Revocation remains possible after an operator disables/removes a grant.
-            return store().revoke(identity, installation_id)
+            if not identifier(installation_id):
+                raise Rejected(422, "Invalid installation ID")
+            return store().revoke(identity, installation_id, profile.policy)
 
         return guarded(remove)
 

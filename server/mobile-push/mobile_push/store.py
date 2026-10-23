@@ -19,7 +19,8 @@ CREATE TABLE IF NOT EXISTS registrations (
  installation TEXT PRIMARY KEY, provider TEXT NOT NULL, user_id TEXT NOT NULL,
  generation INTEGER NOT NULL, status TEXT NOT NULL, nonce TEXT NOT NULL,
  endpoint TEXT NOT NULL, keys_json TEXT NOT NULL, kinds_json TEXT NOT NULL,
- sessions_json TEXT NOT NULL, challenge_hash TEXT NOT NULL, challenge_expires INTEGER NOT NULL
+ sessions_json TEXT NOT NULL, challenge_hash TEXT NOT NULL, challenge_expires INTEGER NOT NULL,
+ registration_revision INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS events (
  cursor INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT UNIQUE NOT NULL,
@@ -56,6 +57,25 @@ class Store:
         with self.connection() as db:
             db.execute("PRAGMA journal_mode=WAL")
             db.executescript(SCHEMA)
+        # Transactional, restart-safe migration: old proofs/delivery fail closed,
+        # but retain installation + revision floor so an upgraded client can renew.
+        with self.transaction() as db:
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(registrations)")}
+            if "registration_revision" not in columns:
+                db.execute(
+                    "ALTER TABLE registrations ADD COLUMN registration_revision "
+                    "INTEGER NOT NULL DEFAULT 0"
+                )
+            legacy = db.execute(
+                "SELECT * FROM registrations WHERE registration_revision=0 "
+                "AND status IN ('pending','active')"
+            ).fetchall()
+            for row in legacy:
+                self.revoke_in(db, row)
+                db.execute(
+                    "UPDATE registrations SET status='upgrade_required' WHERE installation=?",
+                    (row["installation"],),
+                )
 
     @contextlib.contextmanager
     def connection(self):
@@ -88,6 +108,11 @@ class Store:
             return dict(row)
 
     def put(self, principal, installation, body, policy: Policy):
+        revision = body.get("registration_revision")
+        # Validate here too: an authenticated handler started by old code must not
+        # bypass the fence when it eventually reaches this transactional boundary.
+        if type(revision) is not int or not 1 <= revision <= 9007199254740991:
+            raise Rejected(422, "A fenced registration revision is required")
         now = self.now()
         challenge = secrets.token_urlsafe(32)
         with self.transaction() as db:
@@ -96,6 +121,10 @@ class Store:
             ).fetchone()
             if previous:
                 self.owner(previous, principal)
+                if previous["status"] == "revoked":
+                    raise Rejected(409, "Installation revoked; enable with a new installation ID")
+                if revision <= previous["registration_revision"]:
+                    raise Rejected(409, "Registration revision superseded")
                 if previous["nonce"] == body["registration_nonce"]:
                     raise Rejected(409, "A fresh registration_nonce is required")
             elif (
@@ -121,9 +150,10 @@ class Store:
                 json.dumps(body["session_ids"]),
                 hashlib.sha256(challenge.encode()).hexdigest(),
                 now + policy.challenge_ttl,
+                revision,
             )
             db.execute(
-                "INSERT OR REPLACE INTO registrations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", values
+                "INSERT OR REPLACE INTO registrations VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", values
             )
             event_id = self._event(
                 db,
@@ -148,6 +178,7 @@ class Store:
             "generation": generation,
             "status": "pending",
             "registration_nonce": body["registration_nonce"],
+            "registration_revision": revision,
         }
 
     def confirm(self, principal, installation, generation, challenge, policy):
@@ -187,14 +218,31 @@ class Store:
             (row["installation"],),
         )
 
-    def revoke(self, principal, installation):
+    def revoke(self, principal, installation, new_policy=None):
         with self.transaction() as db:
             row = db.execute(
                 "SELECT * FROM registrations WHERE installation=?", (installation,)
             ).fetchone()
-            self.owner(row, principal)
-            self.revoke_in(db, row)
-        return {"generation": row["generation"] + 1, "status": "revoked"}
+            if row is None:
+                policy = new_policy() if new_policy else None
+                if policy is not None and not policy.admitted(principal):
+                    raise Rejected(403, "Principal not authorised for mobile push")
+                capacity = policy.max_registrations if policy else 256
+                if db.execute("SELECT count(*) FROM registrations").fetchone()[0] >= capacity:
+                    raise Rejected(429, "Registration capacity reached")
+                # DELETE can beat the very first PUT (including its DNS lookup).
+                # Keep a terminal tombstone, not a 404 that permits late creation.
+                db.execute(
+                    "INSERT INTO registrations VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (installation, *principal, 1, "revoked", "", "", "{}", "[]", "[]", "", 0, 0),
+                )
+                generation = 1
+            else:
+                self.owner(row, principal)
+                if row["status"] != "revoked":
+                    self.revoke_in(db, row)
+                generation = row["generation"] + int(row["status"] != "revoked")
+        return {"generation": generation, "status": "revoked"}
 
     @staticmethod
     def hint(event_id, kind, generation, nonce, expires, **extra):

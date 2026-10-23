@@ -51,6 +51,14 @@ internal object MobilePushBridge {
     @Synchronized fun command(context: Context, method: String, args: Map<*, *>): Any? {
         if (method == "distributors") return UnifiedPush.getDistributors(context)
         val state = MobilePushStore.read(context)
+        // Upgrade old sealed consent without resetting its installation/revision.
+        // Legacy delivery/proofs cannot remain active across a server migration.
+        if (state.optBoolean("enabled") && state.optInt("registration_fence") != 1 &&
+            method in listOf("snapshot", "preferences")) {
+            invalidateRegistration(state)
+            MobilePushStore.write(context, state)
+            cancelNotifications(context)
+        }
         val expected = JSONObject(args)
         when (method) {
             "snapshot" -> { /* no mutation */ }
@@ -71,7 +79,7 @@ internal object MobilePushBridge {
                 val revoke = state.optJSONArray("revocations") ?: JSONArray()
                 val fresh = JSONObject().put("enabled", true).put("active", false)
                     .put("installation", UUID.randomUUID().toString()).put("nonce", UUID.randomUUID().toString())
-                    .put("revision", 1).put("generation", 0).put("connection", args["connection"])
+                    .put("registration_fence", 1).put("revision", 1).put("generation", 0).put("connection", args["connection"])
                     .put("binding", args["binding"]).put("sessions", sessions)
                     .put("distributor", distributor).put("vapid", args["vapid"])
                     .put("revocations", revoke).put("master", args["master"])
@@ -270,8 +278,10 @@ internal object MobilePushBridge {
         changed()
     }
     private fun invalidateRegistration(state: JSONObject) {
-        state.put("active", false).put("generation", 0)
-            .put("nonce", UUID.randomUUID().toString()).put("revision", state.optLong("revision") + 1)
+        val revision = state.optLong("revision")
+        check(revision in 0 until 9007199254740991L) { "Revision exhausted; disable and enable again" }
+        state.put("registration_fence", 1).put("active", false).put("generation", 0)
+            .put("nonce", UUID.randomUUID().toString()).put("revision", revision + 1)
         listOf("registration_attempt", "confirmation_attempt", "pending_until", "challenges", "tap", "issued", "seen").forEach { state.remove(it) }
     }
     private fun validTap(state: JSONObject, tap: JSONObject) =

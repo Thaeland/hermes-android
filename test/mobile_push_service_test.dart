@@ -43,6 +43,7 @@ class Fixture {
   late final ConnectionManager manager;
   late final SavedConnection connection;
   int capsStatus = 200;
+  int? registrationFence = 1;
   bool permission = true;
   bool failRevoke = false;
   String? failCommand;
@@ -94,6 +95,7 @@ class Fixture {
                 'active': false,
                 'installation': 'fixture-installation',
                 'nonce': 'fixture-nonce',
+                'registration_fence': 1,
                 'revision': 1,
                 'generation': 0,
               });
@@ -229,6 +231,7 @@ class Fixture {
             return http.Response(
               jsonEncode({
                 'schema': 1,
+                'registration_fence': registrationFence,
                 'enabled': true,
                 'transports': ['webpush'],
                 'vapid_public_key': base64Url
@@ -273,6 +276,7 @@ class Fixture {
       'generation': 7,
       'status': 'pending',
       'registration_nonce': native['nonce'],
+      'registration_revision': native['revision'],
     }),
     200,
   );
@@ -284,6 +288,7 @@ class Fixture {
       'binding': MobilePushService.binding(connection),
       'installation': 'fixture-installation',
       'nonce': 'fixture-nonce',
+      'registration_fence': 1,
       'revision': 1,
       'generation': active ? 7 : 0,
       'sessions': ['durable-session'],
@@ -458,6 +463,39 @@ void main() {
       );
       expect(f.service.error, contains('denied'));
       expect(f.methods, isNot(contains('enable')));
+    },
+  );
+  test(
+    'unfenced legacy server rejected before permission or native consent',
+    () async {
+      await f.service.initialize(f.manager);
+      f.registrationFence = null;
+      await expectLater(
+        f.service.enable(f.connection, 'test.distributor', ['durable-session']),
+        throwsFormatException,
+      );
+      expect(f.methods, isNot(contains('permission')));
+      expect(f.methods, isNot(contains('enable')));
+      expect(f.requests.where((r) => r.method == 'PUT'), isEmpty);
+    },
+  );
+  test(
+    'registration must echo exact durable revision before accepting generation',
+    () async {
+      f.seed();
+      f.onPut = (_) async => http.Response(
+        jsonEncode({
+          'generation': 7,
+          'status': 'pending',
+          'registration_nonce': f.native['nonce'],
+          'registration_revision': 999,
+        }),
+        200,
+      );
+      await f.service.initialize(f.manager);
+      expect(f.service.active, isFalse);
+      expect(f.native['registration_attempt'], isTrue);
+      expect(f.methods, isNot(contains('generation')));
     },
   );
   test('permission denial never grants native consent', () async {

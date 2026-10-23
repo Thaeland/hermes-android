@@ -15,6 +15,8 @@ class ConsumingServer {
   final fixture.Fixture f;
   final nonces = <String>{};
   int generation = 0;
+  int revision = 0;
+  String? nonce;
   bool active = false;
   bool losePut = false;
   bool loseConfirm = false;
@@ -24,8 +26,16 @@ class ConsumingServer {
 
   void install() {
     f.onPut = (request) async {
-      final nonce = (jsonDecode(request.body) as Map)['registration_nonce'];
-      if (!nonces.add(nonce as String)) return http.Response('{}', 409);
+      final body = jsonDecode(request.body) as Map;
+      final nextRevision = body['registration_revision'];
+      final nextNonce = body['registration_nonce'];
+      if (nextRevision is! int ||
+          nextRevision <= revision ||
+          !nonces.add(nextNonce as String)) {
+        return http.Response('{}', 409);
+      }
+      revision = nextRevision;
+      nonce = nextNonce;
       generation++;
       active = false;
       proof = 'encrypted-proof-$generation';
@@ -43,6 +53,8 @@ class ConsumingServer {
           'generation': generation,
           'status': 'pending',
           'registration_nonce': nonce,
+          'registration_revision':
+              (jsonDecode(request.body) as Map)['registration_revision'],
         }),
         200,
       );
@@ -77,6 +89,64 @@ void main() {
     await f.setup();
   });
   tearDown(() => f.close());
+
+  for (final replacement in ['restart', 'endpoint']) {
+    test(
+      'precommit old PUT cannot overwrite $replacement activation, retry or restart',
+      () async {
+        f.seed();
+        final server = ConsumingServer(f)..install();
+        final commit = f.onPut!;
+        final entered = Completer<void>();
+        final release = Completer<void>();
+        var first = true;
+        f.onPut = (request) async {
+          if (first) {
+            first = false;
+            entered.complete();
+            await release.future; // BEFORE server generation/revision writes
+          }
+          return commit(request);
+        };
+        final oldOwner = f.service.initialize(f.manager);
+        await entered.future;
+        expect(server.generation, 0);
+        if (replacement == 'endpoint') {
+          f.native.addAll({
+            'nonce': 'renewed-endpoint-nonce',
+            'revision': 2,
+            'generation': 0,
+            'active': false,
+            'endpoint': 'https://renewed.invalid/new',
+          });
+          f.native.remove('registration_attempt');
+        }
+        f.restart();
+        await f.service.initialize(f.manager);
+        expect(f.service.active, isTrue);
+        expect(server.active, isTrue);
+        expect(server.generation, 1);
+        expect(server.revision, f.native['revision']);
+        expect(server.nonce, f.native['nonce']);
+        final durable = f.clone(f.native);
+        release.complete();
+        await oldOwner;
+        expect(f.native, durable);
+        expect(server.generation, 1);
+        expect(server.active, isTrue);
+        expect(server.nonce, f.native['nonce']);
+        await f.service.retry();
+        f.restart();
+        await f.service.initialize(f.manager);
+        expect(f.service.status, 'Active');
+        expect(server.generation, 1);
+        expect(server.active, isTrue);
+        expect(f.requests.where((r) => r.method == 'PUT'), hasLength(2));
+        expect(f.methods, isNot(contains('permission')));
+        expect(f.methods, isNot(contains('enable')));
+      },
+    );
+  }
 
   for (final loss in [
     'PUT response',

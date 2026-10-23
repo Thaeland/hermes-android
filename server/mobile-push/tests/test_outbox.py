@@ -153,7 +153,7 @@ def test_generation_and_authz_are_rechecked_after_claim(env):
     env.runtime.store.claim = revoke_between_claim_and_send
     assert env.runtime.deliver_one()
     assert sender.hints == []
-    activate(env, registration_nonce="new_nonce_0123456789abcdef")
+    activate(env, installation="new-phone", registration_nonce="new_nonce_0123456789abcdef")
     end(env, turn="turn-b")
 
     def remove_acl_between_claim_and_send(policy):
@@ -202,12 +202,18 @@ def test_expired_challenge_never_activates(env):
 
 def test_404_and_410_revoke_and_cancel_sibling_jobs(env):
     for status in [404, 410]:
-        activate(env, registration_nonce=f"nonce_unique_for_status_{status}")
+        installation = f"phone-{status}"
+        activate(
+            env, installation=installation, registration_nonce=f"nonce_unique_for_status_{status}"
+        )
         end(env, turn=f"turn-{status}")
         end(env, turn=f"sibling-{status}")
         env.runtime.sender = RecordingSender(status)
         assert env.runtime.deliver_one()
-        assert env.runtime.store.registration(("fixture", "alice"), "phone")["status"] == "revoked"
+        assert (
+            env.runtime.store.registration(("fixture", "alice"), installation)["status"]
+            == "revoked"
+        )
         assert not env.runtime.deliver_one()
 
 

@@ -10,7 +10,7 @@ internal object MobilePushPolicy {
         (0 until sessions.length()).all { sessions.opt(it) is String &&
             Regex("[A-Za-z0-9_.:@-]{1,200}").matches(sessions.getString(it)) }
     fun valid(state: JSONObject, hint: JSONObject, instance: String, decrypted: Boolean, now: Long): Boolean {
-        if (!decrypted || !state.optBoolean("enabled") || instance != state.optString("installation")) return false
+        if (state.optInt("registration_fence") != 1 || !decrypted || !state.optBoolean("enabled") || instance != state.optString("installation")) return false
         if (hint.opt("schema") != 1 || hint.opt("registration_nonce") !is String ||
             hint.optString("registration_nonce") != state.optString("nonce")) return false
         if (hint.opt("generation") !is Int && hint.opt("generation") !is Long) return false
@@ -29,6 +29,6 @@ internal object MobilePushPolicy {
         return state.optBoolean("active") && hint.optLong("generation") == state.optLong("generation")
     }
     fun current(state: JSONObject, expected: JSONObject): Boolean =
-        state.optBoolean("enabled") && state.optString("installation") == expected.optString("installation") &&
+        state.optInt("registration_fence") == 1 && state.optBoolean("enabled") && state.optString("installation") == expected.optString("installation") &&
             state.optString("nonce") == expected.optString("nonce") && state.optLong("revision") == expected.optLong("revision")
 }

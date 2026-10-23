@@ -29,6 +29,7 @@ class MobilePushApi {
     final result = await client.apiGet('$prefix/capabilities');
     final key = result['vapid_public_key'];
     if (result['schema'] != 1 ||
+        result['registration_fence'] != 1 ||
         result['enabled'] != true ||
         result['transports'] is! List ||
         !(result['transports'] as List).contains('webpush') ||
@@ -51,6 +52,7 @@ class MobilePushApi {
       'endpoint': state['endpoint'],
       'keys': state['keys'],
       'registration_nonce': state['nonce'],
+      'registration_revision': state['revision'],
       'event_kinds': const [
         'turn_done',
         'turn_error',

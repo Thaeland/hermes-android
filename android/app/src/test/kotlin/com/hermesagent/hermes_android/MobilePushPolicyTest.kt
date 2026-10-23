@@ -10,7 +10,7 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], manifest = Config.NONE)
 class MobilePushPolicyTest {
-    private fun state() = JSONObject("""{"enabled":true,"active":true,"installation":"i","nonce":"n","revision":2,"generation":3}""")
+    private fun state() = JSONObject("""{"registration_fence":1,"enabled":true,"active":true,"installation":"i","nonce":"n","revision":2,"generation":3}""")
     private fun hint() = JSONObject("""{"schema":1,"event_id":"e","kind":"turn_done","registration_nonce":"n","generation":3,"expires_at":200}""")
     @Test fun acceptsEncryptedCurrentHint() { assertTrue(MobilePushPolicy.valid(state(), hint(), "i", true, 100)) }
     @Test fun rejectsPlaintext() { assertFalse(MobilePushPolicy.valid(state(), hint(), "i", false, 100)) }

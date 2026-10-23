@@ -399,6 +399,9 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
         status = 'Registering';
         notifyListeners();
         if (!await _current(state, epoch)) return;
+        // The durable native revision travels in this PUT. The server compares
+        // it inside its write transaction, not at request/DNS admission, so a
+        // superseded pre-commit handler cannot replace a recovered authority.
         // Write-ahead intent must survive process death after server commit but
         // before the response/generation can reach native encrypted storage.
         state = await _call('beginRegistration', state);
@@ -409,7 +412,8 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
         if (generation is! int ||
             generation <= 0 ||
             response['status'] != 'pending' ||
-            response['registration_nonce'] != state['nonce']) {
+            response['registration_nonce'] != state['nonce'] ||
+            response['registration_revision'] != state['revision']) {
           throw const FormatException('Invalid registration response.');
         }
         state = await _call('generation', {...state, 'generation': generation});

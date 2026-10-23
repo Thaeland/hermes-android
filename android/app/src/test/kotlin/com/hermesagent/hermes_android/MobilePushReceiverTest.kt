@@ -37,7 +37,7 @@ class MobilePushReceiverTest {
         save()
     }
     private fun save(active: Boolean = true) {
-        MobilePushStore.write(context, JSONObject().put("enabled", true).put("active", active)
+        MobilePushStore.write(context, JSONObject().put("registration_fence", 1).put("enabled", true).put("active", active)
             .put("installation", "i").put("nonce", "private-nonce").put("revision", 2)
             .put("generation", if (active) 3 else 0).put("connection", "c").put("master", true)
             .put("sessions", JSONArray(listOf("durable-session"))).put("kinds", JSONArray(listOf("turn_done")))
@@ -178,6 +178,44 @@ class MobilePushReceiverTest {
         assertFalse(MobilePushStore.read(context).has("confirmation_attempt"))
         MobilePushBridge.command(context, "disable", emptyMap<Any, Any>())
         assertThrows(IllegalStateException::class.java) { MobilePushBridge.command(context, "recoverRegistration", renewed) }
+        assertFalse(MobilePushStore.read(context).getBoolean("enabled"))
+    }
+    @Test fun legacyConsentMigrationIsDurableMonotonicAndInactiveUntilFreshProof() {
+        val legacy = MobilePushStore.read(context)
+        legacy.remove("registration_fence")
+        legacy.put("revision", 40)
+        MobilePushStore.write(context, legacy)
+        // Headless legacy messages fail closed even before foreground migration.
+        deliver(); assertEquals(0, manager.activeNotifications.size)
+        MobilePushBridge.command(context, "snapshot", emptyMap<Any, Any>())
+        MobilePushBridge.detach()
+        val migrated = MobilePushStore.read(context)
+        assertEquals(1, migrated.getInt("registration_fence"))
+        assertEquals(41L, migrated.getLong("revision"))
+        assertEquals("i", migrated.getString("installation"))
+        assertFalse(migrated.getBoolean("active"))
+        assertEquals(0L, migrated.getLong("generation"))
+        assertNotEquals("private-nonce", migrated.getString("nonce"))
+        assertEquals("durable-session", migrated.getJSONArray("sessions").getString(0))
+        assertEquals("https://distributor.invalid/private-endpoint", migrated.getString("endpoint"))
+        MobilePushBridge.command(context, "snapshot", emptyMap<Any, Any>())
+        assertEquals(41L, MobilePushStore.read(context).getLong("revision"))
+        deliver(payload("challenge").put("challenge", "old-proof"))
+        assertFalse(MobilePushStore.read(context).has("challenges"))
+        MobilePushBridge.command(context, "beginRegistration", authority())
+        MobilePushBridge.command(context, "recoverRegistration", authority())
+        assertEquals(42L, MobilePushStore.read(context).getLong("revision"))
+        assertEquals("i", MobilePushStore.read(context).getString("installation"))
+    }
+    @Test fun exhaustedRevisionNeverWrapsOrResetsSameInstallation() {
+        save(active = false)
+        val state = MobilePushStore.read(context).put("revision", 9007199254740991L)
+        MobilePushStore.write(context, state)
+        assertThrows(IllegalStateException::class.java) {
+            MobilePushBridge.command(context, "recoverRegistration", authority())
+        }
+        assertEquals(9007199254740991L, MobilePushStore.read(context).getLong("revision"))
+        MobilePushBridge.command(context, "disable", emptyMap<Any, Any>())
         assertFalse(MobilePushStore.read(context).getBoolean("enabled"))
     }
     @Test fun dedupIsBoundedAndCiphertextTamperingFailsClosed() {

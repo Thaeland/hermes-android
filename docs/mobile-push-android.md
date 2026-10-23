@@ -18,7 +18,10 @@ subscribe other connections, all users, or every session automatically.
    per line), check explicit consent, then Enable. IDs are not titles or local
    temporary chat IDs. No wildcard/all-users subscription is offered. Select
    1–128 IDs of 1–200 ASCII letters, digits or `_ . : @ -`; invalid/blank IDs are
-   rejected before permission or native enable, never silently trimmed/dropped.
+   rejected before HTTP, permission or native enable, never silently trimmed/dropped.
+   LF, CRLF and commas separate entries; CRLF is one separator, a lone CR is
+   invalid. Leading/trailing/consecutive separators preserve blank entries and
+   are rejected. IDs themselves are never normalised.
 4. Android notification permission is requested only on that explicit action.
    An endpoint from the distributor is registered over the connection's existing
    authenticated DashboardClient. Subscriber `p256dh` and `auth` come from the
@@ -43,6 +46,25 @@ expired proof or elapsed ceiling renews on the next foreground reconciliation.
 A missing proof therefore cannot leave a nonzero generation permanently Pending.
 Network failures wait for the next resume/manual retry, rather than continuously
 rotating registrations from queued challenge callbacks.
+
+The paired server must advertise `registration_fence:1`. Every PUT includes the
+native durable `revision` as `registration_revision` (1–9007199254740991). The server
+checks that it strictly exceeds the previous value **inside the same SQLite write
+transaction** that changes authority; UUID nonces are random equality tokens, not
+ordered revisions. An older authenticated handler held before commit cannot overwrite
+a recovered active registration, even if its client or TCP connection has gone away.
+The registration response must echo the exact revision before native generation is
+accepted. This is paired with the server migration described in
+[the companion runbook](mobile-push-server.md#registration-fence-upgrade).
+
+Revisions never reset on the same installation during recovery, renewal or restart.
+Disabling/re-enabling (including changing sessions/distributor) creates a **new random
+installation ID**, so valid new consent starts at revision 1 without stalling behind
+an old high-water mark. Revocation is terminal for the old installation. If the server
+revokes an expired subscription (404/410), explicitly disable and enable again; retry
+cannot reactivate it. Legacy native consent is migrated once to a fresh nonce and
+incremented revision, with activation/proofs/taps cleared before use. Legacy hints
+are rejected headlessly even before foreground migration.
 
 `Reconcile / retry` also refreshes the authenticated event feed,
 retries distributor registration when it failed, and retries failed server
@@ -151,11 +173,11 @@ accessible in the Settings fallback when model settings fail to load.
 Paths are relative to DashboardClient's authenticated origin and dashboard path
 prefix, never the Gateway chat/API key origin:
 
-* `GET /api/plugins/mobile-push/capabilities` → schema 1, enabled, transports
+* `GET /api/plugins/mobile-push/capabilities` → schema 1, registration_fence 1, enabled, transports
   containing `webpush`, VAPID public key.
 * `PUT /api/plugins/mobile-push/registrations/{installation_id}` → endpoint,
-  keys `{p256dh, auth}`, registration_nonce, explicit event_kinds and session_ids;
-  response `{generation, status: pending, registration_nonce}`.
+  keys `{p256dh, auth}`, registration_nonce, registration_revision, explicit event_kinds and session_ids;
+  response `{generation, status: pending, registration_nonce, registration_revision}`.
 * `POST .../registrations/{id}/confirm` → `{generation, challenge}`;
   response must contain `status: active` before local activation.
 * `DELETE .../registrations/{id}` revokes.
@@ -183,8 +205,9 @@ flutter pub get
 flutter analyze lib/core/services/mobile_push_api.dart \
   lib/core/services/mobile_push_service.dart lib/core/widgets/mobile_push_settings.dart \
   lib/core/services/connection_manager.dart test/mobile_push_service_test.dart \
-  test/mobile_push_recovery_test.dart
-flutter test test/mobile_push_service_test.dart test/mobile_push_recovery_test.dart
+  test/mobile_push_recovery_test.dart test/mobile_push_settings_scope_test.dart
+flutter test test/mobile_push_service_test.dart test/mobile_push_recovery_test.dart \
+  test/mobile_push_settings_scope_test.dart
 flutter build apk --debug
 (cd android && ./gradlew :app:testDebugUnitTest --tests '*MobilePush*Test')
 ```
@@ -197,7 +220,10 @@ suite uses a consuming-nonce/one-use-proof HTTP fixture (not an idempotent succe
 stub), lost responses and held acknowledgements after server commit, replacement
 production controllers, failed local commits, persisted expiry/missing-proof
 waits, retry single-flight, renewal handoff, and 128-ID/200-character ASCII scope
-boundaries. Native JVM
+boundaries. It also holds an old PUT before commit across controller replacement,
+activates recovery/endpoint revision, then releases the old handler and rechecks
+retry/restart authority. Actual Settings widget tests cover every empty separator,
+whitespace, CRLF policy and exact count/length/ASCII boundaries before effects. Native JVM
 Robolectric tests exercise the real headless service/bridge with the connector's
 decrypted flag controlled, durable encrypted storage with a test-injected AES
 key (not AndroidKeystore acquisition), generic notifications, bounded dedup,

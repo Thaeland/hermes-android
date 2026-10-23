@@ -139,6 +139,49 @@ Unspecified, multicast and mapped/transition addresses remain refused. Tests use
 explicit `receiver.example.test` → `127.0.0.1` exception and a generated test-only CA;
 that resolver fixture/CA injection is not a production setting.
 
+## Registration fence upgrade
+
+Deploy client and server together, draining/restarting **all** dashboard and lifecycle
+processes on this source. Do not leave old code serving writes against the migrated
+SQLite database. No live upgrade/deployment is performed by these changes.
+
+The server adds `registration_revision INTEGER NOT NULL DEFAULT 0` transactionally.
+Existing active/pending rows are moved once to `upgrade_required`: generation advances,
+endpoint/keys/proof and queued deliveries are cleared, and the installation/owner and
+revision floor are retained. An upgraded client's higher revision plus fresh nonce
+can register that same installation and complete a fresh encrypted proof. Revoked
+rows stay terminal, including across migration/restart. No revision or generation is
+reset; tombstones are not pruned. Old clients' revision-less PUTs are rejected (422),
+and upgraded clients reject a capabilities response without `registration_fence:1`
+before requesting permission. Old pending proofs cannot activate after migration.
+
+The revision comparison and registration update share `BEGIN IMMEDIATE`, after
+external validation. Holding an old handler in DNS before commit, then activating a
+new revision and releasing the old handler, must leave **all** new authority/events/
+outbox unchanged. Closing the old TCP connection does not establish cancellation.
+Lost post-commit acknowledgements still use native journal/revision recovery; this
+pre-commit fence is separate from discarding stale Dart callbacks.
+
+DELETE of an as-yet-uncommitted installation creates an owned, terminal tombstone
+rather than returning 404. This also fences a first PUT whose handler commits after
+disable. Existing-owner revocation stays available after operator grants are removed;
+new tombstones require an admitted principal and available registration capacity
+(429 leaves revocation explicitly pending on Android; no successful DELETE is
+reported without a tombstone). A later re-enable/scope change uses a
+new installation, never revives the revoked ID even with a larger revision. Server
+404/410 delivery revocation likewise requires explicit disable/re-enable on Android.
+Tombstones count toward `max_registrations`; do not delete them to reclaim capacity
+while abandoned requests/credentials could still exist. Operators must provision
+capacity for consent churn; this implementation does not offer tombstone garbage
+collection or a cross-device revision-reset/recovery endpoint.
+
+The isolated fence verification completed **100 server tests** on Python 3.11.15
+against Hermes source `d923a5eb48`, including all three real-host tests and the eight
+open/abandoned-socket pre-commit interleavings. The paired client completed **62
+focused Dart push tests**, **1,721 full Flutter tests**, **28 native push JVM tests**,
+clean full static analysis and a debug APK build. These are local fixture/build
+results, not deployment or physical-distributor acceptance.
+
 ## Exact API contract (schema 1)
 
 All routes require the verified session object. Identity is only the tuple
@@ -149,7 +192,7 @@ Mutating JSON bodies are strict (extra fields denied), at most 32 KiB.
 ### `GET /api/plugins/mobile-push/capabilities`
 
 ```json
-{"schema":1,"transports":["webpush"],"vapid_public_key":"base64url-uncompressed-P256-public-key","enabled":true}
+{"schema":1,"registration_fence":1,"transports":["webpush"],"vapid_public_key":"base64url-uncompressed-P256-public-key","enabled":true}
 ```
 
 Missing/disabled config or an ungranted verified principal yields `enabled:false`
@@ -163,6 +206,7 @@ Invalid private config/key yields generic 503 rather than leaking secret details
   "endpoint":"https://distributor.example.org/opaque-subscription-path",
   "keys":{"p256dh":"real-base64url-65-byte-P256-public-key","auth":"real-base64url-16-byte-auth-secret"},
   "registration_nonce":"fresh-client-base64url-random-nonce",
+  "registration_revision":1,
   "event_kinds":["turn_done","turn_error","input","input_resolved"],
   "session_ids":["exact-durable-session-id"]
 }
@@ -171,7 +215,7 @@ Invalid private config/key yields generic 503 rather than leaking secret details
 Returns HTTP 200:
 
 ```json
-{"generation":1,"status":"pending","registration_nonce":"fresh-client-base64url-random-nonce"}
+{"generation":1,"status":"pending","registration_nonce":"fresh-client-base64url-random-nonce","registration_revision":1}
 ```
 
 `installation_id` and session IDs are 1–200 ASCII characters from
@@ -183,7 +227,10 @@ P-256 point and a 16-byte auth secret, not merely plausible strings.
 
 An update, including endpoint/key/scope rotation, advances generation, requires a
 nonce different from the current one, immediately returns to pending and invalidates
-all older queued deliveries/challenges. Generations are not reset after revocation.
+all older queued deliveries/challenges. `registration_revision` is a strict integer
+1–9007199254740991 and must exceed the stored high-water mark inside the authority
+write transaction (409 for equal/lower). Nonces have no ordering meaning. Revocation
+is terminal for an installation; new explicit consent must create a new random ID.
 An existing installation belonging to another principal returns 404. Operator ACL
 failure/non-durable scope is 403; malformed/unsafe subscription is 422; reused nonce
 is 409; capacity is 429. No wildcard/default session grant is inferred.
@@ -211,7 +258,7 @@ payload, cleared on successful send/confirmation/revocation/expiry.
 
 Returns `{"generation":2,"status":"revoked"}` (the actual next generation).
 Revokes ownership's registration, clears endpoint/keys/challenge and invalidates its
-queue. Repeat deletes also advance generation. The owning verified principal may
+queue. Repeat deletes return the same terminal generation without changes. The owning verified principal may
 revoke after the operator disables push/removes its grant. Another principal gets
 404; no session gets 401. Tombstones retain ownership/generation to reject replay.
 
@@ -348,7 +395,14 @@ paths set, the full suite ran with **80 passed** on Python 3.14.7, including rea
 manager/loader lifecycle tests and an actual TLS loopback receiver. The integrated
 checkout was independently rerun on Python 3.11.15 with the minimum-version TLS
 fixture compatibility fix: **80 passed**, including all three real-host tests.
-A Starlette TestClient/httpx deprecation warning is upstream, not a skipped test.
+The fenced protocol extends these with a real uvicorn/FastAPI/SQLite loopback test
+matrix: old pre-commit handler released after recovery, endpoint renewal, disable,
+or fresh consent, with both open and abandoned TCP connections. Snapshot assertions
+cover authority, events and outbox after another Store open/restart. Additional
+negative tests cover missing/coerced/equal/lower/overflow revisions, nonce ordering,
+terminal revoked IDs, and upgrade of the actual previous database schema. Test-only
+uvicorn is included in the `[test]` dependencies. A Starlette TestClient/httpx
+deprecation warning is upstream, not a skipped test.
 
 The receiver uses real pywebpush encryption, independently decrypts with the generated
 subscriber private key/auth secret, verifies the VAPID JWT signature/audience and
