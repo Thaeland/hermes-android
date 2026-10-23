@@ -9,8 +9,7 @@ class AppLocalizationsZh extends AppLocalizations {
   AppLocalizationsZh([String locale = 'zh']) : super(locale);
 
   @override
-  String get a_one_off_question_archives_itself_after_72_hours_anything =>
-      '一次性问题。将在 72 小时后自动归档；任何值得保留的内容都会被记住。';
+  String get quick_chat_description => '一次性问题。';
 
   @override
   String get ai_full_text => 'AI + 全文';
@@ -154,9 +153,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get auto_device_default => '自动（设备默认）';
-
-  @override
-  String get auto_archives_after_72_hours => '72 小时后自动归档';
 
   @override
   String get automation => '自动化';
@@ -2671,8 +2667,7 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   AppLocalizationsZhHans() : super('zh_Hans');
 
   @override
-  String get a_one_off_question_archives_itself_after_72_hours_anything =>
-      '一次性问题。将在 72 小时后自动归档；任何值得保留的内容都会被记住。';
+  String get quick_chat_description => '一次性问题。';
 
   @override
   String get ai_full_text => 'AI + 全文';
@@ -2816,9 +2811,6 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get auto_device_default => '自动（设备默认）';
-
-  @override
-  String get auto_archives_after_72_hours => '72 小时后自动归档';
 
   @override
   String get automation => '自动化';

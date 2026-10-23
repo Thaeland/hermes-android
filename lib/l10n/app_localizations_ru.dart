@@ -9,8 +9,7 @@ class AppLocalizationsRu extends AppLocalizations {
   AppLocalizationsRu([String locale = 'ru']) : super(locale);
 
   @override
-  String get a_one_off_question_archives_itself_after_72_hours_anything =>
-      'Разовый вопрос. Автоматически архивируется через 72 часа; всё, что стоит сохранить, останется в памяти.';
+  String get quick_chat_description => 'Разовый вопрос.';
 
   @override
   String get ai_full_text => 'ИИ + полный текст';
@@ -157,9 +156,6 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get auto_device_default => 'Автоматически (по умолчанию устройства)';
-
-  @override
-  String get auto_archives_after_72_hours => 'Автоархивация через 72 часа';
 
   @override
   String get automation => 'Автоматизация';

@@ -1,6 +1,6 @@
 {
   "@@locale": "ko",
-  "a_one_off_question_archives_itself_after_72_hours_anything": "일회성 질문입니다. 72시간 후에 자동으로 보관 처리되며, 보관할 가치가 있는 내용은 기억에 유지됩니다.",
+  "quick_chat_description": "일회성 질문입니다.",
   "ai_full_text": "AI + 전문 검색",
   "ai_search_model": "AI 검색 모델",
   "ai_searched_for": "AI 검색어: {aiRewrittenQuery}",
@@ -44,7 +44,6 @@
   "attachment_drafts": "첨부 파일 초안",
   "attachment_of": "첨부 파일 {index}/{total}",
   "auto_device_default": "자동 (기기 기본값)",
-  "auto_archives_after_72_hours": "72시간 후 자동 보관",
   "automation": "자동화",
   "autonomous_agents": "자율 에이전트",
   "background_recovery_unavailable_legacy_transport": "백그라운드 복구를 사용할 수 없음 — 레거시 전송",

@@ -9,8 +9,7 @@ class AppLocalizationsJa extends AppLocalizations {
   AppLocalizationsJa([String locale = 'ja']) : super(locale);
 
   @override
-  String get a_one_off_question_archives_itself_after_72_hours_anything =>
-      '単発の質問用。72時間後に自動アーカイブされますが、残す価値のある内容は記憶されます。';
+  String get quick_chat_description => '単発の質問用。';
 
   @override
   String get ai_full_text => 'AI + 全文';
@@ -154,9 +153,6 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get auto_device_default => '自動（端末のデフォルト）';
-
-  @override
-  String get auto_archives_after_72_hours => '72時間後に自動アーカイブ';
 
   @override
   String get automation => '自動化';

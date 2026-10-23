@@ -9,8 +9,7 @@ class AppLocalizationsKo extends AppLocalizations {
   AppLocalizationsKo([String locale = 'ko']) : super(locale);
 
   @override
-  String get a_one_off_question_archives_itself_after_72_hours_anything =>
-      '일회성 질문입니다. 72시간 후에 자동으로 보관 처리되며, 보관할 가치가 있는 내용은 기억에 유지됩니다.';
+  String get quick_chat_description => '일회성 질문입니다.';
 
   @override
   String get ai_full_text => 'AI + 전문 검색';
@@ -154,9 +153,6 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get auto_device_default => '자동 (기기 기본값)';
-
-  @override
-  String get auto_archives_after_72_hours => '72시간 후 자동 보관';
 
   @override
   String get automation => '자동화';

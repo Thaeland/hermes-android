@@ -1,6 +1,6 @@
 {
   "@@locale": "zh_Hans",
-  "a_one_off_question_archives_itself_after_72_hours_anything": "一次性问题。将在 72 小时后自动归档；任何值得保留的内容都会被记住。",
+  "quick_chat_description": "一次性问题。",
   "ai_full_text": "AI + 全文",
   "ai_search_model": "AI 搜索模型",
   "ai_searched_for": "AI 已搜索：{aiRewrittenQuery}",
@@ -44,7 +44,6 @@
   "attachment_drafts": "附件草稿",
   "attachment_of": "附件 {index} / {total}",
   "auto_device_default": "自动（设备默认）",
-  "auto_archives_after_72_hours": "72 小时后自动归档",
   "automation": "自动化",
   "autonomous_agents": "自主智能体",
   "background_recovery_unavailable_legacy_transport": "后台恢复不可用 — 旧版传输",

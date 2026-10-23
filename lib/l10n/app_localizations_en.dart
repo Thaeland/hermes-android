@@ -9,8 +9,7 @@ class AppLocalizationsEn extends AppLocalizations {
   AppLocalizationsEn([String locale = 'en']) : super(locale);
 
   @override
-  String get a_one_off_question_archives_itself_after_72_hours_anything =>
-      'A one-off question. Archives itself after 72 hours; anything worth keeping is still remembered.';
+  String get quick_chat_description => 'A one-off question.';
 
   @override
   String get ai_full_text => 'AI + full-text';
@@ -156,9 +155,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get auto_device_default => 'Auto (device default)';
-
-  @override
-  String get auto_archives_after_72_hours => 'Auto-archives after 72 hours';
 
   @override
   String get automation => 'Automation';

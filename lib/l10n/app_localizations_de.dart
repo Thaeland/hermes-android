@@ -9,8 +9,7 @@ class AppLocalizationsDe extends AppLocalizations {
   AppLocalizationsDe([String locale = 'de']) : super(locale);
 
   @override
-  String get a_one_off_question_archives_itself_after_72_hours_anything =>
-      'Eine einmalige Frage. Wird nach 72 Stunden automatisch archiviert; alles, was es wert ist, bleibt im Gedächtnis.';
+  String get quick_chat_description => 'Eine einmalige Frage.';
 
   @override
   String get ai_full_text => 'KI + Volltext';
@@ -158,10 +157,6 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get auto_device_default => 'Automatisch (Gerätestandard)';
-
-  @override
-  String get auto_archives_after_72_hours =>
-      'Automatische Archivierung nach 72 Stunden';
 
   @override
   String get automation => 'Automatisierung';

@@ -114,11 +114,11 @@ abstract class AppLocalizations {
     Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
   ];
 
-  /// No description provided for @a_one_off_question_archives_itself_after_72_hours_anything.
+  /// No description provided for @quick_chat_description.
   ///
   /// In en, this message translates to:
-  /// **'A one-off question. Archives itself after 72 hours; anything worth keeping is still remembered.'**
-  String get a_one_off_question_archives_itself_after_72_hours_anything;
+  /// **'A one-off question.'**
+  String get quick_chat_description;
 
   /// No description provided for @ai_full_text.
   ///
@@ -377,12 +377,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Auto (device default)'**
   String get auto_device_default;
-
-  /// No description provided for @auto_archives_after_72_hours.
-  ///
-  /// In en, this message translates to:
-  /// **'Auto-archives after 72 hours'**
-  String get auto_archives_after_72_hours;
 
   /// No description provided for @automation.
   ///

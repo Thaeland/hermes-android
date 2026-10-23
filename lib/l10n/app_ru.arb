@@ -1,6 +1,6 @@
 {
   "@@locale": "ru",
-  "a_one_off_question_archives_itself_after_72_hours_anything": "Разовый вопрос. Автоматически архивируется через 72 часа; всё, что стоит сохранить, останется в памяти.",
+  "quick_chat_description": "Разовый вопрос.",
   "ai_full_text": "ИИ + полный текст",
   "ai_search_model": "Модель ИИ-поиска",
   "ai_searched_for": "ИИ искал: {aiRewrittenQuery}",
@@ -44,7 +44,6 @@
   "attachment_drafts": "Черновики вложений",
   "attachment_of": "Вложение {index} из {total}",
   "auto_device_default": "Автоматически (по умолчанию устройства)",
-  "auto_archives_after_72_hours": "Автоархивация через 72 часа",
   "automation": "Автоматизация",
   "autonomous_agents": "Автономные агенты",
   "background_recovery_unavailable_legacy_transport": "Восстановление в фоне недоступно — устаревший транспорт",

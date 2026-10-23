@@ -1,6 +1,6 @@
 {
   "@@locale": "pt",
-  "a_one_off_question_archives_itself_after_72_hours_anything": "Uma pergunta pontual. É arquivada automaticamente após 72 horas; o que valer a pena guardar continua na memória.",
+  "quick_chat_description": "Uma pergunta pontual.",
   "ai_full_text": "IA + texto completo",
   "ai_search_model": "Modelo de busca com IA",
   "ai_searched_for": "A IA buscou: {aiRewrittenQuery}",
@@ -44,7 +44,6 @@
   "attachment_drafts": "Rascunhos de anexos",
   "attachment_of": "Anexo {index} de {total}",
   "auto_device_default": "Automático (padrão do dispositivo)",
-  "auto_archives_after_72_hours": "Arquiva automaticamente após 72 horas",
   "automation": "Automação",
   "autonomous_agents": "Agentes autônomos",
   "background_recovery_unavailable_legacy_transport": "Recuperação em segundo plano indisponível — transporte legado",
