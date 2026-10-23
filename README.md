@@ -82,10 +82,12 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
   app restarts; no prompt, response, title or approval content is stored there.
   It also lists gateway chats updated within seven days, including REST-only
   connections and chats started elsewhere. These are labelled **Updated**, not
-  assumed to be running or completed. The tab refreshes while foregrounded,
-  supports pull-to-refresh and opens the relevant chat. This is not a complete
-  server audit log: live outcomes from other clients and historic per-turn
-  outcomes predating this build are unavailable.
+  assumed to be running or completed. The tab refreshes while visible,
+  pauses beneath other tabs/chat routes and in the background, supports
+  pull-to-refresh and opens the relevant chat. A bounded gateway scan is
+  labelled partially loaded rather than claiming no activity or an exhaustive
+  count. This is not a complete server audit log: live outcomes from other
+  clients and historic per-turn outcomes predating this build are unavailable.
 - Persistent reconnect/session resume and defensive retry handling.
 - App-owned stock Gateway turns outlive an open chat route. Reopen a chat to
   reattach, including while other chats run. Pending markers survive process
