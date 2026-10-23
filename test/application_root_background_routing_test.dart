@@ -400,6 +400,246 @@ void main() {
     pendingNotificationApprovals.value = const [];
   });
 
+  for (final initiallyGranted in [false, true]) {
+    testWidgets(
+      'RECHECK fresh trailing permission observation resyncs background ongoing $initiallyGranted',
+      (tester) async {
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        );
+        final f = _RootFixture();
+        await f.initialize();
+        final normal = await f.normal();
+        final chat = normal.findChat('local')!;
+        final turn = chat.submitPrepared(
+          reservation: chat.reserve()!,
+          text: 'test',
+          localContent: 'test',
+        );
+        turn.ignore();
+        final oldRead = Completer<void>();
+        final freshRead = Completer<void>();
+        f.sink.permissionResult = initiallyGranted;
+        f.sink.permissionCheck = oldRead;
+        await tester.pumpWidget(f.app());
+        await pumps(tester);
+        expect(f.sink.checks, 1);
+        expect(f.controller.hasActiveTurn, isTrue);
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+        await pumps(tester);
+        f.sink.permissionResult = !initiallyGranted;
+        tester.binding.handleAppLifecycleStateChanged(
+          AppLifecycleState.resumed,
+        );
+        await pumps(tester);
+        var sentReturned = false;
+        final explicitSend = f.notifications
+            .sendTestNotification(title: 'test', body: 'test')
+            .then((value) {
+              sentReturned = true;
+              return value;
+            });
+        await pumps(tester);
+        f.sink.permissionCheck = freshRead;
+        oldRead.complete();
+        await pumps(tester);
+        expect(f.sink.checks, 2);
+        expect(
+          sentReturned,
+          isFalse,
+          reason:
+              'A stale read cannot finish Send test before the trailing observation',
+        );
+        expect(f.notifications.permissionGranted, initiallyGranted);
+        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+        await pumps(tester);
+        final showsBeforeFresh = f.sink.shown.length;
+        final cancelsBeforeFresh = f.sink.cancelled.length;
+        freshRead.complete();
+        await pumps(tester);
+        expect(await explicitSend, !initiallyGranted);
+        expect(f.notifications.permissionGranted, !initiallyGranted);
+        expect(f.sink.permissionRequestCount, 1);
+        expect(f.sink.checks, 2);
+        final ongoingId = TurnNotificationService.ongoingChatNotificationIdFor(
+          connectionId: f.connection.id,
+          localSessionId: 'local',
+        );
+        if (initiallyGranted) {
+          expect(f.sink.shown.length, showsBeforeFresh);
+          expect(
+            f.sink.cancelled.skip(cancelsBeforeFresh),
+            contains(ongoingId),
+          );
+        } else {
+          expect(
+            f.sink.shown
+                .skip(showsBeforeFresh)
+                .where((n) => n.ongoing)
+                .map((n) => n.id),
+            contains(ongoingId),
+          );
+        }
+        expect(f.submissions, 1);
+        await f.close(tester);
+        await turn;
+      },
+    );
+  }
+
+  testWidgets(
+    'RECHECK stored false retry permits protection only after held true save succeeds',
+    (tester) async {
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      final f = _RootFixture();
+      await f.initialize();
+      final normal = await f.normal();
+      final chat = normal.findChat('local')!;
+      final turn = chat.submitPrepared(
+        reservation: chat.reserve()!,
+        text: 'test',
+        localContent: 'test',
+      );
+      turn.ignore();
+      await f.manager.prefs.setBool(BackgroundWorkPrefsStore.storageKey, false);
+      var loads = 0;
+      await tester.pumpWidget(
+        f.app(
+          loadPolicy: () async {
+            if (++loads == 1) throw StateError('initial load unavailable');
+            await BackgroundWorkPrefsStore.load();
+          },
+        ),
+      );
+      await pumps(tester);
+      final original = SharedPreferencesStorePlatform.instance;
+      final held = _HeldReloadAndWriteStore({
+        for (final key in f.manager.prefs.getKeys())
+          'flutter.$key': f.manager.prefs.get(key)!,
+      });
+      SharedPreferencesStorePlatform.instance = held;
+      addTearDown(() => SharedPreferencesStorePlatform.instance = original);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await pumps(tester);
+      expect(held.reads, 1);
+      final saving = BackgroundWorkPrefsStore.setEnabled(true);
+      held.reloadGate.complete();
+      await pumps(tester);
+      expect(held.policyWrites, 1);
+      expect(BackgroundWorkPrefsStore.confirmedEnabled, isFalse);
+      expect(backgroundWorkEnabled.value, isTrue);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await pumps(tester);
+      expect(f.keepalive.where((m) => m == 'start'), isEmpty);
+      held.writeGate.complete(true);
+      await saving;
+      await pumps(tester);
+      expect(f.keepalive.where((m) => m == 'start'), hasLength(1));
+      expect(BackgroundWorkPrefsStore.pendingChoice.value, isFalse);
+      expect(BackgroundWorkPrefsStore.confirmedEnabled, isTrue);
+      SharedPreferencesStorePlatform.instance = original;
+      await f.close(tester);
+      await turn;
+    },
+  );
+
+  testWidgets(
+    'RECHECK same-value enabled intent notifies root while its save is held',
+    (tester) async {
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      final f = _RootFixture();
+      await f.initialize();
+      final normal = await f.normal();
+      final chat = normal.findChat('local')!;
+      final turn = chat.submitPrepared(
+        reservation: chat.reserve()!,
+        text: 'test',
+        localContent: 'test',
+      );
+      turn.ignore();
+      await tester.pumpWidget(f.app());
+      await pumps(tester);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await pumps(tester);
+      expect(backgroundWorkEnabled.value, isTrue);
+      expect(f.keepalive.where((m) => m == 'start'), hasLength(1));
+      f.keepalive.clear();
+      final original = SharedPreferencesStorePlatform.instance;
+      final held = _HeldPolicyWritesStore({
+        for (final key in f.manager.prefs.getKeys())
+          'flutter.$key': f.manager.prefs.get(key)!,
+      });
+      SharedPreferencesStorePlatform.instance = held;
+      addTearDown(() => SharedPreferencesStorePlatform.instance = original);
+      final saving = BackgroundWorkPrefsStore.setEnabled(true);
+      await pumps(tester);
+      expect(backgroundWorkEnabled.value, isTrue);
+      expect(BackgroundWorkPrefsStore.pendingChoice.value, isTrue);
+      expect(f.keepalive, contains('stop'));
+      expect(f.keepalive.where((m) => m == 'start'), isEmpty);
+      expect(held.writes, hasLength(1));
+      held.writes.single.complete(true);
+      await saving;
+      await pumps(tester);
+      expect(f.keepalive.where((m) => m == 'start'), hasLength(1));
+      expect(BackgroundWorkPrefsStore.pendingChoice.value, isFalse);
+      SharedPreferencesStorePlatform.instance = original;
+      await f.close(tester);
+      await turn;
+    },
+  );
+
+  testWidgets(
+    'RECHECK failed first explicit writes never establish unknown root authority',
+    (tester) async {
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      final f = _RootFixture();
+      await f.initialize();
+      final normal = await f.normal();
+      final chat = normal.findChat('local')!;
+      final turn = chat.submitPrepared(
+        reservation: chat.reserve()!,
+        text: 'test',
+        localContent: 'test',
+      );
+      turn.ignore();
+      await tester.pumpWidget(
+        f.app(
+          loadPolicy: () async {
+            throw StateError('unavailable');
+          },
+        ),
+      );
+      await pumps(tester);
+      final original = SharedPreferencesStorePlatform.instance;
+      final held = _HeldPolicyWritesStore({
+        for (final key in f.manager.prefs.getKeys())
+          'flutter.$key': f.manager.prefs.get(key)!,
+      });
+      SharedPreferencesStorePlatform.instance = held;
+      addTearDown(() => SharedPreferencesStorePlatform.instance = original);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      final revision = BackgroundWorkPrefsStore.confirmedChanges.value;
+      for (final desired in [false, true]) {
+        final saving = BackgroundWorkPrefsStore.setEnabled(
+          desired,
+        ).then((_) => true, onError: (Object _) => false);
+        await pumps(tester);
+        expect(f.keepalive.where((m) => m == 'start'), isEmpty);
+        held.writes.last.complete(false);
+        expect(await saving, isFalse);
+        await pumps(tester);
+        expect(BackgroundWorkPrefsStore.pendingChoice.value, isFalse);
+        expect(BackgroundWorkPrefsStore.confirmedChanges.value, revision);
+        expect(f.keepalive.where((m) => m == 'start'), isEmpty);
+      }
+      SharedPreferencesStorePlatform.instance = original;
+      await f.close(tester);
+      await turn;
+    },
+  );
+
   testWidgets(
     'REGRESSION retried stored false load must not authorize a held optimistic true write',
     (tester) async {
