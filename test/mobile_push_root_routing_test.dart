@@ -171,7 +171,12 @@ void main() {
     },
   );
 
-  for (final boundary in ['revocation', 'disposal', 'foreign-session']) {
+  for (final boundary in [
+    'revocation',
+    'disposal',
+    'foreign-session',
+    'configuration',
+  ]) {
     testWidgets(
       '$boundary during held session lookup cannot open an authorised chat',
       (tester) async {
@@ -196,6 +201,16 @@ void main() {
         await _pump(tester);
         expect(reads, 1);
         if (boundary == 'revocation') push.current = false;
+        if (boundary == 'configuration') {
+          await manager.updateConnection(
+            beta.id,
+            beta.label,
+            beta.host,
+            beta.port,
+            'changed-key',
+            gatewayProfile: 'other-profile',
+          );
+        }
         if (boundary == 'disposal') {
           await tester.pumpWidget(const SizedBox.shrink());
         }

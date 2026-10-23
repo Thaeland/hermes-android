@@ -83,6 +83,8 @@ void main() {
           await tester.pump();
         }
         final offset = parentScroll.pixels;
+        // Queue an owner follow callback, then open before it can execute.
+        remote.event('message.delta', {'text': 'Queued before modal.\n'});
         card.onOpenTask!(card.activities.single);
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 350));
