@@ -3,15 +3,62 @@ import 'package:flutter/material.dart';
 import '../models/gateway_insight.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
-class GatewayReasoningCard extends StatelessWidget {
+
+class GatewayReasoningCard extends StatefulWidget {
   final String text;
   final bool initiallyExpanded;
+  final String? id;
+  final bool? pinnedExpansion;
+  final ValueChanged<bool>? onPinChanged;
 
   const GatewayReasoningCard({
     required this.text,
     this.initiallyExpanded = false,
+    this.id,
+    this.pinnedExpansion,
+    this.onPinChanged,
     super.key,
   });
+
+  @override
+  State<GatewayReasoningCard> createState() => _GatewayReasoningCardState();
+}
+
+class _GatewayReasoningCardState extends State<GatewayReasoningCard> {
+  final _controller = ExpansibleController();
+  bool? _userExpanded;
+  bool _syncing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _userExpanded = widget.pinnedExpansion;
+  }
+
+  @override
+  void didUpdateWidget(GatewayReasoningCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.pinnedExpansion != oldWidget.pinnedExpansion) {
+      _userExpanded = widget.pinnedExpansion;
+    }
+    if (_userExpanded != null ||
+        _controller.isExpanded == widget.initiallyExpanded) {
+      return;
+    }
+    _syncing = true;
+    if (widget.initiallyExpanded) {
+      _controller.expand();
+    } else {
+      _controller.collapse();
+    }
+    _syncing = false;
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -19,8 +66,13 @@ class GatewayReasoningCard extends StatelessWidget {
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       clipBehavior: Clip.antiAlias,
       child: ExpansionTile(
-        key: PageStorageKey<String>('gateway-reasoning-${text.hashCode}'),
-        initiallyExpanded: initiallyExpanded,
+        controller: _controller,
+        initiallyExpanded: _userExpanded ?? widget.initiallyExpanded,
+        onExpansionChanged: (expanded) {
+          if (_syncing) return;
+          _userExpanded = expanded;
+          widget.onPinChanged?.call(expanded);
+        },
         leading: const Icon(Icons.psychology_outlined),
         title: Text(context.l10n.reasoning),
         subtitle: Text(context.l10n.hermes_reasoning_details),
@@ -29,7 +81,10 @@ class GatewayReasoningCard extends StatelessWidget {
           SelectionArea(
             child: Padding(
               padding: const EdgeInsets.all(16),
-              child: Align(alignment: Alignment.centerLeft, child: Text(text)),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(widget.text),
+              ),
             ),
           ),
         ],

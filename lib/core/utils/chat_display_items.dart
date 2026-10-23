@@ -1,3 +1,4 @@
+import '../models/chat_timeline.dart';
 import '../models/gateway_activity.dart';
 import '../models/gateway_insight.dart';
 import 'message_content.dart';
@@ -6,8 +7,9 @@ import 'message_content.dart';
 class ChatReasoningItem {
   final String text;
   final bool initiallyExpanded;
+  final String? id;
 
-  const ChatReasoningItem(this.text, this.initiallyExpanded);
+  const ChatReasoningItem(this.text, this.initiallyExpanded, {this.id});
 }
 
 /// Consecutive tool activities rendered as a single activity card.
@@ -40,21 +42,60 @@ class ChatToolActivityGroup {
 ///   replies, `_retry_prompt` with the user prompt that caused it;
 /// - [ChatToolActivityGroup] — consecutive tool results collapsed into one
 ///   activity card;
-/// - [ChatReasoningItem] — assistant reasoning, emitted before its bubble;
+/// - [ChatReasoningItem] — exposed reasoning at its receipt position (or before
+///   the bubble when only a legacy snapshot exists);
 /// - `GatewaySubagentActivity` list and [GatewayNotice] — appended last.
 ///
-/// Tool results are matched positionally against [toolActivities]: stored tool
-/// messages consume activities in order, and any activity left over (streamed
-/// but not yet persisted by the server) is appended as a trailing card. The
-/// caller's [toolActivities] list is never mutated.
+/// When supplied, [timeline] projects actual live receipt chronology without
+/// adding synthetic rows to request history. Otherwise durable tool IDs match
+/// [toolActivities], with positional fallback only for rows without call IDs.
+/// Unmatched activities retain the legacy trailing card: snapshots/recovery-v2
+/// do not provide enough evidence to invent chronology. Inputs are not mutated.
 List<dynamic> buildChatDisplayItems({
   required List<Map<String, dynamic>> messages,
   List<GatewayToolActivity> toolActivities = const [],
   List<GatewaySubagentActivity> subagentActivities = const [],
   List<GatewayNotice> notices = const [],
   bool verbose = false,
+  ChatTimeline? timeline,
 }) {
   final toolQueue = List<GatewayToolActivity>.from(toolActivities);
+  // A turn can contain several canonical interim rows. Project their receipt
+  // runs together at the first live anchor so consuming an earlier preview
+  // cannot pull later tools/reasoning ahead of intervening commentary.
+  final scopeTurns = <Object, int>{};
+  var turn = 0;
+  for (final message in messages) {
+    if (message['role'] == 'user') turn++;
+    scopeTurns[message] = turn;
+  }
+  final liveRuns =
+      timeline?.runs.where((r) => scopeTurns.containsKey(r.scope)).toList() ??
+      const <ChatTimelineRun>[];
+  final liveScopes = liveRuns.map((r) => r.scope).toSet();
+  final anchors = <int, Object>{};
+  for (final message in messages) {
+    if (liveScopes.contains(message)) {
+      anchors.putIfAbsent(scopeTurns[message]!, () => message);
+    }
+  }
+  final anchoredRuns = <Object, List<ChatTimelineRun>>{};
+  for (final run in liveRuns) {
+    (anchoredRuns[anchors[scopeTurns[run.scope]]!] ??= []).add(run);
+  }
+  // A live reference owns its place in the receipt projection, not the
+  // fallback's unmatched trailing strip. Never render the same tool twice.
+  final liveTools = liveRuns
+      .where((r) => r.kind == ChatTimelineKind.tool)
+      .map((r) => r.activity!)
+      .toList();
+  toolQueue.removeWhere(
+    (activity) => liveTools.any(
+      (live) =>
+          live.identity == activity.identity ||
+          live.toolId != null && live.toolId == activity.toolId,
+    ),
+  );
   final displayItems = <dynamic>[];
   final currentGroup = <GatewayToolActivity>[];
   String? currentGroupId;
@@ -76,8 +117,12 @@ List<dynamic> buildChatDisplayItems({
     final rawRole = (msg['role'] as String?) ?? 'assistant';
     final role = rawRole == 'agent' ? 'assistant' : rawRole;
     if (isToolResultMessage(msg)) {
-      if (toolQueue.isNotEmpty) {
-        final activity = toolQueue.removeAt(0);
+      final callId = msg['tool_call_id'] ?? msg['toolCallId'];
+      final match = callId == null || callId == ''
+          ? (toolQueue.isEmpty ? -1 : 0)
+          : toolQueue.indexWhere((activity) => activity.toolId == callId);
+      if (match >= 0) {
+        final activity = toolQueue.removeAt(match);
         if (currentGroup.isEmpty) {
           // A stored row's id survives latest-history window shifts. If
           // neither the activity nor the row has an id, its local identity
@@ -93,6 +138,33 @@ List<dynamic> buildChatDisplayItems({
     }
     if (role != 'user' && role != 'assistant') continue;
 
+    if (liveScopes.contains(msg) && !anchoredRuns.containsKey(msg)) continue;
+    final runs = anchoredRuns[msg] ?? const <ChatTimelineRun>[];
+    if (role == 'assistant' && runs.isNotEmpty) {
+      for (final run in runs) {
+        if (run.kind == ChatTimelineKind.tool) {
+          currentGroupId ??= run.activity!.identity;
+          currentGroup.add(run.activity!);
+          continue;
+        }
+        flushToolGroup();
+        if (run.kind == ChatTimelineKind.reasoning) {
+          displayItems.add(
+            ChatReasoningItem(run.text, verbose || run.verbose, id: run.id),
+          );
+        } else if (run.text.isNotEmpty) {
+          displayItems.add({
+            ...(run.scope as Map<String, dynamic>),
+            'role': role,
+            '_timeline_id': run.id,
+            '_display_content': run.text,
+            '_retry_prompt': ?lastUserPrompt,
+          });
+        }
+      }
+      continue;
+    }
+
     final content = stripToolResultText(messageContentToText(msg['content']));
     final reasoning = msg['_gateway_reasoning']?.toString() ?? '';
     final hasReasoning = role == 'assistant' && reasoning.trim().isNotEmpty;
@@ -105,6 +177,7 @@ List<dynamic> buildChatDisplayItems({
         ChatReasoningItem(
           reasoning,
           verbose || msg['_gateway_reasoning_verbose'] == true,
+          id: 'reasoning:${msg['id'] ?? msg['message_id'] ?? identityHashCode(msg)}',
         ),
       );
     }

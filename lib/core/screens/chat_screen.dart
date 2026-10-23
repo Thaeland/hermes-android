@@ -34,6 +34,7 @@ import '../services/voice_composer_adapter.dart';
 import '../services/ws_client.dart';
 import '../utils/media_tags.dart';
 import '../models/attachment_draft.dart';
+import '../models/chat_timeline.dart';
 import '../models/gateway_activity.dart';
 import '../models/gateway_approval.dart';
 import '../models/gateway_clarify.dart';
@@ -365,6 +366,8 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   List<Map<String, dynamic>> _messages = [];
+  ChatTimeline _timeline = const ChatTimeline();
+  final Map<String, bool> _reasoningExpansionPins = {};
   final ChatHistoryWindow _historyWindow = ChatHistoryWindow();
   bool _loadingOlder = false;
   final List<GatewayToolActivity> _toolActivities = [];
@@ -1782,7 +1785,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         return;
       }
       _historyWindow.acceptOlder(older);
-      _extractToolMessages(_historyWindow.rows);
+      _extractToolMessages(_historyWindow.rows, replacePresentation: false);
       setState(() => _messages = _historyWindow.rows);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || !_scrollController.hasClients) return;
@@ -2034,7 +2037,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     };
   }
 
-  void _extractToolMessages(List<Map<String, dynamic>> messages) {
+  void _extractToolMessages(
+    List<Map<String, dynamic>> messages, {
+    bool replacePresentation = true,
+  }) {
+    // Hydration and optimistic presentation change authority together. Every
+    // latest-history path calls this before installing the durable window.
+    // Older paging cannot authoritatively replace the live tail's chronology.
+    final liveRuns = replacePresentation
+        ? const <ChatTimelineRun>[]
+        : _timeline.runs;
+    if (replacePresentation) _timeline = _timeline.clear();
     final observedByToolId = {
       for (final activity in _toolActivities)
         if (activity.toolId != null) activity.toolId!: activity,
@@ -2067,6 +2080,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           observedLastActivity: observedByToolId[toolCallId]?.lastActivityAt,
         ),
       );
+    }
+    for (final run in liveRuns) {
+      if (run.kind != ChatTimelineKind.tool) continue;
+      final activity = run.activity!;
+      final index = _toolActivities.indexWhere(
+        (stored) =>
+            stored.identity == activity.identity ||
+            activity.toolId != null && stored.toolId == activity.toolId,
+      );
+      if (index < 0) {
+        _toolActivities.add(activity);
+      } else {
+        _timeline = _timeline.tool(run.scope, _toolActivities[index]);
+      }
     }
   }
 
@@ -2925,6 +2952,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               _registerMaterializedAssistantMessage();
             }
             assistant['content'] = current + token;
+            _timeline = _timeline.appendText(assistant, token);
           }
         });
         _scheduleStreamingFollow();
@@ -3303,6 +3331,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         if (assistant == null) return;
         final current = assistant['_gateway_reasoning']?.toString() ?? '';
         assistant['_gateway_reasoning'] = reasoning.applyTo(current);
+        _timeline = _timeline.reasoning(assistant, reasoning);
         assistant['_gateway_reasoning_verbose'] = reasoning.verbose;
         assistant['_gateway_reasoning_replaces'] =
             assistant['_gateway_reasoning_replaces'] == true ||
@@ -3358,6 +3387,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         final current = assistant['content']?.toString() ?? '';
         if (current.isEmpty) _registerMaterializedAssistantMessage();
         assistant['content'] = '$current$token';
+        _timeline = _timeline.appendText(assistant, token);
       });
       _scheduleStreamingFollow();
       return;
@@ -3378,6 +3408,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _registerMaterializedAssistantMessage();
         }
         assistant['content'] = transition.sealedText;
+        _timeline = _timeline.textSnapshot(assistant, transition.sealedText);
         if (transition.startsNewMessage) {
           assistant['_gateway_interim'] = true;
           assistant['_gateway_pending_response'] = false;
@@ -3398,6 +3429,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           event.data['text']?.toString() ??
           '';
       setState(() {
+        final pending = _lastAssistantMessage();
         final assistant = _completionAssistantMessage(
           event.data,
           event.data['text']?.toString() ?? completeText,
@@ -3408,6 +3440,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             final current = assistant['content']?.toString() ?? '';
             if (current.isEmpty) _registerMaterializedAssistantMessage();
             assistant['content'] = completeText;
+            _timeline = _timeline.textSnapshot(
+              assistant,
+              completeText,
+              preservePosition: !identical(assistant, pending),
+            );
           }
         }
       });
@@ -3472,6 +3509,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         candidate['_gateway_reasoning_verbose'] =
             pending['_gateway_reasoning_verbose'] == true;
       }
+      _timeline = _timeline.reassignScope(
+        pending,
+        candidate,
+        replaceReasoning: pending['_gateway_reasoning_replaces'] == true,
+      );
       _messages.removeAt(pendingIndex);
       candidate.remove('_gateway_interim');
       return candidate;
@@ -4452,17 +4494,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           : _toolActivities.indexWhere(
               (activity) => activity.toolId == update.toolId,
             );
-      if (idx < 0) {
-        // A different gateway tool id is a different call, even when two
-        // concurrent calls share the same tool name. Only id-less updates can
-        // fall back to the most recent active call by name.
-        idx = _toolActivities.lastIndexWhere(
-          (activity) =>
-              !activity.isTerminal &&
-              (update.toolId == null || activity.toolId == null) &&
-              activity.name.toLowerCase() == update.name.toLowerCase(),
-        );
-      }
+      // A name is not a call identity. Without a wire ID/correlated reference
+      // we cannot safely assign this receipt to another same-name call.
       if (idx >= 0) {
         final previous = _toolActivities[idx];
         _toolActivities[idx] = previous.merge(update);
@@ -4471,6 +4504,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         }
       } else {
         _toolActivities.add(update);
+      }
+      final assistant = _lastAssistantMessage();
+      if (assistant != null) {
+        _timeline = _timeline.tool(
+          assistant,
+          idx >= 0 ? _toolActivities[idx] : update,
+        );
       }
       _gatewayTurnStatus = GatewayTurnStatus(
         kind: 'tool',
@@ -5033,6 +5073,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       subagentActivities: _subagentActivities,
       notices: _gatewayNotices,
       verbose: _verboseMode,
+      timeline: _timeline,
     );
 
     // The stored row is the durable anchor once available. Carry a pin made
@@ -5094,6 +5135,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             }
             if (item is ChatReasoningItem) {
               return GatewayReasoningCard(
+                key: ValueKey<String>('reasoning-${item.id}'),
+                id: item.id,
+                pinnedExpansion: _reasoningExpansionPins[item.id],
+                onPinChanged: (expanded) {
+                  if (item.id != null) {
+                    _reasoningExpansionPins[item.id!] = expanded;
+                  }
+                },
                 text: item.text,
                 initiallyExpanded: item.initiallyExpanded,
               );
@@ -5110,6 +5159,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             final isUser = role == 'user';
 
             return MessageBubble(
+              key: msg['_timeline_id'] == null
+                  ? null
+                  : ValueKey<String>(msg['_timeline_id'] as String),
               content: content,
               isUser: isUser,
               verbose: _verboseMode,

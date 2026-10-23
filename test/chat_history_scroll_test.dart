@@ -10,10 +10,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:hermes_android/core/models/attachment_draft.dart';
 import 'package:hermes_android/core/screens/chat_screen.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
+import 'package:hermes_android/core/services/desktop_gateway_client.dart';
 import 'package:hermes_android/core/services/ws_client.dart';
 import 'package:hermes_android/core/utils/chat_history_scroll.dart';
 import 'package:hermes_android/core/widgets/chat_end_affordance.dart';
 import 'package:hermes_android/core/widgets/gateway_insight_card.dart';
+import 'package:hermes_android/core/widgets/gateway_activity_card.dart';
 import 'package:hermes_android/l10n/app_localizations.dart';
 
 void main() {
@@ -124,6 +126,380 @@ void main() {
   });
 
   group('ChatScreen integration', () {
+    for (final newline in ['\n', '\r\n']) {
+      testWidgets(
+        'fragmented SSE ${newline.length} byte newline preserves receipt order and durable hydrate',
+        (tester) async {
+          tester.view.devicePixelRatio = 1;
+          tester.view.physicalSize = const Size(1000, 2400);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          addTearDown(tester.view.resetPhysicalSize);
+          final client = _ControlledChatHttpClient(const []);
+          await _pumpChat(
+            tester,
+            client: client,
+            connectionId: 'sse-${newline.length}',
+            sessionId: 'sse',
+          );
+          await tester.enterText(find.byType(TextField), 'SSE order');
+          await tester.tap(find.byTooltip('Send'));
+          await tester.pump();
+          await client.postStarted.future;
+          String token(String text) =>
+              'data: ${jsonEncode({
+                'choices': [
+                  {
+                    'delta': {'content': text},
+                  },
+                ],
+              })}$newline$newline';
+          String tool(String id, String status) =>
+              'event: hermes.tool.progress${newline}data: ${jsonEncode({'tool': 'terminal', 'toolCallId': id, 'status': status})}$newline$newline';
+          // Fragment every byte, including CRLF delimiters and UTF-8 text. The
+          // parser must synchronously deliver each token/tool in receipt order.
+          client.emitFragmented(
+            token('A 🐈') +
+                tool('t1', 'running') +
+                tool('t2', 'running') +
+                token('B') +
+                tool('t3', 'running') +
+                token('C') +
+                tool('t1', 'completed'),
+          );
+          await tester.pump(const Duration(milliseconds: 300));
+          expect(_timelineLabels(tester), [
+            'SSE order',
+            'A 🐈',
+            't1,t2',
+            'B',
+            't3',
+            'C',
+          ]);
+          final group = tester.widget<GatewayActivityCard>(
+            find.byType(GatewayActivityCard).first,
+          );
+          expect(group.activities.first.isTerminal, true);
+          expect(group.activities.last.isTerminal, false);
+          // A durable transcript replaces the receipt overlay in one rebuild.
+          client.finish([
+            {'id': 1, 'role': 'user', 'content': 'SSE order'},
+            {'id': 2, 'role': 'assistant', 'content': 'A 🐈'},
+            {
+              'id': 3,
+              'role': 'tool',
+              'tool_call_id': 't1',
+              'name': 'terminal',
+              'content': 'ok',
+              'timestamp': 1792544523,
+            },
+            {
+              'id': 4,
+              'role': 'tool',
+              'tool_call_id': 't2',
+              'name': 'terminal',
+              'content': 'ok',
+            },
+            {'id': 5, 'role': 'assistant', 'content': 'B'},
+            {
+              'id': 6,
+              'role': 'tool',
+              'tool_call_id': 't3',
+              'name': 'terminal',
+              'content': 'ok',
+            },
+            {'id': 7, 'role': 'assistant', 'content': 'C'},
+          ]);
+          await tester.pump(const Duration(milliseconds: 300));
+          await tester.pump(const Duration(milliseconds: 300));
+          expect(_timelineLabels(tester), [
+            'SSE order',
+            'A 🐈',
+            't1,t2',
+            'B',
+            't3',
+            'C',
+          ]);
+          expect(find.byType(GatewayReasoningCard), findsNothing);
+          await tester.pumpWidget(const SizedBox.shrink());
+        },
+      );
+    }
+
+    testWidgets(
+      'reattach replaces optimistic runs with durable rows without duplicate bubbles or tools',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = const Size(1000, 2400);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.view.resetPhysicalSize);
+        final hook = TestDesktopConnectionHook();
+        final remote = _ControlledRemotePrompt();
+        final client = _ControlledChatHttpClient([
+          {'id': 1, 'role': 'user', 'content': 'Old question'},
+          {'id': 2, 'role': 'assistant', 'content': 'Old answer'},
+        ]);
+        await _pumpChat(
+          tester,
+          client: client,
+          connectionId: 'reattach-order',
+          sessionId: 'reattach-order',
+          remoteSubmit: remote.submit,
+          connectionHook: hook,
+        );
+        hook.handler!(DesktopConnectionState.connected);
+        await tester.enterText(find.byType(TextField), 'Continue');
+        await tester.tap(find.byTooltip('Send'));
+        await tester.pump();
+        await remote.started.future;
+        remote.emit('message.delta', {'text': 'A'});
+        remote.emit('tool.start', {'tool_id': 't1', 'name': 'terminal'});
+        remote.emit('message.delta', {'text': 'B'});
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(_timelineLabels(tester), [
+          'Old question',
+          'Old answer',
+          'Continue',
+          'A',
+          't1',
+          'B',
+        ]);
+        hook.handler!(DesktopConnectionState.reconnecting);
+        remote.fail();
+        await tester.pump(const Duration(milliseconds: 300));
+        // No old-row overlap in the latest page: ChatHistoryWindow still retains
+        // the earlier durable bubbles, while replacing this turn's optimism.
+        client.serverMessages = [
+          {'id': 3, 'role': 'user', 'content': 'Continue'},
+          {'id': 4, 'role': 'assistant', 'content': 'A'},
+          {
+            'id': 5,
+            'role': 'tool',
+            'tool_call_id': 't1',
+            'name': 'terminal',
+            'content': 'ok',
+            'timestamp': 1792544523,
+          },
+          {'id': 6, 'role': 'assistant', 'content': 'B'},
+        ];
+        hook.handler!(DesktopConnectionState.connected);
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(_timelineLabels(tester), [
+          'Old question',
+          'Old answer',
+          'Continue',
+          'A',
+          't1',
+          'B',
+        ]);
+        expect(
+          tester
+              .widget<GatewayActivityCard>(find.byType(GatewayActivityCard))
+              .activities
+              .single
+              .isTerminal,
+          true,
+        );
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+
+    testWidgets(
+      'older paging retains completed receipt runs and pinned cards',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = const Size(1000, 1400);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.view.resetPhysicalSize);
+        final remote = _ControlledRemotePrompt();
+        final client = _ControlledChatHttpClient([
+          for (var i = 1; i <= 50; i++)
+            {
+              'id': i,
+              'role': i.isOdd ? 'user' : 'assistant',
+              'content': 'History row $i',
+            },
+        ]);
+        await _pumpChat(
+          tester,
+          client: client,
+          connectionId: 'paging-order',
+          sessionId: 'paging-order',
+          remoteSubmit: remote.submit,
+        );
+        await tester.enterText(find.byType(TextField), 'Continue');
+        await tester.tap(find.byTooltip('Send'));
+        await tester.pump();
+        await remote.started.future;
+        remote.emit('thinking.delta', {
+          'text': 'Thinking status, not exposed reasoning',
+        });
+        await tester.pump();
+        expect(find.byType(GatewayReasoningCard), findsNothing);
+        remote.emit('message.delta', {'text': 'A'});
+        remote.emit('tool.start', {'tool_id': 't1', 'name': 'terminal'});
+        remote.emit('message.delta', {'text': 'B'});
+        await tester.pump(const Duration(milliseconds: 300));
+        final controller = _chatListController(tester);
+        for (var attempt = 0; attempt < 3; attempt++) {
+          controller.jumpTo(controller.position.maxScrollExtent);
+          await tester.pump(const Duration(milliseconds: 300));
+        }
+        await tester.tap(find.text('Tool activity'));
+        remote.emit('message.complete', {'text': 'AB'});
+        remote.finish();
+        await tester.pump(const Duration(milliseconds: 300));
+        controller.jumpTo(0);
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.tap(find.byKey(const Key('chat-load-older')));
+        await tester.pump(const Duration(milliseconds: 300));
+        controller.jumpTo(controller.position.maxScrollExtent);
+        await tester.pump(const Duration(milliseconds: 300));
+        final order = _timelineLabels(tester);
+        expect(order.sublist(order.length - 4), ['Continue', 'A', 't1', 'B']);
+        expect(
+          tester
+              .widget<GatewayActivityCard>(find.byType(GatewayActivityCard))
+              .pinnedExpansion,
+          false,
+        );
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+
+    testWidgets(
+      'stock interim sequence leaves commentary between separate tool batches',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = const Size(1000, 2400);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.view.resetPhysicalSize);
+        final remote = _ControlledRemotePrompt();
+        await _pumpChat(
+          tester,
+          client: _ControlledChatHttpClient(const []),
+          connectionId: 'stock-order',
+          sessionId: 'stock-order',
+          remoteSubmit: remote.submit,
+        );
+        await tester.enterText(find.byType(TextField), 'Stock ordering');
+        await tester.tap(find.byTooltip('Send'));
+        await tester.pump();
+        await remote.started.future;
+        remote.emit('message.delta', {'text': 'Commentary A'});
+        remote.emit('message.interim', {
+          'text': 'Commentary A',
+          'already_streamed': true,
+        });
+        remote.emit('tool.start', {'tool_id': 't1', 'name': 'terminal'});
+        remote.emit('tool.complete', {'tool_id': 't1', 'name': 'terminal'});
+        remote.emit('message.delta', {'text': 'Commentary B'});
+        remote.emit('message.interim', {
+          'text': 'Commentary B',
+          'already_streamed': true,
+        });
+        remote.emit('reasoning.available', {'text': 'Exposed reasoning'});
+        remote.emit('tool.start', {'tool_id': 't2', 'name': 'terminal'});
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(_timelineLabels(tester), [
+          'Stock ordering',
+          'Commentary A',
+          't1',
+          'Commentary B',
+          'reasoning',
+          't2',
+        ]);
+        remote.finish();
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+
+    testWidgets('receipt timeline interleaves prose reasoning and tool batches', (
+      tester,
+    ) async {
+      tester.view.devicePixelRatio = 1;
+      tester.view.physicalSize = const Size(1000, 2400);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.view.resetPhysicalSize);
+      final remote = _ControlledRemotePrompt();
+      await _pumpChat(
+        tester,
+        client: _ControlledChatHttpClient(const []),
+        connectionId: 'ordered',
+        sessionId: 'ordered',
+        remoteSubmit: remote.submit,
+      );
+      await tester.enterText(find.byType(TextField), 'Order these');
+      await tester.tap(find.byTooltip('Send'));
+      await tester.pump();
+      await remote.started.future;
+      remote.emit('message.delta', {'text': 'A'});
+      remote.emit('reasoning.delta', {'text': 'R'});
+      remote.emit('tool.start', {'tool_id': 't1', 'name': 'terminal'});
+      remote.emit('tool.start', {'tool_id': 't2', 'name': 'terminal'});
+      remote.emit('message.delta', {'text': 'B'});
+      remote.emit('tool.start', {'tool_id': 't3', 'name': 'terminal'});
+      remote.emit('message.delta', {'text': 'C'});
+      await tester.pump(const Duration(milliseconds: 300));
+      List<String> order() => _timelineLabels(tester);
+      expect(order(), [
+        'Order these',
+        'A',
+        'reasoning',
+        't1,t2',
+        'B',
+        't3',
+        'C',
+      ]);
+      // A completion is an update to the first batch, not a new trailing batch.
+      final reasoningKey = tester
+          .widget<GatewayReasoningCard>(find.byType(GatewayReasoningCard))
+          .key;
+      await tester.tap(find.text('Reasoning'));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text('R'), findsOneWidget);
+      await tester.tap(find.text('Reasoning'));
+      await tester.tap(find.text('Tool activity').first);
+      await tester.pump(const Duration(milliseconds: 300));
+      remote.emit('tool.complete', {'tool_id': 't1', 'name': 'terminal'});
+      remote.emit('reasoning.available', {
+        'text': 'Revised R',
+        'verbose': true,
+      });
+      remote.emit('message.complete', {'text': 'ABC'});
+      remote.finish();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(order(), [
+        'Order these',
+        'A',
+        'reasoning',
+        't1,t2',
+        'B',
+        't3',
+        'C',
+      ]);
+      expect(
+        tester
+            .widget<GatewayReasoningCard>(find.byType(GatewayReasoningCard))
+            .text,
+        'Revised R',
+      );
+      expect(
+        tester
+            .widget<GatewayReasoningCard>(find.byType(GatewayReasoningCard))
+            .key,
+        reasoningKey,
+      );
+      expect(find.text('Revised R'), findsNothing);
+      expect(
+        tester
+            .widget<GatewayActivityCard>(find.byType(GatewayActivityCard).first)
+            .pinnedExpansion,
+        false,
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
     testWidgets(
       'composer stays overflow-free at font scale 200% on compact screens',
       (tester) async {
@@ -757,6 +1133,7 @@ Future<void> _pumpChat(
   double textScale = 1,
   EdgeInsets viewInsets = EdgeInsets.zero,
   TestRemotePromptSubmit? remoteSubmit,
+  TestDesktopConnectionHook? connectionHook,
   Future<String?> Function()? serverFilePicker,
   List<AttachmentDraft> initialDrafts = const [],
   bool settle = true,
@@ -797,6 +1174,7 @@ Future<void> _pumpChat(
         ),
         testApiClient: apiClient,
         testRemotePromptSubmit: completedStockTurn(remoteSubmit),
+        testDesktopConnectionHook: connectionHook,
         testServerFilePicker: serverFilePicker,
         testInitialAttachmentDrafts: initialDrafts,
       ),
@@ -804,6 +1182,25 @@ Future<void> _pumpChat(
   );
   if (settle) await tester.pumpAndSettle();
 }
+
+List<String> _timelineLabels(WidgetTester tester) => tester
+    .widgetList(
+      find.byWidgetPredicate(
+        (w) =>
+            w is MessageBubble ||
+            w is GatewayReasoningCard ||
+            w is GatewayActivityCard,
+      ),
+    )
+    .map(
+      (w) => switch (w) {
+        MessageBubble b => b.content,
+        GatewayReasoningCard _ => 'reasoning',
+        GatewayActivityCard c => c.activities.map((a) => a.toolId).join(','),
+        _ => throw StateError('unexpected item'),
+      },
+    )
+    .toList();
 
 ScrollController _chatListController(WidgetTester tester) {
   return tester.widget<ListView>(find.byType(ListView).first).controller!;
@@ -879,6 +1276,10 @@ class _ControlledRemotePrompt {
   void finish() {
     _completion!.complete();
   }
+
+  void fail() => _completion!.completeError(
+    JsonRpcError('prompt.submit', 'Desktop gateway connection closed'),
+  );
 }
 
 class _ControlledChatHttpClient extends http.BaseClient {
@@ -925,6 +1326,12 @@ class _ControlledChatHttpClient extends http.BaseClient {
         })}\n\n',
       ),
     );
+  }
+
+  void emitFragmented(String frames) {
+    for (final byte in utf8.encode(frames)) {
+      _completionStream!.add([byte]);
+    }
   }
 
   void finish(List<Map<String, dynamic>> finalMessages) {
