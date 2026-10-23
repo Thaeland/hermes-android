@@ -4,6 +4,22 @@ All notable changes since v1.0.7 are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The [README](README.md)
 shows only the three latest releases.
 
+## [Unreleased]
+
+### Changed
+
+- Replace the Home tab with a default Chats destination and a second Crons
+  destination: Chats, Crons, Projects, Activity, More.
+- Move actionable Needs you / Running now summaries above the human chat list
+  without duplicating recent and completed conversation lists.
+- Browse scheduled-job conversations separately, with source-aware search,
+  Recent and Archived filters, local pins and access to cron-job management.
+  Retain legacy cron IDs and compressed roots even when source metadata is absent.
+- Share progressive history scans between the two browsers, preserve loaded
+  rows on failed refreshes and continue past the old 2,000-row limit. Dashboard
+  archive loading retains profile, origin and prefix and completes independently
+  of active history.
+
 ## [2.1.32] - 2026-10-23
 
 ### Fixed

@@ -22,7 +22,7 @@ import 'package:hermes_android/core/utils/new_chat_options.dart';
 import 'package:hermes_android/core/widgets/activity_pane.dart';
 import 'package:hermes_android/core/widgets/hermes_components.dart';
 import 'package:hermes_android/core/widgets/hermes_shell.dart';
-import 'package:hermes_android/core/widgets/home_pane.dart';
+import 'package:hermes_android/core/widgets/chat_attention_section.dart';
 import 'package:hermes_android/core/widgets/more_pane.dart';
 import 'package:hermes_android/core/widgets/projects_pane.dart';
 import 'package:hermes_android/core/widgets/project_detail_screen.dart';
@@ -242,14 +242,11 @@ Future<void> _pump(
   );
 }
 
-/// Finds a Home section *header* by kind.
-///
-/// A plain text finder is ambiguous: `Needs you` is also the label of the
-/// blocked [StatusChip] on each row, so matching raw text would pass for the
-/// wrong reason.
+/// Limit the header assertion to the compact attention section, not rows.
 Finder _sectionHeader(HomeSectionKind kind, AppLocalizations l10n) =>
-    find.byWidgetPredicate(
-      (widget) => widget is SectionHeader && widget.title == kind.title(l10n),
+    find.descendant(
+      of: find.byType(ChatAttentionSection),
+      matching: find.text(kind.title(l10n)),
     );
 
 /// A turn session a widget test can drive: captures the workspace's
@@ -314,7 +311,7 @@ void main() {
     expect(find.text('Review local spaces'), findsOneWidget);
   });
 
-  testWidgets('opens on Home inside the four-destination shell', (
+  testWidgets('opens on Chats inside the five-destination shell', (
     tester,
   ) async {
     await _pump(
@@ -376,7 +373,7 @@ void main() {
       isTrue,
     );
 
-    await tester.tap(find.text(HermesDestination.home.label(l10n)).last);
+    await tester.tap(find.text(HermesDestination.crons.label(l10n)).last);
     await tester.pumpAndSettle();
     await tester.tap(find.text(HermesDestination.chats.label(l10n)).last);
     await tester.pumpAndSettle();
@@ -697,7 +694,7 @@ void main() {
     expect(find.text('Nothing is running'), findsOneWidget);
   });
 
-  testWidgets('Home renders the attention digest instead of a placeholder', (
+  testWidgets('Chats renders the browser without a duplicate recent digest', (
     tester,
   ) async {
     await _pump(
@@ -708,17 +705,17 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.byType(HomePane), findsOneWidget);
+    expect(find.byType(WorkspaceSessionsScreen), findsOneWidget);
     expect(
       find.text(HomeSectionKind.continueWorking.title(l10n)),
-      findsOneWidget,
+      findsNothing,
     );
     expect(find.text('Roadmap slice'), findsOneWidget);
     // The placeholder it replaces must be gone, not merely pushed down.
     expect(find.textContaining('Home — Coming next'), findsNothing);
   });
 
-  testWidgets('Home search opens the focused global Chats search', (
+  testWidgets('Chats search opens the focused global Chats search', (
     tester,
   ) async {
     await _pump(
@@ -744,7 +741,7 @@ void main() {
     );
   });
 
-  testWidgets('Home opens an actionable Inbox with a count', (tester) async {
+  testWidgets('Chats opens an actionable Inbox with a count', (tester) async {
     final now = DateTime.now();
     final opened = <String>[];
     await _pump(
@@ -835,7 +832,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Roadmap slice'));
+    await tester.tap(find.text('Roadmap slice').first);
     await tester.pumpAndSettle();
 
     expect(opened, ['s1']);
@@ -859,7 +856,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Roadmap slice'));
+    await tester.tap(find.text('Roadmap slice').first);
     await tester.pumpAndSettle();
 
     expect(opened.map((session) => session.id), ['s1']);
@@ -887,7 +884,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Roadmap slice'));
+    await tester.tap(find.text('Roadmap slice').first);
     await tester.pumpAndSettle();
 
     expect(reported, ['s1']);
@@ -928,7 +925,7 @@ void main() {
     await tester.pumpAndSettle();
     final readsBeforeOpening = reads;
 
-    await tester.tap(find.text('Roadmap slice'));
+    await tester.tap(find.text('Roadmap slice').first);
     await tester.pumpAndSettle();
     await tester.tap(find.text('back'));
     await tester.pumpAndSettle();
@@ -994,7 +991,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Roadmap slice'));
+    await tester.tap(find.text('Roadmap slice').first);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
 
@@ -1003,7 +1000,7 @@ void main() {
     expect(chat.turnApplicationController, same(controller));
   });
 
-  testWidgets('a Home read failure stays recoverable rather than fatal', (
+  testWidgets('a Chats read failure stays recoverable rather than fatal', (
     tester,
   ) async {
     await _pump(
@@ -1014,7 +1011,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.byType(ErrorState), findsOneWidget);
+    expect(find.text(l10n.could_not_load_conversations), findsOneWidget);
+    expect(find.widgetWithText(TextButton, l10n.retry), findsOneWidget);
+    expect(find.byType(EmptyState), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -1177,9 +1176,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(opened, hasLength(1));
-    // The fallback must target the dashboard, not the gateway chat port.
-    expect(opened.single, contains('carlos-miniserver'));
-    expect(opened.single, contains('9119'));
+    // A distinct Desktop Gateway override is the dashboard authority too.
+    expect(opened.single, 'https://host:8642');
+    expect(Uri.parse(opened.single).scheme, 'https');
   });
 
   testWidgets('More disables dashboard entries without a reachable host', (
@@ -1230,7 +1229,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Hermes Android'), findsOneWidget);
 
-    await tester.tap(find.text('Home').last);
+    await tester.tap(find.text('Chats').last);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Projects').last);
     await tester.pumpAndSettle();
@@ -1277,7 +1276,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  group('turn signals feed the Home digest', () {
+  group('turn signals feed compact chat attention', () {
     testWidgets('a blocked turn ranks its chat under Needs you', (
       tester,
     ) async {
@@ -1321,7 +1320,7 @@ void main() {
       );
     });
 
-    testWidgets('blocked work raises the Home badge', (tester) async {
+    testWidgets('blocked work raises the Chats badge', (tester) async {
       // The badge is the only signal visible from another destination, so it
       // must reflect blocked work rather than staying empty.
       await _pump(
@@ -1340,10 +1339,12 @@ void main() {
       await tester.pumpAndSettle();
 
       final shell = tester.widget<HermesShell>(find.byType(HermesShell));
-      expect(shell.badges[HermesDestination.home], 2);
+      expect(shell.badges[HermesDestination.chats], 2);
     });
 
-    testWidgets('a signals read that fails still renders Home', (tester) async {
+    testWidgets('a signals read that fails still renders Chats', (
+      tester,
+    ) async {
       // Losing the recovery journal must degrade the ranking, never the
       // screen: every chat simply falls back to Continue working.
       await _pump(
@@ -1358,7 +1359,7 @@ void main() {
       expect(find.text('Roadmap slice'), findsOneWidget);
       expect(
         _sectionHeader(HomeSectionKind.continueWorking, l10n),
-        findsOneWidget,
+        findsNothing,
       );
       expect(tester.takeException(), isNull);
     });
@@ -1396,7 +1397,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(_sectionHeader(HomeSectionKind.needsYou, l10n), findsOneWidget);
 
-      await tester.tap(find.text('Roadmap slice'));
+      await tester.tap(find.text('Roadmap slice').first);
       await tester.pumpAndSettle();
       await tester.tap(find.text('back'));
       await tester.pumpAndSettle();
@@ -1405,7 +1406,7 @@ void main() {
       expect(_sectionHeader(HomeSectionKind.needsYou, l10n), findsNothing);
       expect(
         _sectionHeader(HomeSectionKind.continueWorking, l10n),
-        findsOneWidget,
+        findsNothing,
       );
     });
 
@@ -1973,7 +1974,7 @@ void main() {
 
       await tester.tap(find.text(HermesDestination.activity.label(l10n)).last);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Roadmap slice'));
+      await tester.tap(find.text('Roadmap slice').first);
       await tester.pumpAndSettle();
 
       expect(opened, ['s1']);

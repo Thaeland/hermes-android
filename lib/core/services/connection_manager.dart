@@ -1659,16 +1659,17 @@ class DashboardClient {
   /// semantics as the live list can repeat rows across pages, and an
   /// inflated `all.length >= total` would stop before every offset
   /// window has been read, truncating the archive. Rows are deduplicated
-  /// by session id so repeats never surface twice. [maxPages] is the
-  /// explicit safety cap: if it is reached while the list was not
-  /// exhausted the read throws rather than silently returning a partial
-  /// archive — callers degrade honestly on the error instead of showing
-  /// a truncated list as complete.
+  /// by session id so repeats never surface twice. [maxPages] is an optional
+  /// safety cap. A progressive browser can omit it, retain successful pages,
+  /// and cancel when its owner is disposed without truncating old history.
   Future<List<Session>> getArchivedSessions({
     int pageSize = 100,
-    int maxPages = 20,
+    int? maxPages = 20,
     String? gatewayProfile,
+    void Function(List<Session> sessions)? onProgress,
+    bool Function()? isCancelled,
   }) async {
+    RangeError.checkValueInInterval(pageSize, 1, 100, 'pageSize');
     final all = <Session>[];
     final seenIds = <String>{};
     var offset = 0;
@@ -1679,7 +1680,10 @@ class DashboardClient {
     // k consecutive zero-new windows consume k*pageSize disjoint pins.
     var pinBound = 0;
     var zeroNewPages = 0;
-    for (var page = 0; page < maxPages; page++) {
+    for (var page = 0; maxPages == null || page < maxPages; page++) {
+      if (isCancelled?.call() ?? false) {
+        throw StateError('Archived session scan cancelled');
+      }
       final data = await apiGet(
         'sessions',
         queryParameters: {
@@ -1691,6 +1695,9 @@ class DashboardClient {
             'profile': gatewayProfile,
         },
       );
+      if (isCancelled?.call() ?? false) {
+        throw StateError('Archived session scan cancelled');
+      }
       // The dashboard router reports the filtered row count alongside the
       // page (`total = session_count(same scope)`), so the LIMIT/OFFSET
       // windows together cover exactly `total` rows — pins inside the
@@ -1712,6 +1719,7 @@ class DashboardClient {
           newRows++;
         }
       }
+      onProgress?.call(List.unmodifiable(all));
       offset += pageSize;
       if (total != null) {
         if (offset >= total) {

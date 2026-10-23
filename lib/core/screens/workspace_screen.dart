@@ -1,9 +1,7 @@
 /// The Hermes workspace: the navigation shell bound to one saved connection.
 ///
-/// This is the entry point of the new information architecture — Home,
-/// Projects, Activity, More — wired to real server-owned Projects. It is
-/// additive: the existing session-list flow is untouched, so the app keeps
-/// working while the remaining destinations are built out.
+/// Chats / Crons / Projects / Activity / More, bound to one saved connection.
+/// Human conversations and scheduled runs share history loading, not a tab.
 ///
 /// See `docs/ANDROID_DAILY_DRIVER_ROADMAP.md`.
 library;
@@ -32,6 +30,7 @@ import '../services/projects_repository.dart';
 import '../services/quick_chat_store.dart';
 import '../services/remote_files_client.dart';
 import '../services/shared_attachment_preparer.dart';
+import '../services/session_browser_loader.dart';
 import '../theme/hermes_theme.dart';
 import '../utils/activity_feed.dart';
 import '../utils/home_turn_signals.dart';
@@ -39,7 +38,6 @@ import '../utils/new_chat_options.dart';
 import '../widgets/activity_pane.dart';
 import '../widgets/hermes_components.dart';
 import '../widgets/hermes_shell.dart';
-import '../widgets/home_pane.dart';
 import '../widgets/more_pane.dart';
 import '../widgets/new_chat_sheet.dart';
 import '../widgets/project_detail_screen.dart';
@@ -64,9 +62,10 @@ typedef ProjectsRepositoryFactory =
 /// the fallback can be asserted without launching a real browser.
 typedef DashboardLauncher = Future<void> Function(String url);
 
-/// Builds the screen a Home row opens. Injectable so the navigation contract
+/// Builds the screen a conversation row opens. Injectable so the navigation contract
 /// can be asserted without constructing a live chat transport.
 typedef WorkspaceSessionScreenBuilder = Widget Function(Session session);
+typedef WorkspaceSessionListLoader = Future<List<Session>> Function();
 
 /// Builds the native remote Files destination. Injectable for navigation tests.
 typedef WorkspaceFilesScreenBuilder =
@@ -89,7 +88,7 @@ typedef WorkspaceActivityFeedLoader =
       Map<String, String> sessionTitles,
     );
 
-/// Identifies Home's global New button, so a test asserts the affordance
+/// Identifies Chats' New button, so a test asserts the affordance
 /// itself rather than an icon that another widget could also draw.
 const Key kWorkspaceNewChatButtonKey = Key('workspace-new-chat');
 
@@ -99,12 +98,12 @@ typedef NewChatSessionIdFactory = String Function();
 typedef SharedAttachmentPreparer =
     Future<List<AttachmentDraft>> Function(List<AndroidSharedFile> files);
 
-/// The chat screen a Home row opens by default.
+/// The chat screen a conversation row opens by default.
 ///
 /// Exposed so a test can assert what actually ships rather than only the
 /// injected stand-in. [turnApplicationController] is threaded through
 /// deliberately: it owns durable turn recovery above the Navigator, so a chat
-/// opened from Home must resume exactly like one opened from the session list.
+/// opened from Chats must resume exactly like one opened from the session list.
 Widget buildWorkspaceChatScreen({
   required SavedConnection connection,
   required Session session,
@@ -135,7 +134,7 @@ class WorkspaceScreen extends StatefulWidget {
   /// Called when the user opens a project.
   final ValueChanged<String>? onOpenProject;
 
-  /// Called when the user opens a chat from the Home digest. When null, this
+  /// Called when the user opens a chat from the conversation browser. When null, this
   /// screen pushes the chat itself, so the shell is never a dead end.
   final ValueChanged<Session>? onOpenSession;
 
@@ -144,32 +143,35 @@ class WorkspaceScreen extends StatefulWidget {
   final Duration? sessionsRefreshInterval;
 
   /// Owns durable turn recovery above this screen's lifetime. Passed to every
-  /// chat opened from Home so a turn survives leaving the chat.
+  /// chat opened from Chats so a turn survives leaving the chat.
   final GatewayTurnApplicationController? turnApplicationController;
 
-  /// Overrides how Home reads the sessions it ranks. Injectable for tests so
+  /// Overrides how the browser reads the sessions it ranks. Injectable for tests so
   /// the digest can be asserted without a live gateway.
-  final HomeSessionsLoader? sessionsLoader;
+  final WorkspaceSessionListLoader? sessionsLoader;
 
-  /// Test-only HTTP client injected into Home's session-list [ApiClient] so
+  /// Test-only HTTP client injected into the session-list [ApiClient] so
   /// the real paging loop (pinned back-fills, offset advance, dedupe) can
   /// be driven against a fake server without a live gateway. Ignored when
   /// [sessionsLoader] is set.
   final http.Client? testSessionsHttpClient;
 
-  /// Overrides the screen a Home row opens.
+  /// Drives archive paging/authentication without a live dashboard in tests.
+  final http.Client? testDashboardHttpClient;
+
+  /// Overrides the screen a conversation row opens.
   final WorkspaceSessionScreenBuilder? sessionScreenBuilder;
 
   /// Overrides the native Files screen.
   final WorkspaceFilesScreenBuilder? filesScreenBuilder;
 
-  /// Overrides how Home reads its attention and running signals.
+  /// Overrides how the browser reads its attention and running signals.
   final WorkspaceTurnSignalsLoader? turnSignalsLoader;
 
   /// Overrides how Activity reads its timeline.
   final WorkspaceActivityFeedLoader? activityFeedLoader;
 
-  /// Called when the user starts a chat from Home's New button. When null,
+  /// Called when the user starts a chat from Chats' New button. When null,
   /// this screen opens the chat itself, so New is never an inert affordance.
   final ValueChanged<NewChatDraft>? onNewChat;
 
@@ -209,6 +211,7 @@ class WorkspaceScreen extends StatefulWidget {
     this.turnApplicationController,
     this.sessionsLoader,
     this.testSessionsHttpClient,
+    this.testDashboardHttpClient,
     this.sessionScreenBuilder,
     this.filesScreenBuilder,
     this.turnSignalsLoader,
@@ -247,25 +250,17 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   late final AppUpdateService _updateService =
       widget.updateService ?? AppUpdateService();
 
-  /// Quick chats past their retention deadline, recomputed on every session
-  /// read. Held here rather than derived inside [HomePane] so the store is
-  /// touched once per refresh instead of once per build.
-  Set<String> _archivedQuickChats = const {};
-
-  /// Reaches the live Home pane so it can be refreshed after a chat closes.
-  final _homeKey = GlobalKey<HomePaneState>();
-
   /// Reaches the live Activity pane for the same reason.
   final _activityKey = GlobalKey<ActivityPaneState>();
 
-  /// Reaches the action-only Activity view opened from Home.
+  /// Reaches the action-only Activity view opened from Chats.
   final _inboxKey = GlobalKey<ActivityPaneState>();
 
-  /// The destination currently on screen. The New button is a Home
+  /// The destination currently on screen. New is a Chats-only
   /// affordance: over Projects or More it would be ambiguous what it creates.
-  HermesDestination _destination = HermesDestination.home;
+  HermesDestination _destination = HermesDestination.chats;
 
-  /// The last known attention/running signals. Home ranks with these; an
+  /// The last known attention/running signals. The compact attention section uses these; an
   /// empty value simply means everything falls back to `Continue working`.
   HomeTurnSignals _turnSignals = HomeTurnSignals.empty;
 
@@ -280,18 +275,19 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   /// Session id to title, from the last successful session read.
   ///
   /// The turn journal deliberately stores no prose, so Activity has no titles
-  /// of its own. Reusing what Home already fetched costs no extra request and
+  /// of its own. Reusing the session browser already fetched costs no extra request and
   /// no new gateway contract; a turn whose chat is absent simply stays
   /// untitled rather than being dropped or given a fabricated name.
   Map<String, String> _sessionTitles = const {};
   final _chatsKey = GlobalKey<WorkspaceSessionsScreenState>();
-  int _homeGeneration = 0;
-  Future<SessionListPage>? _homeFirstPageScan;
-  Future<List<Session>>? _homeFullScan;
-  List<Session>? _homeFirstPageSessions;
-  List<Session>? _chatPreviewSessions;
-  List<Session>? _completeHomeSessions;
-  bool _chatsInitialLoadConsumed = false;
+  final _cronsKey = GlobalKey<WorkspaceSessionsScreenState>();
+  SessionBrowserLoader? _browserLoader;
+  List<Session> _knownSessions = const [];
+  bool _sessionsKnown = false;
+  int _signalsGeneration = 0;
+  Future<List<Session>>? _archiveScan;
+  List<Session>? _archiveProgress;
+  final _archiveListeners = <SessionScanProgress>{};
 
   /// Best-effort Project labels learned from the latest projects.tree read,
   /// used to carry context into chats opened from the global Chats browser.
@@ -303,14 +299,16 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   final Set<String> _movingChats = {};
   Future<void> _quickPromotionTail = Future<void>.value();
 
-  /// Read lazily so a connection that never opens Home never touches secure
+  /// Read lazily so a connection that never opens Chats never touches secure
   /// storage, and so tests that inject a loader never construct one at all.
   GatewayTurnJournal? _journal;
 
-  /// Home reads the same REST session list the session list screen uses; the
-  /// injected loader wins so tests never touch a transport.
-  late final HomeSessionsLoader _loadSessions =
-      widget.sessionsLoader ?? _loadSessionsFromGateway;
+  SessionBrowserLoader get _sessionLoader =>
+      _browserLoader ??= SessionBrowserLoader(
+        api: _sessionClient,
+        loadPins: () async => await _pinStore?.load() ?? const <String>[],
+        sessionsLoader: widget.sessionsLoader,
+      );
 
   late final WorkspaceTurnSignalsLoader _loadTurnSignals =
       widget.turnSignalsLoader ?? _loadTurnSignalsFromJournal;
@@ -325,72 +323,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     );
   }
 
-  Future<List<Session>> _loadSessionsFromGateway({
-    void Function(List<Session>)? onProgress,
-  }) async {
-    final api = _sessionClient;
-    // Page through the whole visible list. The gateway serves newest-first
-    // in a capped window; a single first-page request truncated the
-    // Unassigned bucket (older unfiled chats never reached the device).
-    // Bounded at 20 pages x 100 so a chatty store can't fan out forever.
-    const pageSize = 100;
-    const maxPages = 20;
-    final all = <Session>[];
-    final seenIds = <String>{};
-    var offset = 0;
-    // Upper bound on the total pin set: stock repeats EVERY pin on EVERY
-    // page, so the max pinned count seen on any single page bounds them all.
-    var pinBound = 0;
-    // Consecutive pages that contributed zero unseen ids (see below).
-    var zeroNewPages = 0;
-    for (var page = 0; page < maxPages; page++) {
-      final result = await api.getSessionsPage(limit: pageSize, offset: offset);
-      // The stock gateway back-fills pinned sessions past `limit` and
-      // repeats them on later pages, so the returned row count is NOT
-      // the window size: advance by the requested pageSize or window
-      // rows between the window and the back-fill are skipped, and dedupe
-      // by id so a repeated pin never shows twice.
-      var newRows = 0;
-      for (final session in result.sessions) {
-        if (seenIds.add(session.id)) {
-          all.add(session);
-          newRows++;
-        }
-      }
-      if (newRows > 0) onProgress?.call(List.unmodifiable(all));
-      final pinsOnPage = result.sessions
-          .where((session) => session.pinned)
-          .length;
-      if (pinsOnPage > pinBound) pinBound = pinsOnPage;
-      // `has_more` is NOT trusted for stopping: the server computes it
-      // from the non-pinned rows in the combined response
-      // (api_server.py: windowed >= limit), so a pin that already sits
-      // INSIDE the base window makes that count fall below `limit` and
-      // report has_more=false while rows still exist past the offset.
-      // End-of-list is decided client-side — but a SINGLE zero-new page
-      // is not proof either: a later base window made entirely of
-      // already-seen pins contributes nothing new while unseen rows
-      // remain further along. k consecutive zero-new windows must be
-      // k*pageSize disjoint all-pin windows, so once k*pageSize exceeds
-      // the pin bound the end is proven. With no pins, one zero-new page
-      // already proves it.
-      if (newRows == 0) {
-        zeroNewPages++;
-        final required = pinBound == 0 ? 1 : pinBound ~/ pageSize + 1;
-        if (zeroNewPages >= required) break;
-      } else {
-        zeroNewPages = 0;
-      }
-      offset += pageSize;
-    }
-    final pins = await _pinStore?.load() ?? const <String>[];
-    if (pins.isNotEmpty) {
-      all.addAll(await loadUnlistedLocalPins(api, all, pins));
-    }
-    return all;
-  }
-
-  /// Derives Home's signals from the durable turn recovery journal.
+  /// Derives conversation attention signals from the durable turn recovery journal.
   ///
   /// The journal is the only store that already survives process death and
   /// knows what a chat was doing, so no new gateway contract is required and
@@ -410,160 +343,36 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     );
   }
 
-  /// Reads the sessions, and refreshes the signals alongside them.
-  ///
-  /// The signal read is deliberately *not* awaited before the sessions are
-  /// returned: it hits secure storage, and holding the whole screen on a
-  /// skeleton until the journal answers would trade a working Home for a
-  /// slightly better-ranked one. The ranking simply improves a frame later.
-  ///
-  /// Both are refreshed together so returning from a chat picks up both —
-  /// `HomePaneState.refresh` only knows how to re-read sessions, and a digest
-  /// ranked with stale signals is worse than one ranked with none.
-  Future<List<Session>> _loadHome() {
-    final generation = ++_homeGeneration;
-    unawaited(_refreshTurnSignals(generation));
-    return (widget.sessionsLoader == null
-            ? _loadFullHomeSessions()
-            : _loadSessions())
-        .then((sessions) {
-          if (!mounted || generation != _homeGeneration) return sessions;
-          _onHomeSessions(sessions, generation: generation, complete: true);
-          return sessions;
-        });
-  }
-
-  Future<List<Session>> _loadHomeProgressively(
-    void Function(List<Session>? sessions) onUpdate,
-  ) async {
-    final generation = ++_homeGeneration;
-    unawaited(_refreshTurnSignals(generation));
-    // Stock may append pinned back-fill beyond the requested limit; the full
-    // scan below retains those rows and all older work.
-    final page = await _loadFirstHomePage();
-    final first = page.sessions.take(5).toList(growable: false);
-    if (!mounted || generation != _homeGeneration) return first;
-    _homeFirstPageSessions = first;
-    if (_destination == HermesDestination.chats) setState(() {});
-    _onHomeSessions(first, generation: generation, complete: false);
-    // Give the pane a frame to show the first slice before starting a new
-    // scan. If an earlier refresh already has one in flight, subscribe now:
-    // deferring that subscription can outlive the scan and start a duplicate.
-    Future<void> finishScan(
-      Future<List<Session>> scan, {
-      required bool startedBeforeFirstPage,
-    }) async {
-      try {
-        final scanned = await scan;
-        if (!mounted || generation != _homeGeneration) return;
-        // A shared scan can predate this refresh. Its earlier offset=0
-        // snapshot must not replace a newer first page (new chat, rename,
-        // or pin) when it completes. The scan is not deletion-safe anyway.
-        final full = startedBeforeFirstPage
-            ? [
-                ...first,
-                ...scanned.where(
-                  (old) => !first.any((recent) => recent.id == old.id),
-                ),
-              ]
-            : scanned;
-        _completeHomeSessions = List.unmodifiable(full);
-        if (_destination == HermesDestination.chats) setState(() {});
-        _onHomeSessions(full, generation: generation, complete: true);
-        onUpdate(full);
-      } catch (_) {
-        // Keep the successfully loaded first page even if an older shared
-        // scan failed. Report the incomplete scan to Home without erasing it.
-        if (mounted && generation == _homeGeneration) onUpdate(null);
+  Future<List<Session>> _loadArchivedSessions({
+    SessionScanProgress? onProgress,
+  }) async {
+    if (onProgress != null) {
+      _archiveListeners.add(onProgress);
+      if (_archiveScan != null && _archiveProgress != null) {
+        onProgress(_archiveProgress!);
       }
     }
-
-    final pending = _homeFullScan;
-    if (pending != null) {
-      unawaited(finishScan(pending, startedBeforeFirstPage: true));
-    } else {
-      unawaited(
-        Future<void>.delayed(Duration.zero, () async {
-          if (!mounted || generation != _homeGeneration) return;
-          await finishScan(
-            _loadFullHomeSessions(),
-            startedBeforeFirstPage: false,
-          );
-        }),
-      );
+    try {
+      return await (_archiveScan ??= _dashboardClient
+          .getArchivedSessions(
+            gatewayProfile: widget.connection.gatewayProfile,
+            maxPages: null,
+            isCancelled: () => !mounted,
+            onProgress: (sessions) {
+              if (!mounted) return;
+              _archiveProgress = sessions;
+              for (final listener in _archiveListeners.toList()) {
+                listener(sessions);
+              }
+            },
+          )
+          .whenComplete(() {
+            _archiveScan = null;
+            _archiveProgress = null;
+          }));
+    } finally {
+      if (onProgress != null) _archiveListeners.remove(onProgress);
     }
-    return first;
-  }
-
-  /// A resume and an initial Home load can request the same first page in
-  /// parallel. Only share requests that are still in flight: after one
-  /// settles, the next refresh must see newly created/updated sessions.
-  Future<SessionListPage> _loadFirstHomePage() {
-    final pending = _homeFirstPageScan;
-    if (pending != null) return pending;
-    final scan = _sessionClient.getSessionsPage(limit: 5);
-    _homeFirstPageScan = scan;
-    void clear() {
-      if (identical(_homeFirstPageScan, scan)) _homeFirstPageScan = null;
-    }
-
-    unawaited(scan.then<void>((_) => clear(), onError: (Object _) => clear()));
-    return scan;
-  }
-
-  /// A refresh may supersede the Home projection without making the ongoing
-  /// full-page scan useless. Share that scan instead of starting another
-  /// twenty-request walk for each pull-to-refresh or return from a chat.
-  Future<List<Session>> _loadFullHomeSessions() {
-    final pending = _homeFullScan;
-    if (pending != null) return pending;
-    final scan = _loadSessionsFromGateway(
-      onProgress: _updateChatPreviewFromScan,
-    );
-    _homeFullScan = scan;
-    void clear() {
-      if (identical(_homeFullScan, scan)) _homeFullScan = null;
-    }
-
-    unawaited(scan.then<void>((_) => clear(), onError: (Object _) => clear()));
-    return scan;
-  }
-
-  void _updateChatPreviewFromScan(List<Session> sessions) {
-    if (!mounted || (_chatPreviewSessions?.length ?? 0) >= 5) return;
-    final preview = sessions
-        .where((session) => !session.archived && !isMachineSession(session))
-        .take(5)
-        .toList(growable: false);
-    if (preview.length <= (_chatPreviewSessions?.length ?? 0)) return;
-    _chatPreviewSessions = preview;
-    if (_destination == HermesDestination.chats) setState(() {});
-  }
-
-  void _onHomeSessions(
-    List<Session> sessions, {
-    required int generation,
-    required bool complete,
-  }) {
-    // Cache the titles for Activity. Done here rather than in a second
-    // request: the journal knows what ran, the session list knows what it
-    // was called, and only one of the two costs a round trip.
-    if (complete) {
-      _cacheSessionTitles(sessions);
-    } else {
-      _sessionTitles = Map.unmodifiable({
-        ..._sessionTitles,
-        for (final session in sessions)
-          if (session.title.trim().isNotEmpty) session.id: session.title.trim(),
-      });
-    }
-    // The stored deadline determines which Quick chats are archived. A page
-    // scan (including the capped full scan) is not a deletion-safe snapshot.
-    unawaited(_refreshQuickChats(generation));
-    // The Activity badge is the only signal of blocked work visible while
-    // the user is on another destination, so it cannot wait for the pane
-    // to be mounted for the first time.
-    unawaited(_refreshActivityBadge());
   }
 
   /// Opens the Quick chat lifecycle store for this connection.
@@ -578,27 +387,6 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       preferences,
       connectionId: widget.connection.id,
     );
-  }
-
-  /// Recomputes which quick chats have passed their 72 h deadline. Do not
-  /// prune on absence from mutable OFFSET pages: a moving or over-cap session
-  /// can be missed without having been deleted.
-  Future<void> _refreshQuickChats(int generation) async {
-    Set<String> archived;
-    try {
-      final store = await _quickChatStore();
-      final now = DateTime.now();
-      if (!mounted || generation != _homeGeneration) return;
-      archived = (await store.load()).archivedAt(now);
-    } catch (_) {
-      archived = const {};
-    }
-    if (!mounted || generation != _homeGeneration) return;
-    if (archived.length == _archivedQuickChats.length &&
-        archived.every(_archivedQuickChats.contains)) {
-      return;
-    }
-    setState(() => _archivedQuickChats = Set.unmodifiable(archived));
   }
 
   /// Reads the timeline purely to keep the shell badge honest.
@@ -620,7 +408,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   }
 
   void _cacheSessionTitles(List<Session> sessions) {
-    final titles = <String, String>{};
+    final titles = <String, String>{..._sessionTitles};
     for (final session in sessions) {
       final title = session.title.trim();
       if (title.isEmpty) continue;
@@ -631,7 +419,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
 
   /// Reads the Activity timeline from the durable turn journal.
   ///
-  /// Same store, same scope, and same degradation rule as Home's signals: a
+  /// Same store, same scope, and same degradation rule as conversation attention signals: a
   /// connection with no Desktop Gateway has no journal scope and reports an
   /// empty timeline instead of an error, so a legacy REST connection keeps
   /// working.
@@ -657,13 +445,13 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     // Titles may not be cached yet when Activity is the first destination the
     // user opens; read the sessions once so rows are not all untitled. A
     // failed read degrades a row's title, never the timeline itself.
-    if (_sessionTitles.isEmpty) {
-      final generation = _homeGeneration;
+    if (!_sessionsKnown) {
+      final generation = _signalsGeneration;
       try {
-        final sessions = await (widget.sessionsLoader == null
-            ? _loadFullHomeSessions()
-            : _loadSessions());
-        if (mounted && generation == _homeGeneration) {
+        final sessions = await _sessionLoader.load();
+        if (mounted && generation == _signalsGeneration) {
+          _knownSessions = sessions;
+          _sessionsKnown = true;
           _cacheSessionTitles(sessions);
         }
       } catch (_) {}
@@ -700,7 +488,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       // A journal that cannot be read degrades the ranking, never the screen.
       signals = HomeTurnSignals.empty;
     }
-    if (!mounted || generation != _homeGeneration) return;
+    if (!mounted || generation != _signalsGeneration) return;
     setState(() => _turnSignals = signals);
   }
 
@@ -875,7 +663,9 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
 
   @override
   void dispose() {
-    _homeGeneration++;
+    _signalsGeneration++;
+    _browserLoader?.close();
+    _archiveListeners.clear();
     // Only tear down what this screen created; an injected repository stays
     // owned by whoever supplied it.
     if (_ownsRepository) {
@@ -952,28 +742,19 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
   Widget _pane(BuildContext context, HermesDestination destination) {
     switch (destination) {
       case HermesDestination.chats:
-        final preview =
-            _completeHomeSessions ??
-            _chatPreviewSessions ??
-            _homeFirstPageSessions;
         return WorkspaceSessionsScreen(
           key: _chatsKey,
           title: context.l10n.chats,
           view: WorkspaceSessionView.all,
           embedded: true,
-          // Show the first human chats as Home's scan reaches them. The
-          // provisional list is never mistaken for complete or unassigned.
-          initialData: preview == null
-              ? null
-              : WorkspaceSessionsData(
-                  sessions: preview,
-                  archivedQuickChatIds: _archivedQuickChats,
-                  projectsKnown: false,
-                  isPartial: true,
-                ),
           pinStore: _pinStore,
+          attention: _turnSignals.attention,
+          running: _turnSignals.running,
+          onOpenActivity: _openActivityOverview,
           refreshInterval: widget.sessionsRefreshInterval,
-          load: _loadChatsSessionsData,
+          load: _loadWorkspaceSessionsData,
+          loadProgressively: (onProgress) =>
+              _loadWorkspaceSessionsData(onProgress: onProgress),
           onOpenSession: (session) => unawaited(
             _openSession(session, projectName: _chatProjectLabels[session.id]),
           ),
@@ -981,6 +762,24 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             session,
             sourceContext: _chatsKey.currentContext,
           ),
+          onRename: _renameSession,
+        );
+      case HermesDestination.crons:
+        return WorkspaceSessionsScreen(
+          key: _cronsKey,
+          title: context.l10n.crons,
+          kind: WorkspaceSessionKind.crons,
+          view: WorkspaceSessionView.all,
+          embedded: true,
+          pinStore: _pinStore,
+          refreshInterval: widget.sessionsRefreshInterval,
+          load: () =>
+              _loadWorkspaceSessionsData(kind: WorkspaceSessionKind.crons),
+          loadProgressively: (onProgress) => _loadWorkspaceSessionsData(
+            kind: WorkspaceSessionKind.crons,
+            onProgress: onProgress,
+          ),
+          onOpenSession: (session) => unawaited(_openSession(session)),
           onRename: _renameSession,
         );
       case HermesDestination.projects:
@@ -1003,18 +802,6 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           repository: repository,
           onProjectSelected: (projectId) => _openProject(repository, projectId),
           spaceStore: _spaceStore,
-        );
-      case HermesDestination.home:
-        return HomePane(
-          key: _homeKey,
-          loadSessions: _loadHome,
-          loadProgressiveSessions: widget.sessionsLoader == null
-              ? _loadHomeProgressively
-              : null,
-          attention: _turnSignals.attention,
-          running: _turnSignals.running,
-          archived: _archivedQuickChats,
-          onOpenSession: _openSession,
         );
       case HermesDestination.activity:
         return ActivityPane(
@@ -1040,12 +827,20 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
 
   /// The dashboard origin, which is not the gateway chat origin: it has its
   /// own port and optional path prefix.
-  String get _dashboardUrl {
-    final connection = widget.connection;
-    final scheme = connection.useHttps ? 'https' : 'http';
-    return SavedConnection.joinBaseUrl(
-      '$scheme://${connection.host}:${connection.dashboardPort}',
-      connection.dashboardPrefix ?? '',
+  String get _dashboardUrl =>
+      DesktopGatewayClient.normalizedGatewayBaseUrl(widget.connection);
+
+  DashboardClient get _dashboardClient {
+    final origin = Uri.parse(_dashboardUrl);
+    return _archivedSessionsClient ??= DashboardClient(
+      host: origin.host,
+      port: origin.port,
+      useHttps: origin.scheme == 'https',
+      pathPrefix: origin.path == '/' ? '' : origin.path,
+      proxied: widget.connection.dashboardProxied,
+      username: widget.connection.dashboardUsername,
+      password: widget.connection.dashboardPassword,
+      httpClient: widget.testDashboardHttpClient,
     );
   }
 
@@ -1068,11 +863,11 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => screen));
   }
 
-  /// Opens a chat from the Home digest.
+  /// Opens a chat from the conversation browser.
   ///
   /// A host that supplied [WorkspaceScreen.onOpenSession] owns navigation, so
   /// this screen must not also push a route underneath it. Otherwise it opens
-  /// the chat itself and re-reads Home on return, because the reason a chat
+  /// the chat itself and refreshes the browser on return, because the reason a chat
   /// was blocked usually stops being true while the user is inside it.
   Future<void> _openSession(
     Session session, {
@@ -1104,8 +899,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       ),
     );
     if (!mounted) return;
-    unawaited(_homeKey.currentState?.refresh() ?? Future<void>.value());
-    unawaited(_chatsKey.currentState?.refresh() ?? Future<void>.value());
+    final browser = isCronSession(session) ? _cronsKey : _chatsKey;
+    unawaited(browser.currentState?.refresh() ?? Future<void>.value());
   }
 
   /// Opens one project's detail screen.
@@ -1168,9 +963,21 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     );
   }
 
-  /// Opens the Home action Inbox. It deliberately reuses the Activity feed but
+  /// Opens the action Inbox. It deliberately reuses the Activity feed but
   /// filters out informational Running/Completed rows, so this route contains
   /// only work that can change what the user does next.
+  void _openActivityOverview() {
+    _push(
+      Scaffold(
+        appBar: AppBar(title: Text(context.l10n.nav_activity)),
+        body: ActivityPane(
+          loadFeed: _loadActivity,
+          onOpenItem: _openActivityItem,
+        ),
+      ),
+    );
+  }
+
   void _openInbox() {
     _push(
       Scaffold(
@@ -1227,7 +1034,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     if (repository == null) {
       return const ProjectsView(support: ProjectsSupport.unsupported);
     }
-    // Home may be the first screen the user ever opens, in which case nothing
+    // Chats may be the first screen the user ever opens, in which case nothing
     // has probed the gateway yet. Probe now rather than claiming `unknown`.
     if (repository.current.support == ProjectsSupport.unknown) {
       return repository.refresh();
@@ -1251,7 +1058,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     await _finishNewChat(draft);
   }
 
-  /// Runs Home's global New affordance.
+  /// Runs Chats' New affordance.
   ///
   /// Every product rule it depends on lives in `new_chat_options.dart`; this
   /// method only sequences the two questions (which mode, then which project)
@@ -1361,129 +1168,147 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     );
   }
 
-  Future<WorkspaceSessionsData> _loadChatsSessionsData() {
-    final firstLoad = !_chatsInitialLoadConsumed;
-    _chatsInitialLoadConsumed = true;
-    // Reuse Home's complete list or its in-flight scan on first entry. Later
-    // refreshes read afresh so a new chat or title cannot stay stale forever.
-    final cached = firstLoad ? _completeHomeSessions : null;
-    final pending = firstLoad
-        ? (_homeFullScan ??
-              (cached == null && widget.sessionsLoader == null
-                  ? _loadFullHomeSessions()
-                  : null))
-        : null;
-    return _loadWorkspaceSessionsData(
-      sessionsFuture: pending ?? (cached == null ? null : Future.value(cached)),
-    );
-  }
-
   Future<WorkspaceSessionsData> _loadWorkspaceSessionsData({
-    Future<List<Session>>? sessionsFuture,
+    WorkspaceSessionKind kind = WorkspaceSessionKind.chats,
+    void Function(WorkspaceSessionsData data)? onProgress,
   }) async {
+    final generation = ++_signalsGeneration;
+    unawaited(_refreshTurnSignals(generation));
+    await _initialization;
     final placementRevision = _placementRevision;
-    final placementRead = ++_placementRead;
-    final sessions = await (sessionsFuture ?? _loadSessions());
-    _cacheSessionTitles(sessions);
+    final placementRead = kind == WorkspaceSessionKind.chats
+        ? ++_placementRead
+        : _placementRead;
+    var sessions = <Session>[];
+    var archivedSessions = <Session>[];
+    var activeLoading = true;
+    var archiveLoading = _dashboardReachable;
+    var projectsLoading =
+        kind == WorkspaceSessionKind.chats && _repository != null;
+    var projectsKnown = !projectsLoading;
+    Object? sessionsError;
+    Object? archiveError;
+    var claimed = <String>{};
+    var projectLabels = <String, String>{};
+    var quickArchives = <String>{};
 
-    Set<String> claimed = const {};
-    Map<String, String> projectLabels = const {};
-    var projectsKnown = true;
-    final repository = _repository;
-    if (repository != null) {
+    WorkspaceSessionsData snapshot() {
+      // A metadata response begun before a move may contribute unrelated new
+      // rows, but may not undo that chat's confirmed ownership.
+      final moved = {
+        for (final entry in _savedPlacements.entries)
+          if (!projectsKnown || entry.value.revision > placementRevision)
+            entry.key: entry.value,
+      };
+      final labels = {
+        ...projectLabels,
+        for (final entry in moved.entries) entry.key: entry.value.label,
+      };
+      if (mounted &&
+          kind == WorkspaceSessionKind.chats &&
+          placementRead == _placementRead) {
+        _chatProjectLabels = Map.unmodifiable(labels);
+      }
+      return WorkspaceSessionsData(
+        sessions: List.unmodifiable(sessions),
+        archivedSessions: List.unmodifiable(archivedSessions),
+        isPartial: activeLoading,
+        archivedIsPartial: archiveLoading,
+        sessionsError: sessionsError,
+        archiveError: archiveError,
+        projectsLoading: projectsLoading,
+        claimedSessionIds: Set.unmodifiable({...claimed, ...moved.keys}),
+        archivedQuickChatIds: Set.unmodifiable(
+          quickArchives.difference(moved.keys.toSet()),
+        ),
+        projectLabels: Map.unmodifiable(labels),
+        projectsKnown: projectsKnown,
+      );
+    }
+
+    void publish() {
+      if (mounted) onProgress?.call(snapshot());
+    }
+
+    Future<void> readActive() async {
+      void accept(List<Session> rows) {
+        if (!mounted) return;
+        sessions = rows;
+        setState(() => _knownSessions = rows);
+        _cacheSessionTitles(rows);
+        publish();
+      }
+
       try {
-        // The session list is the primary surface and must never wait on the
-        // Projects transport: a wedged Desktop Gateway (unreachable host,
-        // slow connect) would otherwise hide every conversation behind an
-        // infinite skeleton. Bounded, best-effort, additive metadata only.
-        final overview = await repository
+        accept(await _sessionLoader.load(onProgress: accept));
+        _sessionsKnown = true;
+      } catch (error) {
+        sessionsError = error;
+      } finally {
+        activeLoading = false;
+        publish();
+      }
+      if (mounted) unawaited(_refreshActivityBadge());
+    }
+
+    Future<void> readArchives() async {
+      if (!_dashboardReachable) return;
+      try {
+        archivedSessions = await _loadArchivedSessions(
+          onProgress: (rows) {
+            archivedSessions = rows;
+            publish();
+          },
+        );
+      } catch (error) {
+        archiveError = error;
+      } finally {
+        archiveLoading = false;
+        publish();
+      }
+    }
+
+    Future<void> readProjects() async {
+      if (!projectsLoading) return;
+      try {
+        final overview = await _repository!
             .overview(refresh: true)
             .timeout(const Duration(seconds: 8));
         claimed = {
-          // scoped_session_ids is server-computed over EVERY tier including
-          // the synthetic Home bucket, so it names unfiled chats too —
-          // using it raw would make the Unassigned filter permanently
-          // empty. A chat is claimed only when its owner is a real
-          // project, not the Home bucket.
           for (final entry in overview.sessionProjects.entries)
             if (entry.value != ProjectsTreeOverview.noProjectId) entry.key,
         };
-        // Best-effort session → project label from the server's full placement
-        // map (every claimed chat names its owner, not just the top-N
-        // previews). A conversation the map does not name stays honest as
-        // "Unassigned" in the Chats row.
         projectLabels = {
           for (final entry in overview.sessionProjects.entries)
             if (overview.ownerLabelOf(entry.key) != null)
               entry.key: overview.ownerLabelOf(entry.key)!,
         };
+        projectsKnown = true;
       } catch (_) {
-        // A gateway without projects.tree still gets All chats and Search.
-        // But the claim map is UNKNOWN, not empty: the Unassigned chip
-        // must not present every chat as unfiled on a timeout.
         projectsKnown = false;
+      } finally {
+        projectsLoading = false;
+        publish();
       }
     }
 
-    Set<String> archived = const {};
-    try {
-      final store = await _quickChatStore();
-      archived = (await store.load()).archivedAt(DateTime.now());
-    } catch (_) {
-      // Quick-chat metadata is additive; session access must survive its loss.
-    }
-
-    // Server-archived chats come from the dashboard, not the gateway: the
-    // api_server behind the chat transport ignores `archived` and never
-    // returns archived rows (live-verified). Best-effort like the reads
-    // above — a connection without dashboard credentials keeps the
-    // Archived chip on quick-chat expiries only.
-    List<Session> archivedSessions = const [];
-    if (_dashboardReachable) {
+    Future<void> readQuickArchives() async {
       try {
-        final dashboard = _archivedSessionsClient ??= DashboardClient(
-          host: widget.connection.host,
-          port: widget.connection.dashboardPort,
-          useHttps: widget.connection.useHttps,
-          pathPrefix: widget.connection.dashboardPrefix ?? '',
-          proxied: widget.connection.dashboardProxied,
-          username: widget.connection.dashboardUsername,
-          password: widget.connection.dashboardPassword,
-        );
-        archivedSessions = await dashboard
-            .getArchivedSessions(
-              gatewayProfile: widget.connection.gatewayProfile,
-            )
-            .timeout(const Duration(seconds: 8));
+        final store = await _quickChatStore();
+        quickArchives = (await store.load()).archivedAt(DateTime.now());
       } catch (_) {
-        // Same additive contract: no dashboard, no server-archived rows.
+        // Additive device metadata must never hide stored conversations.
       }
+      publish();
     }
 
-    // A pre-move read may finish after the remote write (including after an
-    // archived/Quick metadata await). Reconcile only those moved identities.
-    final moved = {
-      for (final entry in _savedPlacements.entries)
-        if (!projectsKnown || entry.value.revision > placementRevision)
-          entry.key: entry.value,
-    };
-    claimed = {...claimed, ...moved.keys};
-    projectLabels = {
-      ...projectLabels,
-      for (final entry in moved.entries) entry.key: entry.value.label,
-    };
-    archived = archived.difference(moved.keys.toSet());
-    if (mounted && placementRead == _placementRead) {
-      _chatProjectLabels = Map.unmodifiable(projectLabels);
-    }
-    return WorkspaceSessionsData(
-      sessions: sessions,
-      claimedSessionIds: Set.unmodifiable(claimed),
-      archivedQuickChatIds: Set.unmodifiable(archived),
-      archivedSessions: List.unmodifiable(archivedSessions),
-      projectLabels: Map.unmodifiable(projectLabels),
-      projectsKnown: projectsKnown,
-    );
+    await Future.wait([
+      readActive(),
+      readArchives(),
+      readProjects(),
+      readQuickArchives(),
+    ]);
+    return snapshot();
   }
 
   Future<String> _renameSession(Session session, String title) async {
@@ -1496,7 +1321,10 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         ..._sessionTitles,
         session.id: savedTitle,
       });
-      unawaited(_homeKey.currentState?.refresh() ?? Future<void>.value());
+      _knownSessions = [
+        for (final row in _knownSessions)
+          if (row.id == session.id) row.withTitle(savedTitle) else row,
+      ];
     }
     return savedTitle;
   }
@@ -1627,11 +1455,6 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       } catch (error) {
         debugPrint('[workspace] moved chat retention save failed: $error');
       }
-      if (mounted) {
-        setState(() {
-          _archivedQuickChats = {..._archivedQuickChats}..remove(session.id);
-        });
-      }
     });
   }
 
@@ -1661,6 +1484,15 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     }
   }
 
+  void _openCronJobs() {
+    _push(
+      CronScreen(
+        connection: widget.connection,
+        turnApplicationController: widget.turnApplicationController,
+      ),
+    );
+  }
+
   void _openMoreEntry(MoreEntry entry) {
     final connection = widget.connection;
     switch (entry.id) {
@@ -1671,12 +1503,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       case 'files':
         unawaited(_openFiles());
       case 'cron':
-        _push(
-          CronScreen(
-            connection: connection,
-            turnApplicationController: widget.turnApplicationController,
-          ),
-        );
+        _openCronJobs();
       case 'skills':
         _push(SkillsScreen(connection: connection));
       case 'memory':
@@ -1698,7 +1525,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         title: Text(widget.connection.label),
         centerTitle: false,
         actions: [
-          if (_destination == HermesDestination.home) ...[
+          if (_destination == HermesDestination.chats) ...[
             IconButton(
               tooltip: _inboxActionCount == 0
                   ? context.l10n.open_inbox
@@ -1717,24 +1544,34 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
               icon: const Icon(Icons.search),
             ),
           ],
+          if (_destination == HermesDestination.crons)
+            IconButton(
+              tooltip: context.l10n.cron_jobs,
+              onPressed: _openCronJobs,
+              icon: const Icon(Icons.settings_outlined),
+            ),
         ],
       ),
       body: HermesShell(
-        initialDestination: HermesDestination.home,
+        initialDestination: HermesDestination.chats,
         // The badge is the only attention signal visible from another
         // destination, so blocked work has to raise it even while the user is
         // in Projects or More.
         badges: {
-          HermesDestination.home: _turnSignals.attention.length,
+          HermesDestination.chats: _knownSessions
+              .where(
+                (session) =>
+                    !isMachineSession(session) &&
+                    _turnSignals.attention.containsKey(session.id),
+              )
+              .length,
           HermesDestination.activity: _activityBlockedCount,
         },
         onDestinationChanged: (destination) =>
             setState(() => _destination = destination),
         // The FAB belongs to the shell, not to this Scaffold: above the shell
         // it would float over the bottom bar and swallow taps on More.
-        floatingActionButton:
-            _destination == HermesDestination.home ||
-                _destination == HermesDestination.chats
+        floatingActionButton: _destination == HermesDestination.chats
             ? FloatingActionButton.extended(
                 key: kWorkspaceNewChatButtonKey,
                 onPressed: () => unawaited(_startNewChat()),

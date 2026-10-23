@@ -506,6 +506,16 @@ class AppLocalizationsEs extends AppLocalizations {
   String get cron => 'Cron';
 
   @override
+  String get crons => 'Crons';
+
+  @override
+  String get cron_conversations_empty =>
+      'Conversations from scheduled jobs appear here, including older runs.';
+
+  @override
+  String get search_cron_conversations => 'Search cron conversations';
+
+  @override
   String get cron_jobs => 'Tareas de Cron';
 
   @override

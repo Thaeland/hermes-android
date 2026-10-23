@@ -36,6 +36,27 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
 - Previous upstream releases remain available from the
   [Releases](https://github.com/rusty4444/hermes-android/releases) page.
 
+## Navigation changes (unreleased)
+
+The bottom bar is **Chats → Crons → Projects → Activity → More**. Chats is the
+default screen; the separate Home tab has been removed.
+
+- **Chats** lists human conversations with search and All, Recent, Unassigned
+  and Archived filters. A compact **Needs you / Running now** section appears
+  above the list only when the device has observed relevant work.
+- **Crons** lists conversations produced by scheduled jobs, including older
+  runs and runs whose job has since been deleted. It has its own search and
+  All, Recent and Archived filters. Cron conversations do not appear in Chats.
+  The settings button opens the existing cron-job manager; **More → Cron**
+  remains available too. Script-only jobs without a conversation are still
+  inspected through the job manager, not invented as chat sessions.
+- **Projects**, **Activity** and **More** retain their existing roles.
+
+Both conversation browsers show a small first preview while history loads.
+Older history is not silently cut off after 2,000 rows. Archived history uses
+the saved dashboard connection and profile; a failed read keeps available
+rows and offers Retry rather than claiming the archive is empty.
+
 ## Remote Gateway edition highlights
 
 - One Desktop Gateway JSON-RPC session for text, images, and files.
@@ -172,7 +193,8 @@ sanitized implementation and validation record.
 
 ## Screenshots
 
-The Home, Chats, More, Cron Jobs and Settings screenshots use anonymised example details.
+These screenshots show the published release and use anonymised example details.
+The unreleased navigation above replaces its Home tab.
 
 <table>
   <tr>

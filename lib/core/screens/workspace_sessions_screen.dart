@@ -6,15 +6,30 @@ import '../models/session.dart';
 import '../services/local_chat_pin_store.dart';
 import '../theme/hermes_theme.dart';
 import '../utils/relative_time.dart';
+import '../utils/session_sources.dart';
+import '../widgets/chat_attention_section.dart';
 import '../widgets/hermes_components.dart';
 import '../widgets/hermes_shell.dart';
 import '../widgets/session_name_dialog.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
 
+export '../utils/session_sources.dart';
+
 const kWorkspaceSessionSearchKey = Key('workspace-session-search');
 
 enum WorkspaceSessionView { all, unassigned, archivedQuick, search }
+
+/// Source separation applies before search, pins, date groups, and filters.
+enum WorkspaceSessionKind {
+  chats,
+  crons;
+
+  bool includes(Session session) => switch (this) {
+    WorkspaceSessionKind.chats => !isMachineSession(session),
+    WorkspaceSessionKind.crons => isCronSession(session),
+  };
+}
 
 /// The chip filters the Chats browser offers (decision #4 of the final UI
 /// spec): every conversation, recent activity, unassigned, and archived.
@@ -54,19 +69,6 @@ enum ChatDateBucket {
 /// How long "Recent" means in the Chats browser.
 const Duration kRecentChatsWindow = Duration(days: 7);
 
-/// Machine-generated session sources. The server's `projects.tree`
-/// deliberately never claims these (`_PROJECT_TREE_EXCLUDED_SOURCES` in
-/// tui_gateway/methods_projects.py), and `filing.suggest` skips them too —
-/// automated runs carry no human filing intent. The Unassigned view must
-/// mirror that exclusion or every cron run shows up as "unfiled" noise the
-/// filing engine can never answer for. The Chats browser excludes them from
-/// every chip (desktop parity): cron runs are browsed per-job from the
-/// Cron screen's run list, not as chat-list entries.
-const Set<String> kMachineSessionSources = {'cron', 'kanban', 'oneshot'};
-
-bool isMachineSession(Session session) =>
-    kMachineSessionSources.contains(session.source);
-
 /// Assigns a conversation to its date bucket, by calendar day.
 ChatDateBucket chatDateBucket(DateTime now, double lastActiveSeconds) {
   final activity = DateTime.fromMillisecondsSinceEpoch(
@@ -89,6 +91,7 @@ ChatDateBucket chatDateBucket(DateTime now, double lastActiveSeconds) {
 List<Session> filterChats({
   required List<Session> sessions,
   required WorkspaceChatsFilter filter,
+  WorkspaceSessionKind kind = WorkspaceSessionKind.chats,
   Set<String> claimedSessionIds = const {},
   Set<String> archivedQuickChatIds = const {},
   String query = '',
@@ -102,19 +105,11 @@ List<Session> filterChats({
 
   final filtered = [
     for (final session in sessions)
-      if (switch (filter) {
-            // Machine-generated runs (cron/kanban/oneshot) never enter the
-            // chat browser at all — the desktop's sidebar applies the same
-            // exclusion (SIDEBAR_EXCLUDED_SOURCES in
-            // use-session-list-actions.ts). Cron runs live in the Cron
-            // screen's per-job run list instead, so the scheduler's
-            // always-newest sessions can't crowd human chats out.
-            WorkspaceChatsFilter.all =>
-              !session.archived && !isMachineSession(session),
+      if (kind.includes(session) &&
+          switch (filter) {
+            WorkspaceChatsFilter.all => !session.archived,
             WorkspaceChatsFilter.recent =>
-              !session.archived &&
-                  !isMachineSession(session) &&
-                  session.lastActive >= recentCutoff,
+              !session.archived && session.lastActive >= recentCutoff,
             WorkspaceChatsFilter.unassigned =>
               // When the claim map is unknown (projects.tree timed out),
               // every chat would pass as 'unassigned' — a lie that turns
@@ -122,16 +117,9 @@ List<Session> filterChats({
               // the UI surfaces the read failure.
               projectsKnown &&
                   !session.archived &&
-                  !isMachineSession(session) &&
                   !claimedSessionIds.contains(session.id),
             WorkspaceChatsFilter.archived =>
-              // Machine runs stay excluded even once archived — an archived
-              // cron run is still cron noise, and its home is the Cron
-              // screen's run drill-down. Quick-chat archives are human
-              // rows and stay.
-              !isMachineSession(session) &&
-                  (session.archived ||
-                      archivedQuickChatIds.contains(session.id)),
+              session.archived || archivedQuickChatIds.contains(session.id),
           } &&
           (normalized.isEmpty ||
               session.title.toLowerCase().contains(normalized) ||
@@ -166,6 +154,10 @@ class WorkspaceSessionsData {
 
   /// A provisional list while a complete scan or additive metadata loads.
   final bool isPartial;
+  final bool archivedIsPartial;
+  final bool projectsLoading;
+  final Object? sessionsError;
+  final Object? archiveError;
   final Set<String> claimedSessionIds;
   final Set<String> archivedQuickChatIds;
 
@@ -191,15 +183,43 @@ class WorkspaceSessionsData {
   const WorkspaceSessionsData({
     this.sessions = const [],
     this.isPartial = false,
+    this.archivedIsPartial = false,
+    this.projectsLoading = false,
+    this.sessionsError,
+    this.archiveError,
     this.claimedSessionIds = const {},
     this.archivedQuickChatIds = const {},
     this.archivedSessions = const [],
     this.projectLabels = const {},
     this.projectsKnown = true,
   });
+
+  WorkspaceSessionsData copyWith({
+    List<Session>? sessions,
+    List<Session>? archivedSessions,
+    Set<String>? claimedSessionIds,
+    Set<String>? archivedQuickChatIds,
+    Map<String, String>? projectLabels,
+  }) => WorkspaceSessionsData(
+    sessions: sessions ?? this.sessions,
+    archivedSessions: archivedSessions ?? this.archivedSessions,
+    claimedSessionIds: claimedSessionIds ?? this.claimedSessionIds,
+    archivedQuickChatIds: archivedQuickChatIds ?? this.archivedQuickChatIds,
+    projectLabels: projectLabels ?? this.projectLabels,
+    isPartial: isPartial,
+    archivedIsPartial: archivedIsPartial,
+    projectsLoading: projectsLoading,
+    sessionsError: sessionsError,
+    archiveError: archiveError,
+    projectsKnown: projectsKnown,
+  );
 }
 
 typedef WorkspaceSessionsLoader = Future<WorkspaceSessionsData> Function();
+typedef WorkspaceSessionsProgressiveLoader =
+    Future<WorkspaceSessionsData> Function(
+      void Function(WorkspaceSessionsData data) onProgress,
+    );
 
 /// Saves a title remotely and returns the authoritative saved title.
 /// Failures throw without changing the visible conversation.
@@ -218,6 +238,7 @@ class QuickChatPromotionCancelled implements Exception {
 List<Session> filterWorkspaceSessions({
   required List<Session> sessions,
   required WorkspaceSessionView view,
+  WorkspaceSessionKind kind = WorkspaceSessionKind.chats,
   Set<String> claimedSessionIds = const {},
   Set<String> archivedQuickChatIds = const {},
   String query = '',
@@ -226,7 +247,8 @@ List<Session> filterWorkspaceSessions({
   final normalized = query.trim().toLowerCase();
   return [
     for (final session in sessions)
-      if (switch (view) {
+      if (kind.includes(session) &&
+          switch (view) {
             // Same contract as filterChats' unassigned chip: an unknown
             // claim map (projects.tree timed out) must not render every
             // chat as unfiled, and machine-source runs (cron/kanban/
@@ -234,17 +256,14 @@ List<Session> filterWorkspaceSessions({
             // Cron screen's run drill-down, never in the Unassigned
             // bucket.
             WorkspaceSessionView.unassigned =>
-              projectsKnown &&
-                  !isMachineSession(session) &&
-                  !claimedSessionIds.contains(session.id),
+              projectsKnown && !claimedSessionIds.contains(session.id),
             WorkspaceSessionView.archivedQuick => archivedQuickChatIds.contains(
               session.id,
             ),
             // Machine sessions stay out of every human-facing list, the
             // archived view included — an archived cron run is still
             // cron noise. Quick-chat archives are human rows and stay.
-            WorkspaceSessionView.all ||
-            WorkspaceSessionView.search => !isMachineSession(session),
+            WorkspaceSessionView.all || WorkspaceSessionView.search => true,
           } &&
           (normalized.isEmpty ||
               session.title.toLowerCase().contains(normalized) ||
@@ -258,13 +277,18 @@ List<Session> filterWorkspaceSessions({
 class WorkspaceSessionsScreen extends StatefulWidget {
   final String title;
   final WorkspaceSessionView view;
+  final WorkspaceSessionKind kind;
   final WorkspaceSessionsLoader load;
+  final WorkspaceSessionsProgressiveLoader? loadProgressively;
   final WorkspaceSessionsData? initialData;
   final ValueChanged<Session> onOpenSession;
   final WorkspaceSessionPromoter? onPromote;
   final WorkspaceSessionRenamer? onRename;
   final LocalChatPinStore? pinStore;
   final bool embedded;
+  final Map<String, String> attention;
+  final Set<String> running;
+  final VoidCallback? onOpenActivity;
 
   /// Clock injection for deterministic filter/date tests. When null the
   /// screen uses `DateTime.now()`.
@@ -278,13 +302,18 @@ class WorkspaceSessionsScreen extends StatefulWidget {
   const WorkspaceSessionsScreen({
     required this.title,
     required this.view,
+    this.kind = WorkspaceSessionKind.chats,
     required this.load,
+    this.loadProgressively,
     this.initialData,
     required this.onOpenSession,
     this.onPromote,
     this.onRename,
     this.pinStore,
     this.embedded = false,
+    this.attention = const {},
+    this.running = const {},
+    this.onOpenActivity,
     this.now,
     this.refreshInterval,
     super.key,
@@ -297,6 +326,8 @@ class WorkspaceSessionsScreen extends StatefulWidget {
 class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
     with WidgetsBindingObserver {
   WorkspaceSessionsData? _data;
+  bool _activeFullyLoaded = false;
+  bool _archivesFullyLoaded = false;
   Object? _error;
   String _query = '';
   final Set<String> _promoting = {};
@@ -339,6 +370,8 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
   void initState() {
     super.initState();
     _data = widget.initialData;
+    _activeFullyLoaded = _data != null && !_data!.isPartial;
+    _archivesFullyLoaded = _data != null && !_data!.archivedIsPartial;
     WidgetsBinding.instance.addObserver(this);
     unawaited(_load());
   }
@@ -439,27 +472,59 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
   Future<void> _loadOnce() async {
     final titleRevision = _titleRevision;
     final projectRevision = _projectRevision;
+    void apply(WorkspaceSessionsData data) {
+      if (!mounted) return;
+      if (!data.isPartial && data.sessionsError == null) {
+        _activeFullyLoaded = true;
+      }
+      if (!data.archivedIsPartial && data.archiveError == null) {
+        _archivesFullyLoaded = true;
+      }
+      // A partial refresh must not erase already visible older/blocked work.
+      // A completed authority replaces only its own collection.
+      final previous = _data;
+      List<Session> retained(List<Session> old, List<Session> fresh) {
+        final freshIds = fresh.map((row) => row.id).toSet();
+        return [...fresh, ...old.where((row) => !freshIds.contains(row.id))];
+      }
+
+      if (previous != null) {
+        data = data.copyWith(
+          sessions: data.isPartial || data.sessionsError != null
+              ? retained(previous.sessions, data.sessions)
+              : data.sessions,
+          archivedSessions: data.archivedIsPartial || data.archiveError != null
+              ? retained(previous.archivedSessions, data.archivedSessions)
+              : data.archivedSessions,
+        );
+      }
+      setState(() {
+        _data = _withProjectMoves(
+          _withSessionTitles(data, {
+            for (final entry in _savedTitles.entries)
+              if (entry.value.revision > titleRevision)
+                entry.key: entry.value.title,
+          }),
+          {
+            for (final entry in _movedProjects.entries)
+              if (entry.value.revision > projectRevision)
+                entry.key: entry.value.label,
+          },
+        );
+        _error = null;
+      });
+    }
+
     try {
-      final data = await widget.load();
+      final progressive = widget.loadProgressively;
+      final data = await (progressive == null
+          ? widget.load()
+          : progressive(apply));
       if (!mounted) return;
       final pins = await widget.pinStore?.load() ?? const <String>[];
       if (mounted) {
-        setState(() {
-          _data = _withProjectMoves(
-            _withSessionTitles(data, {
-              for (final entry in _savedTitles.entries)
-                if (entry.value.revision > titleRevision)
-                  entry.key: entry.value.title,
-            }),
-            {
-              for (final entry in _movedProjects.entries)
-                if (entry.value.revision > projectRevision)
-                  entry.key: entry.value.label,
-            },
-          );
-          _pinnedIds = pins;
-          _error = null;
-        });
+        apply(data);
+        setState(() => _pinnedIds = pins);
       }
     } catch (error) {
       debugPrint('[workspace-sessions] load failed: $error');
@@ -477,14 +542,9 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
       return title == null ? session : session.withTitle(title);
     }
 
-    return WorkspaceSessionsData(
+    return data.copyWith(
       sessions: data.sessions.map(renamed).toList(),
       archivedSessions: data.archivedSessions.map(renamed).toList(),
-      isPartial: data.isPartial,
-      claimedSessionIds: data.claimedSessionIds,
-      archivedQuickChatIds: data.archivedQuickChatIds,
-      projectLabels: data.projectLabels,
-      projectsKnown: data.projectsKnown,
     );
   }
 
@@ -556,16 +616,12 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
     Map<String, String> moves,
   ) {
     if (moves.isEmpty) return data;
-    return WorkspaceSessionsData(
-      sessions: data.sessions,
-      archivedSessions: data.archivedSessions,
-      isPartial: data.isPartial,
+    return data.copyWith(
       claimedSessionIds: {...data.claimedSessionIds, ...moves.keys},
       archivedQuickChatIds: data.archivedQuickChatIds.difference(
         moves.keys.toSet(),
       ),
       projectLabels: {...data.projectLabels, ...moves},
-      projectsKnown: data.projectsKnown,
     );
   }
 
@@ -657,6 +713,17 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
   }
 
   Widget _buildLoaded(WorkspaceSessionsData data) {
+    final archiveScope =
+        widget.embedded && _filter == WorkspaceChatsFilter.archived;
+    final scopeLoading = archiveScope
+        ? data.archivedIsPartial
+        : data.isPartial || (_isUnassignedSurface && data.projectsLoading);
+    final scopeError =
+        _error ??
+        (archiveScope ? data.archiveError : data.sessionsError) ??
+        (_isUnassignedSurface && !data.projectsKnown && !data.projectsLoading
+            ? StateError('Project ownership unavailable')
+            : null);
     // The embedded browser filters over the union of the gateway's active
     // list and the dashboard's archived list: the Archived chip needs the
     // archived rows, and every other chip explicitly excludes
@@ -670,10 +737,11 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
         if (!archivedIds.contains(s.id)) s,
       ...data.archivedSessions,
     ];
-    final sessions = widget.embedded
+    final filteredSessions = widget.embedded
         ? filterChats(
             sessions: unionSessions,
             filter: _filter,
+            kind: widget.kind,
             claimedSessionIds: data.claimedSessionIds,
             archivedQuickChatIds: data.archivedQuickChatIds,
             query: _query,
@@ -683,12 +751,19 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
         : filterWorkspaceSessions(
             sessions: data.sessions,
             view: widget.view,
+            kind: widget.kind,
             claimedSessionIds: data.claimedSessionIds,
             archivedQuickChatIds: data.archivedQuickChatIds,
             query: _query,
             projectsKnown: data.projectsKnown,
           );
 
+    final previouslyLoaded = archiveScope
+        ? _archivesFullyLoaded
+        : _activeFullyLoaded;
+    final sessions = scopeLoading && !previouslyLoaded
+        ? filteredSessions.take(5).toList()
+        : filteredSessions;
     final ordered = orderLocalPinnedChats(sessions, _pinnedIds);
     final pinnedSessions = ordered
         .where((session) => localPinIdForSession(session, _pinnedIds) != null)
@@ -708,6 +783,7 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
     return RefreshIndicator(
       onRefresh: refresh,
       child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(
           HermesSpacing.lg,
           HermesSpacing.md,
@@ -715,10 +791,21 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
           HermesSpacing.xl,
         ),
         children: [
-          if (data.isPartial)
+          if (widget.embedded &&
+              widget.kind == WorkspaceSessionKind.chats &&
+              _filter == WorkspaceChatsFilter.all &&
+              _query.isEmpty)
+            ChatAttentionSection(
+              sessions: unionSessions.where(widget.kind.includes).toList(),
+              attention: widget.attention,
+              running: widget.running,
+              onOpenSession: widget.onOpenSession,
+              onOpenActivity: widget.onOpenActivity,
+            ),
+          if (scopeLoading || scopeError != null)
             Padding(
               padding: const EdgeInsets.only(bottom: HermesSpacing.md),
-              child: _error == null
+              child: scopeError == null
                   ? Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -734,7 +821,7 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
                           ),
                         ),
                         TextButton(
-                          onPressed: () => unawaited(_load()),
+                          onPressed: () => unawaited(refresh()),
                           child: Text(context.l10n.retry),
                         ),
                       ],
@@ -744,7 +831,9 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
             key: kWorkspaceSessionSearchKey,
             autofocus: widget.view == WorkspaceSessionView.search,
             decoration: InputDecoration(
-              hintText: context.l10n.search_conversations,
+              hintText: widget.kind == WorkspaceSessionKind.crons
+                  ? context.l10n.search_cron_conversations
+                  : context.l10n.search_conversations,
               prefixIcon: const Icon(Icons.search),
               suffixIcon: _query.isEmpty
                   ? null
@@ -761,7 +850,7 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
             _buildChips(),
           ],
           const SizedBox(height: HermesSpacing.lg),
-          if (sessions.isEmpty && !data.isPartial)
+          if (sessions.isEmpty && !scopeLoading && scopeError == null)
             EmptyState(
               icon: _emptyIcon,
               title: _query.isEmpty
@@ -819,16 +908,18 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
       child: Row(
         children: [
           for (final filter in WorkspaceChatsFilter.values)
-            Padding(
-              padding: const EdgeInsets.only(right: HermesSpacing.sm),
-              child: ChoiceChip(
-                label: Text(filter.label(context.l10n)),
-                selected: _filter == filter,
-                onSelected: (_) => setState(() {
-                  _filter = filter;
-                }),
+            if (widget.kind != WorkspaceSessionKind.crons ||
+                filter != WorkspaceChatsFilter.unassigned)
+              Padding(
+                padding: const EdgeInsets.only(right: HermesSpacing.sm),
+                child: ChoiceChip(
+                  label: Text(filter.label(context.l10n)),
+                  selected: _filter == filter,
+                  onSelected: (_) => setState(() {
+                    _filter = filter;
+                  }),
+                ),
               ),
-            ),
         ],
       ),
     );
@@ -900,7 +991,8 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
                         label: projectLabel,
                         icon: Icons.folder_outlined,
                       )
-                    else if (data.projectsKnown)
+                    else if (data.projectsKnown &&
+                        widget.kind == WorkspaceSessionKind.chats)
                       _MetaChip(
                         label: context.l10n.unassigned,
                         icon: Icons.inbox_outlined,
@@ -994,6 +1086,11 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
   }
 
   String get _emptyMessage {
+    if (widget.kind == WorkspaceSessionKind.crons &&
+        _filter == WorkspaceChatsFilter.all &&
+        _query.isEmpty) {
+      return context.l10n.cron_conversations_empty;
+    }
     if (widget.embedded) {
       return switch (_filter) {
         WorkspaceChatsFilter.unassigned =>

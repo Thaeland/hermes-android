@@ -406,7 +406,8 @@ void main() {
       expect(writes, hasLength(1));
       expect(find.text('Renamed while load pending'), findsOneWidget);
       await tester.pageBack();
-      await tester.pumpAndSettle();
+      // The browser now shows an honest loading bar while this read is held.
+      await tester.pump(const Duration(milliseconds: 400));
       final loadsBeforeCompletion = loads;
 
       staleLoad.complete([Session.fromJson(_row('Original chat'))]);

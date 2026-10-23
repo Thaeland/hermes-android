@@ -11,7 +11,6 @@ import 'package:hermes_android/core/services/quick_chat_store.dart';
 import 'package:hermes_android/core/theme/hermes_theme.dart';
 import 'package:hermes_android/core/utils/home_turn_signals.dart';
 import 'package:hermes_android/core/widgets/hermes_components.dart';
-import 'package:hermes_android/core/widgets/home_pane.dart';
 
 import 'package:hermes_android/l10n/app_localizations.dart';
 import 'package:http/http.dart' as http;
@@ -37,7 +36,7 @@ void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
   testWidgets(
-    'five-row Home renders before later page; old work and Chats complete',
+    'five-row Chats preview retains older work, local pins and Quick deadlines',
     (tester) async {
       tester.view.physicalSize = const Size(500, 1200);
       tester.view.devicePixelRatio = 1;
@@ -100,14 +99,16 @@ void main() {
       expect(requested.first.queryParameters['offset'], '0');
       expect(find.text('Chat 0'), findsOneWidget);
       expect(find.byType(LinearProgressIndicator), findsOneWidget);
-      expect(find.text('Chat 100'), findsNothing);
+      expect(find.text('Chat 100'), findsOneWidget);
       expect(find.text('Late unassigned'), findsNothing);
       expect(find.byType(LoadingSkeleton), findsNothing);
       expect((await quick.load()).expiries, contains('session-101'));
       expect((await quick.load()).expiries, contains('session-beyond-scan'));
       expect(await pins.load(), contains('session-101'));
 
-      final home = tester.state<HomePaneState>(find.byType(HomePane));
+      final home = tester.state<WorkspaceSessionsScreenState>(
+        find.byType(WorkspaceSessionsScreen),
+      );
       unawaited(home.refresh());
       unawaited(home.refresh());
       await tester.pump(const Duration(milliseconds: 1));
@@ -128,7 +129,7 @@ void main() {
       );
       expect(find.text('Chat 100'), findsOneWidget);
       expect(find.text('Approval required'), findsOneWidget);
-      expect(find.text('Late unassigned'), findsOneWidget);
+      expect(find.text('Late unassigned'), findsNWidgets(2));
       expect(find.byType(LinearProgressIndicator), findsNothing);
       expect((await quick.load()).expiries, contains('session-101'));
       expect((await quick.load()).expiries, contains('session-beyond-scan'));
@@ -170,47 +171,23 @@ void main() {
     },
   );
 
-  testWidgets('overlapping Home refreshes share only in-flight pages', (
+  testWidgets('explicit refreshes queue one fresh scan after the active read', (
     tester,
   ) async {
-    tester.view.physicalSize = const Size(500, 1200);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-    final firstPage = Completer<http.Response>();
-    final fullPage = Completer<http.Response>();
-    final requested = <Uri>[];
+    final held = Completer<http.Response>();
+    var fullReads = 0;
+    var firstReads = 0;
     final client = MockClient((request) async {
-      requested.add(request.url);
       if (request.url.queryParameters['limit'] == '5') {
-        return requested
-                    .where((uri) => uri.queryParameters['limit'] == '5')
-                    .length ==
-                1
-            ? firstPage.future
-            : _page([
-                ...List.generate(4, _row),
-                {
-                  ..._row(100),
-                  'title': 'New chat',
-                  'started_at':
-                      DateTime.now().millisecondsSinceEpoch / 1000.0 + 100,
-                },
-              ]);
+        firstReads++;
+        return _page([_row(0)]);
       }
       if (request.url.queryParameters['offset'] == '0') {
-        return requested
-                    .where((uri) => uri.queryParameters['limit'] == '100')
-                    .length ==
-                1
-            ? fullPage.future
+        fullReads++;
+        return fullReads == 1
+            ? held.future
             : _page([
-                ...List.generate(3, _row),
-                {
-                  ..._row(100),
-                  'title': 'New chat',
-                  'started_at':
-                      DateTime.now().millisecondsSinceEpoch / 1000.0 + 100,
-                },
+                {..._row(0), 'title': 'Fresh title'},
               ]);
       }
       return _page([]);
@@ -222,7 +199,7 @@ void main() {
         theme: hermesTheme(Brightness.dark),
         home: WorkspaceScreen(
           connection: SavedConnection(
-            id: 'overlapping-refresh',
+            id: 'queued',
             label: 'Test',
             host: 'example.invalid',
             port: 8642,
@@ -234,127 +211,100 @@ void main() {
       ),
     );
     await tester.pump();
-    final home = tester.state<HomePaneState>(find.byType(HomePane));
-    unawaited(home.refresh());
-    unawaited(home.refresh());
+    final browser = tester.state<WorkspaceSessionsScreenState>(
+      find.byType(WorkspaceSessionsScreen),
+    );
+    final refresh = browser.refresh();
+    expect(identical(browser.refresh(), refresh), isTrue);
     await tester.pump();
-    expect(
-      requested.where((uri) => uri.queryParameters['limit'] == '5'),
-      hasLength(1),
-    );
-
-    firstPage.complete(_page(List.generate(5, _row)));
-    await tester.pump(const Duration(milliseconds: 1));
-    expect(
-      requested.where((uri) => uri.queryParameters['limit'] == '100'),
-      hasLength(1),
-    );
-    unawaited(home.refresh());
-    unawaited(home.refresh());
-    await tester.pump();
-    expect(find.text('New chat'), findsOneWidget);
-    expect(
-      requested.where((uri) => uri.queryParameters['limit'] == '100'),
-      hasLength(1),
-    );
-
-    // The older scan started before the new chat existed. Completing it
-    // must not replace the newer five-row page on Home or in Chats.
-    fullPage.complete(_page(List.generate(3, _row)));
-    await tester.pumpAndSettle();
-    expect(find.text('New chat'), findsOneWidget);
-    await tester.tap(find.text('Chats').last);
-    await tester.pumpAndSettle();
-    expect(
-      find.descendant(
-        of: find.byType(WorkspaceSessionsScreen),
-        matching: find.text('New chat'),
-      ),
-      findsOneWidget,
-    );
-    await tester.tap(find.text('Home').last);
-    await tester.pumpAndSettle();
-    unawaited(home.refresh());
-    await tester.pumpAndSettle();
-    // A completed request is never reused: a later refresh sees new work.
-    expect(
-      requested.where(
-        (uri) =>
-            uri.queryParameters['limit'] == '100' &&
-            uri.queryParameters['offset'] == '0',
-      ),
-      hasLength(2),
-    );
-  });
-
-  testWidgets('opening Chats during Home scan shares the pending request', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(500, 1200);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-    final laterPage = Completer<http.Response>();
-    final requested = <Uri>[];
-    final client = MockClient((request) async {
-      requested.add(request.url);
-      if (request.url.queryParameters['limit'] == '5') {
-        return _page(List.generate(5, _row));
-      }
-      if (request.url.queryParameters['offset'] == '0') {
-        return _page(List.generate(100, _row));
-      }
-      return laterPage.future;
-    });
-    await tester.pumpWidget(
-      MaterialApp(
-        localizationsDelegates: AppLocalizations.localizationsDelegates,
-        supportedLocales: AppLocalizations.supportedLocales,
-        theme: hermesTheme(Brightness.dark),
-        home: WorkspaceScreen(
-          connection: SavedConnection(
-            id: 'early-switch',
-            label: 'Test',
-            host: 'example.invalid',
-            port: 8642,
-            apiKey: 'test-key',
-          ),
-          testSessionsHttpClient: client,
-          turnSignalsLoader: (_) async => HomeTurnSignals.empty,
-        ),
-      ),
-    );
-    await tester.pump();
-    await tester.pump(const Duration(milliseconds: 1));
-    expect(
-      requested.where((uri) => uri.queryParameters['limit'] == '100'),
-      hasLength(2),
-    );
-
-    await tester.tap(find.text('Chats').last);
-    await tester.pump();
-    expect(
-      find.descendant(
-        of: find.byType(WorkspaceSessionsScreen),
-        matching: find.text('Chat 0'),
-      ),
-      findsOneWidget,
-    );
-    expect(find.byType(LinearProgressIndicator), findsOneWidget);
-    expect(find.byType(LoadingSkeleton), findsNothing);
-    expect(
-      requested.where(
-        (uri) =>
-            uri.queryParameters['limit'] == '100' &&
-            uri.queryParameters['offset'] == '0',
-      ),
-      hasLength(1),
-    );
-
-    laterPage.complete(_page([]));
-    await tester.pumpAndSettle();
+    expect(firstReads, 1);
+    expect(fullReads, 1);
     expect(find.text('Chat 0'), findsOneWidget);
-    expect(find.byType(LinearProgressIndicator), findsNothing);
+    held.complete(_page([_row(0)]));
+    await tester.pumpAndSettle();
+    await refresh;
+    expect(firstReads, 2);
+    expect(fullReads, 2);
+    expect(find.text('Fresh title'), findsOneWidget);
+    expect(find.text('Chat 0'), findsNothing);
   });
+
+  testWidgets(
+    'opening Crons during a Chats scan shares and replays the pending request',
+    (tester) async {
+      tester.view.physicalSize = const Size(500, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final laterPage = Completer<http.Response>();
+      final requested = <Uri>[];
+      final client = MockClient((request) async {
+        requested.add(request.url);
+        if (request.url.queryParameters['limit'] == '5') {
+          return _page(List.generate(5, _row));
+        }
+        if (request.url.queryParameters['offset'] == '0') {
+          return _page(
+            List.generate(
+              100,
+              (i) => {..._row(i), if (i >= 10) 'source': 'cron'},
+            ),
+          );
+        }
+        return laterPage.future;
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          theme: hermesTheme(Brightness.dark),
+          home: WorkspaceScreen(
+            connection: SavedConnection(
+              id: 'early-switch',
+              label: 'Test',
+              host: 'example.invalid',
+              port: 8642,
+              apiKey: 'test-key',
+            ),
+            testSessionsHttpClient: client,
+            turnSignalsLoader: (_) async => HomeTurnSignals.empty,
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(
+        requested.where((uri) => uri.queryParameters['limit'] == '100'),
+        hasLength(2),
+      );
+
+      await tester.tap(find.text('Crons').last);
+      for (var frame = 0; frame < 5; frame++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      expect(
+        find.descendant(
+          of: find.byType(WorkspaceSessionsScreen),
+          matching: find.text('Chat 10'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.byType(LinearProgressIndicator), findsOneWidget);
+      expect(find.byType(LoadingSkeleton), findsNothing);
+      expect(
+        requested.where(
+          (uri) =>
+              uri.queryParameters['limit'] == '100' &&
+              uri.queryParameters['offset'] == '0',
+        ),
+        hasLength(1),
+      );
+
+      laterPage.complete(_page([]));
+      await tester.pumpAndSettle();
+      expect(find.text('Chat 10'), findsOneWidget);
+      expect(find.byType(LinearProgressIndicator), findsNothing);
+    },
+  );
 
   testWidgets('Chats fills its preview from the scan when five rows are cron', (
     tester,
