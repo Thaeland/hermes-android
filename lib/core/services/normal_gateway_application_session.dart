@@ -35,6 +35,7 @@ enum NormalGatewayTurnPhase {
   submitting,
   running,
   reconciling,
+  reconciledUnknown,
   completed,
   failed,
 }
@@ -216,20 +217,45 @@ class NormalGatewayApplicationSession {
         NormalGatewayChatOwner._(this, localSessionId, title, workingDirectory);
     _aliases[localSessionId] = owner;
     owner.title = title;
-    if (storedSessionId != null) _bind(owner, storedSessionId);
+    if (storedSessionId != null) {
+      _bind(owner, storedSessionId, localAlias: localSessionId);
+    }
     if (owner.storedSessionId != null) {
       client?.bindStoredSession(localSessionId, owner.storedSessionId!);
     }
     return owner;
   }
 
-  void _bind(NormalGatewayChatOwner owner, String stored) {
+  void _bind(
+    NormalGatewayChatOwner owner,
+    String stored, {
+    String? localAlias,
+  }) {
     final other = _aliases[stored];
     if (other != null && !identical(other, owner)) {
       throw StateError('Durable chat alias already owned.');
     }
     owner.storedSessionId = stored;
     _aliases[stored] = owner;
+    unawaited(
+      ComposerDraftStore.bind(
+        connectionId: connection.id,
+        localSessionId: owner.localSessionId,
+        storedSessionId: stored,
+      ),
+    );
+    // Restoration can race a route opened directly through the stored id. In
+    // that case the retained owner's primary id is already canonical, but the
+    // receipt's original local id still owns the pre-existing composer bucket.
+    if (localAlias != null && localAlias != owner.localSessionId) {
+      unawaited(
+        ComposerDraftStore.bind(
+          connectionId: connection.id,
+          localSessionId: localAlias,
+          storedSessionId: stored,
+        ),
+      );
+    }
     client?.bindStoredSession(owner.localSessionId, stored);
     owner._notify();
   }
@@ -380,13 +406,14 @@ class NormalGatewayChatOwner {
   String? _error;
   String? _draftToRestore;
   bool _draftRestoreAllowed = false;
+  ComposerDraftHandle? _draftHandle;
   Timer? _retryTimer;
   int _retry = 0;
   bool _recovering = false;
   int? _recoveringGeneration;
   bool _recoveryQueued = false;
   bool _settling = false;
-  ({bool completed, String? error, int generation})? _terminalReceipt;
+  ({bool? completed, String? error, int generation})? _terminalReceipt;
   NormalGatewayChatOwner._(
     this._session,
     this.localSessionId,
@@ -477,6 +504,7 @@ class NormalGatewayChatOwner {
     wireEmitted = false;
     _wireTurnId = null;
     _error = null;
+    _status = null;
     _notify();
     return _reservation;
   }
@@ -510,6 +538,7 @@ class NormalGatewayChatOwner {
     String? knownStoredSessionId,
     String? rawDraftText,
     bool canRestoreDraft = false,
+    ComposerDraftHandle? draftHandle,
   }) async {
     if (!identical(_reservation, reservation) ||
         phase != NormalGatewayTurnPhase.preparing) {
@@ -519,6 +548,7 @@ class NormalGatewayChatOwner {
     final generation = _generation;
     _draftToRestore = rawDraftText;
     _draftRestoreAllowed = canRestoreDraft;
+    _draftHandle = draftHandle;
     phase = NormalGatewayTurnPhase.submitting;
     _priorDisplay.addAll(_display);
     if (_priorDisplay.length > 256) {
@@ -993,8 +1023,10 @@ class NormalGatewayChatOwner {
       if (!_current(generation) || !snapshot.hasActiveTurn || _settling) return;
       if (!_session._canRecover) return;
       _history = fresh;
-      // Unknown/running resume state cannot establish that an assistant row is
-      // final: Hermes persists interim commentary during an active tool loop.
+      _historyKnown = true;
+      // Idle proves the remote work ended, NOT that it succeeded. Stock clears
+      // inflight on interruption and persists partial assistant prose without
+      // an outcome field. Only explicit terminal status can prove success.
       final status = (resumed.inflight?['status'] ?? resumed.status)
           ?.toString()
           .toLowerCase();
@@ -1005,11 +1037,20 @@ class NormalGatewayChatOwner {
           resumed.running == true ||
           const {'running', 'queued', 'pending', 'streaming'}.contains(status);
       if (running) phase = NormalGatewayTurnPhase.running;
-      if (inactive &&
+      final completed = const {
+        'completed',
+        'complete',
+        'done',
+      }.contains(status);
+      if (completed &&
           !running &&
           _floor != null &&
-          fresh.any((row) => _terminalRow(row, _floor!))) {
+          fresh.any((row) => _responseRow(row, _floor!))) {
         await _settle(true, null, generation: generation);
+      } else if (inactive && !running && !completed) {
+        // Release admission without resubmitting or inventing success/failure.
+        // No row/count heuristic is needed to know the server is now idle.
+        await _settle(null, null, generation: generation);
       } else {
         _notify();
       }
@@ -1035,10 +1076,15 @@ class NormalGatewayChatOwner {
     }
   }
 
-  Future<void> _settle(bool completed, String? error, {int? generation}) async {
+  Future<void> _settle(
+    bool? completed,
+    String? error, {
+    int? generation,
+  }) async {
     final owned = generation ?? _generation;
     if (!_current(owned) || _settling || !snapshot.hasActiveTurn) return;
     final settledTurnId = turnId;
+    final settledWireEmitted = wireEmitted;
     final settledSessionId = storedSessionId ?? localSessionId;
     final settledTitle = title;
     _terminalReceipt = (completed: completed, error: error, generation: owned);
@@ -1055,19 +1101,24 @@ class NormalGatewayChatOwner {
         await _session.pendingStore.remove(marker).catchError((Object _) {});
         if (!_current(owned)) return;
       }
-      if (!completed &&
+      if (completed == false &&
           !wireEmitted &&
           _listeners.isEmpty &&
           _draftRestoreAllowed &&
           _draftToRestore != null) {
-        await ComposerDraftStore.save(
-          connectionId: _session.connection.id,
-          sessionId: localSessionId,
-          text: _draftToRestore!,
-        );
+        final handle = _draftHandle;
+        await (handle != null
+            ? handle.save(_draftToRestore!)
+            : ComposerDraftStore.save(
+                connectionId: _session.connection.id,
+                sessionId: localSessionId,
+                text: _draftToRestore!,
+              ));
         if (!_current(owned)) return;
       }
-      phase = completed
+      phase = completed == null
+          ? NormalGatewayTurnPhase.reconciledUnknown
+          : completed
           ? NormalGatewayTurnPhase.completed
           : NormalGatewayTurnPhase.failed;
       if (_wireTurnId != null) {
@@ -1085,9 +1136,9 @@ class NormalGatewayChatOwner {
         );
       }
       final canonical =
-          completed &&
+          completed != false &&
           _floor != null &&
-          _history.any((row) => _terminalRow(row, _floor!));
+          _history.any((row) => _responseRow(row, _floor!));
       if (canonical) {
         _display.clear();
         _priorDisplay.clear();
@@ -1096,7 +1147,13 @@ class NormalGatewayChatOwner {
         _subagents.clear();
       }
       _error = error;
-      _status = null;
+      _status = completed == null
+          ? const GatewayTurnStatus(
+              kind: 'reconciled_unknown',
+              text:
+                  'The gateway is idle. The previous turn’s outcome could not be confirmed.',
+            )
+          : null;
       _pendingInput.clear();
       if (wireEmitted) {
         _session.client?.forgetSettledServerRequestsForSession(localSessionId);
@@ -1109,7 +1166,10 @@ class NormalGatewayChatOwner {
       _settling = false;
       _notify();
       if (!canonical && wireEmitted) unawaited(_refreshSettledHistory(owned));
-      if (_session._background && settledTurnId != null) {
+      if (settledWireEmitted &&
+          completed != null &&
+          _session._background &&
+          settledTurnId != null) {
         final kind = completed
             ? HermesNotificationKind.turnDone
             : HermesNotificationKind.turnError;
@@ -1219,7 +1279,7 @@ class NormalGatewayChatOwner {
       _history = fresh;
       // An old/empty sliding page must not erase the received final response.
       if (phase == NormalGatewayTurnPhase.completed &&
-          (_floor != null && fresh.any((row) => _terminalRow(row, _floor!)) ||
+          (_floor != null && fresh.any((row) => _responseRow(row, _floor!)) ||
               _canonicalTurnVisible(fresh))) {
         _display.clear();
         _priorDisplay.clear();
@@ -1279,7 +1339,8 @@ int? _numericFloor(List<Map<String, dynamic>> rows) {
   return floor;
 }
 
-bool _terminalRow(Map<String, dynamic> row, int floor) {
+// A fresh displayable response, never proof of a successful terminal outcome.
+bool _responseRow(Map<String, dynamic> row, int floor) {
   final id = int.tryParse(row['id']?.toString() ?? '');
   final role = row['role'];
   return id != null &&

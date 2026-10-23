@@ -579,6 +579,9 @@ class _Fixture {
         return ResumedGatewaySession(
           runtimeSessionId: 'runtime',
           running: running,
+          // This fixture's known-success reads include explicit terminal
+          // evidence. Stock idle alone is covered separately as unknown.
+          status: running == false ? 'completed' : null,
         );
       },
       history: (_) async {

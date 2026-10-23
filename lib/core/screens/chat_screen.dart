@@ -516,6 +516,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   static final Map<String, List<GatewayNotice>> _savedGatewayNotices = {};
 
   late final TurnNotificationService _turnNotifications;
+  late final ComposerDraftHandle _composerDraft;
+  bool _restoringComposerDraft = false;
 
   @override
   void initState() {
@@ -523,35 +525,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _sessionTitle = widget.session.title;
     WidgetsBinding.instance.addObserver(this);
     _projectName = _normalisedProjectName(widget.projectName);
+    _composerDraft = ComposerDraftStore.open(
+      connectionId: widget.connection.id,
+      sessionId: widget.session.id,
+    );
     _textController.addListener(_onComposerChanged);
     if (widget.initialComposerText case final shared?) {
       _textController.text = shared;
       _textController.selection = TextSelection.collapsed(
         offset: shared.length,
-      );
-    } else {
-      // Restore this session's draft: leaving the chat must never lose it.
-      final composerRevision = _composerRevision;
-      final readDraft =
-          widget.testComposerDraftReader ?? ComposerDraftStore.read;
-      unawaited(
-        readDraft(
-          connectionId: widget.connection.id,
-          sessionId: widget.session.id,
-        ).then((draft) {
-          if (!mounted || draft == null) return;
-          // The user may have started typing while the read was in flight:
-          // even if they cleared or sent that newer text, never resurrect the
-          // older stored value just because the composer is empty again.
-          if (_composerRevision != composerRevision ||
-              _textController.text.isNotEmpty) {
-            return;
-          }
-          _textController.text = draft;
-          _textController.selection = TextSelection.collapsed(
-            offset: draft.length,
-          );
-        }),
       );
     }
     _turnNotifications =
@@ -656,6 +638,48 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _recoverLostImage();
     _scrollController.addListener(_onScroll);
     if (_desktopGateway != null) unawaited(_ensureDesktopSession());
+    // Register app-owner aliases before reading, including a canonical reopen.
+    if (widget.initialComposerText == null) _restoreComposerDraft();
+  }
+
+  void _restoreComposerDraft() {
+    final composerRevision = _composerRevision;
+    final readDraft = widget.testComposerDraftReader ?? ComposerDraftStore.read;
+    Future<String?> readBoundDraft() async {
+      try {
+        // A restored receipt may be the first place we learn the local alias.
+        await _normalSession?.ready;
+        if (!mounted) return null;
+        return await readDraft(
+          connectionId: widget.connection.id,
+          sessionId: widget.session.id,
+        );
+      } catch (_) {
+        return null;
+      }
+    }
+
+    unawaited(
+      readBoundDraft().then((draft) {
+        if (!mounted ||
+            draft == null ||
+            _composerRevision != composerRevision ||
+            _textController.text.isNotEmpty) {
+          return;
+        }
+        // Hydration is not a new user edit or permission to steal draft ownership
+        // from a newer canonical route. Keep the existing revision fence intact.
+        _restoringComposerDraft = true;
+        try {
+          _textController.text = draft;
+          _textController.selection = TextSelection.collapsed(
+            offset: draft.length,
+          );
+        } finally {
+          _restoringComposerDraft = false;
+        }
+      }),
+    );
   }
 
   void _attachNormalSession() {
@@ -893,7 +917,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _scheduleScrollTarget(_scrollCoordinator.endStreaming());
       }
     }
-    if (snapshot.phase == NormalGatewayTurnPhase.failed) {
+    if (snapshot.phase == NormalGatewayTurnPhase.failed ||
+        snapshot.phase == NormalGatewayTurnPhase.reconciledUnknown) {
       _awaitingVoiceReply = false;
     }
     if (snapshot.phase == NormalGatewayTurnPhase.completed &&
@@ -937,6 +962,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   void _onComposerChanged() {
     _composerRevision += 1;
+    if (!_restoringComposerDraft) _composerDraft.edited();
     _normalChat?.invalidateDraftRecovery();
   }
 
@@ -1108,13 +1134,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         boundRegistration,
       );
     }
-    unawaited(
-      ComposerDraftStore.save(
-        connectionId: widget.connection.id,
-        sessionId: widget.session.id,
-        text: _composerDraftForPersistence,
-      ),
-    );
+    unawaited(_composerDraft.save(_composerDraftForPersistence));
     _textController.dispose();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
@@ -1155,13 +1175,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _appInBackground = true;
       _normalSession?.setLifecycle(background: true);
       // Persist the draft on the way out: a process kill must not lose it.
-      unawaited(
-        ComposerDraftStore.save(
-          connectionId: widget.connection.id,
-          sessionId: widget.session.id,
-          text: _composerDraftForPersistence,
-        ),
-      );
+      unawaited(_composerDraft.save(_composerDraftForPersistence));
     } else if (state == AppLifecycleState.resumed) {
       _appInBackground = false;
       if (_normalChat?.snapshot.reconciling == true) {
@@ -3176,6 +3190,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             knownStoredSessionId: knownStored,
             rawDraftText: text,
             canRestoreDraft: _composerRevision == _clearedComposerRevision,
+            draftHandle: _composerDraft,
           );
         },
       );
@@ -4490,25 +4505,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _pendingComposerPrompt = text;
     _textController.clear();
     _clearedComposerRevision = _composerRevision;
-    unawaited(
-      ComposerDraftStore.save(
-        connectionId: widget.connection.id,
-        sessionId: widget.session.id,
-        text: text,
-      ),
-    );
+    unawaited(_composerDraft.save(text));
   }
 
   /// Preparation finished: hand off the prompt without touching newer typing.
   void _commitComposerForSend() {
     _pendingComposerPrompt = null;
-    unawaited(
-      ComposerDraftStore.save(
-        connectionId: widget.connection.id,
-        sessionId: widget.session.id,
-        text: _textController.text,
-      ),
-    );
+    unawaited(_composerDraft.save(_textController.text));
   }
 
   /// Restore only the send's untouched draft. A newer edit (including typing
@@ -4522,13 +4525,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         selection: TextSelection.collapsed(offset: text.length),
       );
     }
-    unawaited(
-      ComposerDraftStore.save(
-        connectionId: widget.connection.id,
-        sessionId: widget.session.id,
-        text: _textController.text,
-      ),
-    );
+    unawaited(_composerDraft.save(_textController.text));
   }
 
   void _handleSendError(Object e, {bool removePendingUserMessage = false}) {
@@ -4818,7 +4815,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (_gatewayTurnStatus != null && (_sending || _streaming))
+                    if (_gatewayTurnStatus != null &&
+                        (_sending ||
+                            _streaming ||
+                            _normalPhase ==
+                                NormalGatewayTurnPhase.reconciledUnknown))
                       Container(
                         width: double.infinity,
                         margin: const EdgeInsets.fromLTRB(4, 2, 4, 2),
@@ -4835,12 +4836,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         ),
                         child: Row(
                           children: [
-                            const SizedBox.square(
-                              dimension: 14,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 1.8,
+                            if (_normalPhase ==
+                                NormalGatewayTurnPhase.reconciledUnknown)
+                              const Icon(Icons.info_outline, size: 14)
+                            else
+                              const SizedBox.square(
+                                dimension: 14,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 1.8,
+                                ),
                               ),
-                            ),
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(
