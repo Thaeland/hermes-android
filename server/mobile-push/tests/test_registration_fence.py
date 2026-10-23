@@ -143,7 +143,19 @@ def test_precommit_old_put_cannot_mutate_new_authority(
                 response = httpx.put(loopback + f"/registrations/{installation}", json=body)
                 assert response.status_code == 200, response.text
                 confirm(loopback, env, installation)
+                # Preserve real pending delivery work, not just an empty queue.
+                env.runtime.store.record(
+                    {
+                        "kind": "turn_done",
+                        "session_id": body["session_ids"][0],
+                        "turn_id": "replacement-turn",
+                        "dedup": "replacement-turn",
+                    },
+                    env.profile.policy(),
+                )
             expected = snapshot(env)
+            if replacement != "disable":
+                assert len(expected["outbox"]) == 1
             # Reopen the real durable store before the abandoned handler resumes.
             Store(env.profile.database)
         finally:
