@@ -10,7 +10,7 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], manifest = Config.NONE)
 class MobilePushPolicyTest {
-    private fun state() = JSONObject("""{"enabled":true,"active":true,"installation":"i","nonce":"n","revision":2,"generation":3}""")
+    private fun state() = JSONObject("""{"registration_fence":1,"enabled":true,"active":true,"installation":"i","nonce":"n","revision":2,"generation":3}""")
     private fun hint() = JSONObject("""{"schema":1,"event_id":"e","kind":"turn_done","registration_nonce":"n","generation":3,"expires_at":200}""")
     @Test fun acceptsEncryptedCurrentHint() { assertTrue(MobilePushPolicy.valid(state(), hint(), "i", true, 100)) }
     @Test fun rejectsPlaintext() { assertFalse(MobilePushPolicy.valid(state(), hint(), "i", false, 100)) }
@@ -39,6 +39,14 @@ class MobilePushPolicyTest {
         assertFalse(MobilePushPolicy.valid(state(), hint().put("schema", "1"), "i", true, 100))
         assertFalse(MobilePushPolicy.valid(state(), hint().put("generation", "3"), "i", true, 100))
         assertFalse(MobilePushPolicy.valid(state(), hint().put("expires_at", 200.5), "i", true, 100))
+    }
+    @Test fun sessionScopeMatchesServerAsciiAndCountContract() {
+        assertTrue(MobilePushPolicy.validSessions(org.json.JSONArray((0 until 128).map { "session-$it" })))
+        assertFalse(MobilePushPolicy.validSessions(org.json.JSONArray((0 until 129).map { "session-$it" })))
+        assertTrue(MobilePushPolicy.validSessions(org.json.JSONArray(listOf("a".repeat(200), "AZaz09_.:@-"))))
+        listOf("a".repeat(201), "invalid/session", "non-ascii-é", "", " leading", "trailing\n").forEach {
+            assertFalse(MobilePushPolicy.validSessions(org.json.JSONArray(listOf("valid", it))))
+        }
     }
     @Test fun casRejectsRenewalAndRevocation() {
         val expected = state()

@@ -12,6 +12,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import '../models/connection.dart';
 import '../models/session.dart';
+import 'connection_mutation_barrier.dart';
 
 // Re-export for convenience
 export '../models/connection.dart';
@@ -135,12 +136,25 @@ class ConnectionManager {
   static const Uuid _uuid = Uuid();
   static final CredentialStore _sharedCredentialStore =
       FlutterSecureCredentialStore();
+  static const _pushChannel = MethodChannel(
+    'com.hermesagent.hermes_android/mobile_push',
+  );
+  // Only finished transactions enter this outbox. An uncertain END reply must
+  // stay retryable by a replacement manager, not strand this native lease until
+  // process death. Retrying END never restores consent or releases a sibling.
+  static final _pendingPushMutationEnds = <String, Map<String, dynamic>>{};
 
   final SharedPreferences prefs;
   final CredentialStore _credentialStore;
+  final bool _nativePushSupported;
 
-  ConnectionManager(this.prefs, {CredentialStore? credentialStore})
-    : _credentialStore = credentialStore ?? _sharedCredentialStore;
+  ConnectionManager(
+    this.prefs, {
+    CredentialStore? credentialStore,
+    bool? nativePushSupported,
+  }) : _credentialStore = credentialStore ?? _sharedCredentialStore,
+       _nativePushSupported =
+           nativePushSupported ?? (!kIsWeb && Platform.isAndroid);
 
   static Future<ConnectionManager> create(
     SharedPreferences prefs, {
@@ -258,23 +272,24 @@ class ConnectionManager {
       ];
     }
 
-    for (final connection in [...ordered, ...removed]) {
-      await _invalidateMobilePushAuthority(connection.id);
-    }
-    for (final connection in ordered) {
-      await _writeAndVerifyCredentials(
-        connection.id,
-        _ConnectionCredentials.fromConnection(connection),
-      );
-    }
-    for (final connection in removed) {
-      await _writeAndVerifyCredentials(
-        connection.id,
-        const _ConnectionCredentials(apiKey: '', dashboardPassword: null),
-      );
-    }
-
-    await _saveAll(next);
+    await _withConnectionMutation(
+      [...ordered, ...removed].map((connection) => connection.id),
+      () async {
+        for (final connection in ordered) {
+          await _writeAndVerifyCredentials(
+            connection.id,
+            _ConnectionCredentials.fromConnection(connection),
+          );
+        }
+        for (final connection in removed) {
+          await _writeAndVerifyCredentials(
+            connection.id,
+            const _ConnectionCredentials(apiKey: '', dashboardPassword: null),
+          );
+        }
+        await _saveAll(next);
+      },
+    );
   }
 
   Future<void> saveConnection(
@@ -502,20 +517,64 @@ class ConnectionManager {
     );
   }
 
-  /// Revoke native push authority before editing/removing an account, including
-  /// while a registration/confirmation is still in flight. No push secret is
-  /// copied into connection metadata or backup/export payloads.
-  Future<void> _invalidateMobilePushAuthority(String connectionId) async {
-    if (kIsWeb || !Platform.isAndroid) return;
+  /// Own the full mutation, not just a one-shot invalidation while consent may
+  /// still be off. Begin synchronously before any await; release only after the
+  /// transaction/rollback and the matching native lease have settled. The
+  /// injected platform boundary lets host tests exercise the actual IPC.
+  Future<void> _withConnectionMutation(
+    Iterable<String> connections,
+    Future<void> Function() action,
+  ) async {
+    final lease = ConnectionMutationBarrier.begin(connections);
+    final args = {
+      'connections': lease.connections.toList(),
+      'mutation': _uuid.v4(),
+    };
+    final native = _nativePushSupported;
     try {
-      await const MethodChannel(
-        'com.hermesagent.hermes_android/mobile_push',
-      ).invokeMethod<void>('connectionChanged', {'connection': connectionId});
-    } catch (_) {
-      throw const CredentialStorageException(
-        'Native push consent could not be invalidated safely. Retry the connection change.',
-      );
+      if (native) {
+        try {
+          await finishPendingMobilePushChanges();
+          await _pushChannel.invokeMethod<void>('beginConnectionChange', args);
+        } catch (_) {
+          throw const CredentialStorageException(
+            'Native push consent could not be invalidated safely. Retry the connection change.',
+          );
+        }
+      }
+      await action();
+    } finally {
+      try {
+        // Idempotent even if begin's reply was lost after native revocation.
+        if (native) {
+          try {
+            await _finishMobilePushChange(args);
+          } catch (_) {
+            throw const CredentialStorageException(
+              'Native push account change could not be completed safely. Retry the connection change.',
+            );
+          }
+        }
+      } finally {
+        lease.release();
+      }
     }
+  }
+
+  /// Complete only terminal native leases whose acknowledgement was lost.
+  /// Called before fresh consent as well as before another account transaction.
+  Future<void> finishPendingMobilePushChanges() async {
+    if (!_nativePushSupported) return;
+    for (final args in _pendingPushMutationEnds.values.toList()) {
+      await _finishMobilePushChange(args);
+    }
+  }
+
+  static Future<void> _finishMobilePushChange(Map<String, dynamic> args) async {
+    final mutation = args['mutation'] as String;
+    _pendingPushMutationEnds[mutation] = args;
+    await _pushChannel.invokeMethod<void>('endConnectionChange', args);
+    _pendingPushMutationEnds.remove(mutation);
   }
 
   Future<void> _commitCredentialAndMetadata({
@@ -524,21 +583,21 @@ class ConnectionManager {
     required _ConnectionCredentials nextCredentials,
     required List<SavedConnection> connections,
   }) async {
-    await _invalidateMobilePushAuthority(connectionId);
-    try {
-      await _writeAndVerifyCredentials(connectionId, nextCredentials);
-      await _saveAll(connections);
-    } catch (_) {
+    await _withConnectionMutation([connectionId], () async {
       try {
-        await _writeAndVerifyCredentials(connectionId, previousCredentials);
+        await _writeAndVerifyCredentials(connectionId, nextCredentials);
+        await _saveAll(connections);
       } catch (_) {
-        // The caller still receives a generic fail-closed error. Never attach
-        // platform errors because they may include sensitive storage details.
+        try {
+          await _writeAndVerifyCredentials(connectionId, previousCredentials);
+        } catch (_) {
+          // Never attach platform errors: they may include storage secrets.
+        }
+        throw const CredentialStorageException(
+          'Connection credentials could not be saved safely.',
+        );
       }
-      throw const CredentialStorageException(
-        'Connection credentials could not be saved safely.',
-      );
-    }
+    });
   }
 
   Future<void> _writeAndVerifyCredentials(
@@ -726,10 +785,24 @@ class ApiClient {
 
   /// Fetches one session by exact id, paging through the list until it is
   /// found: a notification may name a session older than the first page.
-  Future<Session?> getSessionById(String sessionId) async {
+  /// [canContinue] fences each page, not just the final result. Notification
+  /// navigation uses it to revoke captured credentials/consent while a request
+  /// is suspended; other callers retain the original paging behaviour.
+  /// [isCurrent] rechecks synchronous lifetime/configuration authority after
+  /// every await, including the asynchronous continuation fence itself.
+  Future<Session?> getSessionById(
+    String sessionId, {
+    Future<bool> Function()? canContinue,
+    bool Function()? isCurrent,
+  }) async {
     var offset = 0;
     while (true) {
+      if (canContinue != null && !await canContinue()) return null;
+      if (isCurrent != null && !isCurrent()) return null;
       final result = await getSessionsPage(limit: 50, offset: offset);
+      if (isCurrent != null && !isCurrent()) return null;
+      if (canContinue != null && !await canContinue()) return null;
+      if (isCurrent != null && !isCurrent()) return null;
       for (final session in result.sessions) {
         if (session.id == sessionId) return session;
       }
@@ -1363,7 +1436,6 @@ class DashboardClient {
   final String? _username;
   final String? _password;
   final String? _gatewayProfile;
-  String? get gatewayProfile => _gatewayProfile;
   String? _token;
   String? _cookie;
   int _authGeneration = 0;
@@ -1374,6 +1446,9 @@ class DashboardClient {
   Future<String>? _tokenInFlight;
 
   String get baseUrl => _baseUrl;
+
+  /// Selected connection profile; generic API helpers deliberately do not add it.
+  String? get gatewayProfile => _gatewayProfile;
 
   bool get _usesPasswordAuth =>
       (_username?.isNotEmpty ?? false) && (_password?.isNotEmpty ?? false);

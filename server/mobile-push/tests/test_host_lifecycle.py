@@ -112,54 +112,31 @@ def test_real_manager_rolls_back_initialisation_failure(env, monkeypatch):
     manager.unload()
 
 
-def test_dashboard_loader_reads_request_home_and_fails_closed_without_session(env, monkeypatch):
+def test_dashboard_without_host_profile_scope_fails_closed(env, monkeypatch):
     host(env, monkeypatch)
-    from hermes_constants import reset_hermes_home_override, set_hermes_home_override
+    spec = importlib.util.spec_from_file_location(
+        "test_mobile_api_unscoped", PLUGIN / "dashboard" / "plugin_api.py"
+    )
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    app = FastAPI()
 
-    def load(home, name):
-        token = set_hermes_home_override(home)
-        try:
-            spec = importlib.util.spec_from_file_location(
-                name, PLUGIN / "dashboard" / "plugin_api.py"
-            )
-            module = importlib.util.module_from_spec(spec)
-            sys.modules[name] = module
-            spec.loader.exec_module(module)
-            return module.router
-        finally:
-            reset_hermes_home_override(token)
+    @app.middleware("http")
+    async def authenticated(request, call_next):
+        if env.identity[0] is not None:
+            request.state.session = env.identity[0]
+        return await call_next(request)
 
-    first = load(env.profile.home, "test_mobile_api_a")
-    second_home = other_home(env)
-    second = load(second_home, "test_mobile_api_b")
-    apps = [FastAPI(), FastAPI()]
-    for app, router, home in zip(apps, (first, second), (env.profile.home, second_home)):
-
-        @app.middleware("http")
-        async def authenticated(request, call_next, home=home):
-            if env.identity[0] is not None:
-                request.state.session = env.identity[0]
-            token = set_hermes_home_override(str(home))
-            try:
-                return await call_next(request)
-            finally:
-                reset_hermes_home_override(token)
-
-        app.include_router(router)
-    with TestClient(apps[0]) as client_a, TestClient(apps[1]) as client_b:
-        # Root import has no runtime worker; each read uses the request-local fake home.
-        assert client_a.get("/capabilities").json()["enabled"]
-        assert client_b.get("/capabilities").json()["enabled"]
-        assert client_b.get("/events").json()["events"] == []
-        env.config["enabled"] = False
-        env.save()
-        assert not client_a.get("/capabilities").json()["enabled"]
-        assert client_b.get("/capabilities").json()["enabled"]
-        env.identity[0] = (
-            None  # Models plugin host's ASGI forwarding: headers, but no trusted session.
-        )
+    # Intentionally NOT the host mount: no vetted request home is available.
+    app.include_router(module.router)
+    with TestClient(app) as client:
+        assert client.get("/capabilities").status_code == 503
+        assert client.get("/events", params={"profile": "other-profile"}).status_code == 503
+        env.identity[0] = None
         assert (
-            client_b.get(
+            client.get(
                 "/capabilities",
                 headers={"X-User-ID": "alice", "Authorization": "Bearer not-trusted"},
             ).status_code
