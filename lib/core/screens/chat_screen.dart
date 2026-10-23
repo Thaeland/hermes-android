@@ -685,7 +685,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _normalSubscription = _normalChat!.subscribe(_applyNormalSnapshot);
   }
 
-  void _applyNormalSnapshot(NormalGatewayChatSnapshot snapshot) {
+  void _applyNormalSnapshot(
+    NormalGatewayChatSnapshot snapshot, {
+    bool hydrateHistory = true,
+  }) {
     if (!mounted) return;
     final rejectedDraft = snapshot.rejectedDraft;
     if (rejectedDraft != null &&
@@ -824,7 +827,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               text: 'Recovering without resending',
             )
           : snapshot.status;
-      if (snapshot.historyRows.isNotEmpty) {
+      if (hydrateHistory && snapshot.historyRows.isNotEmpty) {
         _acceptRecentMessages(
           snapshot.historyRows
               .map((row) => Map<String, dynamic>.from(row))
@@ -845,11 +848,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           ...snapshot.displayRows.map((row) => Map<String, dynamic>.from(row)),
         ];
       } else {
-        _acceptRecentMessages(
-          snapshot.historyRows
-              .map((row) => Map<String, dynamic>.from(row))
-              .toList(),
-        );
+        if (hydrateHistory) {
+          _acceptRecentMessages(
+            snapshot.historyRows
+                .map((row) => Map<String, dynamic>.from(row))
+                .toList(),
+          );
+        }
         _messages = _historyWindow.rows;
       }
       for (final tool in snapshot.tools) {
@@ -865,6 +870,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _subagentActivities
         ..clear()
         ..addAll(snapshot.subagents);
+      // App-owned runs use stable projection ids, so copying snapshot rows or
+      // replacing a route cannot discard receipt chronology.
+      _timeline = snapshot.timeline;
     });
     if (snapshot.hasActiveTurn) {
       _scheduleStreamingFollow();
@@ -1787,6 +1795,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _historyWindow.acceptOlder(older);
       _extractToolMessages(_historyWindow.rows, replacePresentation: false);
       setState(() => _messages = _historyWindow.rows);
+      final normalSnapshot = _normalChat?.snapshot;
+      if (normalSnapshot?.turnId != null) {
+        _applyNormalSnapshot(normalSnapshot!, hydrateHistory: false);
+      }
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted || !_scrollController.hasClients) return;
         final delta = _scrollController.position.maxScrollExtent - oldExtent;
@@ -1845,6 +1857,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _messages = _historyWindow.rows;
         _error = null;
       });
+      final normalSnapshot = _normalChat?.snapshot;
+      if (normalSnapshot?.turnId != null) {
+        _applyNormalSnapshot(normalSnapshot!, hydrateHistory: false);
+      }
       _scheduleInitialEndAlignment();
     } catch (_) {
       // Keep the refresh pending. A later terminal/rollback transition can

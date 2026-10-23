@@ -64,10 +64,15 @@ List<dynamic> buildChatDisplayItems({
   // runs together at the first live anchor so consuming an earlier preview
   // cannot pull later tools/reasoning ahead of intervening commentary.
   final scopeTurns = <Object, int>{};
+  final scopeRows = <Object, Map<String, dynamic>>{};
+  Object scopeFor(Map<String, dynamic> row) =>
+      row['_normal_projection_id'] ?? row;
   var turn = 0;
   for (final message in messages) {
     if (message['role'] == 'user') turn++;
-    scopeTurns[message] = turn;
+    final scope = scopeFor(message);
+    scopeTurns[scope] = turn;
+    scopeRows[scope] = message;
   }
   final liveRuns =
       timeline?.runs.where((r) => scopeTurns.containsKey(r.scope)).toList() ??
@@ -75,8 +80,9 @@ List<dynamic> buildChatDisplayItems({
   final liveScopes = liveRuns.map((r) => r.scope).toSet();
   final anchors = <int, Object>{};
   for (final message in messages) {
-    if (liveScopes.contains(message)) {
-      anchors.putIfAbsent(scopeTurns[message]!, () => message);
+    final scope = scopeFor(message);
+    if (liveScopes.contains(scope)) {
+      anchors.putIfAbsent(scopeTurns[scope]!, () => scope);
     }
   }
   final anchoredRuns = <Object, List<ChatTimelineRun>>{};
@@ -138,8 +144,11 @@ List<dynamic> buildChatDisplayItems({
     }
     if (role != 'user' && role != 'assistant') continue;
 
-    if (liveScopes.contains(msg) && !anchoredRuns.containsKey(msg)) continue;
-    final runs = anchoredRuns[msg] ?? const <ChatTimelineRun>[];
+    final scope = scopeFor(msg);
+    if (liveScopes.contains(scope) && !anchoredRuns.containsKey(scope)) {
+      continue;
+    }
+    final runs = anchoredRuns[scope] ?? const <ChatTimelineRun>[];
     if (role == 'assistant' && runs.isNotEmpty) {
       for (final run in runs) {
         if (run.kind == ChatTimelineKind.tool) {
@@ -154,7 +163,7 @@ List<dynamic> buildChatDisplayItems({
           );
         } else if (run.text.isNotEmpty) {
           displayItems.add({
-            ...(run.scope as Map<String, dynamic>),
+            ...scopeRows[run.scope]!,
             'role': role,
             '_timeline_id': run.id,
             '_display_content': run.text,

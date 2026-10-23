@@ -12,6 +12,7 @@ import 'package:hermes_android/core/screens/chat_screen.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
 import 'package:hermes_android/core/services/desktop_gateway_client.dart';
 import 'package:hermes_android/core/services/ws_client.dart';
+import 'package:hermes_android/core/services/normal_gateway_application_session.dart';
 import 'package:hermes_android/core/utils/chat_history_scroll.dart';
 import 'package:hermes_android/core/widgets/chat_end_affordance.dart';
 import 'package:hermes_android/core/widgets/gateway_insight_card.dart';
@@ -245,6 +246,11 @@ void main() {
           sessionId: 'reattach-order',
           remoteSubmit: remote.submit,
           connectionHook: hook,
+          resume: ({required localSessionId, required storedSessionId}) async =>
+              const ResumedGatewaySession(
+                runtimeSessionId: 'runtime-fixture',
+                running: false,
+              ),
         );
         hook.handler!(DesktopConnectionState.connected);
         await tester.enterText(find.byType(TextField), 'Continue');
@@ -1134,6 +1140,7 @@ Future<void> _pumpChat(
   EdgeInsets viewInsets = EdgeInsets.zero,
   TestRemotePromptSubmit? remoteSubmit,
   TestDesktopConnectionHook? connectionHook,
+  NormalGatewayResume? resume,
   Future<String?> Function()? serverFilePicker,
   List<AttachmentDraft> initialDrafts = const [],
   bool settle = true,
@@ -1175,6 +1182,7 @@ Future<void> _pumpChat(
         testApiClient: apiClient,
         testRemotePromptSubmit: completedStockTurn(remoteSubmit),
         testDesktopConnectionHook: connectionHook,
+        testNormalResume: resume,
         testServerFilePicker: serverFilePicker,
         testInitialAttachmentDrafts: initialDrafts,
       ),

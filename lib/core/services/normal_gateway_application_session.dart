@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:uuid/uuid.dart';
 
+import '../models/chat_timeline.dart';
 import '../models/gateway_activity.dart';
 import '../models/gateway_insight.dart';
 import 'connection_manager.dart';
@@ -75,6 +76,7 @@ class NormalGatewayChatSnapshot {
   final String? error;
   final String? rejectedDraft;
   final DesktopConnectionState connectionState;
+  final ChatTimeline timeline;
   const NormalGatewayChatSnapshot({
     required this.turnId,
     required this.storedSessionId,
@@ -92,6 +94,7 @@ class NormalGatewayChatSnapshot {
     required this.error,
     required this.rejectedDraft,
     required this.connectionState,
+    this.timeline = const ChatTimeline(),
   });
   bool get hasActiveTurn => const {
     NormalGatewayTurnPhase.preparing,
@@ -368,6 +371,7 @@ class NormalGatewayChatOwner {
   bool _historyKnown = false;
   final List<GatewayToolActivity> _tools = [];
   final List<GatewaySubagentActivity> _subagents = [];
+  ChatTimeline _timeline = const ChatTimeline();
   final Map<String, StreamEvent> _pendingInput = {};
   final List<StreamEvent> _inputUpdates = [];
   final List<StreamEvent> _auxiliaryEvents = [];
@@ -416,6 +420,7 @@ class NormalGatewayChatOwner {
         ? _draftToRestore
         : null,
     connectionState: _session._connectionState,
+    timeline: _timeline,
   );
 
   void bindStoredSession(String storedSessionId) {
@@ -700,7 +705,10 @@ class NormalGatewayChatOwner {
         (event.type == 'message.delta' || event.type.startsWith('tool.'))) {
       phase = NormalGatewayTurnPhase.running;
     }
-    if (_display.isEmpty && event.type.startsWith('message.')) {
+    if (_display.isEmpty &&
+        (event.type.startsWith('message.') ||
+            event.type.startsWith('tool.') ||
+            event.type.startsWith('reasoning.'))) {
       _display.add({
         'role': 'assistant',
         'content': '',
@@ -717,6 +725,10 @@ class NormalGatewayChatOwner {
         ? _display.last
         : null;
     if (reasoning != null && assistant != null) {
+      _timeline = _timeline.reasoning(
+        assistant['_normal_projection_id']!,
+        reasoning,
+      );
       assistant['_gateway_reasoning'] = reasoning.applyTo(
         assistant['_gateway_reasoning']?.toString() ?? '',
       );
@@ -727,8 +739,12 @@ class NormalGatewayChatOwner {
     } else if (event.type == 'message.start' && assistant != null) {
       assistant.remove('_gateway_interim_boundary');
     } else if (event.type == 'message.delta' && assistant != null) {
-      assistant['content'] =
-          '${assistant['content'] ?? ''}${event.data['text'] ?? ''}';
+      final token = event.data['text']?.toString() ?? '';
+      assistant['content'] = '${assistant['content'] ?? ''}$token';
+      _timeline = _timeline.appendText(
+        assistant['_normal_projection_id']!,
+        token,
+      );
       _status = null;
     } else if (event.type == 'message.interim' && assistant != null) {
       final transition = GatewayInterimTransition.resolve(
@@ -737,6 +753,10 @@ class NormalGatewayChatOwner {
         alreadyStreamed: event.data['already_streamed'] == true,
       );
       assistant['content'] = transition.sealedText;
+      _timeline = _timeline.textSnapshot(
+        assistant['_normal_projection_id']!,
+        transition.sealedText,
+      );
       if (transition.startsNewMessage) {
         assistant['_gateway_interim'] = true;
         assistant['_gateway_pending_response'] = false;
@@ -758,7 +778,17 @@ class NormalGatewayChatOwner {
         event.data['text']?.toString() ?? text,
       );
       if (target != null) {
-        if (text.isNotEmpty) target['content'] = text;
+        if (text.isNotEmpty) {
+          target['content'] = text;
+          _timeline = _timeline.textSnapshot(
+            target['_normal_projection_id']!,
+            text,
+            preservePosition:
+                event.data['response_previewed'] == true ||
+                event.data['response_reused'] == true ||
+                event.data['response_transformed'] == true,
+          );
+        }
         target['_gateway_pending_response'] = false;
       }
     } else if (event.type.startsWith('tool.')) {
@@ -783,6 +813,13 @@ class NormalGatewayChatOwner {
           _tools.add(update);
         } else {
           _tools[index] = _tools[index].merge(update);
+        }
+        final activity = index < 0 ? _tools.last : _tools[index];
+        if (assistant != null) {
+          _timeline = _timeline.tool(
+            assistant['_normal_projection_id']!,
+            activity,
+          );
         }
         if (_tools.length > 512) _tools.removeAt(0);
       }
@@ -815,6 +852,12 @@ class NormalGatewayChatOwner {
         }
       }
     }
+    _timeline = _timeline.retainScopes(
+      [
+        ..._priorDisplay,
+        ..._display,
+      ].map((row) => row['_normal_projection_id']).whereType<String>(),
+    );
     final failure = _failure(event.data);
     if (event.type == 'turn.error' ||
         event.type == 'error' ||
@@ -879,6 +922,11 @@ class NormalGatewayChatOwner {
         candidate['_gateway_reasoning_verbose'] =
             pending['_gateway_reasoning_verbose'] == true;
       }
+      _timeline = _timeline.reassignScope(
+        pending['_normal_projection_id']!,
+        candidate['_normal_projection_id']!,
+        replaceReasoning: pending['_gateway_reasoning_replaces'] == true,
+      );
       _display.removeAt(pendingIndex);
       candidate.remove('_gateway_interim');
       return candidate;
@@ -1026,7 +1074,14 @@ class NormalGatewayChatOwner {
           _settledWireTurnIds.remove(_settledWireTurnIds.first);
         }
       }
-      if (!wireEmitted) _display.clear();
+      if (!wireEmitted) {
+        _display.clear();
+        _timeline = _timeline.retainScopes(
+          _priorDisplay
+              .map((row) => row['_normal_projection_id'])
+              .whereType<String>(),
+        );
+      }
       final canonical =
           completed &&
           _floor != null &&
@@ -1034,6 +1089,9 @@ class NormalGatewayChatOwner {
       if (canonical) {
         _display.clear();
         _priorDisplay.clear();
+        _timeline = _timeline.clear();
+        _tools.clear();
+        _subagents.clear();
       }
       _error = error;
       _status = null;
@@ -1163,6 +1221,9 @@ class NormalGatewayChatOwner {
               _canonicalTurnVisible(fresh))) {
         _display.clear();
         _priorDisplay.clear();
+        _timeline = _timeline.clear();
+        _tools.clear();
+        _subagents.clear();
       }
       _notify();
     } catch (_) {

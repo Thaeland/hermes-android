@@ -52,6 +52,28 @@ class ChatTimeline {
   /// Drop optimistic references on durable hydration, without reusing card IDs.
   ChatTimeline clear() => ChatTimeline._(const [], _nextId);
 
+  /// Keep only retained presentation anchors. This is a bounded live view, not
+  /// a transcript: durable history is always the authority after hydration.
+  ChatTimeline retainScopes(Iterable<Object> scopes) {
+    final retained = scopes.toSet();
+    var next = runs.where((run) => retained.contains(run.scope)).toList();
+    if (next.length > 1024) next = next.sublist(next.length - 1024);
+    var budget = 1048576;
+    final bounded = <ChatTimelineRun>[];
+    for (final run in next.reversed) {
+      if (run.kind == ChatTimelineKind.tool) {
+        bounded.add(run);
+      } else if (budget > 0) {
+        final text = run.text.length > budget
+            ? run.text.substring(run.text.length - budget)
+            : run.text;
+        budget -= text.length;
+        bounded.add(run._copy(text: text));
+      }
+    }
+    return _with(bounded.reversed.toList());
+  }
+
   Iterable<ChatTimelineRun> forScope(Object scope) =>
       runs.where((run) => run.scope == scope);
 

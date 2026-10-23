@@ -41,6 +41,56 @@ List<String> labels(List<dynamic> items) => items
     .toList();
 
 void main() {
+  test('stable presentation ids survive immutable snapshot row copies', () {
+    final row = <String, dynamic>{
+      'role': 'assistant',
+      'content': 'AB',
+      '_normal_projection_id': 'turn-row',
+    };
+    final before = Map<String, dynamic>.from(row);
+    final state = const ChatTimeline()
+        .appendText('turn-row', 'A')
+        .tool('turn-row', tool('t1'))
+        .appendText('turn-row', 'B');
+    expect(
+      labels(
+        buildChatDisplayItems(
+          messages: [Map<String, dynamic>.unmodifiable(row)],
+          timeline: state,
+        ),
+      ),
+      ['A', 't1', 'B'],
+    );
+    expect(row, before);
+  });
+
+  test(
+    'retained live view prunes anchors and bounds runs without reusing ids',
+    () {
+      var state = const ChatTimeline().appendText('old', 'not retained');
+      for (var i = 0; i < 600; i++) {
+        state = state.appendText('live', 'text $i').tool('live', tool('t$i'));
+      }
+      final bounded = state.retainScopes(['live']);
+      expect(bounded.runs, hasLength(1024));
+      expect(bounded.runs.every((run) => run.scope == 'live'), isTrue);
+      expect(bounded.runs.last.id, state.runs.last.id);
+      final cleared = bounded.retainScopes([]).appendText('new', 'new');
+      expect(
+        state.runs.map((run) => run.id),
+        isNot(contains(cleared.runs.single.id)),
+      );
+    },
+  );
+
+  test('retained live view bounds text while preserving run identity', () {
+    final state = const ChatTimeline().appendText('live', 'x' * 2097152);
+    final bounded = state.retainScopes(['live']);
+    expect(bounded.runs.single.text, hasLength(1048576));
+    expect(bounded.runs.single.id, state.runs.single.id);
+    expect(state.runs.single.text, hasLength(2097152));
+  });
+
   test(
     'new exposed reasoning deltas after tools are separate receipt runs',
     () {

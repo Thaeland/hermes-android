@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hermes_android/core/screens/chat_screen.dart';
+import 'package:hermes_android/core/widgets/gateway_activity_card.dart';
+import 'package:hermes_android/core/widgets/gateway_insight_card.dart';
 import 'package:hermes_android/core/services/composer_draft_store.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
 import 'package:hermes_android/core/services/gateway_turn_application_controller.dart';
@@ -60,6 +62,89 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
       await controller.close();
+    },
+  );
+
+  testWidgets(
+    'retained owner preserves timeline order across snapshots and route reattachment',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1000, 2400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final controller = GatewayTurnApplicationController();
+      addTearDown(controller.close);
+      final remote = _Remote();
+      await _open(tester, controller, remote);
+      await tester.enterText(find.byType(TextField), 'One prompt');
+      await tester.tap(find.byTooltip('Send'));
+      await tester.pump();
+      await tester.pump();
+      remote.event('message.delta', {'text': 'Commentary A'});
+      remote.event('message.interim', {
+        'text': 'Commentary A',
+        'already_streamed': true,
+      });
+      remote.event('tool.start', {'tool': 'read_file', 'tool_id': 't1'});
+      remote.event('message.delta', {'text': 'Commentary B'});
+      remote.event('reasoning.delta', {'text': 'Exposed reasoning'});
+      remote.event('tool.start', {'tool': 'read_file', 'tool_id': 't2'});
+      await tester.pump();
+      List<String> labels() => tester
+          .widgetList(
+            find.byWidgetPredicate(
+              (w) =>
+                  w is MessageBubble ||
+                  w is GatewayReasoningCard ||
+                  w is GatewayActivityCard,
+            ),
+          )
+          .map(
+            (w) => switch (w) {
+              MessageBubble b => b.content,
+              GatewayReasoningCard _ => 'reasoning',
+              GatewayActivityCard c =>
+                c.activities.map((a) => a.toolId).join(','),
+              _ => throw StateError('Unexpected timeline widget'),
+            },
+          )
+          .toList();
+      expect(labels(), [
+        'One prompt',
+        'Commentary A',
+        't1',
+        'Commentary B',
+        'reasoning',
+        't2',
+      ]);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      remote.event('tool.complete', {
+        'tool': 'read_file',
+        'tool_id': 't1',
+        'status': 'completed',
+      });
+      remote.event('message.delta', {'text': ' continued'});
+      await _open(
+        tester,
+        controller,
+        remote,
+        id: 'stored-chat',
+        key: const ValueKey('timeline-remount'),
+      );
+      expect(labels(), [
+        'One prompt',
+        'Commentary A',
+        't1',
+        'Commentary B',
+        'reasoning',
+        't2',
+        ' continued',
+      ]);
+      expect(remote.submissions, 1);
+      remote.event('message.complete', {'text': 'Commentary B continued'});
+      remote.rpc.complete();
+      await tester.pump();
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
     },
   );
 
