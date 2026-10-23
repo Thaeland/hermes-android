@@ -244,9 +244,7 @@ class ConnectionManager {
     final connections = _connectionsFromMaps(_readConnectionMaps());
     final hydrated = <SavedConnection>[];
     for (final connection in connections) {
-      final encoded = await _credentialStore.read(
-        _credentialKey(connection.id),
-      );
+      final encoded = await _readEncodedCredentials(connection.id);
       if (encoded == null) {
         hydrated.add(connection);
         continue;
@@ -261,6 +259,17 @@ class ConnectionManager {
       );
     }
     return hydrated;
+  }
+
+  Future<String?> _readEncodedCredentials(String connectionId) async {
+    try {
+      return await _credentialStore.read(_credentialKey(connectionId));
+    } catch (_) {
+      // Provider errors may contain secrets; never attach them or use the cache.
+      throw const CredentialStorageException(
+        'Connection credentials could not be read safely.',
+      );
+    }
   }
 
   /// Refresh this store's cache without waiting for unrelated transactions.
@@ -314,9 +323,7 @@ class ConnectionManager {
         () async {
           final previous = <String, _ConnectionCredentials>{};
           for (final connection in [...ordered, ...removed]) {
-            final encoded = await _credentialStore.read(
-              _credentialKey(connection.id),
-            );
+            final encoded = await _readEncodedCredentials(connection.id);
             previous[connection.id] = encoded == null
                 ? _ConnectionCredentials.fromConnection(
                     current.where((c) => c.id == connection.id).firstOrNull ??
@@ -599,7 +606,13 @@ class ConnectionManager {
     Future<T> perform() async {
       try {
         if (previous != null) await previous;
-        await prefs.reload();
+        try {
+          await prefs.reload();
+        } catch (_) {
+          throw const CredentialStorageException(
+            'Saved connection metadata could not be read safely.',
+          );
+        }
         return await action();
       } finally {
         lease.release();
