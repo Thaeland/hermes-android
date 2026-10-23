@@ -604,6 +604,9 @@ class NormalGatewayChatOwner {
   final List<Map<String, dynamic>> _priorDisplay = [];
   final List<_SettledGatewayPresentation> _settledPresentation = [];
   final List<Map<String, dynamic>> _hydratedPresentation = [];
+  // Presentation-only seam, never the current admission/WAL watermark. Once
+  // established, each accepted latest snapshot replaces the whole suffix.
+  int? _hydratedPresentationFloor;
   int? _receivedObservation;
   List<Map<String, dynamic>> _history = [];
   bool _historyKnown = false;
@@ -739,8 +742,9 @@ class NormalGatewayChatOwner {
     _acceptHistory(
       _GatewayHistoryObservation(rows, ++_session._historyObservation),
     );
-    final retired = _retireSettledPresentation(rows);
-    if (_retireCompletedPresentation(rows) || retired) _notify();
+    _retireSettledPresentation(rows);
+    _retireCompletedPresentation(rows);
+    _notify();
   }
 
   Future<_GatewayHistoryObservation> _readLatestHistory(String stored) async {
@@ -756,15 +760,24 @@ class NormalGatewayChatOwner {
     _history = fresh.rows.map((row) => Map<String, dynamic>.from(row)).toList();
     _historyKnown = true;
     _historyObservation = fresh.observation;
+    _refreshHydratedPresentation();
+    _boundSettledPresentation();
     return true;
   }
 
   void _adoptSettledPresentation(NormalGatewayChatOwner other) {
     _settledPresentation.addAll(other._settledPresentation);
+    final otherFloor = other._hydratedPresentationFloor;
+    if (otherFloor != null &&
+        (_hydratedPresentationFloor == null ||
+            otherFloor < _hydratedPresentationFloor!)) {
+      _hydratedPresentationFloor = otherFloor;
+    }
     _hydratedPresentation.addAll(
       other._hydratedPresentation.map(Map<String, dynamic>.from),
     );
     other._hydratedPresentation.clear();
+    other._hydratedPresentationFloor = null;
     if (!other.snapshot.hasActiveTurn && other._hasReceivedPresentation) {
       final floor = other._floor;
       _settledPresentation.add(
@@ -804,7 +817,10 @@ class NormalGatewayChatOwner {
           settled.floor != null &&
           fresh.any((row) => _responseRow(row, settled.floor!)),
     );
-    if (_settledPresentation.isEmpty) _hydratedPresentation.clear();
+    if (_settledPresentation.isEmpty) {
+      _hydratedPresentation.clear();
+      _hydratedPresentationFloor = null;
+    }
     return count != _settledPresentation.length;
   }
 
@@ -844,6 +860,7 @@ class NormalGatewayChatOwner {
       _settledPresentation.removeAt(0);
     }
     _hydratedPresentation.clear();
+    _hydratedPresentationFloor = null;
   }
 
   void _adoptPreWireHistory(NormalGatewayChatOwner other, String stored) {
@@ -864,6 +881,8 @@ class NormalGatewayChatOwner {
     if (!_hasReceivedPresentation) {
       _presentationBase = _history.map(Map<String, dynamic>.from).toList();
     }
+    _refreshHydratedPresentation();
+    _boundSettledPresentation();
   }
 
   void _adoptChildObservers(NormalGatewayChatOwner other) {
@@ -1756,10 +1775,11 @@ class NormalGatewayChatOwner {
               .whereType<String>(),
         );
       }
+      final boundary = _canonicalPresentationBoundary();
       final canonical =
           completed != false &&
-          _floor != null &&
-          _history.any((row) => _responseRow(row, _floor!));
+          boundary != null &&
+          _history.any((row) => _responseRow(row, boundary));
       if (canonical) {
         _clearTransientPresentation();
       }
@@ -1917,8 +1937,9 @@ class NormalGatewayChatOwner {
             _tools.isEmpty)) {
       return false;
     }
+    final boundary = _canonicalPresentationBoundary();
     final hasFreshResponse =
-        _floor != null && fresh.any((row) => _responseRow(row, _floor!));
+        boundary != null && fresh.any((row) => _responseRow(row, boundary));
     if (!hasFreshResponse && !_canHandOffSubmissionScaffolds(fresh)) {
       return false;
     }
@@ -1946,24 +1967,50 @@ class NormalGatewayChatOwner {
     return user >= 0 && fresh.skip(user + 1).any(_displayableResponseRow);
   }
 
-  void _clearTransientPresentation() {
-    if (_settledPresentation.isNotEmpty && _floor != null) {
-      // Keep physically identified current rows after an independent retained
-      // donor, not in the pinned pre-donor base. These are actual canonical
-      // rows, never synthetic request/history entries or a second live turn.
-      final known = _hydratedPresentation.map((row) => row['id']).toSet();
-      final latestUser = _history.lastIndexWhere(
-        (row) => row['role'] == 'user',
-      );
-      _hydratedPresentation.addAll(
+  int? _canonicalPresentationBoundary() {
+    final admissionFloor = _floor;
+    if (admissionFloor == null) return null;
+    var boundary = admissionFloor;
+    // A retained donor is an independent received interval, not a successful
+    // current turn. Leave its first canonical response interval unclaimed. Only
+    // the suffix beyond those ordered intervals may replace current receipts.
+    // No prompt/text matching or last-user selection establishes this seam.
+    for (final settled in _settledPresentation) {
+      final floor = settled.floor;
+      if (floor == null) return null;
+      if (floor < admissionFloor) continue;
+      if (floor > boundary) boundary = floor;
+      final response = _history.where((row) => _responseRow(row, boundary));
+      if (response.isEmpty) return null;
+      boundary = int.parse(response.first['id'].toString());
+    }
+    return boundary;
+  }
+
+  void _refreshHydratedPresentation() {
+    final floor = _hydratedPresentationFloor;
+    if (floor == null) return;
+    _hydratedPresentation
+      ..clear()
+      ..addAll(
         _history
-            .skip(latestUser < 0 ? 0 : latestUser)
             .where((row) {
               final id = int.tryParse(row['id']?.toString() ?? '');
-              return id != null && id > _floor! && known.add(row['id']);
+              return id != null && id > floor;
             })
             .map(Map<String, dynamic>.from),
       );
+  }
+
+  void _clearTransientPresentation() {
+    if (_settledPresentation.isNotEmpty) {
+      final boundary = _canonicalPresentationBoundary();
+      if (boundary != null &&
+          (_hydratedPresentationFloor == null ||
+              boundary < _hydratedPresentationFloor!)) {
+        _hydratedPresentationFloor = boundary;
+      }
+      _refreshHydratedPresentation();
     }
     _presentationBase = [];
     _display.clear();

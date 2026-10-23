@@ -12,6 +12,7 @@ class ChatTimelineRun {
     this.text = '',
     this.verbose = false,
     this.activity,
+    this.presentationId,
   });
 
   final String id;
@@ -20,6 +21,12 @@ class ChatTimelineRun {
   final String text;
   final bool verbose;
   final GatewayToolActivity? activity;
+  final String? presentationId;
+
+  // Capture the first scope, not its current preview/completion owner. A scope
+  // transfer must not change the key of an already manually pinned card.
+  String get _stablePresentationId =>
+      presentationId ?? (kind == ChatTimelineKind.tool ? id : '$scope:$id');
 
   ChatTimelineRun _copy({
     Object? scope,
@@ -33,6 +40,7 @@ class ChatTimelineRun {
     text: text ?? this.text,
     verbose: verbose ?? this.verbose,
     activity: activity ?? this.activity,
+    presentationId: _stablePresentationId,
   );
 }
 
@@ -62,6 +70,7 @@ class ChatTimeline {
   // Identity-only tombstones are bounded too. Once saturated, unmatched late
   // terminals cannot safely be distinguished from completed-only first receipts.
   static const maxEvictedTools = 1024;
+  static final _presentations = Expando<ChatTimeline>();
 
   final List<ChatTimelineRun> runs;
   final int _nextId;
@@ -75,12 +84,41 @@ class ChatTimeline {
   ChatTimeline clear() =>
       ChatTimeline._(const [], _nextId, const {}, const {}, false);
 
+  /// Read-only, idempotent projection used from the very first render. Raw
+  /// reducer IDs and tool receipts remain untouched; independent reducers may
+  /// both start at timeline:0 without sharing a presentation pin.
+  ChatTimeline forPresentation() {
+    final existing = _presentations[this];
+    if (existing != null) return existing;
+    final projected = ChatTimeline._(
+      List.unmodifiable([
+        for (final run in runs)
+          ChatTimelineRun(
+            id: run._stablePresentationId,
+            scope: run.scope,
+            kind: run.kind,
+            text: run.text,
+            verbose: run.verbose,
+            activity: run.activity,
+            presentationId: run._stablePresentationId,
+          ),
+      ]),
+      _nextId,
+      scopes,
+      _evictedTools,
+      _tombstonesSaturated,
+    );
+    _presentations[this] = projected;
+    _presentations[projected] = projected;
+    return projected;
+  }
+
   /// Compose independent settled scopes without replaying their receipts into
-  /// the current reducer. Imported local run IDs need a scope namespace; tool
-  /// identities, eviction ledgers and the combined budgets remain intact.
+  /// the current reducer. Projection keys are already stable before import;
+  /// tool identities, eviction ledgers and combined budgets remain intact.
   ChatTimeline precededBy(Iterable<ChatTimeline> earlier) {
     final timelines = earlier.toList();
-    if (timelines.isEmpty) return this;
+    if (timelines.isEmpty) return forPresentation();
     final tombstones = <String>{};
     var saturated = false;
     for (final timeline in [...timelines, this]) {
@@ -88,6 +126,12 @@ class ChatTimeline {
       saturated |= timeline._tombstonesSaturated;
     }
     if (tombstones.length > maxEvictedTools) saturated = true;
+    final composed = <(Object, String), ChatTimelineRun>{};
+    for (final timeline in [...timelines, this]) {
+      for (final run in timeline.forPresentation().runs) {
+        composed[(run.scope, run.id)] = run;
+      }
+    }
     return ChatTimeline._(
       const [],
       _nextId,
@@ -96,19 +140,7 @@ class ChatTimeline {
       }),
       Set.unmodifiable(tombstones.take(maxEvictedTools)),
       saturated,
-    )._with([
-      for (final timeline in timelines)
-        for (final run in timeline.runs)
-          ChatTimelineRun(
-            id: '${run.scope}:${run.id}',
-            scope: run.scope,
-            kind: run.kind,
-            text: run.text,
-            verbose: run.verbose,
-            activity: run.activity,
-          ),
-      ...runs,
-    ]);
+    )._with(composed.values.toList());
   }
 
   /// Keep only retained presentation anchors. This is a bounded live view, not
