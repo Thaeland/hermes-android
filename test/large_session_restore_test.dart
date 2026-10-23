@@ -199,9 +199,9 @@ void main() {
   testWidgets(
     'a newer turn prevents an older deferred refresh from replacing it',
     (tester) async {
-      final httpClient = _MultiTurnRaceHttpClient();
-      addTearDown(httpClient.releaseAll);
       var submitted = 0;
+      final httpClient = _MultiTurnRaceHttpClient(() => submitted);
+      addTearDown(httpClient.releaseAll);
       final apiClient = ApiClient(
         baseUrl: 'http://large-session.fixture',
         apiKey: 'test-key',
@@ -256,6 +256,8 @@ void main() {
       await tester.pump();
       httpClient.releaseFirst();
       await httpClient.deferredRefreshUri.future;
+      await tester.pump();
+      expect(submitted, 1);
 
       await tester.enterText(
         find.byKey(const Key('chat-message-composer')),
@@ -413,6 +415,14 @@ class _DelayedMessagesHttpClient extends http.BaseClient {
 }
 
 class _MultiTurnRaceHttpClient extends http.BaseClient {
+  _MultiTurnRaceHttpClient(this.submittedTurns);
+
+  final int Function() submittedTurns;
+  static const _firstTurnHistory = [
+    {'id': 1, 'role': 'assistant', 'content': 'Existing transcript row'},
+    {'id': 2, 'role': 'user', 'content': 'First turn'},
+    {'id': 3, 'role': 'assistant', 'content': 'First reply'},
+  ];
   final Completer<Uri> firstMessagesUri = Completer<Uri>();
   final Completer<Uri> deferredRefreshUri = Completer<Uri>();
   final Completer<Uri> authoritativeRefreshUri = Completer<Uri>();
@@ -439,32 +449,41 @@ class _MultiTurnRaceHttpClient extends http.BaseClient {
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
     if (request.method == 'GET' && request.url.path.endsWith('/messages')) {
       _messageRequestCount += 1;
-      switch (_messageRequestCount) {
-        case 1:
-          firstMessagesUri.complete(request.url);
-          await _releaseFirst.future;
-          return _response([
-            {'role': 'assistant', 'content': 'Initial stale snapshot'},
-          ]);
-        case 2:
+      if (_messageRequestCount == 1) {
+        firstMessagesUri.complete(request.url);
+        await _releaseFirst.future;
+        return _response([
+          {'id': 1, 'role': 'assistant', 'content': 'Initial stale snapshot'},
+        ]);
+      }
+      // Canonical admission reads happen before the corresponding prompt.
+      // Do not confuse one with a post-turn refresh or invent future replies.
+      if (submittedTurns() == 0) {
+        return _response(_firstTurnHistory.take(1).toList());
+      }
+      if (submittedTurns() == 1) {
+        if (!deferredRefreshUri.isCompleted) {
           deferredRefreshUri.complete(request.url);
           await _releaseDeferredRefresh.future;
           return _response([
-            {'role': 'assistant', 'content': 'Pre-second-turn snapshot'},
-            {'role': 'user', 'content': 'First turn'},
+            {
+              'id': 1,
+              'role': 'assistant',
+              'content': 'Pre-second-turn snapshot',
+            },
+            ..._firstTurnHistory.skip(1),
           ]);
-        default:
-          if (!authoritativeRefreshUri.isCompleted) {
-            authoritativeRefreshUri.complete(request.url);
-          }
-          return _response([
-            {'role': 'assistant', 'content': 'Existing transcript row'},
-            {'role': 'user', 'content': 'First turn'},
-            {'role': 'assistant', 'content': 'First reply'},
-            {'role': 'user', 'content': 'Second turn'},
-            {'role': 'assistant', 'content': 'Second reply'},
-          ]);
+        }
+        return _response(_firstTurnHistory);
       }
+      if (!authoritativeRefreshUri.isCompleted) {
+        authoritativeRefreshUri.complete(request.url);
+      }
+      return _response([
+        ..._firstTurnHistory,
+        {'id': 4, 'role': 'user', 'content': 'Second turn'},
+        {'id': 5, 'role': 'assistant', 'content': 'Second reply'},
+      ]);
     }
     return http.StreamedResponse(
       Stream.value(utf8.encode(jsonEncode({'error': 'unexpected request'}))),
