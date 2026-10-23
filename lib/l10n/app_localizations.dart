@@ -4353,6 +4353,282 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Quiet status updates for unresolved user-started chats'**
   String get ongoing_chat_channel_description;
+
+  /// No description provided for @task_timeline.
+  ///
+  /// In en, this message translates to:
+  /// **'Task timeline'**
+  String get task_timeline;
+
+  /// No description provided for @task_refresh_history.
+  ///
+  /// In en, this message translates to:
+  /// **'Refresh task history'**
+  String get task_refresh_history;
+
+  /// No description provided for @task_live_preview.
+  ///
+  /// In en, this message translates to:
+  /// **'Live preview from parent events'**
+  String get task_live_preview;
+
+  /// No description provided for @task_preview_explanation.
+  ///
+  /// In en, this message translates to:
+  /// **'Latest exposed preview only; not a recorded transcript row.'**
+  String get task_preview_explanation;
+
+  /// No description provided for @task_preview.
+  ///
+  /// In en, this message translates to:
+  /// **'Preview'**
+  String get task_preview;
+
+  /// No description provided for @task_recorded_history.
+  ///
+  /// In en, this message translates to:
+  /// **'Recorded task history'**
+  String get task_recorded_history;
+
+  /// No description provided for @task_loading_history.
+  ///
+  /// In en, this message translates to:
+  /// **'Loading task history…'**
+  String get task_loading_history;
+
+  /// No description provided for @task_empty_history.
+  ///
+  /// In en, this message translates to:
+  /// **'No recorded messages yet. The task may not have flushed its history; this does not mean it produced no work.'**
+  String get task_empty_history;
+
+  /// No description provided for @task_load_older.
+  ///
+  /// In en, this message translates to:
+  /// **'Load older'**
+  String get task_load_older;
+
+  /// No description provided for @task_default_goal.
+  ///
+  /// In en, this message translates to:
+  /// **'Delegated task'**
+  String get task_default_goal;
+
+  /// No description provided for @task_status.
+  ///
+  /// In en, this message translates to:
+  /// **'Status: {status}'**
+  String task_status(Object status);
+
+  /// No description provided for @task_identity.
+  ///
+  /// In en, this message translates to:
+  /// **'Task: {id}'**
+  String task_identity(Object id);
+
+  /// No description provided for @task_stored_session.
+  ///
+  /// In en, this message translates to:
+  /// **'Stored session: {id}'**
+  String task_stored_session(Object id);
+
+  /// No description provided for @task_delegation.
+  ///
+  /// In en, this message translates to:
+  /// **'Delegation: {id}'**
+  String task_delegation(Object id);
+
+  /// No description provided for @task_read_only_notice.
+  ///
+  /// In en, this message translates to:
+  /// **'Read-only · recorded history may appear after the task flushes. Refresh to check again.'**
+  String get task_read_only_notice;
+
+  /// No description provided for @task_row_label.
+  ///
+  /// In en, this message translates to:
+  /// **'{role} · row {id}'**
+  String task_row_label(Object id, Object role);
+
+  /// No description provided for @task_role_assistant.
+  ///
+  /// In en, this message translates to:
+  /// **'Assistant'**
+  String get task_role_assistant;
+
+  /// No description provided for @task_role_user.
+  ///
+  /// In en, this message translates to:
+  /// **'User'**
+  String get task_role_user;
+
+  /// No description provided for @task_role_tool.
+  ///
+  /// In en, this message translates to:
+  /// **'Tool'**
+  String get task_role_tool;
+
+  /// No description provided for @task_tool_call.
+  ///
+  /// In en, this message translates to:
+  /// **'Tool call · {name}'**
+  String task_tool_call(Object name);
+
+  /// No description provided for @task_tool_result.
+  ///
+  /// In en, this message translates to:
+  /// **'Tool result · {name}'**
+  String task_tool_result(Object name);
+
+  /// No description provided for @task_call_details.
+  ///
+  /// In en, this message translates to:
+  /// **'Call ID: {id}\nArguments\n{arguments}'**
+  String task_call_details(Object arguments, Object id);
+
+  /// No description provided for @task_result_details.
+  ///
+  /// In en, this message translates to:
+  /// **'Call ID: {id}\nResult\n{result}'**
+  String task_result_details(Object id, Object result);
+
+  /// No description provided for @task_not_supplied.
+  ///
+  /// In en, this message translates to:
+  /// **'Not supplied'**
+  String get task_not_supplied;
+
+  /// No description provided for @task_missing_arguments.
+  ///
+  /// In en, this message translates to:
+  /// **'Arguments not retained by the server.'**
+  String get task_missing_arguments;
+
+  /// No description provided for @task_image_placeholder.
+  ///
+  /// In en, this message translates to:
+  /// **'[image]'**
+  String get task_image_placeholder;
+
+  /// No description provided for @task_invalid_reference.
+  ///
+  /// In en, this message translates to:
+  /// **'Task transcript unavailable: invalid stored session reference.'**
+  String get task_invalid_reference;
+
+  /// No description provided for @task_auth_required.
+  ///
+  /// In en, this message translates to:
+  /// **'Task transcript unavailable: configure Dashboard authentication for this gateway. The API-server key cannot read task reasoning.'**
+  String get task_auth_required;
+
+  /// No description provided for @task_auth_rejected.
+  ///
+  /// In en, this message translates to:
+  /// **'Task transcript unavailable: Dashboard authentication was rejected. Check this gateway’s Dashboard settings.'**
+  String get task_auth_rejected;
+
+  /// No description provided for @task_incompatible_history.
+  ///
+  /// In en, this message translates to:
+  /// **'Task transcript unavailable: this Dashboard does not provide compatible bounded raw history for the selected profile.'**
+  String get task_incompatible_history;
+
+  /// No description provided for @task_identity_unproven.
+  ///
+  /// In en, this message translates to:
+  /// **'Task transcript unavailable: the Dashboard could not prove the exact stored session or its compression lineage. No transcript from another session is shown.'**
+  String get task_identity_unproven;
+
+  /// No description provided for @task_partial_compression.
+  ///
+  /// In en, this message translates to:
+  /// **'Partial history: this task continued after compression, but this gateway has not exposed a verifiable newer reference. The final reply may be missing. Automatic refresh is paused; use Refresh to retry.'**
+  String get task_partial_compression;
+
+  /// No description provided for @task_partial_ancestors.
+  ///
+  /// In en, this message translates to:
+  /// **'Partial history: this gateway omits compression ancestors for this task. Earlier task segments may be missing. Known rows are retained; use Refresh to retry.'**
+  String get task_partial_ancestors;
+
+  /// No description provided for @task_missing_reference.
+  ///
+  /// In en, this message translates to:
+  /// **'Task transcript unavailable: this server did not retain its session reference.'**
+  String get task_missing_reference;
+
+  /// No description provided for @task_missing_row_identity.
+  ///
+  /// In en, this message translates to:
+  /// **'Task transcript unavailable: this server did not supply durable message row identities.'**
+  String get task_missing_row_identity;
+
+  /// No description provided for @task_history_not_ready.
+  ///
+  /// In en, this message translates to:
+  /// **'Task history is not available yet (HTTP 404). The task may not have flushed, or this Dashboard may not support task history. Retry to check again.'**
+  String get task_history_not_ready;
+
+  /// No description provided for @task_refresh_failed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not refresh task history. Check the connection and retry.'**
+  String get task_refresh_failed;
+
+  /// No description provided for @task_status_interrupted.
+  ///
+  /// In en, this message translates to:
+  /// **'Interrupted'**
+  String get task_status_interrupted;
+
+  /// No description provided for @task_status_cancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'Cancelled'**
+  String get task_status_cancelled;
+
+  /// No description provided for @task_status_requested.
+  ///
+  /// In en, this message translates to:
+  /// **'Requested'**
+  String get task_status_requested;
+
+  /// No description provided for @task_status_thinking.
+  ///
+  /// In en, this message translates to:
+  /// **'Thinking'**
+  String get task_status_thinking;
+
+  /// No description provided for @task_status_tool.
+  ///
+  /// In en, this message translates to:
+  /// **'Using a tool'**
+  String get task_status_tool;
+
+  /// No description provided for @task_status_pending.
+  ///
+  /// In en, this message translates to:
+  /// **'Pending'**
+  String get task_status_pending;
+
+  /// No description provided for @task_status_dispatched.
+  ///
+  /// In en, this message translates to:
+  /// **'Dispatched'**
+  String get task_status_dispatched;
+
+  /// No description provided for @task_status_unknown.
+  ///
+  /// In en, this message translates to:
+  /// **'Unknown status: {status}'**
+  String task_status_unknown(Object status);
+
+  /// No description provided for @task_tasks_finished.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} delegated task(s) finished'**
+  String task_tasks_finished(Object count);
 }
 
 class _AppLocalizationsDelegate

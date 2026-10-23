@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/gateway_insight.dart';
+import 'delegated_task_labels.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
 
@@ -140,8 +141,13 @@ class GatewayNoticeCard extends StatelessWidget {
 
 class GatewaySubagentCard extends StatelessWidget {
   final List<GatewaySubagentActivity> activities;
+  final ValueChanged<GatewaySubagentActivity>? onOpenTask;
 
-  const GatewaySubagentCard({required this.activities, super.key});
+  const GatewaySubagentCard({
+    required this.activities,
+    this.onOpenTask,
+    super.key,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -151,11 +157,22 @@ class GatewaySubagentCard extends StatelessWidget {
       child: ExpansionTile(
         initiallyExpanded: !complete,
         leading: Icon(
-          complete ? Icons.hub_outlined : Icons.account_tree_outlined,
+          activities.any((task) => task.failed)
+              ? Icons.error_outline
+              : activities.any((task) => task.interrupted)
+              ? Icons.cancel_outlined
+              : complete
+              ? Icons.hub_outlined
+              : Icons.account_tree_outlined,
+          color: activities.any((task) => task.failed)
+              ? Theme.of(context).colorScheme.error
+              : null,
         ),
         title: Text(
           complete
-              ? context.l10n.delegated_tasks_completed(activities.length)
+              ? (activities.every((task) => task.succeeded)
+                    ? context.l10n.delegated_tasks_completed(activities.length)
+                    : context.l10n.task_tasks_finished(activities.length))
               : context.l10n.delegated_tasks_active(
                   activities.where((item) => !item.isComplete).length,
                 ),
@@ -163,17 +180,39 @@ class GatewaySubagentCard extends StatelessWidget {
         children: [
           for (final activity in activities)
             ListTile(
+              key: ValueKey('delegated-task-${activity.id}'),
+              onTap: onOpenTask == null ? null : () => onOpenTask!(activity),
+              trailing: onOpenTask == null
+                  ? null
+                  : const Icon(Icons.chevron_right),
               dense: true,
               leading: activity.isComplete
-                  ? const Icon(Icons.check_circle_outline, color: Colors.green)
+                  ? Icon(
+                      activity.failed
+                          ? Icons.error_outline
+                          : activity.status == 'cancelled'
+                          ? Icons.cancel_outlined
+                          : activity.interrupted
+                          ? Icons.pause_circle_outline
+                          : activity.succeeded
+                          ? Icons.check_circle_outline
+                          : Icons.help_outline,
+                      color: activity.failed
+                          ? Theme.of(context).colorScheme.error
+                          : null,
+                      semanticLabel: delegatedTaskStatus(
+                        context.l10n,
+                        activity,
+                      ),
+                    )
                   : const SizedBox.square(
                       dimension: 18,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     ),
-              title: Text(activity.goal),
+              title: Text(delegatedTaskGoal(context.l10n, activity)),
               subtitle: Text(
                 [
-                  activity.phase.name,
+                  delegatedTaskStatus(context.l10n, activity),
                   if (activity.model != null) activity.model!,
                   if (activity.detail != null) activity.detail!,
                 ].join(' • '),

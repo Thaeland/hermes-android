@@ -15,6 +15,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../controllers/voice_composer_controller.dart';
+import '../controllers/delegated_task_controller.dart';
+import '../services/delegated_task_history.dart';
+import '../widgets/delegated_task_timeline.dart';
+import '../widgets/delegated_task_labels.dart';
 import '../services/connection_manager.dart';
 import '../services/attachment_draft_service.dart';
 import '../services/composer_draft_store.dart';
@@ -331,6 +335,9 @@ class ChatScreen extends StatefulWidget {
   final RemoteFilesDataSource Function(String storedSessionId)?
   testMediaFilesClient;
 
+  @visibleForTesting
+  final TaskHistorySource Function()? testTaskHistorySource;
+
   const ChatScreen({
     required this.connection,
     required this.session,
@@ -357,6 +364,7 @@ class ChatScreen extends StatefulWidget {
     this.testLegacyProjectSessionEnsure,
     this.testStoredSessionKey,
     this.testMediaFilesClient,
+    this.testTaskHistorySource,
     super.key,
   });
 
@@ -376,6 +384,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// survive the list reordering and row eviction that a streaming turn causes.
   final ToolActivityGroupPins _toolActivityPins = ToolActivityGroupPins();
   final List<GatewaySubagentActivity> _subagentActivities = [];
+  DelegatedTaskController? _openTaskController;
   final Map<String, GatewayNotification> _gatewayNotifications = {};
   final Map<String, Timer> _notificationTimers = {};
   late final List<GatewayNotice> _gatewayNotices;
@@ -1043,6 +1052,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final subscription = _normalSubscription;
     if (subscription != null) normalChat?.unsubscribe(subscription);
     if (reservation != null) normalChat?.cancelPreparation(reservation);
+    _openTaskController?.dispose();
+    _openTaskController = null;
     WidgetsBinding.instance.removeObserver(this);
     chatDensitySelection.removeListener(_onChatDensityChanged);
     _projectNameRefreshGeneration += 1;
@@ -2064,6 +2075,24 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ? const <ChatTimelineRun>[]
         : _timeline.runs;
     if (replacePresentation) _timeline = _timeline.clear();
+    for (final recovered in recoverDelegatedTasks(messages)) {
+      // Real child references can reconnect a persisted row to live activity;
+      // neither task goal nor task index is sufficient identity evidence.
+      final index = _subagentActivities.indexWhere(
+        (activity) =>
+            activity.id == recovered.id ||
+            (recovered.childSessionId != null &&
+                activity.childSessionId == recovered.childSessionId),
+      );
+      if (index < 0) {
+        _subagentActivities.add(recovered);
+      } else {
+        _subagentActivities[index] = _subagentActivities[index].merge(
+          recovered,
+        );
+        _openTaskController?.updateTask(_subagentActivities[index]);
+      }
+    }
     final observedByToolId = {
       for (final activity in _toolActivities)
         if (activity.toolId != null) activity.toolId!: activity,
@@ -3622,21 +3651,50 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (update == null || !mounted) return;
     setState(() {
       final index = _subagentActivities.indexWhere(
-        (activity) => activity.id == update.id,
+        (activity) =>
+            activity.id == update.id ||
+            (update.childSessionId != null &&
+                activity.childSessionId == update.childSessionId),
       );
       if (index < 0) {
         _subagentActivities.add(update);
       } else {
         _subagentActivities[index] = _subagentActivities[index].merge(update);
       }
-      if (!update.isComplete) {
+      final merged =
+          _subagentActivities[index < 0
+              ? _subagentActivities.length - 1
+              : index];
+      _openTaskController?.updateTask(merged);
+      if (!merged.isComplete) {
         _gatewayTurnStatus = GatewayTurnStatus(
           kind: 'subagent',
-          text: context.l10n.delegated_task(update.goal),
+          text: context.l10n.delegated_task(
+            delegatedTaskGoal(context.l10n, merged),
+          ),
         );
       }
     });
-    _scheduleStreamingFollow();
+    if (_openTaskController == null) _scheduleStreamingFollow();
+  }
+
+  Future<void> _openDelegatedTask(GatewaySubagentActivity task) async {
+    if (_openTaskController != null) return;
+    final controller = DelegatedTaskController(
+      task: task,
+      history:
+          widget.testTaskHistorySource?.call() ??
+          DashboardTaskHistory.fromConnection(widget.connection),
+    );
+    _openTaskController = controller;
+    try {
+      await showDelegatedTaskTimeline(context, controller);
+    } finally {
+      controller.dispose();
+      if (identical(_openTaskController, controller)) {
+        _openTaskController = null;
+      }
+    }
   }
 
   Future<void> _respondToGatewayApproval(
@@ -5147,7 +5205,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               );
             }
             if (item is List<GatewaySubagentActivity>) {
-              return GatewaySubagentCard(activities: item);
+              return GatewaySubagentCard(
+                activities: item,
+                onOpenTask: (task) => unawaited(_openDelegatedTask(task)),
+              );
             }
             if (item is ChatReasoningItem) {
               return GatewayReasoningCard(
