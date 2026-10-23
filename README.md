@@ -99,6 +99,10 @@ After an outage, the app keeps recovery pending until it can verify the server's
 state. A proven-idle turn with no recorded terminal outcome becomes inactive
 with an outcome-unknown status. It does not generate a completion alert.
 
+When a received reply has no verified history baseline, the app preserves it
+and known older messages. Unverified saved rows remain cached outside the
+combined transcript. The app does not match turns by message text.
+
 The experimental v2 path adds a separate durable exactly-once recovery contract
 when the gateway advertises support. A legacy-transport capability notice refers
 to that contract; it does not mean stock chat reattachment is unavailable. Neither

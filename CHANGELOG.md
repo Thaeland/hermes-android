@@ -95,6 +95,9 @@ shows only the three latest releases.
   and distributor availability can prevent or delay delivery. A foreground
   service does not guarantee uninterrupted networking. Reopen and reconcile
   uncertain work; push is a hint rather than proof of a turn's current outcome.
+- Without a verified baseline, received replies and known older context take
+  precedence over unverified saved rows. The app caches ambiguous rows outside
+  the combined transcript; unresolved history can remain partial.
 - Release identity is `2.1.31+2174`; split version codes are `21741`
   (armeabi-v7a), `21742` (arm64-v8a) and `21743` (x86_64). The accepted base
   upgrade floor remains `2127`. Store notes cover the base and all three splits.
