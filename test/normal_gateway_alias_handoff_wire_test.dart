@@ -173,10 +173,12 @@ void main() {
         expect(session.chats, hasLength(1));
         expect(canonical.snapshot.turnId, local.turnId);
         expect(canonical.reserve(), isNull);
-        expect(local.snapshot.rowFloor, known ? 37 : 0);
+        // Canonical latest history arrived after the source's older context
+        // and allocation snapshot, before any write-ahead receipt or emission.
+        expect(local.snapshot.rowFloor, 99);
         expect(
           (await session.pendingStore.load(session.scope)).single.rowFloor,
-          known ? 37 : 0,
+          99,
         );
         server.finish('Only original answer');
         await first;

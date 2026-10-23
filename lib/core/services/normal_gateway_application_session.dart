@@ -153,8 +153,14 @@ class NormalGatewayApplicationSession {
   final void Function()? onActivityChanged;
   final ChatPresentationRegistry? presentation;
   final Map<String, NormalGatewayChatOwner> _aliases = {};
+  final Map<String, NormalGatewayPendingMarker> _retiringMarkers = {};
+  Timer? _retirementTimer;
+  bool _retiring = false;
+  int _retirementRetry = 0;
   late final Future<void> ready;
   bool _initialized = false;
+  int _historyObservation = 0;
+  int _childObservation = 0;
   bool _closed = false;
   bool _background = false;
   bool _backgroundWorkEnabled = true;
@@ -277,6 +283,7 @@ class NormalGatewayApplicationSession {
     String? localAlias,
   }) {
     owner = owner._root;
+    if (_closed) return owner;
     final other = _aliases[stored];
     final coalescing = other != null && !identical(other, owner);
     if (coalescing) {
@@ -328,7 +335,7 @@ class NormalGatewayApplicationSession {
     if (sourceOnWire && canonicalOnWire) {
       throw StateError('Cannot combine independently emitted gateway turns.');
     }
-    final winner = sourceOnWire || canonical.turnId == null
+    final winner = sourceOnWire || !canonical.snapshot.hasActiveTurn
         ? source
         : canonical;
     final loser = identical(winner, source) ? canonical : source;
@@ -337,11 +344,17 @@ class NormalGatewayApplicationSession {
     presentation?.bind(source.localSessionId, stored);
     final retiredListeners = loser._listeners.entries.toList(growable: false);
     final rejection = loser._rejectForHandoff();
-    if (!winner.snapshot.hasActiveTurn &&
-        !winner._historyKnown &&
-        loser._historyKnown) {
-      winner._history = loser._history;
-      winner._historyKnown = true;
+    winner._adoptPreWireHistory(loser, stored);
+    winner._adoptChildObservers(loser);
+    final settledIds = {
+      ...loser._settledWireTurnIds,
+      ...winner._settledWireTurnIds,
+    };
+    winner._settledWireTurnIds
+      ..clear()
+      ..addAll(settledIds);
+    while (winner._settledWireTurnIds.length > 32) {
+      winner._settledWireTurnIds.remove(winner._settledWireTurnIds.first);
     }
     // Empty-create proof belongs to the original admission only. In
     // particular it cannot seed an already-active canonical unknown floor.
@@ -360,9 +373,12 @@ class NormalGatewayApplicationSession {
     // every retained subscriber then observes the single winning operation.
     scheduleMicrotask(() {
       if (_closed) return;
+      final root = winner._root;
+      final generation = root._generation;
       if (rejection != null) {
         for (final entry in retiredListeners) {
-          if (identical(winner._root._listeners[entry.key], entry.value)) {
+          if (!root._current(generation)) return;
+          if (identical(root._listeners[entry.key], entry.value)) {
             entry.value(rejection);
           }
         }
@@ -377,6 +393,17 @@ class NormalGatewayApplicationSession {
     try {
       final markers = await pendingStore.load(scope);
       if (_closed) return;
+      // Prefer an emitted receipt for display identity, but retain every
+      // unresolved WAL. A failed retirement followed by a crash cannot prove
+      // that its write-ahead receipt never reached the wire.
+      markers.sort((a, b) {
+        final emitted = (b.phase == 'emitted' ? 1 : 0).compareTo(
+          a.phase == 'emitted' ? 1 : 0,
+        );
+        if (emitted != 0) return emitted;
+        final created = b.createdAt.compareTo(a.createdAt);
+        return created != 0 ? created : a.key.compareTo(b.key);
+      });
       for (final marker in markers) {
         final chat = chatFor(
           marker.localSessionId,
@@ -405,6 +432,7 @@ class NormalGatewayApplicationSession {
     if (_closed) return;
     final changed = _connectionState != state;
     _connectionState = state;
+    if (state == DesktopConnectionState.connected) _retryRetirements();
     for (final chat in chats) {
       if (state != DesktopConnectionState.connected) {
         chat._pendingInput.clear(); // exact socket identity is no longer valid
@@ -426,6 +454,12 @@ class NormalGatewayApplicationSession {
       _backgroundWorkEnabled = backgroundWorkEnabled;
     }
     client?.setReconnectAllowed(_canRecover);
+    if (_canRecover) {
+      _retryRetirements();
+    } else {
+      _retirementTimer?.cancel();
+      _retirementTimer = null;
+    }
     for (final chat in chats) {
       if (_canRecover) {
         chat.requestRecovery();
@@ -437,6 +471,46 @@ class NormalGatewayApplicationSession {
   }
 
   bool get _canRecover => !_closed && (!_background || _backgroundWorkEnabled);
+
+  void _retirePreWireMarker(NormalGatewayPendingMarker marker) {
+    _retiringMarkers[marker.key] = marker;
+    _retryRetirements();
+  }
+
+  void _retryRetirements() {
+    if (!_canRecover || _retiring || _retiringMarkers.isEmpty) return;
+    _retirementTimer?.cancel();
+    _retirementTimer = null;
+    unawaited(_drainRetirements());
+  }
+
+  Future<void> _drainRetirements() async {
+    _retiring = true;
+    try {
+      for (final marker in _retiringMarkers.values.toList()) {
+        if (_closed) return;
+        try {
+          await pendingStore.put(marker.withPhase('settled'));
+          if (_closed) return;
+          await pendingStore.remove(marker);
+          _retiringMarkers.remove(marker.key);
+        } catch (_) {
+          // Keep cleanup ownership after failed writes and lost ACKs. Only
+          // known unsent receipts enter this queue, never uncertain wire WALs.
+        }
+      }
+    } finally {
+      _retiring = false;
+      if (_retiringMarkers.isEmpty) _retirementRetry = 0;
+      if (_canRecover && _retiringMarkers.isNotEmpty) {
+        final shift = (_retirementRetry++).clamp(0, 6);
+        _retirementTimer = Timer(
+          Duration(milliseconds: (500 * (1 << shift)).clamp(500, 30000)),
+          _retryRetirements,
+        );
+      }
+    }
+  }
 
   bool ownsApprovalRequest({
     required String sessionId,
@@ -480,6 +554,8 @@ class NormalGatewayApplicationSession {
   Future<void> close() async {
     if (_closed) return;
     _closed = true; // synchronous fence before any resource cleanup
+    _retirementTimer?.cancel();
+    _retirementTimer = null;
     for (final chat in chats) {
       chat._close();
     }
@@ -518,21 +594,26 @@ class NormalGatewayChatOwner {
   int _generation = 0;
   Object? _reservation;
   NormalGatewayPendingMarker? _marker;
+  final Map<String, NormalGatewayPendingMarker> _additionalRestoredMarkers = {};
   final List<Map<String, dynamic>> _display = [];
   final List<Map<String, dynamic>> _priorDisplay = [];
   List<Map<String, dynamic>> _history = [];
   bool _historyKnown = false;
+  int _historyObservation = 0;
   String? _createdEmptySessionId;
   List<Map<String, dynamic>> _presentationBase = [];
   final List<GatewayToolActivity> _tools = [];
   final List<GatewaySubagentActivity> _subagents = [];
+  bool _hasTurnSubagentPresentation = false;
   // Observer identity outlives parent presentation and its canonical hydration.
-  final List<GatewaySubagentActivity> _observedSubagents = [];
+  final List<({GatewaySubagentActivity activity, int observation})>
+  _observedSubagents = [];
   ChatTimeline _timeline = const ChatTimeline();
   final Map<String, StreamEvent> _pendingInput = {};
   final List<StreamEvent> _inputUpdates = [];
   final List<StreamEvent> _auxiliaryEvents = [];
   final Map<Object, void Function(NormalGatewayChatSnapshot)> _listeners = {};
+  int _notificationRevision = 0;
   GatewayTurnStatus? _status;
   String? _error;
   String? _draftToRestore;
@@ -558,7 +639,7 @@ class NormalGatewayChatOwner {
   bool get _hasReceivedPresentation =>
       _timeline.runs.isNotEmpty ||
       _tools.isNotEmpty ||
-      _subagents.isNotEmpty ||
+      _hasTurnSubagentPresentation ||
       [..._priorDisplay, ..._display].any(
         (row) =>
             row['role'] == 'assistant' &&
@@ -633,18 +714,100 @@ class NormalGatewayChatOwner {
   void observeHistory(List<Map<String, dynamic>> rows) {
     if (_redirect != null) return _root.observeHistory(rows);
     if (_session._closed || snapshot.hasActiveTurn) return;
-    _history = rows.map((row) => Map<String, dynamic>.from(row)).toList();
-    _historyKnown = true;
+    _acceptHistory(rows);
     if (_retireCompletedPresentation(rows)) _notify();
   }
 
-  void _notify() {
-    if (_session._closed) return;
-    final state = snapshot;
-    for (final listener in _listeners.values.toList(growable: false)) {
-      listener(state);
+  void _acceptHistory(List<Map<String, dynamic>> rows) {
+    _history = rows.map((row) => Map<String, dynamic>.from(row)).toList();
+    _historyKnown = true;
+    _historyObservation = ++_session._historyObservation;
+  }
+
+  void _adoptPreWireHistory(NormalGatewayChatOwner other, String stored) {
+    // A verified alias may have observed the conversation after allocation but
+    // before the delayed create reply. Only an unused, newer latest observation
+    // can replace admission context; a receipt's floor is already immutable.
+    if (wireEmitted ||
+        _marker != null ||
+        other.storedSessionId != stored ||
+        !other._historyKnown ||
+        other._historyObservation <= _historyObservation) {
+      return;
     }
-    _session.onActivityChanged?.call();
+    _history = other._history.map(Map<String, dynamic>.from).toList();
+    _historyKnown = true;
+    _historyObservation = other._historyObservation;
+    _createdEmptySessionId = null;
+    if (!_hasReceivedPresentation) {
+      _presentationBase = _history.map(Map<String, dynamic>.from).toList();
+    }
+  }
+
+  void _adoptChildObservers(NormalGatewayChatOwner other) {
+    // Observer identity is independent of parent admission/presentation. Do not
+    // copy the losing parent's turn, timeline or tools along with its children.
+    for (final child in other._observedSubagents) {
+      _mergeObservedChild(child.activity, observation: child.observation);
+    }
+    final visible = [..._subagents, ...other._subagents];
+    _subagents.clear();
+    for (final child in visible) {
+      final index = _observedSubagents.indexWhere(
+        (observed) => observed.activity.matchesTask(child),
+      );
+      if (index >= 0) _mergeVisibleChild(_observedSubagents[index].activity);
+    }
+  }
+
+  GatewaySubagentActivity _mergeObservedChild(
+    GatewaySubagentActivity update, {
+    int? observation,
+  }) {
+    final received = observation ?? ++_session._childObservation;
+    final index = _observedSubagents.indexWhere(
+      (agent) => agent.activity.matchesTask(update),
+    );
+    final previous = index < 0 ? null : _observedSubagents.removeAt(index);
+    final incomingIsNewer =
+        previous == null || received >= previous.observation;
+    final merged = previous == null
+        ? update
+        : incomingIsNewer
+        ? previous.activity.merge(update)
+        : update.merge(previous.activity);
+    _observedSubagents.add((
+      activity: merged,
+      observation: incomingIsNewer ? received : previous.observation,
+    ));
+    // Bound by recent observation, not which alias happened to win admission.
+    _observedSubagents.sort((a, b) => a.observation.compareTo(b.observation));
+    if (_observedSubagents.length > 128) _observedSubagents.removeAt(0);
+    return merged;
+  }
+
+  void _mergeVisibleChild(GatewaySubagentActivity update) {
+    final index = _subagents.indexWhere((agent) => agent.matchesTask(update));
+    if (index < 0) {
+      _subagents.add(update);
+    } else {
+      _subagents[index] = update;
+    }
+    if (_subagents.length > 128) _subagents.removeAt(0);
+  }
+
+  void _notify() {
+    if (_session._closed || _redirect != null) return;
+    final generation = _generation;
+    final revision = ++_notificationRevision;
+    final state = snapshot;
+    for (final entry in _listeners.entries.toList(growable: false)) {
+      if (!_current(generation) || revision != _notificationRevision) return;
+      if (identical(_listeners[entry.key], entry.value)) entry.value(state);
+    }
+    if (_current(generation) && revision == _notificationRevision) {
+      _session.onActivityChanged?.call();
+    }
   }
 
   bool _current(int generation) =>
@@ -770,8 +933,8 @@ class NormalGatewayChatOwner {
         _session._bind(this, stored);
       }
       if (!_submissionCurrent(generation)) return;
-      // Exact session.create emptiness is stronger than a possibly delayed GET.
-      // Consume it once at this binding; resumed/unknown/404 are never empty.
+      // Allocation-time emptiness is consumed once, unless a newer verified
+      // alias observation has superseded it. Resume/unknown/404 are never empty.
       final createdEmpty = _createdEmptySessionId == storedSessionId;
       _createdEmptySessionId = null;
       if (!_historyKnown && !createdEmpty) {
@@ -779,8 +942,7 @@ class NormalGatewayChatOwner {
         final baseline = await _readAdmissionBaseline(stored);
         if (!_submissionCurrent(generation)) return;
         if (stored == storedSessionId && baseline != null) {
-          _history = baseline;
-          _historyKnown = true;
+          _acceptHistory(baseline);
         }
       }
       _floor = protectUnknownPresentation
@@ -901,6 +1063,13 @@ class NormalGatewayChatOwner {
   }
 
   void _restore(NormalGatewayPendingMarker marker) {
+    if (_marker != null) {
+      if (_marker!.key != marker.key) {
+        _additionalRestoredMarkers[marker.key] = marker;
+        _floor = null; // ambiguous receipts have no single known boundary
+      }
+      return;
+    }
     _generation++;
     turnId = marker.turnId;
     _floor = marker.rowFloor;
@@ -981,27 +1150,10 @@ class NormalGatewayChatOwner {
         event.data,
       );
       if (update != null) {
-        final observedIndex = _observedSubagents.indexWhere(
-          (agent) => agent.matchesTask(update),
-        );
-        final merged = observedIndex < 0
-            ? update
-            : _observedSubagents[observedIndex].merge(update);
-        if (observedIndex < 0) {
-          _observedSubagents.add(merged);
-        } else {
-          _observedSubagents[observedIndex] = merged;
+        if (snapshot.hasActiveTurn && wireEmitted) {
+          _hasTurnSubagentPresentation = true;
         }
-        if (_observedSubagents.length > 128) _observedSubagents.removeAt(0);
-        final index = _subagents.indexWhere(
-          (agent) => agent.matchesTask(merged),
-        );
-        if (index < 0) {
-          _subagents.add(merged);
-        } else {
-          _subagents[index] = merged;
-        }
-        if (_subagents.length > 128) _subagents.removeAt(0);
+        _mergeVisibleChild(_mergeObservedChild(update));
       }
       _notify();
       return;
@@ -1180,6 +1332,7 @@ class NormalGatewayChatOwner {
     final ownedLifecycleTerminal =
         wireTurn != null &&
         wireTurn == _wireTurnId &&
+        _additionalRestoredMarkers.isEmpty &&
         const {'turn.end', 'turn.error'}.contains(event.type);
     if (ownedLifecycleTerminal &&
         (event.type == 'turn.error' || failure != null)) {
@@ -1330,14 +1483,17 @@ class NormalGatewayChatOwner {
         'status': resumed.inflight?['status'] ?? resumed.status,
       });
       if (!running && failure != null) {
-        await _settle(false, failure, generation: generation);
+        await _settle(
+          _additionalRestoredMarkers.isEmpty ? false : null,
+          _additionalRestoredMarkers.isEmpty ? failure : null,
+          generation: generation,
+        );
         return;
       }
       final fresh = await _session._history(stored);
       if (!_current(generation) || !snapshot.hasActiveTurn || _settling) return;
       if (!_session._canRecover) return;
-      _history = fresh;
-      _historyKnown = true;
+      _acceptHistory(fresh);
       // Idle proves work ended, never success: stock may retain partial prose
       // after interruption. Only explicit terminal status proves an outcome.
       if (running) phase = NormalGatewayTurnPhase.running;
@@ -1346,7 +1502,11 @@ class NormalGatewayChatOwner {
         'complete',
         'done',
       }.contains(status);
-      if (completed &&
+      if (inactive && !running && _additionalRestoredMarkers.isNotEmpty) {
+        // Authoritative idle releases all restored uncertainties, but cannot
+        // assign one recovered turn's successful outcome to every receipt.
+        await _settle(null, null, generation: generation);
+      } else if (completed &&
           !running &&
           _floor != null &&
           fresh.any((row) => _responseRow(row, _floor!))) {
@@ -1401,12 +1561,12 @@ class NormalGatewayChatOwner {
     _retryTimer = null;
     final marker = _marker;
     try {
-      if (marker != null) {
-        await _session.pendingStore.put(marker.withPhase('settled'));
+      for (final receipt in [?marker, ..._additionalRestoredMarkers.values]) {
+        await _session.pendingStore.put(receipt.withPhase('settled'));
         if (!_current(owned)) return;
         // A durable tombstone prevents restart from resurrecting this turn if
         // the optional physical removal fails.
-        await _session.pendingStore.remove(marker).catchError((Object _) {});
+        await _session.pendingStore.remove(receipt).catchError((Object _) {});
         if (!_current(owned)) return;
       }
       if (completed == false &&
@@ -1472,6 +1632,7 @@ class NormalGatewayChatOwner {
         row['_gateway_pending_response'] = false;
       }
       _marker = null;
+      _additionalRestoredMarkers.clear();
       _terminalReceipt = null;
       _settling = false;
       _notify();
@@ -1585,8 +1746,7 @@ class NormalGatewayChatOwner {
     try {
       final fresh = await _session._history(stored);
       if (!_current(generation) || snapshot.hasActiveTurn) return;
-      _historyKnown = true;
-      _history = fresh;
+      _acceptHistory(fresh);
       _retireCompletedPresentation(fresh);
       _notify();
     } catch (_) {
@@ -1621,7 +1781,7 @@ class NormalGatewayChatOwner {
     if (_floor != null ||
         _timeline.runs.isNotEmpty ||
         _tools.isNotEmpty ||
-        _subagents.isNotEmpty) {
+        _hasTurnSubagentPresentation) {
       return false;
     }
     final rows = [..._priorDisplay, ..._display];
@@ -1644,6 +1804,7 @@ class NormalGatewayChatOwner {
     _timeline = _timeline.clear();
     _tools.clear();
     _subagents.clear();
+    _hasTurnSubagentPresentation = false;
   }
 
   NormalGatewayChatSnapshot? _rejectForHandoff() {
@@ -1678,12 +1839,7 @@ class NormalGatewayChatOwner {
     }
     final marker = _marker;
     if (marker != null) {
-      unawaited(
-        _session.pendingStore
-            .put(marker.withPhase('settled'))
-            .then((_) => _session.pendingStore.remove(marker))
-            .catchError((Object _) {}),
-      );
+      _session._retirePreWireMarker(marker);
     }
     return snapshot;
   }
