@@ -64,6 +64,13 @@ class ToolActivityGroupPins {
     _trim();
   }
 
+  /// Share identity with another visit without importing its manual choices.
+  void inheritAliasesFrom(ToolActivityGroupPins other) {
+    for (final entry in other._aliases.entries) {
+      alias(entry.key, entry.value);
+    }
+  }
+
   /// Forgets every choice, for when the conversation itself is replaced.
   void clear() {
     _pins.clear();

@@ -388,8 +388,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final List<GatewayToolActivity> _toolActivities = [];
 
   /// Expansion choices for tool-activity cards, keyed by group id so they
-  /// survive the list reordering and row eviction that a streaming turn causes.
-  ToolActivityGroupPins get _toolActivityPins => _presentation.toolPins;
+  /// survive reordering/eviction within this State's visit, never a real exit.
+  late final ToolActivityGroupPins _toolActivityPins;
   final List<GatewaySubagentActivity> _subagentActivities = [];
   DelegatedTaskController? _openTaskController;
   int _automaticScrollGeneration = 0;
@@ -538,6 +538,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             : GatewayTurnApplicationController.standalone);
     _presentationRegistry = _viewController.presentationFor(widget.connection);
     _presentation = _presentationRegistry.chatFor(widget.session.id);
+    _toolActivityPins = _presentation.openToolVisit();
     _draftWriter = _presentation.openWriter(
       onBindingChanged: () {
         if (mounted && widget.initialComposerText == null) {
@@ -1142,6 +1143,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         boundRegistration,
       );
     }
+    _presentation.closeToolVisit(_toolActivityPins);
     final draftSaved = _draftWriter.close();
     unawaited(draftSaved.then((_) => _localTurnController?.close()));
     _textController.dispose();
@@ -4612,7 +4614,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       final activity = idx >= 0 ? _toolActivities[idx] : update;
       final toolId = activity.toolId;
       if (toolId != null) {
-        _toolActivityPins.alias(activity.identity, 'tool:$toolId');
+        _presentation.aliasTool(activity.identity, 'tool:$toolId');
       }
       final assistant = _lastAssistantMessage();
       if (assistant != null) {

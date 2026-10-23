@@ -50,7 +50,13 @@ class ChatPresentationRegistry {
           .._writerEdited = source._writerEdited;
       }
       target._reasoningPins.mergeMissingFrom(source._reasoningPins);
-      target._toolPins.mergeMissingFrom(source._toolPins);
+      target._toolAliases.mergeMissingFrom(source._toolAliases);
+      target._toolVisits.addAll(source._toolVisits);
+      source._toolVisits.clear();
+      for (final pins in target._toolVisits) {
+        // Share learned identity, never another route's manual choices.
+        pins.inheritAliasesFrom(target._toolAliases);
+      }
       source._redirect = target;
     }
     final state = target ?? source;
@@ -126,6 +132,12 @@ class ChatPresentationRegistry {
 
   void close() {
     _closed = true; // Fences leases, held reads and queued migrations together.
+    for (final state in _aliases.values.map((s) => s._root).toSet()) {
+      for (final pins in state._toolVisits) {
+        pins.clear();
+      }
+      state._toolVisits.clear();
+    }
     _aliases.clear();
   }
 }
@@ -138,9 +150,39 @@ class ChatPresentationState {
   ChatPresentationState? _redirect;
   ChatPresentationState get _root => _redirect?._root ?? this;
   final ToolActivityGroupPins _reasoningPins = ToolActivityGroupPins();
-  final ToolActivityGroupPins _toolPins = ToolActivityGroupPins();
+  // The application retains identity aliases, not cross-visit tool choices.
+  final ToolActivityGroupPins _toolAliases = ToolActivityGroupPins();
+  final Set<ToolActivityGroupPins> _toolVisits = {};
   ToolActivityGroupPins get reasoningPins => _root._reasoningPins;
-  ToolActivityGroupPins get toolPins => _root._toolPins;
+
+  /// One actual ChatScreen State is one visit, even while covered by a route.
+  /// Distinct prebinding routes keep independent choices after convergence.
+  ToolActivityGroupPins openToolVisit() {
+    if (_registry._closed) {
+      throw StateError('Chat presentation registry is closed.');
+    }
+    final pins = ToolActivityGroupPins()
+      ..inheritAliasesFrom(_root._toolAliases);
+    _root._toolVisits.add(pins);
+    return pins;
+  }
+
+  void closeToolVisit(ToolActivityGroupPins pins) {
+    _root._toolVisits.remove(pins);
+    pins.clear();
+  }
+
+  /// Ingress may learn an ID while a route is covered or no route is mounted.
+  /// Only visits already holding a pin propagate a manual choice to that ID.
+  void aliasTool(String groupId, String durableId) {
+    final state = _root;
+    if (_registry._closed) return;
+    state._toolAliases.alias(groupId, durableId);
+    for (final pins in state._toolVisits) {
+      pins.alias(groupId, durableId);
+    }
+  }
+
   String? _text;
   // The last explicitly owned value survives a cold read on remount. An alias
   // may arrive before that read, so its chronology must retain a value too.

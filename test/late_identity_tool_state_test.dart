@@ -113,23 +113,25 @@ void main() {
       final registry = ChatPresentationRegistry('connection');
       final first = registry.chatFor('first');
       final second = registry.chatFor('second');
-      first.toolPins.pin('local:first', true);
-      first.toolPins.alias('local:first', 'tool:shared-wire-id');
-      second.toolPins.pin('local:second', false);
-      second.toolPins.alias('local:second', 'tool:shared-wire-id');
-      expect(first.toolPins['tool:shared-wire-id'], isTrue);
-      expect(second.toolPins['tool:shared-wire-id'], isFalse);
+      final firstPins = first.openToolVisit();
+      final secondPins = second.openToolVisit();
+      firstPins.pin('local:first', true);
+      first.aliasTool('local:first', 'tool:shared-wire-id');
+      secondPins.pin('local:second', false);
+      second.aliasTool('local:second', 'tool:shared-wire-id');
+      expect(firstPins['tool:shared-wire-id'], isTrue);
+      expect(secondPins['tool:shared-wire-id'], isFalse);
       for (var i = 0; i < 600; i++) {
-        first.toolPins.pin('local:$i', true);
-        first.toolPins.alias('local:$i', 'tool:$i');
+        firstPins.pin('local:$i', true);
+        first.aliasTool('local:$i', 'tool:$i');
         first.reasoningPins.pin('reasoning:$i', false);
       }
-      expect(first.toolPins.length, ToolActivityGroupPins.maxPins);
+      expect(firstPins.length, ToolActivityGroupPins.maxPins);
       expect(first.reasoningPins.length, ToolActivityGroupPins.maxPins);
       registry.close();
       final replacement = ChatPresentationRegistry('connection');
       expect(
-        replacement.chatFor('first').toolPins['tool:shared-wire-id'],
+        replacement.chatFor('first').openToolVisit()['tool:shared-wire-id'],
         isNull,
       );
       replacement.close();

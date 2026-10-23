@@ -1435,8 +1435,7 @@ class NormalGatewayChatOwner {
         if (toolId != null) {
           _session.presentation
               ?.chatFor(storedSessionId ?? localSessionId)
-              .toolPins
-              .alias(activity.identity, 'tool:$toolId');
+              .aliasTool(activity.identity, 'tool:$toolId');
         }
         if (assistant != null) {
           _timeline = _timeline.tool(

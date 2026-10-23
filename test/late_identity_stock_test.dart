@@ -115,6 +115,9 @@ void main() {
               )
               .controller!
               .isExpanded;
+          expect(expanded(), isFalse);
+          await tester.tap(find.text('Tool activity'));
+          await tester.pump(const Duration(milliseconds: 300));
           expect(expanded(), isTrue);
           await tester.tap(find.text('Tool activity'));
           await tester.pump(const Duration(milliseconds: 300));
@@ -151,6 +154,27 @@ void main() {
             },
             {'id': 3, 'role': 'assistant', 'content': 'Canonical reply'},
           ];
+          if (!detached) {
+            final originalState = tester.state(find.byType(ChatScreen));
+            final requests = remote.historyRequests;
+            await tester.tap(find.byTooltip('Chat actions').hitTestable());
+            await tester.pumpAndSettle();
+            await tester.tap(find.text('Refresh').hitTestable());
+            await tester.pumpAndSettle();
+            expect(remote.historyRequests, greaterThan(requests));
+            expect(
+              identical(tester.state(find.byType(ChatScreen)), originalState),
+              isTrue,
+            );
+            expect(expanded(), isTrue);
+            expect(find.text('Completed'), findsOneWidget);
+            expect(
+              tester
+                  .widget<GatewayActivityCard>(find.byType(GatewayActivityCard))
+                  .key,
+              const ValueKey('tool-activity-message:2'),
+            );
+          }
           await tester.pumpWidget(const SizedBox.shrink());
           await tester.pump();
           await _open(
@@ -162,6 +186,21 @@ void main() {
           );
           await tester.pump(const Duration(milliseconds: 300));
           final actual = expanded();
+          expect(find.text('Completed'), findsNothing);
+          await tester.tap(find.text('Tool activity'));
+          await tester.pump(const Duration(milliseconds: 300));
+          expect(expanded(), isTrue);
+          expect(find.text('Completed'), findsOneWidget);
+          expect(
+            tester
+                .widget<GatewayActivityCard>(find.byType(GatewayActivityCard))
+                .activities
+                .single
+                .toolId,
+            'hydrated-tool',
+          );
+          expect(find.text('Canonical reply'), findsOneWidget);
+          expect(remote.submissions, 1);
           debugPrint(
             'SPEC hydration lateId=$lateId pinnedExpanded=true actual=$actual key=${tester.widget<GatewayActivityCard>(find.byType(GatewayActivityCard)).key}',
           );
@@ -169,9 +208,9 @@ void main() {
           await tester.pump();
           expect(
             actual,
-            isTrue,
+            isFalse,
             reason:
-                'A pin made before the tool ID arrives must follow the established durable alias.',
+                'A new visit resets only tool UI choice, not the retained durable data (v2.1.32).',
           );
         },
       );
@@ -204,18 +243,15 @@ void main() {
       ).whereType<GatewayActivityCard>().expand((c) => c.activities).toList();
       expect(activities.length, 3);
       expect(activities.first.toolId, isNull);
-      final pins = controller
-          .presentationFor(_connection)
-          .chatFor('stored-chat')
-          .toolPins;
-      expect(pins['tool:other-call'], isNull);
-      expect(pins['tool:ambiguous-call'], isNull);
+      final cards = _allRows(tester).whereType<GatewayActivityCard>().toList();
+      expect(cards.first.pinnedExpansion, isTrue);
+      expect(cards[1].pinnedExpansion, isNull);
       // The same wire ID in another chat is not an expansion authority.
       expect(
         controller
             .presentationFor(_connection)
             .chatFor('different-chat')
-            .toolPins[activities.first.identity],
+            .openToolVisit()[activities.first.identity],
         isNull,
       );
       await tester.pumpWidget(const SizedBox.shrink());
@@ -471,6 +507,7 @@ class _Remote {
   StreamCallback? onEvent;
   List<Map<String, dynamic>> history = [];
   int historyRequests = 0;
+  int submissions = 0;
   Future<void> submit({
     required String sessionId,
     required String text,
@@ -478,6 +515,7 @@ class _Remote {
     required void Function() onSent,
   }) {
     this.onEvent = onEvent;
+    submissions++;
     onSent();
     return rpc.future;
   }

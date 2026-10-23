@@ -31,6 +31,9 @@ void main() {
         client.emit(_tool('running', id: lateId ? null : 'hydrated-tool'));
         await tester.pump();
         final first = _activities(tester).single;
+        expect(_expanded(tester), isFalse);
+        await tester.tap(find.text('Tool activity'));
+        await tester.pump(const Duration(milliseconds: 300));
         expect(_expanded(tester), isTrue);
         await tester.tap(find.text('Tool activity'));
         await tester.pump(const Duration(milliseconds: 300));
@@ -40,6 +43,7 @@ void main() {
         await tester.pump();
         expect(_activities(tester).single.identity, first.identity);
         expect(_activities(tester).single.toolId, 'hydrated-tool');
+        expect(_expanded(tester), isTrue);
         client.emit(_tool('completed', id: 'hydrated-tool'));
         await tester.pump();
         expect(_expanded(tester), isTrue);
@@ -47,8 +51,6 @@ void main() {
         for (var i = 0; i < 5; i++) {
           await tester.pump();
         }
-        await tester.pumpWidget(const SizedBox.shrink());
-        await tester.pump();
         client.history = [
           {'id': 1, 'role': 'user', 'content': 'One prompt'},
           {
@@ -60,6 +62,27 @@ void main() {
           },
           {'id': 3, 'role': 'assistant', 'content': 'Canonical reply'},
         ];
+        final originalState = tester.state(find.byType(ChatScreen));
+        final requests = client.historyRequests;
+        await tester.tap(find.byTooltip('Chat actions').hitTestable());
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Refresh').hitTestable());
+        await tester.pumpAndSettle();
+        expect(client.historyRequests, greaterThan(requests));
+        expect(
+          identical(tester.state(find.byType(ChatScreen)), originalState),
+          isTrue,
+        );
+        expect(_expanded(tester), isTrue);
+        expect(find.text('Completed'), findsOneWidget);
+        expect(
+          tester
+              .widget<GatewayActivityCard>(find.byType(GatewayActivityCard))
+              .key,
+          const ValueKey('tool-activity-message:2'),
+        );
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
         await _open(tester, controller, client);
         await tester.pump(const Duration(milliseconds: 300));
         expect(
@@ -68,7 +91,14 @@ void main() {
               .key,
           const ValueKey('tool-activity-message:2'),
         );
+        expect(_expanded(tester), isFalse);
+        expect(find.text('Completed'), findsNothing);
+        await tester.tap(find.text('Tool activity'));
+        await tester.pump(const Duration(milliseconds: 300));
         expect(_expanded(tester), isTrue);
+        expect(find.text('Completed'), findsOneWidget);
+        expect(_activities(tester).single.toolId, 'hydrated-tool');
+        expect(find.text('Canonical reply'), findsOneWidget);
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.pump();
         expect(client.submissions, 1);
@@ -129,16 +159,17 @@ void main() {
       await tester.pump();
       expect(_activities(tester).length, 2);
       expect(_activities(tester).first.identity, anonymous);
-      final pins = controller
-          .presentationFor(_connection)
-          .chatFor('stored')
-          .toolPins;
-      expect(pins['tool:unrelated'], isNull);
+      final cards = _rows(tester).whereType<GatewayActivityCard>().toList();
+      expect(cards.first.pinnedExpansion, isTrue);
+      expect(cards.last.pinnedExpansion, isNull);
       client.emit(_tool('progress', id: 'ambiguous'));
       await tester.pump();
       expect(_activities(tester).length, 3);
       expect(_activities(tester).first.toolId, isNull);
-      expect(pins['tool:ambiguous'], isNull);
+      expect(
+        _rows(tester).whereType<GatewayActivityCard>().last.pinnedExpansion,
+        isNull,
+      );
       await tester.pumpWidget(const SizedBox.shrink());
       await client.finish();
       await tester.pump();
@@ -234,6 +265,7 @@ class _Client extends http.BaseClient {
   final stream = StreamController<List<int>>();
   List<Map<String, dynamic>> history = [];
   int submissions = 0;
+  int historyRequests = 0;
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
     if (request.method == 'POST') {
@@ -244,6 +276,7 @@ class _Client extends http.BaseClient {
         headers: {'content-type': 'text/event-stream'},
       );
     }
+    historyRequests++;
     return http.StreamedResponse(
       Stream.value(utf8.encode(jsonEncode({'data': history}))),
       200,

@@ -48,10 +48,10 @@ void main() {
             .controller!
             .isExpanded;
         final beforeKey = tester.widget(card()).key;
-        expect(expanded(), !reasoning);
+        expect(expanded(), isFalse);
         await tester.tap(find.text(reasoning ? 'Reasoning' : 'Tool activity'));
         await tester.pump(const Duration(milliseconds: 300));
-        expect(expanded(), reasoning);
+        expect(expanded(), isTrue);
         final owner = controller
             .normalSessionFor(_connection)
             .findChat('local-chat')!;
@@ -82,7 +82,7 @@ void main() {
           reopened,
           reasoning,
           reason:
-              'Explicit expansion belongs to the retained presentation, not the disposed ChatScreen.',
+              'Reasoning retains its app-owned pin; tool choices reset on a new visit (v2.1.32).',
         );
       },
     );

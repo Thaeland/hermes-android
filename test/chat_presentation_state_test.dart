@@ -155,15 +155,16 @@ void main() {
       );
       final registry = controller.presentationFor(connection);
       final state = registry.chatFor('local');
+      final toolPins = state.openToolVisit();
       for (var i = 0; i < 150; i++) {
         state.reasoningPins.pin('r-$i', true);
-        state.toolPins.pin('t-$i', false);
-        state.toolPins.alias('t-$i', 'durable-$i');
+        toolPins.pin('t-$i', false);
+        state.aliasTool('t-$i', 'durable-$i');
       }
       registry.bind('local', 'stored');
       expect(identical(registry.chatFor('stored'), state), isTrue);
       expect(state.reasoningPins.length, ToolActivityGroupPins.maxPins);
-      expect(state.toolPins.length, ToolActivityGroupPins.maxPins);
+      expect(toolPins.length, ToolActivityGroupPins.maxPins);
       expect(registry.chatFor('stored').reasoningPins['r-149'], isTrue);
       expect(registry.chatFor('sibling').reasoningPins['r-149'], isNull);
       final replacement = controller.presentationFor(
@@ -182,6 +183,47 @@ void main() {
       await controller.close();
     },
   );
+
+  for (final reverse in [false, true]) {
+    test(
+      'prebinding visits keep independent pins after alias reverse=$reverse',
+      () async {
+        final registry = ChatPresentationRegistry('visits');
+        final local = registry.chatFor('local');
+        final canonical = registry.chatFor('stored');
+        final localVisit = local.openToolVisit()..pin('anonymous', true);
+        final canonicalVisit = canonical.openToolVisit()
+          ..pin('anonymous', false);
+        local.reasoningPins.pin('reasoning', true);
+        final writer = canonical.openWriter()..edit('newer canonical draft');
+        if (reverse) {
+          registry.bind('stored', 'local');
+        } else {
+          registry.bind('local', 'stored');
+        }
+        canonical.aliasTool('anonymous', 'tool:learned');
+        expect(localVisit['tool:learned'], isTrue);
+        expect(canonicalVisit['tool:learned'], isFalse);
+        expect(await writer.read(), 'newer canonical draft');
+        local.closeToolVisit(localVisit);
+        expect(localVisit.length, 0);
+        expect(canonicalVisit['tool:learned'], isFalse);
+        final reopened = local.openToolVisit();
+        expect(reopened['anonymous'], isNull);
+        expect(reopened['tool:learned'], isNull);
+        expect(canonical.reasoningPins['reasoning'], isTrue);
+        canonical.aliasTool('next-local', 'tool:next');
+        reopened.pin('next-local', true);
+        expect(reopened['tool:next'], isTrue);
+        expect(canonicalVisit['tool:next'], isNull);
+        await writer.close();
+        registry.close();
+        expect(reopened.length, 0);
+        expect(canonicalVisit.length, 0);
+        expect(() => local.openToolVisit(), throwsStateError);
+      },
+    );
+  }
 }
 
 Future<String?> _read() =>
