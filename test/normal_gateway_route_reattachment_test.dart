@@ -24,10 +24,17 @@ import 'package:hermes_android/core/widgets/delegated_task_timeline.dart';
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({'verbose_mode': false}));
 
-  for (final following in [true, false]) {
+  for (final (following, width) in [
+    (true, 400.0),
+    (false, 400.0),
+    (true, 1000.0),
+    (false, 1000.0),
+  ]) {
     testWidgets(
-      'owner stream updates open task aliases and final history without changing parent (following=$following)',
+      'owner stream updates open task aliases and final history without changing parent (following=$following, width=$width)',
       (tester) async {
+        await tester.binding.setSurfaceSize(Size(width, 800));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
         final controller = GatewayTurnApplicationController();
         addTearDown(controller.close);
         final remote = _Remote();
@@ -142,6 +149,20 @@ void main() {
         await tester.pump();
         expect(history.requests.last, ('child-root', 'child-tip'));
         expect(
+          overlay.controller.rows.single['content'],
+          'Recorded child final',
+        );
+        await tester.scrollUntilVisible(
+          find.text('Recorded child final', findRichText: true),
+          200,
+          scrollable: find
+              .descendant(
+                of: find.byType(DelegatedTaskTimeline),
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        );
+        expect(
           find.text('Recorded child final', findRichText: true),
           findsOneWidget,
         );
@@ -161,7 +182,11 @@ void main() {
               .text,
           'Keep next draft',
         );
-        await tester.tap(find.widgetWithText(TextButton, 'Close'));
+        if (following) {
+          await tester.tap(find.widgetWithText(TextButton, 'Close'));
+        } else {
+          await tester.binding.handlePopRoute();
+        }
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 350));
         expect(history.closed, isTrue);
