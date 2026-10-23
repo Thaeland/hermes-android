@@ -30,6 +30,8 @@ abstract interface class GatewayTurnApplicationSession {
     DesktopAsyncEventCallback listener,
   );
 
+  /// Detaches only this owner's exact registration. Safe after [close], even
+  /// while asynchronous cleanup is pending; it never acquires a new owner.
   void removeAsyncEventListener(String localSessionId, Object registration);
 
   /// Registers the mounted owner of one local session's terminal callbacks.
@@ -435,7 +437,10 @@ class _CoordinatorGatewayTurnApplicationSession
 
   @override
   void removeAsyncEventListener(String localSessionId, Object registration) {
-    _requireOpen();
+    // close() synchronously clears this owner's registrations/dispatcher.
+    // A retained route may detach later, including during registry shutdown.
+    // Cleanup is not admission and must not touch a replacement's requests.
+    if (_closed) return;
     final current = _asyncEventListeners[localSessionId];
     if (current == null || !identical(current.token, registration)) return;
     _asyncEventListeners.remove(localSessionId);
