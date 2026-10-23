@@ -522,6 +522,7 @@
   "titles_previews_and_models": "タイトル・プレビュー・モデル",
   "tool_activity": "ツールのアクティビティ",
   "trigger_now": "今すぐ実行",
+  "received_outcome_unknown": "ターン終了 — 結果未確認",
   "turn_completed": "ターン完了",
   "turn_failed": "ターン失敗",
   "turn_failed_description": "バックグラウンドのターンがエラーで終了しました。",

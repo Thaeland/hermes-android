@@ -522,6 +522,7 @@
   "titles_previews_and_models": "Titres, aperçus et modèles",
   "tool_activity": "Activité des outils",
   "trigger_now": "Déclencher maintenant",
+  "received_outcome_unknown": "Tour terminé — résultat non confirmé",
   "turn_completed": "Tour terminé",
   "turn_failed": "Échec du tour",
   "turn_failed_description": "Un tour en arrière-plan s’est terminé par une erreur.",

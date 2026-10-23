@@ -1901,6 +1901,10 @@ class AppLocalizationsRu extends AppLocalizations {
   String get trigger_now => 'Запустить сейчас';
 
   @override
+  String get received_outcome_unknown =>
+      'Ход завершён — результат не подтверждён';
+
+  @override
   String get turn_completed => 'Ход завершён';
 
   @override

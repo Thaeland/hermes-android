@@ -522,6 +522,7 @@
   "titles_previews_and_models": "标题、预览与模型",
   "tool_activity": "工具活动",
   "trigger_now": "立即触发",
+  "received_outcome_unknown": "本轮对话已结束 — 结果未确认",
   "turn_completed": "本轮对话已完成",
   "turn_failed": "对话失败",
   "turn_failed_description": "后台对话以错误结束。",

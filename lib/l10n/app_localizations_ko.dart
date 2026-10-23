@@ -1854,6 +1854,9 @@ class AppLocalizationsKo extends AppLocalizations {
   String get trigger_now => '지금 트리거';
 
   @override
+  String get received_outcome_unknown => '턴 종료 — 결과 미확인';
+
+  @override
   String get turn_completed => '턴 완료';
 
   @override

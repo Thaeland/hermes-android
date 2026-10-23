@@ -1911,6 +1911,9 @@ class AppLocalizationsFr extends AppLocalizations {
   String get trigger_now => 'Déclencher maintenant';
 
   @override
+  String get received_outcome_unknown => 'Tour terminé — résultat non confirmé';
+
+  @override
   String get turn_completed => 'Tour terminé';
 
   @override

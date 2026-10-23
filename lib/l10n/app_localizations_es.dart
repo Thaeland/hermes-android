@@ -1906,6 +1906,10 @@ class AppLocalizationsEs extends AppLocalizations {
   String get trigger_now => 'Ejecutar ahora';
 
   @override
+  String get received_outcome_unknown =>
+      'Turno finalizado — resultado sin confirmar';
+
+  @override
   String get turn_completed => 'Turno completado';
 
   @override

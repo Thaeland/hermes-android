@@ -3310,6 +3310,12 @@ abstract class AppLocalizations {
   /// **'Trigger now'**
   String get trigger_now;
 
+  /// No description provided for @received_outcome_unknown.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn ended — outcome unconfirmed'**
+  String get received_outcome_unknown;
+
   /// No description provided for @turn_completed.
   ///
   /// In en, this message translates to:

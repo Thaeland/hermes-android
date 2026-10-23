@@ -530,6 +530,7 @@
   "titles_previews_and_models": "Titles, previews, and models",
   "tool_activity": "Tool activity",
   "trigger_now": "Trigger now",
+  "received_outcome_unknown": "Turn ended — outcome unconfirmed",
   "turn_completed": "Turn completed",
   "turn_failed": "Turn failed",
   "turn_failed_description": "A background turn ended with an error.",

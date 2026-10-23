@@ -618,6 +618,7 @@ Future<void> widgetUntil(WidgetTester tester, bool Function() condition) async {
 
 class BindingServer {
   final HttpServer server;
+  void Function(WebSocket socket, Map frame)? observeClientFrame;
   final sockets = <WebSocket>[];
   final createEntered = Completer<void>();
   late void Function() releaseCreate;
@@ -678,6 +679,7 @@ class BindingServer {
     socket.listen((raw) {
       if (_closed) return;
       final frame = jsonDecode(raw as String) as Map;
+      observeClientFrame?.call(socket, frame);
       final method = frame['method'];
       if (method == null) return;
       final result = <String, dynamic>{'jsonrpc': '2.0', 'id': frame['id']};

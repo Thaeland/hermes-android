@@ -1,4 +1,5 @@
 import '../models/chat_timeline.dart';
+import '../models/received_scope_outcome.dart';
 import '../models/gateway_activity.dart';
 import '../models/gateway_insight.dart';
 import 'message_content.dart';
@@ -7,11 +8,25 @@ import 'message_content.dart';
 enum ChatDisplaySource { canonical, received, auxiliary }
 
 class ChatDisplaySection {
-  ChatDisplaySection({required this.source, required List<dynamic> items})
-    : items = List<dynamic>.unmodifiable(items);
+  ChatDisplaySection({
+    required this.source,
+    required List<dynamic> items,
+    Map<Object, ReceivedScopeOutcome> outcomes = const {},
+  }) : items = List<dynamic>.unmodifiable(items),
+       outcomes = Map.unmodifiable(outcomes);
 
   final ChatDisplaySource source;
   final List<dynamic> items;
+  final Map<Object, ReceivedScopeOutcome> outcomes;
+
+  ChatDisplaySection withReceivedOutcomes(
+    ChatTimeline timeline,
+    List<ReceivedScopeOutcome> facts,
+  ) => ChatDisplaySection(
+    source: source,
+    items: items,
+    outcomes: _receivedOutcomeAnchors(items, timeline, facts),
+  );
 }
 
 /// Two independent source-local projections, not a cross-channel chronology.
@@ -21,6 +36,7 @@ List<ChatDisplaySection> buildNormalChatDisplaySections({
   List<GatewayToolActivity> canonicalTools = const [],
   List<GatewayToolActivity> receivedTools = const [],
   required ChatTimeline receivedTimeline,
+  List<ReceivedScopeOutcome> receivedOutcomes = const [],
   List<GatewaySubagentActivity> subagentActivities = const [],
   List<GatewayNotice> notices = const [],
   bool verbose = false,
@@ -42,7 +58,7 @@ List<ChatDisplaySection> buildNormalChatDisplaySections({
         timeline: receivedTimeline,
         verbose: verbose,
       ),
-    ),
+    ).withReceivedOutcomes(receivedTimeline, receivedOutcomes),
     ChatDisplaySection(
       source: ChatDisplaySource.auxiliary,
       items: [
@@ -54,6 +70,36 @@ List<ChatDisplaySection> buildNormalChatDisplaySections({
   ])
     if (section.items.isNotEmpty) section,
 ]);
+
+Map<Object, ReceivedScopeOutcome> _receivedOutcomeAnchors(
+  List<dynamic> items,
+  ChatTimeline timeline,
+  List<ReceivedScopeOutcome> outcomes,
+) {
+  final runScopes = {for (final run in timeline.runs) run.id: run.scope};
+  // Imported reducers can reuse public tool IDs. The projected card contains
+  // these exact activity objects; sibling string IDs are not scope authority.
+  final toolScopes = Map<GatewayToolActivity, Object>.identity();
+  for (final run in timeline.runs) {
+    if (run.activity != null) toolScopes[run.activity!] = run.scope;
+  }
+  final emitted = <String>{};
+  return {
+    for (final item in items)
+      for (final fact in outcomes)
+        if (!emitted.contains(fact.id) &&
+            (item is Map<String, dynamic> &&
+                    fact.scopes.contains(item['_normal_projection_id']) ||
+                item is ChatReasoningItem &&
+                    fact.scopes.contains(runScopes[item.id]) ||
+                item is ChatToolActivityGroup &&
+                    item.activities.any(
+                      (tool) => fact.scopes.contains(toolScopes[tool]),
+                    )) &&
+            emitted.add(fact.id))
+          chatDisplayItemIdentity(item): fact,
+  };
+}
 
 /// Stable within its source; anonymous saved rows deliberately have no inferred
 /// correspondence across physical observations. Inner card/pin IDs are unchanged.

@@ -522,6 +522,7 @@
   "titles_previews_and_models": "Titel, Vorschauen und Modelle",
   "tool_activity": "Tool-Aktivität",
   "trigger_now": "Jetzt auslösen",
+  "received_outcome_unknown": "Turn beendet — Ergebnis unbestätigt",
   "turn_completed": "Turn abgeschlossen",
   "turn_failed": "Durchlauf fehlgeschlagen",
   "turn_failed_description": "Ein Durchlauf im Hintergrund endete mit einem Fehler.",

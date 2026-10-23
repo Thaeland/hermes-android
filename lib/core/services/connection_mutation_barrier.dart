@@ -7,6 +7,11 @@ class ConnectionMutationBarrier {
 
   static final _epochs = <String, Object>{};
   static final _pending = <String, int>{};
+  static final _listeners = <void Function()>{};
+
+  static void addListener(void Function() listener) => _listeners.add(listener);
+  static void removeListener(void Function() listener) =>
+      _listeners.remove(listener);
 
   static Object? capture(String id) => _epochs[id];
   static bool isPending(String id) => _pending.containsKey(id);
@@ -19,6 +24,9 @@ class ConnectionMutationBarrier {
     for (final id in ids) {
       _epochs[id] = Object();
       _pending[id] = (_pending[id] ?? 0) + 1;
+    }
+    for (final listener in _listeners.toList()) {
+      listener();
     }
     return ConnectionMutationLease._(ids);
   }

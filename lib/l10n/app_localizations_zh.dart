@@ -1838,6 +1838,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get trigger_now => '立即触发';
 
   @override
+  String get received_outcome_unknown => '本轮对话已结束 — 结果未确认';
+
+  @override
   String get turn_completed => '本轮对话已完成';
 
   @override
@@ -4491,6 +4494,9 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get trigger_now => '立即触发';
+
+  @override
+  String get received_outcome_unknown => '本轮对话已结束 — 结果未确认';
 
   @override
   String get turn_completed => '本轮对话已完成';

@@ -522,6 +522,7 @@
   "titles_previews_and_models": "Títulos, pré-visualizações e modelos",
   "tool_activity": "Atividade de ferramentas",
   "trigger_now": "Acionar agora",
+  "received_outcome_unknown": "Turno encerrado — resultado não confirmado",
   "turn_completed": "Turno concluído",
   "turn_failed": "Turno falhou",
   "turn_failed_description": "Um turno em segundo plano terminou com erro.",

@@ -35,12 +35,14 @@ import '../services/gateway_turn_recovery.dart';
 import '../services/gateway_turn_ui_projection.dart';
 import '../services/remote_files_client.dart';
 import '../services/turn_notification_service.dart';
+import '../services/notification_approval_authority.dart';
 import '../services/notification_prefs.dart';
 import '../services/voice_composer_adapter.dart';
 import '../services/ws_client.dart';
 import '../utils/media_tags.dart';
 import '../models/attachment_draft.dart';
 import '../models/chat_timeline.dart';
+import '../models/received_scope_outcome.dart';
 import '../models/gateway_activity.dart';
 import '../models/gateway_approval.dart';
 import '../models/gateway_clarify.dart';
@@ -447,6 +449,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   NormalGatewayApplicationSession? _normalSession;
   NormalGatewayChatOwner? _normalChat;
   NormalGatewayChatSnapshot? _normalSnapshot;
+  late final Map<String, String> _notificationApprovalOrigin;
   Object? _normalSubscription;
   Object? _normalReservation;
   String? _normalTurnId;
@@ -565,6 +568,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    _notificationApprovalOrigin = NotificationApprovalAuthority.origin(
+      widget.connection,
+    );
     _sessionTitle = widget.session.title;
     WidgetsBinding.instance.addObserver(this);
     _projectName = _normalisedProjectName(widget.projectName);
@@ -1403,6 +1409,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           buffer.writeln('${context.l10n.received_output_lifetime}\n');
         }
         for (final item in section.items) {
+          final fact = section.outcomes[chatDisplayItemIdentity(item)];
+          if (fact != null) {
+            buffer.writeln('${_receivedOutcomeLabel(fact.outcome)}\n');
+          }
           if (item is Map<String, dynamic>) {
             _writeExportMessage(buffer, item, localPrompt: received);
           } else if (item is ChatReasoningItem) {
@@ -1613,6 +1623,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           'sessionId': widget.session.id,
           'connectionId': widget.connection.id,
           'requestId': serverRequestId,
+          ..._notificationApprovalOrigin,
         }),
       ),
     );
@@ -3991,30 +4002,44 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _respondToGatewayApproval(
     String choice, {
     String? requestId,
+    bool Function()? isCurrent,
   }) async {
+    final normal = _normalSession;
+    final recovery = _turnApplicationSession;
+    final gateway = _desktopGateway;
+    final sessionId = widget.session.id;
+    final localSessionId = _normalLocalSessionKey;
+    void check() {
+      if (isCurrent != null && !isCurrent()) {
+        throw StateError('Approval authority was revoked.');
+      }
+    }
+
+    check();
     if (requestId != null &&
-        await _normalSession?.tryRespondToApproval(
-              sessionId: widget.session.id,
+        await normal?.tryRespondToApproval(
+              sessionId: sessionId,
               requestId: requestId,
               choice: choice,
             ) ==
             true) {
       return;
     }
+    check();
     final handled =
-        await _turnApplicationSession?.tryRespondToApproval(
-          sessionId: widget.session.id,
+        await recovery?.tryRespondToApproval(
+          sessionId: sessionId,
           choice: choice,
           requestId: requestId,
         ) ??
         false;
     if (handled) return;
-    final gateway = _desktopGateway;
+    check();
     if (gateway == null) {
       throw StateError('The Desktop gateway session is no longer connected');
     }
     await gateway.respondToApproval(
-      sessionId: _normalLocalSessionKey,
+      sessionId: localSessionId,
       choice: choice,
       serverRequestId: requestId,
     );
@@ -4025,10 +4050,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// answer: a cold start (no route-local session yet) or a throw keeps the
   /// tap pending for a later retry instead of losing it.
   void _consumePendingNotificationApproval() {
+    prunePendingNotificationApprovals();
     final mine = [
       for (final approval in pendingNotificationApprovals.value)
         if (approval.connectionId == widget.connection.id &&
-            approval.sessionId == widget.session.id)
+            approval.sessionId == widget.session.id &&
+            approval.authority?.isCurrentFor(widget.connection) == true)
           approval,
     ];
     for (final approval in mine) {
@@ -4038,28 +4065,35 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   /// Approvals whose answer is in flight, so a notifier change cannot
   /// dispatch the same request twice.
-  final Set<String> _answeringPendingApprovals = {};
-
   Future<void> _answerPendingNotificationApproval(
     PendingNotificationApproval approval,
   ) async {
-    final key =
-        '${approval.connectionId}|${approval.sessionId}|${approval.requestId}';
-    if (_answeringPendingApprovals.contains(key)) return;
-    _answeringPendingApprovals.add(key);
+    if (!claimNotificationApproval(approval)) return;
+    final account = _historyAccountKey;
+    final sessionId = widget.session.id;
+    bool current() =>
+        mounted &&
+        account == _historyAccountKey &&
+        sessionId == widget.session.id &&
+        approval.authority?.isCurrentFor(widget.connection) == true &&
+        pendingNotificationApprovals.value.any(
+          (item) => identical(item, approval),
+        );
     try {
+      if (!await approval.authority!.validate() || !current()) return;
       // The normal approval path: route-local turn session first, then the
       // desktop gateway. A throw means the route-local gateway is not up
       // yet (cold start/reconnect) — keep the entry and retry later.
       await _respondToGatewayApproval(
         approval.choice,
         requestId: approval.requestId,
+        isCurrent: current,
       );
       removePendingNotificationApproval(approval);
     } catch (_) {
       // Unresolved, not answered: keep the entry for a later retry.
     } finally {
-      _answeringPendingApprovals.remove(key);
+      releaseNotificationApproval(approval);
     }
   }
 
@@ -5392,6 +5426,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         canonicalTools: _toolActivities,
         receivedTools: _normalSnapshot?.tools ?? const [],
         receivedTimeline: _normalSnapshot?.timeline ?? const ChatTimeline(),
+        receivedOutcomes: _normalSnapshot?.receivedOutcomes ?? const [],
         subagentActivities: _subagentActivities,
         notices: _gatewayNotices,
         verbose: _verboseMode,
@@ -5427,11 +5462,26 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildReceivedCell(dynamic item, Widget child) {
+  String _receivedOutcomeLabel(ReceivedLifecycleOutcome outcome) =>
+      switch (outcome) {
+        ReceivedLifecycleOutcome.completed => context.l10n.turn_completed,
+        ReceivedLifecycleOutcome.failed => context.l10n.turn_failed,
+        ReceivedLifecycleOutcome.unknown =>
+          context.l10n.received_outcome_unknown,
+      };
+
+  Widget _buildReceivedCell(
+    dynamic item,
+    Widget child,
+    ReceivedScopeOutcome? fact,
+  ) {
     final localPrompt = item is Map<String, dynamic> && item['role'] == 'user';
-    final label = localPrompt
+    final provenance = localPrompt
         ? context.l10n.local_prompt_context
         : context.l10n.received_output_badge;
+    final label = fact == null
+        ? provenance
+        : '${_receivedOutcomeLabel(fact.outcome)} · $provenance';
     // Separate semantics node: do not merge away ExpansionTile/actions, or put
     // changing streamed content into a live-region announcement.
     return Column(
@@ -5441,7 +5491,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
           child: Semantics(
             container: true,
-            child: Text(label, style: Theme.of(context).textTheme.labelSmall),
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelSmall,
+            ),
           ),
         ),
         child,
@@ -5605,6 +5660,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         for (var i = 0; i < displayMessages.length; i++)
           (source: null, item: displayMessages[i], key: ValueKey(i)),
     ];
+    final receivedOutcomes = <Object, ReceivedScopeOutcome>{
+      for (final section in sections)
+        if (section.source == ChatDisplaySource.received) ...section.outcomes,
+    };
     final cellIndices = <Key, int>{
       for (var i = 0; i < cells.length; i++)
         cells[i].key: i + (_historyWindow.hasOlder ? 1 : 0),
@@ -5659,7 +5718,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             return KeyedSubtree(
               key: cell.key,
               child: cell.source == ChatDisplaySource.received
-                  ? _buildReceivedCell(cell.item, child)
+                  ? _buildReceivedCell(
+                      cell.item,
+                      child,
+                      receivedOutcomes[chatDisplayItemIdentity(cell.item)],
+                    )
                   : child,
             );
           },

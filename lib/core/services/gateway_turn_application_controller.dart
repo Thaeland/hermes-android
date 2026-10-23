@@ -12,6 +12,7 @@ import 'normal_gateway_application_session.dart';
 import 'connection_manager.dart';
 import 'chat_presentation_state.dart';
 import 'turn_notification_service.dart';
+import 'connection_mutation_barrier.dart';
 
 typedef GatewayTurnApplicationSessionFactory =
     GatewayTurnApplicationSession Function(SavedConnection connection);
@@ -135,6 +136,7 @@ class GatewayTurnApplicationController {
   static final standalone = GatewayTurnApplicationController();
   final GatewayTurnApplicationSessionFactory _sessionFactory;
   final Map<String, GatewayTurnApplicationSession> _sessions = {};
+  final Map<String, Object?> _sessionMutations = {};
   final Map<String, NormalGatewayApplicationSession> _normalSessions = {};
   final Map<String, String> _normalScopeByConnection = {};
   final Map<String, ChatPresentationRegistry> _presentations = {};
@@ -159,6 +161,18 @@ class GatewayTurnApplicationController {
   GatewayTurnApplicationSession sessionFor(SavedConnection connection) {
     if (_closed) throw StateError('Gateway turn application owner is closed.');
     final key = _connectionScopeKey(connection);
+    if (_sessionMutations.containsKey(key) &&
+        !ConnectionMutationBarrier.isCurrent(
+          connection.id,
+          _sessionMutations[key],
+        )) {
+      final previous = _sessions.remove(key);
+      if (previous != null) {
+        _forwardedSessions.remove(previous);
+        unawaited(previous.close());
+      }
+    }
+    _sessionMutations[key] = ConnectionMutationBarrier.capture(connection.id);
     final session = _sessions.putIfAbsent(
       key,
       () => _sessionFactory(connection),
@@ -195,7 +209,8 @@ class GatewayTurnApplicationController {
     if (_closed) throw StateError('Gateway turn application owner is closed.');
     final key = _connectionScopeKey(connection);
     final old = _normalScopeByConnection[connection.id];
-    if (old != null && old != key) {
+    if (old != null &&
+        (old != key || _normalSessions[old]?.hasCurrentAccount == false)) {
       final previous = _normalSessions.remove(old);
       if (previous != null) unawaited(previous.close());
       _notifyActivityListeners();
@@ -345,6 +360,7 @@ class GatewayTurnApplicationController {
     _normalScopeByConnection.clear();
     _legacyTurns.clear();
     _sessions.clear();
+    _sessionMutations.clear();
     // Listeners must observe the true→false flip even when both a legacy
     // send and a retained recovery session were active at shutdown.
     if (hadTrackedTurns) _notifyActivityListeners();

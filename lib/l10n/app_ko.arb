@@ -522,6 +522,7 @@
   "titles_previews_and_models": "제목, 미리보기 및 모델",
   "tool_activity": "도구 활동",
   "trigger_now": "지금 트리거",
+  "received_outcome_unknown": "턴 종료 — 결과 미확인",
   "turn_completed": "턴 완료",
   "turn_failed": "턴 실패",
   "turn_failed_description": "백그라운드 턴이 오류로 종료되었습니다.",

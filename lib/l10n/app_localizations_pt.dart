@@ -1907,6 +1907,10 @@ class AppLocalizationsPt extends AppLocalizations {
   String get trigger_now => 'Acionar agora';
 
   @override
+  String get received_outcome_unknown =>
+      'Turno encerrado — resultado não confirmado';
+
+  @override
   String get turn_completed => 'Turno concluído';
 
   @override
@@ -4651,6 +4655,10 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get trigger_now => 'Acionar agora';
+
+  @override
+  String get received_outcome_unknown =>
+      'Turno encerrado — resultado não confirmado';
 
   @override
   String get turn_completed => 'Turno concluído';

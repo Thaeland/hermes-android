@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../l10n/app_localizations.dart';
 import '../l10n/l10n.dart' show resolvePreferredLocale;
 import 'notification_prefs.dart';
+import 'notification_approval_authority.dart';
 
 /// Delivered to the app root when the user taps a notification body or one of
 /// its action buttons. Set once by the root widget; every service instance
@@ -849,6 +850,8 @@ class NotificationRoute {
   final String? actionId;
   final String? localSessionId;
   final String? turnId;
+  final String? approvalAccount;
+  final String? approvalMutation;
 
   const NotificationRoute({
     this.sessionId,
@@ -857,6 +860,8 @@ class NotificationRoute {
     this.actionId,
     this.localSessionId,
     this.turnId,
+    this.approvalAccount,
+    this.approvalMutation,
   });
 
   static NotificationRoute fromResponse(NotificationResponse response) {
@@ -865,6 +870,8 @@ class NotificationRoute {
     String? requestId;
     String? localSessionId;
     String? turnId;
+    String? approvalAccount;
+    String? approvalMutation;
     final raw = response.payload;
     if (raw != null && raw.isNotEmpty) {
       try {
@@ -875,6 +882,8 @@ class NotificationRoute {
           requestId = decoded['requestId']?.toString();
           localSessionId = decoded['localSessionId']?.toString();
           turnId = decoded['turnId']?.toString();
+          approvalAccount = decoded['approvalAccount'] as String?;
+          approvalMutation = decoded['approvalMutation'] as String?;
         }
       } catch (_) {
         // A plain-string payload (older turns) carries only the turn id.
@@ -887,6 +896,8 @@ class NotificationRoute {
       actionId: response.actionId,
       localSessionId: localSessionId,
       turnId: turnId,
+      approvalAccount: approvalAccount,
+      approvalMutation: approvalMutation,
     );
   }
 
@@ -909,11 +920,16 @@ class PendingNotificationApproval {
   final String requestId;
   final String choice;
 
+  /// Optional only for decoding/legacy fixture compatibility. Unscoped entries
+  /// have no automatic-answer authority and are never admitted to the queue.
+  final NotificationApprovalAuthority? authority;
+
   const PendingNotificationApproval({
     required this.connectionId,
     required this.sessionId,
     required this.requestId,
     required this.choice,
+    this.authority,
   });
 }
 
@@ -925,14 +941,18 @@ class PendingNotificationApproval {
 final ValueNotifier<List<PendingNotificationApproval>>
 pendingNotificationApprovals = ValueNotifier(const []);
 
-/// Queues [approval], deduplicating by connection + session + request.
+/// Queues only live captured authority; deduplication stays inside that exact
+/// account/mutation/owner plus session/request, never across replacements.
 void addPendingNotificationApproval(PendingNotificationApproval approval) {
+  if (approval.authority?.isCurrent != true) return;
+  prunePendingNotificationApprovals();
   final existing = pendingNotificationApprovals.value;
   final duplicate = existing.any(
     (item) =>
         item.connectionId == approval.connectionId &&
         item.sessionId == approval.sessionId &&
-        item.requestId == approval.requestId,
+        item.requestId == approval.requestId &&
+        item.authority?.sameCapture(approval.authority!) == true,
   );
   if (duplicate) return;
   pendingNotificationApprovals.value = [...existing, approval];
@@ -940,11 +960,43 @@ void addPendingNotificationApproval(PendingNotificationApproval approval) {
 
 /// Removes [approval] once its owner confirmed it was answered.
 void removePendingNotificationApproval(PendingNotificationApproval approval) {
+  if (!pendingNotificationApprovals.value.any(
+    (item) => identical(item, approval),
+  )) {
+    return;
+  }
   pendingNotificationApprovals.value = [
     for (final item in pendingNotificationApprovals.value)
-      if (item.connectionId != approval.connectionId ||
-          item.sessionId != approval.sessionId ||
-          item.requestId != approval.requestId)
-        item,
+      if (!identical(item, approval)) item,
   ];
 }
+
+void prunePendingNotificationApprovals() {
+  final existing = pendingNotificationApprovals.value;
+  final current = existing
+      .where((item) => item.authority?.isCurrent == true)
+      .toList();
+  if (current.length != existing.length) {
+    pendingNotificationApprovals.value = current;
+  }
+}
+
+final _answeringNotificationApprovals = <PendingNotificationApproval>{};
+
+bool claimNotificationApproval(PendingNotificationApproval approval) {
+  if (approval.authority?.isCurrent != true ||
+      _answeringNotificationApprovals.any(
+        (item) =>
+            item.authority?.isCurrent == true &&
+            item.connectionId == approval.connectionId &&
+            item.sessionId == approval.sessionId &&
+            item.requestId == approval.requestId &&
+            item.authority!.sameCapture(approval.authority!),
+      )) {
+    return false;
+  }
+  return _answeringNotificationApprovals.add(approval);
+}
+
+void releaseNotificationApproval(PendingNotificationApproval approval) =>
+    _answeringNotificationApprovals.remove(approval);

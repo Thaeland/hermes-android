@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:uuid/uuid.dart';
 
 import '../models/chat_timeline.dart';
+import '../models/received_scope_outcome.dart';
 import '../models/gateway_activity.dart';
 import '../models/gateway_insight.dart';
 import 'connection_manager.dart';
@@ -13,6 +14,8 @@ import 'desktop_gateway_client.dart';
 import 'normal_gateway_pending_store.dart';
 import 'notification_prefs.dart';
 import 'turn_notification_service.dart';
+import 'notification_approval_authority.dart';
+import 'connection_mutation_barrier.dart';
 import 'ws_client.dart';
 
 typedef NormalGatewayPromptSubmit =
@@ -80,6 +83,7 @@ class NormalGatewayChatSnapshot {
   final String? rejectedDraft;
   final DesktopConnectionState connectionState;
   final ChatTimeline timeline;
+  final List<ReceivedScopeOutcome> receivedOutcomes;
   const NormalGatewayChatSnapshot({
     required this.turnId,
     required this.storedSessionId,
@@ -98,6 +102,7 @@ class NormalGatewayChatSnapshot {
     required this.rejectedDraft,
     required this.connectionState,
     this.timeline = const ChatTimeline(),
+    this.receivedOutcomes = const [],
   });
   bool get hasActiveTurn => const {
     NormalGatewayTurnPhase.preparing,
@@ -112,6 +117,8 @@ class NormalGatewayChatSnapshot {
 /// Routes only subscribe; this object owns ingress, recovery and notifications.
 class NormalGatewayApplicationSession {
   final SavedConnection connection;
+  final Map<String, String> _approvalOrigin;
+  final Object? _accountMutation;
   final String scope;
   final DesktopGatewayClient? client;
   final ApiClient? _historyClient;
@@ -151,6 +158,8 @@ class NormalGatewayApplicationSession {
     this.onActivityChanged,
     this.presentation,
   }) : client = client,
+       _approvalOrigin = NotificationApprovalAuthority.origin(connection),
+       _accountMutation = ConnectionMutationBarrier.capture(connection.id),
        _historyClient = historyClient,
        pendingStore = pendingStore ?? NormalGatewayPendingStore(),
        notifications = notifications ?? TurnNotificationService.shared,
@@ -516,17 +525,21 @@ class NormalGatewayApplicationSession {
     required String choice,
   }) async {
     final chat = _aliases[sessionId];
-    if (chat == null ||
+    if (_closed ||
+        chat == null ||
         !ownsApprovalRequest(sessionId: sessionId, requestId: requestId)) {
       return false;
     }
+    final pending = chat._pendingInput[requestId];
     await client!.respondToApproval(
       sessionId: chat.localSessionId,
       choice: choice,
       serverRequestId: requestId,
     );
-    chat._pendingInput.remove(requestId);
-    chat._notify();
+    if (!_closed && identical(chat._pendingInput[requestId], pending)) {
+      chat._pendingInput.remove(requestId);
+      chat._notify();
+    }
     return true;
   }
 
@@ -539,6 +552,7 @@ class NormalGatewayApplicationSession {
   Future<void> close() async {
     if (_closed) return;
     _closed = true; // synchronous fence before any resource cleanup
+    prunePendingNotificationApprovals();
     _retirementTimer?.cancel();
     _retirementTimer = null;
     for (final chat in chats) {
@@ -547,6 +561,11 @@ class NormalGatewayApplicationSession {
     client?.close();
     _historyClient?.close();
   }
+
+  bool get isClosed => _closed;
+  bool get hasCurrentAccount =>
+      !_closed &&
+      ConnectionMutationBarrier.isCurrent(connection.id, _accountMutation);
 }
 
 class NormalGatewayChatOwner {
@@ -583,6 +602,7 @@ class NormalGatewayChatOwner {
   final List<Map<String, dynamic>> _display = [];
   final List<Map<String, dynamic>> _priorDisplay = [];
   final List<_SettledGatewayPresentation> _settledPresentation = [];
+  final List<ReceivedScopeOutcome> _receivedOutcomes = [];
   int? _receivedObservation;
   List<Map<String, dynamic>> _history = [];
   bool _historyKnown = false;
@@ -671,6 +691,10 @@ class NormalGatewayChatOwner {
           timeline: _timeline.precededBy(
             _settledPresentation.map((settled) => settled.timeline),
           ),
+          receivedOutcomes: List.unmodifiable([
+            for (final settled in _settledPresentation) ...settled.outcomes,
+            ..._receivedOutcomes,
+          ]),
         );
 
   void bindStoredSession(String storedSessionId) {
@@ -776,10 +800,12 @@ class NormalGatewayChatOwner {
           rows: retainedRows.map(Map<String, dynamic>.from).toList(),
           tools: List.of(other._tools),
           timeline: other._timeline,
+          outcomes: List.of(other._receivedOutcomes),
         ),
       );
     }
     other._settledPresentation.clear();
+    other._receivedOutcomes.clear();
     _settledPresentation.sort((a, b) => a.observation.compareTo(b.observation));
     _boundSettledPresentation();
   }
@@ -814,9 +840,28 @@ class NormalGatewayChatOwner {
                 (sum, t) => sum + t.retainedToolIdentityCount,
               ) <=
               ChatTimeline.maxEvictedTools) {
-        return;
+        break;
       }
       _settledPresentation.removeAt(0);
+    }
+    // Metadata shares retained anchors' lifetime, not an independent journal.
+    final retained = <Object>{
+      for (final row in [..._priorDisplay, ..._display])
+        if (row['_normal_projection_id'] != null) row['_normal_projection_id']!,
+      for (final run in _timeline.runs) run.scope,
+    };
+    for (var i = _receivedOutcomes.length - 1; i >= 0; i--) {
+      final fact = _receivedOutcomes[i];
+      final scopes = fact.scopes.where(retained.contains).toSet();
+      if (scopes.isEmpty) {
+        _receivedOutcomes.removeAt(i);
+      } else if (scopes.length != fact.scopes.length) {
+        _receivedOutcomes[i] = ReceivedScopeOutcome(
+          id: fact.id,
+          scopes: scopes,
+          outcome: fact.outcome,
+        );
+      }
     }
   }
 
@@ -1728,7 +1773,23 @@ class NormalGatewayChatOwner {
         );
       }
       // Successful lifecycle settlement cannot establish an HTTP row match.
+      if (wireEmitted && turnId != null && _display.isNotEmpty) {
+        _receivedOutcomes.add(
+          ReceivedScopeOutcome(
+            id: turnId!,
+            scopes: _display
+                .map((row) => row['_normal_projection_id'])
+                .whereType<String>(),
+            outcome: completed == null
+                ? ReceivedLifecycleOutcome.unknown
+                : completed
+                ? ReceivedLifecycleOutcome.completed
+                : ReceivedLifecycleOutcome.failed,
+          ),
+        );
+      }
       _cleanCompletedEmptySubmission(_history);
+      _boundSettledPresentation();
       _error = error;
       _status = completed == null
           ? const GatewayTurnStatus(
@@ -1854,6 +1915,7 @@ class NormalGatewayChatOwner {
               'sessionId': storedSessionId ?? localSessionId,
               'connectionId': _session.connection.id,
               'requestId': requestId,
+              ..._session._approvalOrigin,
             }),
           )
           .catchError((Object _) => false),
@@ -1959,6 +2021,7 @@ class NormalGatewayChatOwner {
     _display.clear();
     _priorDisplay.clear();
     _settledPresentation.clear();
+    _receivedOutcomes.clear();
     _timeline = _timeline.clear();
     _tools.clear();
     _subagents.clear();
@@ -2028,11 +2091,13 @@ class _SettledGatewayPresentation {
     required this.rows,
     required this.tools,
     required this.timeline,
+    required this.outcomes,
   });
   final int observation;
   final List<Map<String, dynamic>> rows;
   final List<GatewayToolActivity> tools;
   final ChatTimeline timeline;
+  final List<ReceivedScopeOutcome> outcomes;
 }
 
 bool _interactive(String type) => const {

@@ -1853,6 +1853,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get trigger_now => '今すぐ実行';
 
   @override
+  String get received_outcome_unknown => 'ターン終了 — 結果未確認';
+
+  @override
   String get turn_completed => 'ターン完了';
 
   @override

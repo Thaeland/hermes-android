@@ -522,6 +522,7 @@
   "titles_previews_and_models": "Заголовки, предпросмотры и модели",
   "tool_activity": "Активность инструментов",
   "trigger_now": "Запустить сейчас",
+  "received_outcome_unknown": "Ход завершён — результат не подтверждён",
   "turn_completed": "Ход завершён",
   "turn_failed": "Ход не удался",
   "turn_failed_description": "Фоновый ход завершился с ошибкой.",

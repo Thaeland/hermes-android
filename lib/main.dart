@@ -16,6 +16,8 @@ import 'core/services/background_work_prefs.dart';
 import 'core/services/gateway_turn_application_controller.dart';
 import 'core/services/local_chat_pin_store.dart';
 import 'core/services/mobile_push_service.dart';
+import 'core/services/notification_approval_authority.dart';
+import 'core/services/connection_mutation_barrier.dart';
 import 'core/services/notification_prefs.dart';
 import 'core/services/text_size_preference.dart';
 import 'core/services/turn_notification_service.dart';
@@ -334,7 +336,15 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
         })
       >[];
   _NotificationNavigationIntent? _pendingNavigation;
-  NotificationResponse? _pendingNormalResponse;
+  void Function()? _pendingNormalResponse;
+  final _pendingApprovalResponses =
+      <
+        ({
+          NotificationRoute route,
+          SavedConnection connection,
+          NotificationApprovalAuthority authority,
+        })
+      >[];
 
   /// Android foreground keep-alive: while the app is backgrounded with an
   /// unresolved chat turn, a foreground service holds the process so
@@ -391,6 +401,7 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
     notificationPrefs.addListener(_syncOngoingChats);
     _mobilePush.addListener(_onMobilePushChanged);
     notificationResponseHandler = _notificationHandler;
+    ConnectionMutationBarrier.addListener(_pruneApprovalActions);
     // A notification that launched a terminated app carries its tap/action in
     // the platform's launch details; route it once the first frame is up.
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -405,9 +416,7 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
         _mobilePush.initialize(widget.connManager).catchError((Object _) {}),
       );
       _onMobilePushChanged();
-      final pending = _pendingNormalResponse;
-      _pendingNormalResponse = null;
-      if (pending != null) _notificationHandler(pending);
+      _resumeNormalNotificationResponses();
       unawaited(_initializeForegroundNotifications());
       final initial = await _notifications.takeInitialNotificationResponse();
       if (initial != null &&
@@ -459,9 +468,7 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
         unawaited(_initializeForegroundNotifications());
         _resumeNotificationNavigation();
         _onMobilePushChanged();
-        final pending = _pendingNormalResponse;
-        _pendingNormalResponse = null;
-        if (pending != null) _notificationHandler(pending);
+        _resumeNormalNotificationResponses();
       }
     } else if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused ||
@@ -480,7 +487,30 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
     );
   }
 
+  void _pruneApprovalActions() {
+    _pendingApprovalResponses.removeWhere(
+      (entry) => !entry.authority.isCurrent,
+    );
+    prunePendingNotificationApprovals();
+  }
+
+  void _resumeNormalNotificationResponses() {
+    final pending = _pendingNormalResponse;
+    _pendingNormalResponse = null;
+    final approvals = List.of(_pendingApprovalResponses);
+    _pendingApprovalResponses.clear();
+    pending?.call();
+    for (final entry in approvals) {
+      _dispatchNotificationResponse(
+        entry.route,
+        entry.connection,
+        entry.authority,
+      );
+    }
+  }
+
   void _restoreNormalSessions() {
+    _pruneApprovalActions();
     _pruneNotificationChatRoutes();
     final connections = widget.connManager.getConnections();
     for (final connection in connections) {
@@ -706,85 +736,126 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
   /// every response lands the user on the session the notification was about.
   void _handleNotificationResponse(NotificationResponse response) {
     if (!mounted || _closingTurnOwner) return;
-    if (_background || !_rootFrameReady) {
-      _pendingNormalResponse = response;
-      return;
-    }
+    _pruneApprovalActions();
     final route = NotificationRoute.fromResponse(response);
-    // An explicit connection id must resolve: falling back to another backend
-    // could answer an approval against the wrong gateway. Only legacy
-    // payloads without an id use the last-opened connection.
     final hasExplicitConnection =
         route.connectionId != null && route.connectionId!.isNotEmpty;
     final connection = hasExplicitConnection
         ? _connectionById(route.connectionId)
         : _notificationConnection();
     if (connection == null) return;
+    final manager = widget.connManager;
 
+    // Capture at physical ingress, before either lifecycle deferral or I/O.
+    // Legacy actions retain navigation, never automatic answer authority.
+    final normal = route.approvalChoice == null
+        ? null
+        : _turnApplicationController.normalSessionFor(connection);
+    final authority = normal == null
+        ? null
+        : NotificationApprovalAuthority.capture(
+            connection: connection,
+            accountBinding: route.approvalAccount,
+            originMutation: route.approvalMutation,
+            owner: normal,
+            ownerIsCurrent: () =>
+                mounted &&
+                !_closingTurnOwner &&
+                identical(widget.connManager, manager) &&
+                !normal.isClosed &&
+                _connectionIsCurrent(connection),
+            refresh: () async {
+              await manager.prefs.reload();
+              await manager.refreshConnectionCredentials(connection.id);
+              return _connectionIsCurrent(connection);
+            },
+          );
+    void consume() =>
+        _dispatchNotificationResponse(route, connection, authority);
+    if (_background || !_rootFrameReady) {
+      if (authority != null) {
+        final duplicate = _pendingApprovalResponses.any(
+          (entry) =>
+              entry.route.sessionId == route.sessionId &&
+              entry.route.requestId == route.requestId &&
+              entry.authority.sameCapture(authority),
+        );
+        if (!duplicate) {
+          _pendingApprovalResponses.add((
+            route: route,
+            connection: connection,
+            authority: authority,
+          ));
+        }
+      } else {
+        _pendingNormalResponse = consume;
+      }
+    } else {
+      consume();
+    }
+  }
+
+  void _dispatchNotificationResponse(
+    NotificationRoute route,
+    SavedConnection connection,
+    NotificationApprovalAuthority? authority,
+  ) {
+    if (!mounted || _closingTurnOwner) return;
     final choice = route.approvalChoice;
     final sessionId = route.sessionId;
     final requestId = route.requestId;
-    if (choice != null && sessionId != null && requestId != null) {
+    if (choice != null &&
+        sessionId != null &&
+        requestId != null &&
+        authority?.isCurrent == true) {
       final approval = PendingNotificationApproval(
-        // Saved connection ids remain distinct even when two profiles point
-        // at the same endpoint with different credentials or gateway profiles.
         connectionId: connection.id,
         sessionId: sessionId,
         requestId: requestId,
         choice: choice,
+        authority: authority,
       );
-      try {
+      if (claimNotificationApproval(approval)) {
+        // Capture both dispatch owners before the first await. Never borrow a
+        // replacement owner if an old answer returns false or throws later.
         unawaited(
           (() async {
-                final normal = _turnApplicationController.normalSessionFor(
-                  connection,
-                );
-                if (await normal.tryRespondToApproval(
-                  sessionId: sessionId,
-                  choice: choice,
-                  requestId: requestId,
-                )) {
-                  return true;
-                }
-                if (!mounted ||
-                    _closingTurnOwner ||
-                    !_connectionIsCurrent(connection)) {
-                  return true; // Revoked, not a pending action on a new account.
-                }
-                return _turnApplicationController
-                    .sessionFor(connection)
-                    .tryRespondToApproval(
-                      sessionId: sessionId,
-                      choice: choice,
-                      requestId: requestId,
-                    );
-              })()
-              .then((answered) {
-                // The request belongs to an open chat's route-local gateway:
-                // leave it pending so that screen answers it normally.
-                if (!answered &&
-                    mounted &&
-                    !_closingTurnOwner &&
-                    _connectionIsCurrent(connection)) {
-                  addPendingNotificationApproval(approval);
-                }
-              })
-              .catchError((_) {
-                // A throw is unresolved, not answered: keep the tap pending
-                // so the owning chat can still answer it.
-                if (mounted &&
-                    !_closingTurnOwner &&
-                    _connectionIsCurrent(connection)) {
-                  addPendingNotificationApproval(approval);
-                }
-              }),
+            var retry = false;
+            try {
+              final normal = _turnApplicationController.normalSessionFor(
+                connection,
+              );
+              final recovery = _turnApplicationController.sessionFor(
+                connection,
+              );
+              if (!await authority!.validate()) return;
+              if (await normal.tryRespondToApproval(
+                sessionId: sessionId,
+                choice: choice,
+                requestId: requestId,
+              )) {
+                return;
+              }
+              if (!authority.isCurrent) return;
+              if (await recovery.tryRespondToApproval(
+                sessionId: sessionId,
+                choice: choice,
+                requestId: requestId,
+              )) {
+                return;
+              }
+              retry = true;
+            } catch (_) {
+              // addPending also fences revoked completions and pending mutations.
+              retry = true;
+            } finally {
+              releaseNotificationApproval(approval);
+              if (retry) addPendingNotificationApproval(approval);
+            }
+          })(),
         );
-      } catch (_) {
-        // A closed controller cannot answer; the owning chat still can.
-        addPendingNotificationApproval(approval);
       }
     }
-
     unawaited(
       _openNotificationSession(connection, sessionId).catchError((Object _) {}),
     );
@@ -1084,6 +1155,10 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     final token = _keepAliveTurnActivityToken;
     _closingTurnOwner = true;
+    _pendingNormalResponse = null;
+    _pendingApprovalResponses.clear();
+    ConnectionMutationBarrier.removeListener(_pruneApprovalActions);
+    prunePendingNotificationApprovals();
     _pendingNavigation = null;
     _notificationChatRoutes.clear();
     ++_notificationGeneration;

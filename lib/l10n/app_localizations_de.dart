@@ -1912,6 +1912,9 @@ class AppLocalizationsDe extends AppLocalizations {
   String get trigger_now => 'Jetzt auslösen';
 
   @override
+  String get received_outcome_unknown => 'Turn beendet — Ergebnis unbestätigt';
+
+  @override
   String get turn_completed => 'Turn abgeschlossen';
 
   @override
