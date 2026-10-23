@@ -4689,6 +4689,18 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'This chat is no longer available, or the gateway could not be reached.'**
   String get activity_chat_unavailable;
+
+  /// No description provided for @activity_partial_title.
+  ///
+  /// In en, this message translates to:
+  /// **'Activity partially loaded'**
+  String get activity_partial_title;
+
+  /// No description provided for @activity_partial_detail.
+  ///
+  /// In en, this message translates to:
+  /// **'Showing a limited window of gateway activity. More chats may exist; pull to refresh.'**
+  String get activity_partial_detail;
 }
 
 class _AppLocalizationsDelegate

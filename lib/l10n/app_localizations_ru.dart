@@ -2792,4 +2792,11 @@ class AppLocalizationsRu extends AppLocalizations {
   @override
   String get activity_chat_unavailable =>
       'Этот чат больше недоступен или не удалось связаться со шлюзом.';
+
+  @override
+  String get activity_partial_title => 'Активность загружена частично';
+
+  @override
+  String get activity_partial_detail =>
+      'Показана ограниченная часть активности шлюза. Могут существовать другие чаты; потяните вниз для обновления.';
 }

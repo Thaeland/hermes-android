@@ -2693,6 +2693,12 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get activity_chat_unavailable => '此聊天已不可用，或无法连接到网关。';
+
+  @override
+  String get activity_partial_title => '活动已部分加载';
+
+  @override
+  String get activity_partial_detail => '目前仅显示网关活动的有限范围。可能还有更多聊天，请下拉刷新。';
 }
 
 /// The translations for Chinese, using the Han script (`zh_Hans`).
@@ -5378,4 +5384,10 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get activity_chat_unavailable => '此聊天已不可用，或无法连接到网关。';
+
+  @override
+  String get activity_partial_title => '活动已部分加载';
+
+  @override
+  String get activity_partial_detail => '目前仅显示网关活动的有限范围。可能还有更多聊天，请下拉刷新。';
 }

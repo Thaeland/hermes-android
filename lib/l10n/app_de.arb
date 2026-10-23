@@ -756,5 +756,7 @@
   "activity_empty_title": "Keine aktuellen Aktivitäten",
   "activity_empty_detail": "Hier erscheinen in dieser App gestartete Turns und Gateway-Chats, die in den letzten 7 Tagen aktualisiert wurden.",
   "activity_read_error": "Die Aktivitätsansicht konnte ihre Turn-Aufzeichnungen oder Gateway-Chats nicht lesen. Prüfe die Verbindung und versuche es erneut.",
-  "activity_chat_unavailable": "Dieser Chat ist nicht mehr verfügbar oder das Gateway konnte nicht erreicht werden."
+  "activity_chat_unavailable": "Dieser Chat ist nicht mehr verfügbar oder das Gateway konnte nicht erreicht werden.",
+  "activity_partial_title": "Aktivität teilweise geladen",
+  "activity_partial_detail": "Es wird ein begrenzter Ausschnitt der Gateway-Aktivität angezeigt. Möglicherweise gibt es weitere Chats. Zum Aktualisieren nach unten ziehen."
 }

@@ -2718,4 +2718,11 @@ class AppLocalizationsJa extends AppLocalizations {
   @override
   String get activity_chat_unavailable =>
       'このチャットは利用できなくなったか、ゲートウェイに接続できませんでした。';
+
+  @override
+  String get activity_partial_title => 'アクティビティは一部のみ読み込まれています';
+
+  @override
+  String get activity_partial_detail =>
+      'ゲートウェイのアクティビティを限られた範囲で表示しています。他にもチャットがある可能性があります。下に引いて更新してください。';
 }

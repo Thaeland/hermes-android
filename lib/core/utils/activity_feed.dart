@@ -160,11 +160,15 @@ class ActivityFeed {
 
   final bool isStale;
 
+  /// The bounded server metadata scan cannot prove exhaustive absence/totals.
+  final bool isPartial;
+
   const ActivityFeed({
     required this.groups,
     required this.blockedCount,
     required this.runningCount,
     this.isStale = false,
+    this.isPartial = false,
   });
 
   bool get isEmpty => groups.isEmpty;

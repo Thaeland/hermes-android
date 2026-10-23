@@ -756,5 +756,7 @@
   "activity_empty_title": "Sem atividade recente",
   "activity_empty_detail": "Aqui aparecem os turnos iniciados nesta app e os chats do Gateway atualizados nos últimos 7 dias.",
   "activity_read_error": "A Atividade não conseguiu ler os registos dos turnos ou os chats do Gateway. Verifique a ligação e tente novamente.",
-  "activity_chat_unavailable": "Este chat já não está disponível ou não foi possível contactar o Gateway."
+  "activity_chat_unavailable": "Este chat já não está disponível ou não foi possível contactar o Gateway.",
+  "activity_partial_title": "Atividade parcialmente carregada",
+  "activity_partial_detail": "É apresentado um intervalo limitado da atividade do gateway. Podem existir mais conversas; puxe para atualizar."
 }

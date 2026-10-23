@@ -756,5 +756,7 @@
   "activity_empty_title": "暂无近期活动",
   "activity_empty_detail": "在此应用中启动的轮次，以及过去7天内更新的网关聊天都会显示在这里。",
   "activity_read_error": "活动功能无法读取轮次记录或网关聊天。请检查连接后重试。",
-  "activity_chat_unavailable": "此聊天已不可用，或无法连接到网关。"
+  "activity_chat_unavailable": "此聊天已不可用，或无法连接到网关。",
+  "activity_partial_title": "活动已部分加载",
+  "activity_partial_detail": "目前仅显示网关活动的有限范围。可能还有更多聊天，请下拉刷新。"
 }

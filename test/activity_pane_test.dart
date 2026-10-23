@@ -6,6 +6,7 @@ import 'package:hermes_android/core/theme/hermes_theme.dart';
 import 'package:hermes_android/core/utils/activity_feed.dart';
 import 'package:hermes_android/core/widgets/activity_pane.dart';
 import 'package:hermes_android/core/widgets/hermes_components.dart';
+import 'package:hermes_android/core/widgets/hermes_shell.dart';
 import 'support/l10n_test_utils.dart';
 import 'package:hermes_android/l10n/app_localizations.dart';
 
@@ -89,6 +90,115 @@ void main() {
   setUpAll(() async {
     l10n = await loadTestL10n();
   });
+
+  testWidgets('hidden shell Activity stops polling and refreshes on return', (
+    tester,
+  ) async {
+    var reads = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        theme: hermesTheme(Brightness.dark),
+        home: HermesShell(
+          initialDestination: HermesDestination.activity,
+          builder: (_, destination) => destination == HermesDestination.activity
+              ? ActivityPane(
+                  refreshInterval: const Duration(seconds: 10),
+                  loadFeed: () async {
+                    reads++;
+                    return _feed([]);
+                  },
+                )
+              : const SizedBox(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(reads, 1);
+    await tester.tap(find.text('More').last);
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 30));
+    expect(reads, 1);
+    await tester.tap(find.text('Activity').last);
+    await tester.pumpAndSettle();
+    expect(reads, 2);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets(
+    'a covering Navigator route stops polling until Activity is visible again',
+    (tester) async {
+      var reads = 0;
+      await _pump(
+        tester,
+        refreshInterval: const Duration(seconds: 10),
+        loadFeed: () async {
+          reads++;
+          return _feed([]);
+        },
+      );
+      await tester.pumpAndSettle();
+      final navigator = Navigator.of(tester.element(find.byType(ActivityPane)));
+      unawaited(
+        navigator.push<void>(
+          MaterialPageRoute(
+            builder: (_) => const Scaffold(body: Text('Covering chat')),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final before = reads;
+      await tester.pump(const Duration(seconds: 30));
+      expect(reads, before);
+      navigator.pop();
+      await tester.pumpAndSettle();
+      expect(reads, before + 1);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
+  testWidgets('failed empty refresh never claims Inbox is clear', (
+    tester,
+  ) async {
+    var reads = 0;
+    await _pump(
+      tester,
+      actionableOnly: true,
+      loadFeed: () async {
+        if (++reads > 1) throw StateError('offline');
+        return _feed([]);
+      },
+    );
+    await tester.pumpAndSettle();
+    await tester.state<ActivityPaneState>(find.byType(ActivityPane)).refresh();
+    await tester.pumpAndSettle();
+    expect(find.text('Inbox is clear'), findsNothing);
+    expect(find.text('Could not read activity'), findsOneWidget);
+  });
+
+  for (final inbox in [false, true]) {
+    testWidgets(
+      'partial ${inbox ? "Inbox" : "Activity"} is not an exhaustive empty verdict',
+      (tester) async {
+        await _pump(
+          tester,
+          actionableOnly: inbox,
+          loadFeed: () async => const ActivityFeed(
+            groups: [],
+            blockedCount: 0,
+            runningCount: 0,
+            isPartial: true,
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Activity partially loaded'), findsOneWidget);
+        expect(find.text('No recent activity'), findsNothing);
+        expect(find.text('Inbox is clear'), findsNothing);
+      },
+    );
+  }
+
   testWidgets(
     'refresh requested during a held read performs a trailing fresh read',
     (tester) async {

@@ -2719,4 +2719,11 @@ class AppLocalizationsKo extends AppLocalizations {
   @override
   String get activity_chat_unavailable =>
       '이 채팅은 더 이상 사용할 수 없거나 게이트웨이에 연결할 수 없습니다.';
+
+  @override
+  String get activity_partial_title => '활동이 일부만 로드됨';
+
+  @override
+  String get activity_partial_detail =>
+      '게이트웨이 활동의 제한된 범위가 표시됩니다. 다른 채팅이 더 있을 수 있습니다. 아래로 당겨 새로고침하세요.';
 }

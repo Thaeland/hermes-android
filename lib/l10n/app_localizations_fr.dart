@@ -2796,4 +2796,11 @@ class AppLocalizationsFr extends AppLocalizations {
   @override
   String get activity_chat_unavailable =>
       'Cette discussion n’est plus disponible ou la passerelle n’a pas pu être jointe.';
+
+  @override
+  String get activity_partial_title => 'Activité partiellement chargée';
+
+  @override
+  String get activity_partial_detail =>
+      'Une période limitée de l’activité de la passerelle est affichée. D’autres discussions peuvent exister ; tirez vers le bas pour actualiser.';
 }

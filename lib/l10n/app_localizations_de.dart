@@ -2796,4 +2796,11 @@ class AppLocalizationsDe extends AppLocalizations {
   @override
   String get activity_chat_unavailable =>
       'Dieser Chat ist nicht mehr verfügbar oder das Gateway konnte nicht erreicht werden.';
+
+  @override
+  String get activity_partial_title => 'Aktivität teilweise geladen';
+
+  @override
+  String get activity_partial_detail =>
+      'Es wird ein begrenzter Ausschnitt der Gateway-Aktivität angezeigt. Möglicherweise gibt es weitere Chats. Zum Aktualisieren nach unten ziehen.';
 }

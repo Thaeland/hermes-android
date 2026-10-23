@@ -756,5 +756,7 @@
   "activity_empty_title": "No hay actividad reciente",
   "activity_empty_detail": "Aquí aparecen los turnos iniciados en esta app y los chats del Gateway actualizados en los últimos 7 días.",
   "activity_read_error": "Actividad no pudo leer sus registros de turnos o los chats del Gateway. Comprueba la conexión y vuelve a intentarlo.",
-  "activity_chat_unavailable": "Este chat ya no está disponible o no se pudo acceder al Gateway."
+  "activity_chat_unavailable": "Este chat ya no está disponible o no se pudo acceder al Gateway.",
+  "activity_partial_title": "Actividad cargada parcialmente",
+  "activity_partial_detail": "Se muestra un intervalo limitado de actividad de la pasarela. Puede haber más chats; desliza hacia abajo para actualizar."
 }

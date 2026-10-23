@@ -2790,6 +2790,13 @@ class AppLocalizationsPt extends AppLocalizations {
   @override
   String get activity_chat_unavailable =>
       'Este chat já não está disponível ou não foi possível contactar o Gateway.';
+
+  @override
+  String get activity_partial_title => 'Atividade parcialmente carregada';
+
+  @override
+  String get activity_partial_detail =>
+      'É apresentado um intervalo limitado da atividade do gateway. Podem existir mais conversas; puxe para atualizar.';
 }
 
 /// The translations for Portuguese, as used in Brazil (`pt_BR`).
@@ -5573,4 +5580,11 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   @override
   String get activity_chat_unavailable =>
       'Este chat não está mais disponível ou não foi possível acessar o Gateway.';
+
+  @override
+  String get activity_partial_title => 'Atividade parcialmente carregada';
+
+  @override
+  String get activity_partial_detail =>
+      'Um intervalo limitado da atividade do gateway é exibido. Pode haver mais conversas; puxe para atualizar.';
 }
