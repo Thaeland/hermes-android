@@ -304,6 +304,11 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // OS Settings may have granted or revoked access while we were away.
+      // A resume must only query authorisation, never prompt for it.
+      unawaited(TurnNotificationService.shared.ensureInitialized());
+    }
     _keepAlive.onAppLifecycleState(
       state,
       hasActiveTurn: _turnApplicationController.hasActiveTurn,

@@ -15,6 +15,7 @@ import 'support/recording_turn_notification_sink.dart';
 class HeldNotificationSink extends RecordingTurnNotificationSink {
   Completer<void>? initializationGate;
   Completer<void>? permissionGate;
+  Completer<void>? permissionCheckGate;
   Completer<void>? showGate;
   bool failCancel = false;
 
@@ -28,6 +29,13 @@ class HeldNotificationSink extends RecordingTurnNotificationSink {
   Future<bool?> requestPermission() async {
     final result = await super.requestPermission();
     await permissionGate?.future;
+    return result;
+  }
+
+  @override
+  Future<bool?> checkPermission() async {
+    final result = await super.checkPermission();
+    await permissionCheckGate?.future;
     return result;
   }
 
@@ -292,6 +300,148 @@ void main() {
       await service.ensureInitialized(requestPermission: true);
       expect(service.permissionGranted, isTrue);
       expect(sink.permissionRequestCount, 2);
+    },
+  );
+
+  for (final foregroundCheck in [false, true]) {
+    test(
+      'denied then granted refreshes without another prompt (foreground=$foregroundCheck)',
+      () async {
+        sink.permissionResult = false;
+        await service.ensureInitialized(requestPermission: true);
+        expect(service.permissionGranted, isFalse);
+        expect(sink.permissionRequestCount, 1);
+
+        // The process remains alive while the user grants access in Settings.
+        sink.permissionResult = true;
+        await service.ensureInitialized(requestPermission: foregroundCheck);
+        expect(service.permissionGranted, isTrue);
+        expect(sink.permissionCheckCount, 1);
+        await show();
+        expect(sink.shown.single.ongoing, isTrue);
+        expect(
+          await service.sendTestNotification(title: 'test', body: 'test'),
+          isTrue,
+        );
+        expect(sink.shown, hasLength(2));
+        expect(sink.permissionRequestCount, 1);
+        expect(sink.initializeCount, 1);
+      },
+    );
+
+    test(
+      'granted then revoked suppresses ongoing and test (foreground=$foregroundCheck)',
+      () async {
+        sink.permissionResult = true;
+        await service.ensureInitialized(requestPermission: true);
+        await show();
+        final ongoingId = sink.shown.single.id;
+        sink.shown.clear();
+
+        sink.permissionResult = false;
+        await service.ensureInitialized(requestPermission: foregroundCheck);
+        expect(service.permissionGranted, isFalse);
+        await show();
+        expect(sink.cancelled, contains(ongoingId));
+        expect(
+          await service.sendTestNotification(title: 'test', body: 'test'),
+          isFalse,
+        );
+        expect(sink.shown, isEmpty);
+        expect(sink.permissionRequestCount, 1);
+        expect(sink.cancelAllCount, 0);
+      },
+    );
+  }
+
+  test(
+    'send test alone refreshes a denied grant without re-prompting',
+    () async {
+      sink.permissionResult = false;
+      await service.ensureInitialized(requestPermission: true);
+      sink.permissionResult = true;
+      expect(
+        await service.sendTestNotification(title: 'test', body: 'test'),
+        isTrue,
+      );
+      expect(service.permissionGranted, isTrue);
+      expect(sink.permissionCheckCount, 1);
+      expect(sink.permissionRequestCount, 1);
+      expect(sink.shown.single.payload, 'test');
+    },
+  );
+
+  test(
+    'headless denial checks stay passive until explicit foreground opt-in',
+    () async {
+      sink.permissionResult = false;
+      await service.ensureInitialized();
+      await service.ensureInitialized();
+      await show();
+      expect(service.permissionGranted, isFalse);
+      expect(sink.permissionCheckCount, 3);
+      expect(sink.permissionRequestCount, 0);
+      expect(sink.shown, isEmpty);
+
+      await service.ensureInitialized(requestPermission: true);
+      await service.ensureInitialized(requestPermission: true);
+      await service.ensureInitialized();
+      expect(sink.permissionRequestCount, 1);
+      expect(service.permissionGranted, isFalse);
+    },
+  );
+
+  test(
+    'failed passive check fails closed and recovers without prompting',
+    () async {
+      await service.ensureInitialized(requestPermission: true);
+      sink.permissionCheckError = StateError('missing channel');
+      await service.ensureInitialized();
+      expect(service.permissionGranted, isFalse);
+      await show();
+      expect(sink.shown, isEmpty);
+      sink.permissionCheckError = null;
+      sink.permissionResult = true;
+      await service.ensureInitialized();
+      await show();
+      expect(service.permissionGranted, isTrue);
+      expect(sink.shown.single.ongoing, isTrue);
+      expect(sink.permissionRequestCount, 1);
+    },
+  );
+
+  test(
+    'held passive denial finishes before a concurrent foreground grant',
+    () async {
+      sink.permissionResult = false;
+      sink.permissionCheckGate = Completer<void>();
+      final headless = service.ensureInitialized();
+      await pumpEventQueue();
+      expect(sink.permissionCheckCount, 1);
+
+      sink.permissionResult = true;
+      sink.permissionGate = Completer<void>();
+      final foreground = service.ensureInitialized(requestPermission: true);
+      final sibling = service.ensureInitialized(requestPermission: true);
+      final passiveSibling = service.ensureInitialized();
+      await pumpEventQueue();
+      expect(sink.permissionRequestCount, 0);
+      expect(sink.permissionCheckCount, 1);
+      sink.permissionCheckGate!.complete();
+      await pumpEventQueue();
+      expect(sink.permissionRequestCount, 1);
+      expect(service.permissionGranted, isFalse);
+      sink.permissionGate!.complete();
+      await Future.wait([headless, foreground, sibling, passiveSibling]);
+      expect(service.permissionGranted, isTrue);
+      expect(sink.permissionRequestCount, 1);
+      expect(sink.permissionCheckCount, 1);
+
+      // Finished flights must be released so the next check reads fresh state.
+      sink.permissionResult = false;
+      await service.ensureInitialized();
+      expect(service.permissionGranted, isFalse);
+      expect(sink.permissionCheckCount, 2);
     },
   );
 

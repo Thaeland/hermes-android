@@ -1006,15 +1006,32 @@ class _NotificationSettings extends StatefulWidget {
   State<_NotificationSettings> createState() => _NotificationSettingsState();
 }
 
-class _NotificationSettingsState extends State<_NotificationSettings> {
+class _NotificationSettingsState extends State<_NotificationSettings>
+    with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
-    // Resolve the Android 13+ permission state so a denied app shows the hint
-    // instead of looking silently broken.
+    WidgetsBinding.instance.addObserver(this);
+    _refreshPermission(requestPermission: true);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _refreshPermission();
+  }
+
+  void _refreshPermission({bool requestPermission = false}) {
+    // Keep the visible hint in sync after returning from OS Settings without
+    // asking again. Only the initial foreground visit may request permission.
     unawaited(
       TurnNotificationService.shared
-          .ensureInitialized(requestPermission: true)
+          .ensureInitialized(requestPermission: requestPermission)
           .then((_) {
             if (mounted) setState(() {});
           }),
@@ -1056,6 +1073,7 @@ class _NotificationSettingsState extends State<_NotificationSettings> {
       body: context.l10n.test_notification_body,
     );
     if (!mounted) return;
+    setState(() {});
     final messenger = ScaffoldMessenger.of(context);
     messenger
       ..hideCurrentSnackBar()
