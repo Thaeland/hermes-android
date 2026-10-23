@@ -701,6 +701,24 @@
   "chat_density_compact_description": "Tighter, unlabelled bubbles so more messages fit on screen.",
   "chat_density_label_description": "{label} — {description}",
   "compact_removes_the_you_and_hermes_labels_and_trims_bubble_padding_spacing_and_side_margins": "Compact removes the You and Hermes labels and trims bubble padding, spacing, and side margins.",
+  "client_certificate_mtls": "Client certificate (mTLS)",
+  "client_certificate_mtls_description": "Present a certificate when an HTTPS proxy requires mutual TLS.",
+  "client_certificate_https_only": "Client certificates are only used for HTTPS connections.",
+  "choose_p12_pfx": "Choose .p12 / .pfx",
+  "choose_certificate_pem": "Choose certificate (PEM)",
+  "choose_private_key_pem": "Choose private key (PEM)",
+  "certificate_password_optional": "Certificate password (optional)",
+  "client_certificate_required": "Load a client certificate or turn off the client certificate option.",
+  "client_certificate_loaded": "Loaded: {label}",
+  "@client_certificate_loaded": {
+    "placeholders": {
+      "label": {
+        "type": "String"
+      }
+    }
+  },
+  "remove_certificate": "Remove certificate",
+  "certificate_import_failed": "That certificate could not be loaded.",
   "background_work": "Background work",
   "keep_chats_active_in_background": "Keep chats active in the background",
   "background_work_description": "Keep user-started chats connected while this app is in the background. Idle connections may disconnect. Uses more battery and network data. Turning this off does not stop work on the server.",
