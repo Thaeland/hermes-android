@@ -132,6 +132,88 @@ void main() {
     expect(await OperationalActivityStore().load('scope'), hasLength(2));
   });
 
+  test('a repair batch is captured before queueing and writes once', () async {
+    final platform = _RejectingStore()..reject = false;
+    SharedPreferencesStorePlatform.instance = platform;
+    final gate = Completer<SharedPreferences>();
+    final store = OperationalActivityStore(
+      preferences: () => gate.future,
+      nowEpochMs: () => now,
+    );
+    final accepted = [
+      _record('a', updated: now),
+      _record('b', updated: now),
+      _record('a', state: OperationalActivityState.completed, updated: now + 1),
+      _record('a', scope: 'other', updated: now),
+    ];
+    final write = store.putAll(accepted);
+    accepted.clear();
+    final read = OperationalActivityStore(nowEpochMs: () => now).load('scope');
+    gate.complete(await SharedPreferences.getInstance());
+    await write;
+    final rows = await read;
+    expect(platform.activityWrites, 1);
+    expect(rows.map((r) => r.turnId), ['a', 'b']);
+    expect(rows.first.state, OperationalActivityState.completed);
+    expect(rows.first.updatedAtEpochMs, now + 1);
+    expect(
+      (await OperationalActivityStore().load('other')).single.state,
+      OperationalActivityState.running,
+    );
+  });
+
+  test(
+    'a failed repair batch rolls back every row and can be retried',
+    () async {
+      final platform = _RejectingStore()..reject = false;
+      SharedPreferencesStorePlatform.instance = platform;
+      final store = OperationalActivityStore(nowEpochMs: () => now);
+      await store.put(_record('a', updated: now));
+      final batch = [
+        _record(
+          'a',
+          state: OperationalActivityState.completed,
+          updated: now + 1,
+        ),
+        _record('b', state: OperationalActivityState.failed, updated: now + 2),
+      ];
+      platform.reject = true;
+      await expectLater(store.putAll(batch), throwsStateError);
+      expect(platform.activityWrites, 2);
+      expect(
+        (await store.load('scope')).single.toJson(),
+        _record('a').toJson(),
+      );
+      platform.reject = false;
+      await store.putAll(batch);
+      expect(platform.activityWrites, 3);
+      expect(
+        (await OperationalActivityStore().load('scope')).map((r) => r.toJson()),
+        batch.reversed.map((r) => r.toJson()),
+      );
+    },
+  );
+
+  test(
+    'invalid batch metadata cannot partially persist sibling repairs',
+    () async {
+      final store = OperationalActivityStore(nowEpochMs: () => now);
+      await store.put(_record('original', updated: now));
+      await expectLater(
+        store.putAll([
+          _record(
+            'new',
+            state: OperationalActivityState.completed,
+            updated: now,
+          ),
+          _record('invalid', scope: '', updated: now),
+        ]),
+        throwsArgumentError,
+      );
+      expect((await store.load('scope')).single.turnId, 'original');
+    },
+  );
+
   test('failed physical writes do not poison the cache or queue', () async {
     final platform = _RejectingStore();
     SharedPreferencesStorePlatform.instance = platform;
@@ -251,12 +333,14 @@ OperationalActivityRecord _record(
 
 class _RejectingStore extends InMemorySharedPreferencesStore {
   bool reject = true;
+  int activityWrites = 0;
   _RejectingStore() : super.empty();
 
   @override
   Future<bool> setValue(String valueType, String key, Object value) async {
-    if (reject && key.endsWith(OperationalActivityStore.preferenceKey)) {
-      return false;
+    if (key.endsWith(OperationalActivityStore.preferenceKey)) {
+      activityWrites++;
+      if (reject) return false;
     }
     return super.setValue(valueType, key, value);
   }

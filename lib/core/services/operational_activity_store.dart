@@ -169,15 +169,25 @@ class OperationalActivityStore {
     ),
   );
 
-  Future<void> put(OperationalActivityRecord record) =>
-      _serialized((prefs) async {
-        if (OperationalActivityRecord.parse(record.toJson()) == null) {
-          throw ArgumentError('Invalid operational activity metadata.');
-        }
-        final rows = _read(prefs)..removeWhere((row) => row.key == record.key);
-        rows.add(record);
-        await _write(prefs, _retained(rows));
-      });
+  Future<void> put(OperationalActivityRecord record) => putAll([record]);
+
+  /// Piggyback failed turn repairs on new observations in one physical write.
+  /// Capture the batch at acceptance, not after waiting for the global queue.
+  Future<void> putAll(Iterable<OperationalActivityRecord> records) {
+    final accepted = records.toList(growable: false);
+    return _serialized((prefs) async {
+      if (accepted.any(
+        (record) => OperationalActivityRecord.parse(record.toJson()) == null,
+      )) {
+        throw ArgumentError('Invalid operational activity metadata.');
+      }
+      final rows = {for (final row in _read(prefs)) row.key: row};
+      for (final record in accepted) {
+        rows[record.key] = record;
+      }
+      await _write(prefs, _retained(rows.values));
+    });
+  }
 
   Future<void> clearScope(String scope) => _serialized((prefs) async {
     final rows = _read(prefs)..removeWhere((row) => row.scope == scope);

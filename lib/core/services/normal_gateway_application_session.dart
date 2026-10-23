@@ -141,6 +141,7 @@ class NormalGatewayChatSnapshot {
 /// Routes only subscribe; this object owns ingress, recovery and notifications.
 class NormalGatewayApplicationSession {
   static const activityHeartbeatInterval = Duration(seconds: 30);
+  static const activityRetryInterval = Duration(seconds: 30);
   final SavedConnection connection;
   final String scope;
   final DesktopGatewayClient? client;
@@ -160,6 +161,7 @@ class NormalGatewayApplicationSession {
   bool _background = false;
   bool _backgroundWorkEnabled = true;
   Future<void>? _activityWrite;
+  final Map<String, _PendingActivityWrite> _pendingActivity = {};
   DesktopConnectionState _connectionState = DesktopConnectionState.disconnected;
 
   NormalGatewayApplicationSession({
@@ -376,6 +378,72 @@ class NormalGatewayApplicationSession {
 
   bool get _canRecover => !_closed && (!_background || _backgroundWorkEnabled);
 
+  void _recordActivity(OperationalActivityRecord record) {
+    if (_closed) return;
+    _pendingActivity[record.key] = _PendingActivityWrite(record);
+    // Retain repair ownership by turn, not by the chat's latest turn. Include
+    // in-flight records too: their write may fail after this batch is accepted.
+    // The store serializes both snapshots, so an old completion cannot win.
+    _writeActivity(_pendingActivity.values.toList(growable: false));
+  }
+
+  void _retryActivity() {
+    if (_closed) return;
+    final now = _activityNowEpochMs();
+    final retry = _pendingActivity.values
+        .where((pending) {
+          final notBefore = pending.retryNotBeforeEpochMs;
+          return pending.flights == 0 &&
+              (notBefore == null || now >= notBefore);
+        })
+        .toList(growable: false);
+    if (retry.isEmpty) return;
+    for (final pending in retry) {
+      // Permit one immediate repair probe, then back off independently of
+      // token delivery and failed-write completion. No timer or retry spin:
+      // later real progress can probe again, and a new accepted observation
+      // always carries older dirty turns along in its single physical write.
+      pending.retryNotBeforeEpochMs =
+          now + activityRetryInterval.inMilliseconds;
+    }
+    _writeActivity(retry);
+  }
+
+  void _writeActivity(List<_PendingActivityWrite> accepted) {
+    for (final pending in accepted) {
+      pending.flights++;
+    }
+    final records = accepted.map((pending) => pending.record).toList();
+    // Single observations retain the put contract; multi-turn repairs share
+    // a read/modify/write and failure reload instead of multiplying disk I/O.
+    final flight = records.length == 1
+        ? activityStore.put(records.single)
+        : activityStore.putAll(records);
+    final write = flight
+        .then<void>(
+          (_) {
+            for (final pending in accepted) {
+              if (identical(_pendingActivity[pending.record.key], pending)) {
+                _pendingActivity.remove(pending.record.key);
+              }
+            }
+          },
+          onError: (Object _, StackTrace _) {
+            // Optional presentation metadata must never change turn authority.
+            // Keep the exact failed observation (including its original time).
+          },
+        )
+        .whenComplete(() {
+          for (final pending in accepted) {
+            pending.flights--;
+          }
+        });
+    _activityWrite = write;
+    write.whenComplete(() {
+      if (identical(_activityWrite, write)) _activityWrite = null;
+    }).ignore();
+  }
+
   bool ownsApprovalRequest({
     required String sessionId,
     required String requestId,
@@ -426,7 +494,16 @@ class NormalGatewayApplicationSession {
     // Closing fences new metadata synchronously, then joins the last accepted
     // write. Its global queue also covers every earlier write from this owner.
     await _activityWrite;
+    _pendingActivity.clear();
   }
+}
+
+class _PendingActivityWrite {
+  final OperationalActivityRecord record;
+  int flights = 0;
+  int? retryNotBeforeEpochMs;
+
+  _PendingActivityWrite(this.record);
 }
 
 class NormalGatewayChatOwner {
@@ -472,7 +549,6 @@ class NormalGatewayChatOwner {
   bool _settling = false;
   ({bool? completed, String? error, int generation})? _terminalReceipt;
   OperationalActivityRecord? _lastActivityRecord;
-  bool _activityNeedsRetry = false;
   NormalGatewayChatOwner._(
     this._session,
     this.localSessionId,
@@ -618,7 +694,10 @@ class NormalGatewayChatOwner {
             NormalGatewayApplicationSession
                 .activityHeartbeatInterval
                 .inMilliseconds;
-    if (unchanged && !_activityNeedsRetry && !heartbeat) return;
+    if (unchanged && !heartbeat) {
+      if (meaningfulActivity) _session._retryActivity();
+      return;
+    }
     final record = OperationalActivityRecord(
       scope: _session.scope,
       localSessionId: local,
@@ -630,19 +709,10 @@ class NormalGatewayChatOwner {
           (unchanged && !heartbeat ? previous.updatedAtEpochMs : now),
     );
     _lastActivityRecord = record;
-    _activityNeedsRetry = false;
     // Activity is an optional index, never a prerequisite for submitting,
-    // settling or recovering real work. Unchanged live progress is persisted
-    // at most once per heartbeat interval, without an independent timer.
-    final write = _session.activityStore.put(record).catchError((Object _) {
-      if (identical(_lastActivityRecord, record)) _activityNeedsRetry = true;
-    });
-    _session._activityWrite = write;
-    write.whenComplete(() {
-      if (identical(_session._activityWrite, write)) {
-        _session._activityWrite = null;
-      }
-    }).ignore();
+    // settling or recovering real work. New unchanged progress observations
+    // are heartbeat-bounded; dirty retries have a separate bounded cooldown.
+    _session._recordActivity(record);
   }
 
   bool _current(int generation) =>
