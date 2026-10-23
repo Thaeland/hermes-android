@@ -45,11 +45,7 @@ ActivityFeed buildOperationalActivityFeed({
           updatedAt: item.updatedAt,
         ),
       );
-      knownSessions.addAll([
-        item.sessionId,
-        sessionId,
-        if (storedId != null) storedId,
-      ]);
+      knownSessions.addAll([item.sessionId, sessionId, ?storedId]);
       knownTurns.add(item.clientTurnId);
       if (item.turnId != null) knownTurns.add(item.turnId!);
     }

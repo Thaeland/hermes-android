@@ -697,9 +697,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         _lastJournalAliases = {
           for (final binding in snapshot.bindings)
             if (binding.connectionId == connection.id &&
-                binding.endpointDigest == endpointDigest &&
-                binding.storedSessionId != null)
-              binding.localSessionId: binding.storedSessionId!,
+                binding.endpointDigest == endpointDigest)
+              binding.localSessionId: binding.storedSessionId,
         };
         _lastJournalFeed = buildActivityFeed(
           snapshot: snapshot,
