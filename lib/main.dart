@@ -523,38 +523,63 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
           final current = _turnApplicationController.activeChatActivities
               .toList();
           final desired = <String>{};
+          var failed = false;
           for (final activity in current.where(
             (_) =>
                 _background &&
                 _protectBackgroundWork &&
                 notificationPrefs.value.enabled,
           )) {
+            if (_closingTurnOwner) break;
             final key = jsonEncode([
               activity.connectionId,
               activity.localSessionId,
             ]);
             desired.add(key);
-            await service.showOngoingChat(
-              connectionId: activity.connectionId,
-              localSessionId: activity.localSessionId,
-              storedSessionId: activity.storedSessionId,
-              title: activity.title,
-              turnId: activity.turnId,
-              status: activity.status,
-            );
+            // A platform call can post successfully and still fail its reply.
+            // Own targeted cleanup before the await, not after the whole batch.
+            _ongoingChats.add(key);
+            try {
+              await service.showOngoingChat(
+                connectionId: activity.connectionId,
+                localSessionId: activity.localSessionId,
+                storedSessionId: activity.storedSessionId,
+                title: activity.title,
+                turnId: activity.turnId,
+                status: activity.status,
+              );
+            } catch (_) {
+              failed = true;
+            }
           }
           for (final stale in _ongoingChats.difference(desired)) {
-            final identity = jsonDecode(stale) as List;
-            await service.cancelOngoingChat(
-              connectionId: identity[0] as String,
-              localSessionId: identity[1] as String,
-            );
+            if (!await _cancelTrackedOngoingChat(stale)) failed = true;
           }
-          _ongoingChats
-            ..clear()
-            ..addAll(desired);
+          // Retry on a later reconciliation, even if its desired state is the
+          // same. Never spin immediately on a failing platform implementation.
+          if (failed && _ongoingSignature == signature) {
+            _ongoingSignature = null;
+          }
         })
-        .catchError((Object _) {});
+        .catchError((Object _) {
+          if (_ongoingSignature == signature) _ongoingSignature = null;
+        });
+  }
+
+  Future<bool> _cancelTrackedOngoingChat(String key) async {
+    try {
+      final identity = jsonDecode(key) as List;
+      await _notifications.cancelOngoingChat(
+        connectionId: identity[0] as String,
+        localSessionId: identity[1] as String,
+      );
+      _ongoingChats.remove(key);
+      return true;
+    } catch (_) {
+      // Keep both root ownership and the service's durable numeric index for
+      // retry. One failed cancellation must not abandon its siblings.
+      return false;
+    }
   }
 
   /// The connection a notification response should act on: the last one the
@@ -1033,13 +1058,8 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
       _ongoingWrites
           .then<void>((_) async {
             for (final key in _ongoingChats.toList()) {
-              final identity = jsonDecode(key) as List;
-              await _notifications.cancelOngoingChat(
-                connectionId: identity[0] as String,
-                localSessionId: identity[1] as String,
-              );
+              await _cancelTrackedOngoingChat(key);
             }
-            _ongoingChats.clear();
           })
           .catchError((Object _) {}),
     );

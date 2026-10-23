@@ -101,6 +101,17 @@ class _HeldPolicyWritesStore extends InMemorySharedPreferencesStore {
 }
 
 class _HeldSink extends RecordingTurnNotificationSink {
+  String? failOngoingLocal;
+  @override
+  Future<void> show(TurnNotification notification) async {
+    if (notification.ongoing &&
+        (jsonDecode(notification.payload) as Map)['localSessionId'] ==
+            failOngoingLocal) {
+      throw PlatformException(code: 'notification_unavailable');
+    }
+    await super.show(notification);
+  }
+
   Completer<void>? initialization;
   Completer<void>? permissionCheck;
   int checks = 0;
@@ -637,6 +648,53 @@ void main() {
       SharedPreferencesStorePlatform.instance = original;
       await f.close(tester);
       await turn;
+    },
+  );
+
+  testWidgets(
+    'QUALITY real owners retain cleanup for a successful show before a sibling fails',
+    (tester) async {
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      final f = _RootFixture();
+      await f.initialize();
+      final normal = await f.normal();
+      final first = normal.findChat('local')!;
+      final second = normal.chatFor(
+        'sibling',
+        storedSessionId: 'stored-sibling',
+        title: 'Sibling',
+      );
+      await tester.pumpWidget(f.app());
+      await pumps(tester);
+      for (final chat in [first, second]) {
+        chat
+            .submitPrepared(
+              reservation: chat.reserve()!,
+              text: 'test',
+              localContent: 'test',
+            )
+            .ignore();
+      }
+      await pumps(tester);
+      expect(f.controller.activeChatActivities, hasLength(2));
+      f.sink.failOngoingLocal = 'sibling';
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await pumps(tester);
+      final firstId = TurnNotificationService.ongoingChatNotificationIdFor(
+        connectionId: f.connection.id,
+        localSessionId: 'local',
+      );
+      expect(
+        f.sink.shown.where((n) => n.ongoing).map((n) => n.id),
+        contains(firstId),
+      );
+      await BackgroundWorkPrefsStore.setEnabled(false);
+      await pumps(tester);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await pumps(tester);
+      await f.close(tester);
+      expect(f.sink.cancelled, contains(firstId));
+      expect(f.sink.cancelAllCount, 0);
     },
   );
 
