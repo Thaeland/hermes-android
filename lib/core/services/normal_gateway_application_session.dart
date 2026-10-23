@@ -1303,18 +1303,44 @@ class NormalGatewayChatOwner {
   bool _retireCompletedPresentation(List<Map<String, dynamic>> fresh) {
     // Settlement's first GET can lag persistence. A later latest read may
     // replace the projection, but only durable identity beyond the known
-    // admission floor proves freshness. Repeated text is not identity.
+    // admission floor proves freshness of a received response. A completed
+    // submission scaffold has no received response to protect; it may hand
+    // presentation to a successful latest transcript containing a full turn.
+    // Neither path correlates turns by matching prompt or response text.
     if (phase != NormalGatewayTurnPhase.completed ||
         (_display.isEmpty &&
             _priorDisplay.isEmpty &&
             _timeline.runs.isEmpty &&
-            _tools.isEmpty) ||
-        _floor == null ||
-        !fresh.any((row) => _responseRow(row, _floor!))) {
+            _tools.isEmpty)) {
+      return false;
+    }
+    final hasFreshResponse =
+        _floor != null && fresh.any((row) => _responseRow(row, _floor!));
+    if (!hasFreshResponse && !_canHandOffSubmissionScaffolds(fresh)) {
       return false;
     }
     _clearTransientPresentation();
     return true;
+  }
+
+  bool _canHandOffSubmissionScaffolds(List<Map<String, dynamic>> fresh) {
+    if (_floor != null ||
+        _timeline.runs.isNotEmpty ||
+        _tools.isNotEmpty ||
+        _subagents.isNotEmpty) {
+      return false;
+    }
+    final rows = [..._priorDisplay, ..._display];
+    if (rows.isEmpty || rows.length.isOdd) return false;
+    for (var i = 0; i < rows.length; i += 2) {
+      if (rows[i]['role'] != 'user' ||
+          rows[i + 1]['role'] != 'assistant' ||
+          (rows[i + 1]['content']?.toString().isNotEmpty ?? false)) {
+        return false;
+      }
+    }
+    final user = fresh.lastIndexWhere((row) => row['role'] == 'user');
+    return user >= 0 && fresh.skip(user + 1).any(_displayableResponseRow);
   }
 
   void _clearTransientPresentation() {
@@ -1358,10 +1384,12 @@ int? _numericFloor(List<Map<String, dynamic>> rows) {
 // A fresh displayable response, never proof of a successful terminal outcome.
 bool _responseRow(Map<String, dynamic> row, int floor) {
   final id = int.tryParse(row['id']?.toString() ?? '');
+  return id != null && id > floor && _displayableResponseRow(row);
+}
+
+bool _displayableResponseRow(Map<String, dynamic> row) {
   final role = row['role'];
-  return id != null &&
-      id > floor &&
-      (role == 'assistant' || role == 'agent') &&
+  return (role == 'assistant' || role == 'agent') &&
       (row['tool_calls'] == null ||
           row['tool_calls'] is List && (row['tool_calls'] as List).isEmpty) &&
       row['tool_call_id'] == null &&

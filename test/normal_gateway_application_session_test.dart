@@ -248,6 +248,189 @@ void main() {
     },
   );
 
+  for (final durableIds in [false, true]) {
+    test(
+      'completed empty scaffold hands off without text correlation (durableIds=$durableIds)',
+      () async {
+        final f = _Fixture()..rows = [];
+        addTearDown(f.close);
+        await f.start(seedHistory: false);
+        f.emit('turn.end', {'status': 'completed'});
+        await _flush();
+        expect(f.owner.phase, NormalGatewayTurnPhase.completed);
+        expect(f.owner.snapshot.rowFloor, isNull);
+        expect(f.owner.snapshot.displayRows.first['content'], 'private prompt');
+        expect(f.owner.snapshot.displayRows.last['content'], isEmpty);
+        expect(f.owner.snapshot.timeline.runs, isEmpty);
+
+        // History owns an unmaterialized scaffold, not a text-matched turn.
+        // Rewritten canonical prompt text must not be an identity heuristic.
+        f.owner.observeHistory([
+          {
+            if (durableIds) 'id': 11,
+            'role': 'user',
+            'content': 'Canonical prompt representation',
+          },
+          {
+            if (durableIds) 'id': 12,
+            'role': 'assistant',
+            'content': 'Canonical response',
+          },
+        ]);
+        expect(f.owner.snapshot.displayRows, isEmpty);
+        expect(
+          f.owner.snapshot.historyRows.last['content'],
+          'Canonical response',
+        );
+        expect(f.owner.phase, NormalGatewayTurnPhase.completed);
+        expect(f.submissions, 1);
+      },
+    );
+  }
+
+  test(
+    'completed empty scaffold survives failed and incomplete latest reads',
+    () async {
+      final f = _Fixture()..historyFails = true;
+      addTearDown(f.close);
+      await f.start(seedHistory: false);
+      f.emit('turn.end', {'status': 'completed'});
+      await _flush();
+      final scaffold = f.owner.snapshot.displayRows;
+      expect(scaffold, hasLength(2));
+      for (final rows in <List<Map<String, dynamic>>>[
+        [],
+        [
+          {'role': 'assistant', 'content': 'Old assistant without a user turn'},
+        ],
+        [
+          {'role': 'user', 'content': 'private prompt'},
+        ],
+        [
+          {'role': 'user', 'content': 'private prompt'},
+          {'role': 'assistant', 'content': ''},
+        ],
+        [
+          {'role': 'user', 'content': 'private prompt'},
+          {'role': 'assistant', 'content': 'Interim', 'interim': true},
+        ],
+        [
+          {'role': 'user', 'content': 'private prompt'},
+          {
+            'role': 'assistant',
+            'content': 'Tool',
+            'finish_reason': 'tool_calls',
+          },
+        ],
+      ]) {
+        f.owner.observeHistory(rows);
+        expect(f.owner.snapshot.displayRows, scaffold, reason: '$rows');
+        expect(f.owner.snapshot.rowFloor, isNull);
+      }
+    },
+  );
+
+  test('known stale full turn cannot replace even an empty scaffold', () async {
+    final f = _Fixture()
+      ..rows = [
+        {'id': 9, 'role': 'user', 'content': 'private prompt'},
+        {
+          'id': 10,
+          'role': 'assistant',
+          'content': 'Old repeated-prompt answer',
+        },
+      ];
+    addTearDown(f.close);
+    await f.start();
+    f.emit('turn.end', {'status': 'completed'});
+    await _flush();
+    expect(f.owner.snapshot.rowFloor, 10);
+    expect(f.owner.snapshot.displayRows, hasLength(2));
+    f.owner.observeHistory(f.rows);
+    expect(f.owner.snapshot.displayRows, hasLength(2));
+    f.owner.observeHistory([
+      ...f.rows,
+      {'id': 11, 'role': 'user', 'content': 'private prompt'},
+      {'id': 12, 'role': 'assistant', 'content': 'Fresh canonical answer'},
+    ]);
+    expect(f.owner.snapshot.displayRows, isEmpty);
+  });
+
+  for (final (type, data) in <(String, Map<String, dynamic>)>[
+    ('message.delta', {'text': 'Received reply'}),
+    ('reasoning.delta', {'text': 'Received reasoning'}),
+    ('tool.start', {'tool': 'read_file', 'tool_id': 't1'}),
+    ('subagent.start', {'subagent_id': 'child', 'goal': 'Inspect'}),
+  ]) {
+    test('unknown-floor $type is not an empty submission scaffold', () async {
+      final f = _Fixture()..rows = [];
+      addTearDown(f.close);
+      await f.start(seedHistory: false);
+      f.emit(type, data);
+      f.emit('turn.end', {'status': 'completed'});
+      await _flush();
+      final retained = f.owner.snapshot;
+      f.owner.observeHistory([
+        {'role': 'user', 'content': 'private prompt'},
+        {'role': 'assistant', 'content': 'Old repeated-prompt answer'},
+      ]);
+      expect(f.owner.snapshot.displayRows, retained.displayRows);
+      expect(f.owner.snapshot.timeline, same(retained.timeline));
+      expect(f.owner.snapshot.tools, retained.tools);
+      expect(f.owner.snapshot.subagents, retained.subagents);
+    });
+  }
+
+  test(
+    'empty latest turn cannot hand off a prior materialized reply',
+    () async {
+      final f = _Fixture()..historyFails = true;
+      addTearDown(f.close);
+      await f.start(seedHistory: false);
+      f.emit('message.complete', {'text': 'Prior received reply'});
+      await _flush();
+      f.rpc.complete();
+      await f.flight;
+      f.resetRpc();
+      f.flight = f.owner.submitPrepared(
+        reservation: f.owner.reserve()!,
+        text: 'Next prompt',
+        localContent: 'Next prompt',
+      );
+      await _flush();
+      f.emit('turn.end', {'status': 'completed'});
+      await _flush();
+      final retained = f.owner.snapshot;
+      expect(retained.rowFloor, isNull);
+      expect(retained.displayRows, hasLength(4));
+      f.owner.observeHistory([
+        {'role': 'user', 'content': 'Next prompt'},
+        {'role': 'assistant', 'content': 'Uncorrelated canonical reply'},
+      ]);
+      expect(f.owner.snapshot.displayRows, retained.displayRows);
+      expect(f.owner.snapshot.timeline, same(retained.timeline));
+    },
+  );
+
+  test('unknown outcome does not hand off an empty scaffold', () async {
+    final f = _Fixture()
+      ..rows = []
+      ..running = false
+      ..terminalStatus = 'idle';
+    addTearDown(f.close);
+    await f.start(seedHistory: false);
+    f.rpc.complete();
+    await f.flight;
+    await _flush();
+    final retained = f.owner.snapshot.displayRows;
+    expect(f.owner.phase, NormalGatewayTurnPhase.reconciledUnknown);
+    f.owner.observeHistory([
+      {'role': 'user', 'content': 'private prompt'},
+      {'role': 'assistant', 'content': 'Unconfirmed canonical reply'},
+    ]);
+    expect(f.owner.snapshot.displayRows, retained);
+  });
+
   test(
     'unknown floor never retires materialized reply by matching an old prompt',
     () async {
