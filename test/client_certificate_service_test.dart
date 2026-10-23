@@ -91,26 +91,28 @@ void main() {
     expect(await service.commit(committed), committed);
   });
 
-  test('discard removes a staged import and leaves committed ones alone',
-      () async {
-    final staged = await service.importPemPair(
-      certificateBytes: await fixture('client-cert.pem'),
-      privateKeyBytes: await fixture('client-key.pem'),
-      label: 'staged',
-    );
-    await service.discard(staged);
-    expect(File(staged.certificatePemPath).existsSync(), isFalse);
-
-    final committed = await service.commit(
-      await service.importPemPair(
+  test(
+    'discard removes a staged import and leaves committed ones alone',
+    () async {
+      final staged = await service.importPemPair(
         certificateBytes: await fixture('client-cert.pem'),
         privateKeyBytes: await fixture('client-key.pem'),
-        label: 'committed',
-      ),
-    );
-    await service.discard(committed);
-    expect(File(committed.certificatePemPath).existsSync(), isTrue);
-  });
+        label: 'staged',
+      );
+      await service.discard(staged);
+      expect(File(staged.certificatePemPath).existsSync(), isFalse);
+
+      final committed = await service.commit(
+        await service.importPemPair(
+          certificateBytes: await fixture('client-cert.pem'),
+          privateKeyBytes: await fixture('client-key.pem'),
+          label: 'committed',
+        ),
+      );
+      await service.discard(committed);
+      expect(File(committed.certificatePemPath).existsSync(), isTrue);
+    },
+  );
 
   test('deleteUnreferenced removes abandoned identities and staging', () async {
     final keep = await service.commit(

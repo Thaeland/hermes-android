@@ -92,8 +92,10 @@ void main() {
         clientCertificates: const <String, ClientCertificateBackup>{
           'mtls': ClientCertificateBackup(
             label: 'proxy.p12',
-            certificatePem: '-----BEGIN CERTIFICATE-----\nAAA\n-----END CERTIFICATE-----',
-            privateKeyPem: '-----BEGIN PRIVATE KEY-----\nBBB\n-----END PRIVATE KEY-----',
+            certificatePem:
+                '-----BEGIN CERTIFICATE-----\nAAA\n-----END CERTIFICATE-----',
+            privateKeyPem:
+                '-----BEGIN PRIVATE KEY-----\nBBB\n-----END PRIVATE KEY-----',
             password: 'key-password',
           ),
         },

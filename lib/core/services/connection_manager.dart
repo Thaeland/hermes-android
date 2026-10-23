@@ -135,7 +135,8 @@ class _ConnectionCredentials {
 
   static _ConnectionCredentials fromConnection(SavedConnection connection) {
     final password = connection.dashboardPassword?.trim();
-    final keyPassword = connection.clientCertificate?.privateKeyPassword?.trim();
+    final keyPassword = connection.clientCertificate?.privateKeyPassword
+        ?.trim();
     return _ConnectionCredentials(
       apiKey: connection.apiKey,
       dashboardPassword: password == null || password.isEmpty ? null : password,
@@ -535,7 +536,10 @@ class ConnectionManager {
   SavedConnection _hydrateFromCachedCredentials(SavedConnection connection) {
     final encoded = _credentialStore.readCached(_credentialKey(connection.id));
     if (encoded == null) return connection;
-    return _applyCredentials(connection, _ConnectionCredentials.decode(encoded));
+    return _applyCredentials(
+      connection,
+      _ConnectionCredentials.decode(encoded),
+    );
   }
 
   /// Attaches secrets held in the secure store to [connection].
@@ -623,7 +627,9 @@ class ConnectionManager {
     }
   }
 
-  static Set<String> _certificateDirectories(List<SavedConnection> connections) {
+  static Set<String> _certificateDirectories(
+    List<SavedConnection> connections,
+  ) {
     return <String>{
       for (final connection in connections)
         if (connection.clientCertificate case final certificate?)

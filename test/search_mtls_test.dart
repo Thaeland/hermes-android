@@ -15,9 +15,7 @@ import 'package:http/io_client.dart';
 /// transport, not an injected mock: the point of the review finding was that
 /// search built its own plain `http.Client()` and therefore silently omitted
 /// the connection's TLS identity.
-Future<HttpServer> _startMutualTlsServer({
-  required String responseJson,
-}) async {
+Future<HttpServer> _startMutualTlsServer({required String responseJson}) async {
   final context = SecurityContext()
     ..useCertificateChain('test/fixtures/mtls-server-cert.pem')
     ..usePrivateKey('test/fixtures/mtls-server-key.pem')
@@ -82,34 +80,36 @@ void main() {
     },
   );
 
-  test('SessionSearchClient without the identity is rejected by the server',
-      () async {
-    TestWidgetsFlutterBinding.ensureInitialized();
-    final savedOverrides = HttpOverrides.current;
-    HttpOverrides.global = null;
-    final server = await _startMutualTlsServer(
-      responseJson: jsonEncode({'results': []}),
-    );
-    try {
-      final context = SecurityContext(withTrustedRoots: true)
-        ..setTrustedCertificates('test/fixtures/mtls-ca-cert.pem');
-      final anonymous = IOClient(HttpClient(context: context));
-      addTearDown(anonymous.close);
-      final client = SessionSearchClient(
-        baseUrl: 'https://127.0.0.1:${server.port}',
-        headers: () async => const {},
-        httpClient: anonymous,
+  test(
+    'SessionSearchClient without the identity is rejected by the server',
+    () async {
+      TestWidgetsFlutterBinding.ensureInitialized();
+      final savedOverrides = HttpOverrides.current;
+      HttpOverrides.global = null;
+      final server = await _startMutualTlsServer(
+        responseJson: jsonEncode({'results': []}),
       );
+      try {
+        final context = SecurityContext(withTrustedRoots: true)
+          ..setTrustedCertificates('test/fixtures/mtls-ca-cert.pem');
+        final anonymous = IOClient(HttpClient(context: context));
+        addTearDown(anonymous.close);
+        final client = SessionSearchClient(
+          baseUrl: 'https://127.0.0.1:${server.port}',
+          headers: () async => const {},
+          httpClient: anonymous,
+        );
 
-      await expectLater(
-        client.search('tls'),
-        throwsA(isA<SessionSearchException>()),
-      );
-    } finally {
-      HttpOverrides.global = savedOverrides;
-      await server.close(force: true);
-    }
-  });
+        await expectLater(
+          client.search('tls'),
+          throwsA(isA<SessionSearchException>()),
+        );
+      } finally {
+        HttpOverrides.global = savedOverrides;
+        await server.close(force: true);
+      }
+    },
+  );
 
   test(
     'AiSearchQueryRewriter performs a certificate-enforcing mTLS request',

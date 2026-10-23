@@ -77,29 +77,37 @@ void main() {
     });
   });
 
-  test('SavedConnection persists the certificate metadata without a password',
-      () {
-    final connection = SavedConnection(
-      id: 'conn-1',
-      label: 'mTLS proxy',
-      host: 'hermes.example.com',
-      port: 443,
-      apiKey: 'key',
-      useHttps: true,
-      clientCertificate: config,
-    );
+  test(
+    'SavedConnection persists the certificate metadata without a password',
+    () {
+      final connection = SavedConnection(
+        id: 'conn-1',
+        label: 'mTLS proxy',
+        host: 'hermes.example.com',
+        port: 443,
+        apiKey: 'key',
+        useHttps: true,
+        clientCertificate: config,
+      );
 
-    final map = connection.toMap();
-    final restored = SavedConnection.fromMap(map);
+      final map = connection.toMap();
+      final restored = SavedConnection.fromMap(map);
 
-    expect(restored.clientCertificate, config.copyWith(clearPrivateKeyPassword: true));
-    expect(restored.clientCertificate!.privateKeyPassword, isNull);
-    expect(
-      map['client_certificate'] as Map<String, dynamic>,
-      isNot(contains('private_key_password')),
-    );
-    expect(connection.toMap()['client_certificate'], isA<Map<String, dynamic>>());
-  });
+      expect(
+        restored.clientCertificate,
+        config.copyWith(clearPrivateKeyPassword: true),
+      );
+      expect(restored.clientCertificate!.privateKeyPassword, isNull);
+      expect(
+        map['client_certificate'] as Map<String, dynamic>,
+        isNot(contains('private_key_password')),
+      );
+      expect(
+        connection.toMap()['client_certificate'],
+        isA<Map<String, dynamic>>(),
+      );
+    },
+  );
 
   test('SavedConnection.copyWith can clear the client certificate', () {
     final connection = SavedConnection(

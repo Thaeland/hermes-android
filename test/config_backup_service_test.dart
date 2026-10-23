@@ -349,7 +349,8 @@ void main() {
       );
       await target.import(backup, mode: ConfigImportMode.replace);
 
-      final restored = (await targetManager.loadConnectionsWithSecrets()).single;
+      final restored =
+          (await targetManager.loadConnectionsWithSecrets()).single;
       final restoredCertificate = restored.clientCertificate;
       expect(restoredCertificate, isNotNull);
       expect(restoredCertificate!.label, 'proxy.p12');
@@ -361,108 +362,106 @@ void main() {
         restoredCertificate.privateKeyPemPath,
         startsWith(targetSupport.path),
       );
-      expect(
-        File(restoredCertificate.certificatePemPath).existsSync(),
-        isTrue,
-      );
-      expect(
-        File(restoredCertificate.privateKeyPemPath).existsSync(),
-        isTrue,
-      );
+      expect(File(restoredCertificate.certificatePemPath).existsSync(), isTrue);
+      expect(File(restoredCertificate.privateKeyPemPath).existsSync(), isTrue);
 
       // Re-exporting the restored profile keeps the identity available.
       final reexported = await target.export(appVersion: 'test');
       expect(reexported.clientCertificates, hasLength(1));
     });
 
-    test('merge-import on the same device restores mTLS instead of dropping it',
-        () async {
-      final support = await Directory.systemTemp.createTemp(
-        'hermes-backup-merge',
-      );
-      addTearDown(() async {
-        if (support.existsSync()) await support.delete(recursive: true);
-      });
-      final certificates = ClientCertificateService(
-        supportDirectory: () async => support,
-      );
+    test(
+      'merge-import on the same device restores mTLS instead of dropping it',
+      () async {
+        final support = await Directory.systemTemp.createTemp(
+          'hermes-backup-merge',
+        );
+        addTearDown(() async {
+          if (support.existsSync()) await support.delete(recursive: true);
+        });
+        final certificates = ClientCertificateService(
+          supportDirectory: () async => support,
+        );
 
-      final (service, manager, _) = await buildService(
-        <String, Object>{},
-        certificates: certificates,
-      );
-      final identity = await certificates.commit(
-        await certificates.importPkcs12(
-          bytes: await File('test/fixtures/client-test.p12').readAsBytes(),
-          password: 'test-password',
-          label: 'proxy.p12',
-        ),
-      );
-      await manager.saveConnection(
-        'mTLS proxy',
-        'https://host.ts.net',
-        443,
-        'sk-key',
-        clientCertificate: identity,
-      );
-      final backup = await service.export(appVersion: 'test');
-      final id = backup.connections.single.id;
+        final (service, manager, _) = await buildService(
+          <String, Object>{},
+          certificates: certificates,
+        );
+        final identity = await certificates.commit(
+          await certificates.importPkcs12(
+            bytes: await File('test/fixtures/client-test.p12').readAsBytes(),
+            password: 'test-password',
+            label: 'proxy.p12',
+          ),
+        );
+        await manager.saveConnection(
+          'mTLS proxy',
+          'https://host.ts.net',
+          443,
+          'sk-key',
+          clientCertificate: identity,
+        );
+        final backup = await service.export(appVersion: 'test');
+        final id = backup.connections.single.id;
 
-      // Simulate a same-id profile already on the device without the identity.
-      await manager.updateConnection(
-        id,
-        'mTLS proxy',
-        'https://host.ts.net',
-        443,
-        'sk-key',
-        clearClientCertificate: true,
-      );
-      expect(manager.getConnections().single.clientCertificate, isNull);
+        // Simulate a same-id profile already on the device without the identity.
+        await manager.updateConnection(
+          id,
+          'mTLS proxy',
+          'https://host.ts.net',
+          443,
+          'sk-key',
+          clearClientCertificate: true,
+        );
+        expect(manager.getConnections().single.clientCertificate, isNull);
 
-      await service.import(backup, mode: ConfigImportMode.merge);
+        await service.import(backup, mode: ConfigImportMode.merge);
 
-      final restored = manager.getConnections().single;
-      expect(restored.id, id);
-      expect(restored.clientCertificate, isNotNull);
-      expect(
-        File(restored.clientCertificate!.certificatePemPath).existsSync(),
-        isTrue,
-      );
-    });
+        final restored = manager.getConnections().single;
+        expect(restored.id, id);
+        expect(restored.clientCertificate, isNotNull);
+        expect(
+          File(restored.clientCertificate!.certificatePemPath).existsSync(),
+          isTrue,
+        );
+      },
+    );
 
-    test('rejects a backup that claims a certificate it does not carry',
-        () async {
-      final backup = ConfigBackup(
-        createdAt: DateTime.utc(2026),
-        appVersion: 'test',
-        connections: [
-          SavedConnection(
-            id: 'conn-1',
-            label: 'mTLS',
-            host: 'host',
-            port: 443,
-            apiKey: 'key',
-            useHttps: true,
-            clientCertificate: const ClientCertificateConfig(
-              label: 'missing',
-              certificatePemPath: '/tmp/certificate.pem',
-              privateKeyPemPath: '/tmp/private-key.pem',
+    test(
+      'rejects a backup that claims a certificate it does not carry',
+      () async {
+        final backup = ConfigBackup(
+          createdAt: DateTime.utc(2026),
+          appVersion: 'test',
+          connections: [
+            SavedConnection(
+              id: 'conn-1',
+              label: 'mTLS',
+              host: 'host',
+              port: 443,
+              apiKey: 'key',
+              useHttps: true,
+              clientCertificate: const ClientCertificateConfig(
+                label: 'missing',
+                certificatePemPath: '/tmp/certificate.pem',
+                privateKeyPemPath: '/tmp/private-key.pem',
+              ),
+            ),
+          ],
+          preferences: const <String, Object>{},
+        );
+        final json = backup.toJson();
+        expect(
+          () => ConfigBackup.fromJson(json),
+          throwsA(
+            isA<ConfigBackupException>().having(
+              (e) => e.message,
+              'message',
+              contains('complete restore is not possible'),
             ),
           ),
-        ],
-        preferences: const <String, Object>{},
-      );
-      final json = backup.toJson();
-      expect(
-        () => ConfigBackup.fromJson(json),
-        throwsA(
-          isA<ConfigBackupException>().having(
-            (e) => e.message,
-            'message',
-            contains('complete restore is not possible'),
-          ),
-        ),
-      );
-    });
+        );
+      },
+    );
   });
 }

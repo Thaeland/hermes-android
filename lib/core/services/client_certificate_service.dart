@@ -164,10 +164,7 @@ class ClientCertificateService implements ClientCertificateFileStore {
         config.certificatePemPath,
       ).readAsString();
       final privateKeyPem = await File(config.privateKeyPemPath).readAsString();
-      return (
-        certificatePem: certificatePem,
-        privateKeyPem: privateKeyPem,
-      );
+      return (certificatePem: certificatePem, privateKeyPem: privateKeyPem);
     } catch (_) {
       throw const ClientCertificateImportException(
         'The saved client certificate files could not be read.',
@@ -249,8 +246,7 @@ class ClientCertificateService implements ClientCertificateFileStore {
     final root = await _rootDirectory();
     if (!root.existsSync()) return;
     final referenced = <String>{
-      for (final path in referencedDirectoryPaths)
-        _normalize(path),
+      for (final path in referencedDirectoryPaths) _normalize(path),
     };
     // Staged imports are never "referenced" by a saved connection: they are
     // leftovers from a cancelled flow.
@@ -307,9 +303,7 @@ class ClientCertificateService implements ClientCertificateFileStore {
 
   Future<Directory> _rootDirectory() async {
     final support = await _supportDirectory();
-    return Directory(
-      '${support.path}${Platform.pathSeparator}$_directoryName',
-    );
+    return Directory('${support.path}${Platform.pathSeparator}$_directoryName');
   }
 
   Future<Directory> _stagingRoot() async {
@@ -350,7 +344,9 @@ class ClientCertificateService implements ClientCertificateFileStore {
     final normalizedCandidate = _normalize(candidate);
     final normalizedParent = _normalize(parent);
     return normalizedCandidate == normalizedParent ||
-        normalizedCandidate.startsWith('$normalizedParent${Platform.pathSeparator}');
+        normalizedCandidate.startsWith(
+          '$normalizedParent${Platform.pathSeparator}',
+        );
   }
 
   static String _normalize(String path) {
