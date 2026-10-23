@@ -1,4 +1,4 @@
-# Hermes Android v2.1.32
+# Hermes Android v2.1.33
 
 Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — chat with your Hermes sessions from a phone or tablet over local Wi-Fi or a private Tailscale network.
 
@@ -14,15 +14,15 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
 
 ## Current release
 
-- Version: **2.1.32** (build 2175)
+- Version: **2.1.33** (build 2176)
 - Package: `com.hermesagent.hermes_android`
 - Recommended APK for modern phones: ARM64 release build from the
   [Releases](https://github.com/rusty4444/hermes-android/releases) page.
 - Production builds are signed with a private release keystore. Debug APKs
   signed with the Android debug certificate remain available for testing
   under the `com.hermesagent.hermes_android.dev` package ID.
-- v2.1.32 keeps tool sections collapsed on each chat visit and shows only
-  the current or latest tool call until you expand the group.
+- v2.1.33 shows your saved facts in More → Memory, keeps delegated-task bubbles
+  compact and starts reasoning collapsed on each chat visit.
   See the [changelog](CHANGELOG.md) for features, fixes and delivery limits.
 - The app checks [GitHub Releases](https://github.com/rusty4444/hermes-android/releases)
   on ordinary launches. An answered check limits network requests to once
@@ -115,6 +115,18 @@ See [CHANGELOG.md](CHANGELOG.md) for the complete release history and
 [docs/HERMESAPK_DEVELOPMENT_LOG.md](docs/HERMESAPK_DEVELOPMENT_LOG.md) for the
 sanitized implementation and validation record.
 
+## What's new in v2.1.33
+
+- More → Memory opens facts about you from the connected profile's `USER.md`.
+  Switch to Agent notes for `MEMORY.md`, select text or read long facts in full.
+  This read-only view does not enumerate external providers such as MemPalace.
+  See [Saved memory facts](docs/MEMORY_FACTS.md) for API compatibility limits.
+- Delegated-task bubbles keep a compact goal and status. Open the task timeline
+  for the full details and model information.
+- Reasoning starts collapsed on a new chat visit, even with gateway verbose
+  hints. Your manual choice survives updates and scrolling during that visit;
+  the app's explicit Verbose mode remains an open default.
+
 ## What's new in v2.1.32
 
 - Tool sections start collapsed when opening or returning to a chat, including
@@ -137,15 +149,6 @@ sanitized implementation and validation record.
 - Opt in to Google-free UnifiedPush for selected sessions with an installed
   distributor and the separate server companion. Setup and Android delivery
   limits appear in [Background work and notifications](#background-work-and-notifications).
-
-## What's new in v2.1.30
-
-- Enter inserts a new line instead of sending. Use the on-screen Send button.
-- Start typing a follow-up immediately after Send, including during attachment
-  uploads, replies and reconnects. Delayed setup cannot erase the new draft.
-- A rejected prompt returns only if you have not edited the cleared composer.
-  Newer text and deliberately cleared drafts are left alone. Sending another
-  turn remains blocked while the current turn or recovery is active.
 
 ## Features
 
@@ -593,7 +596,7 @@ cp build/app/outputs/flutter-apk/app-*-release.apk release-apks/
 block in `android/app/build.gradle.kts` derives per-ABI codes as
 `base * 10 + ABI code` (armeabi-v7a = 1, arm64-v8a = 2, x86_64 = 3), so the
 codes stay ordered armeabi-v7a < arm64-v8a < x86_64 as fdroiddata requires.
-For v2.1.32, base `2175` therefore produces codes `21751`/`21752`/`21753`.
+For v2.1.33, base `2176` therefore produces codes `21761`/`21762`/`21763`.
 CI reads the completed arm64 APK with `aapt` and fails if that relationship
 drifts. Release-floor checks continue to apply to the base value and must not
 be weakened to rely on the ABI code.
@@ -705,7 +708,8 @@ lib/
 ## Credits
 
 **AI assistance:** Hermes Agent assists with implementation, research, code
-review and regression tests, including the tool-section behaviour in v2.1.32.
+review and regression tests, including the saved-memory viewer and compact chat
+details in v2.1.33. Existing contributor credits below remain unchanged.
 Automated checks do not substitute for device validation; release notes list
 the checks performed.
 

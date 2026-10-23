@@ -4,7 +4,7 @@ All notable changes since v1.0.7 are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The [README](README.md)
 shows only the three latest releases.
 
-## [Unreleased]
+## [2.1.33] - 2026-10-24
 
 ### Fixed
 
@@ -15,6 +15,24 @@ shows only the three latest releases.
   explicitly outside this view.
 - Missing or unsupported saved-memory APIs show an actionable error rather than
   falling back to configuration or falsely reporting an empty memory store.
+- Delegated-task bubbles keep a compact goal and status in the parent chat.
+  Open the task timeline for its full details and model information (PR #173).
+- Reasoning starts collapsed on a new chat visit. Manual expansion survives
+  updates and scrolling within that visit; the app's explicit Verbose mode
+  remains the open default. Gateway hints cannot reopen reasoning (PR #174).
+
+### Validation
+
+- Local static analysis and all 1,839 Flutter tests passed. The ARM64 debug APK
+  compiled on the integrated tree. No physical-device validation is claimed.
+- Release identity is `2.1.33+2176`; split codes are `21761` (armeabi-v7a),
+  `21762` (arm64-v8a) and `21763` (x86_64). The upgrade floor remains `2127`.
+
+### Thanks
+
+- Hermes Agent assisted with implementation, independent review, documentation
+  and regression tests. Existing community credits remain in the README and
+  earlier entries; this release includes no new external-contributor commits.
 
 ## [2.1.32] - 2026-10-23
 

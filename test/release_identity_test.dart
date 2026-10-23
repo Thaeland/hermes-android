@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   test(
-    'Build 2.1.32 has the exact release identity and an upgrade-safe code',
+    'Build 2.1.33 has the exact release identity and an upgrade-safe code',
     () {
       final pubspec = File('pubspec.yaml').readAsStringSync();
       final match = RegExp(
@@ -13,11 +13,11 @@ void main() {
       ).firstMatch(pubspec);
 
       expect(match, isNotNull);
-      expect(match!.group(1), '2.1.32');
-      expect(int.parse(match.group(2)!), 2175);
-      expect(int.parse(match.group(2)!), greaterThan(2174));
+      expect(match!.group(1), '2.1.33');
+      expect(int.parse(match.group(2)!), 2176);
+      expect(int.parse(match.group(2)!), greaterThan(2175));
       // F-Droid ABI split: packaged arm64 code is base * 10 + ABI code.
-      expect(int.parse(match.group(2)!) * 10 + 2, 21752);
+      expect(int.parse(match.group(2)!) * 10 + 2, 21762);
     },
   );
 
@@ -42,7 +42,7 @@ void main() {
     );
     expect(gradle, contains('variant.versionCode * 10 + abiVersionCode'));
     expect(releaseWorkflow, contains("MINIMUM_INSTALLED_VERSION_CODE: '2127'"));
-    expect(releaseWorkflow, contains("REQUIRED_BASE_VERSION_CODE: '2175'"));
+    expect(releaseWorkflow, contains("REQUIRED_BASE_VERSION_CODE: '2176'"));
     expect(releaseWorkflow, contains("ARM64_ABI_CODE: '2'"));
     expect(
       releaseWorkflow,
@@ -67,16 +67,16 @@ void main() {
     );
     expect(releaseWorkflow, contains('if certs != {expected_cert}:'));
     expect(qualityWorkflow, contains("MINIMUM_INSTALLED_VERSION_CODE: '2127'"));
-    expect(qualityWorkflow, contains("REQUIRED_BASE_VERSION_CODE: '2175'"));
+    expect(qualityWorkflow, contains("REQUIRED_BASE_VERSION_CODE: '2176'"));
   });
 
   test('Store notes cover the base and every exact ABI split code', () {
     const directory = 'fastlane/metadata/android/en-US/changelogs';
-    final notes = File('$directory/2175.txt').readAsStringSync();
+    final notes = File('$directory/2176.txt').readAsStringSync();
 
     expect(notes.trim(), isNotEmpty);
     expect(notes.runes.length, lessThanOrEqualTo(500));
-    for (final splitCode in [21751, 21752, 21753]) {
+    for (final splitCode in [21761, 21762, 21763]) {
       expect(File('$directory/$splitCode.txt').readAsStringSync(), notes);
     }
   });
