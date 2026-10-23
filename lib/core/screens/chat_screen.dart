@@ -1905,6 +1905,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         return;
       }
       _acceptRecentMessages(messages);
+      _normalChat?.observeHistory(messages);
       setState(() {
         _messages = _historyWindow.rows;
         _error = null;

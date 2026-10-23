@@ -61,6 +61,7 @@ shows only the three latest releases.
   revocations after resume. Passive initialisation does not repeat a permission
   prompt or retain a stale denied/granted latch. Optional chat preferences do
   not suppress Android's required foreground-service disclosure.
+- Later canonical history replaces retained wire presentation after delayed persistence, including on chat reopen.
 - Stock-turn recovery distinguishes interrupted/failed outcomes from successful
   completion. A proven-idle turn without a recorded outcome becomes inactive
   with an outcome-unknown status; partial assistant prose does not trigger a

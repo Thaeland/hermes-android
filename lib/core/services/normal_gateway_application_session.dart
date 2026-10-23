@@ -397,6 +397,8 @@ class NormalGatewayChatOwner {
   bool _historyKnown = false;
   final List<GatewayToolActivity> _tools = [];
   final List<GatewaySubagentActivity> _subagents = [];
+  // Observer identity outlives parent presentation and its canonical hydration.
+  final List<GatewaySubagentActivity> _observedSubagents = [];
   ChatTimeline _timeline = const ChatTimeline();
   final Map<String, StreamEvent> _pendingInput = {};
   final List<StreamEvent> _inputUpdates = [];
@@ -472,12 +474,13 @@ class NormalGatewayChatOwner {
     _draftToRestore = null;
   }
 
-  /// Only successful canonical reads taken before admission may establish a
-  /// baseline. A held route read from a prior generation cannot seed a turn.
+  /// Accept only a fresh latest batch, never a retained/older paging window.
+  /// Reads during a turn cannot seed its admission baseline or replace it.
   void observeHistory(List<Map<String, dynamic>> rows) {
-    if (snapshot.hasActiveTurn) return;
+    if (_session._closed || snapshot.hasActiveTurn) return;
     _history = rows.map((row) => Map<String, dynamic>.from(row)).toList();
     _historyKnown = true;
+    if (_retireCompletedPresentation(rows)) _notify();
   }
 
   void _notify() {
@@ -725,13 +728,25 @@ class NormalGatewayChatOwner {
         event.data,
       );
       if (update != null) {
-        final index = _subagents.indexWhere(
+        final observedIndex = _observedSubagents.indexWhere(
           (agent) => agent.matchesTask(update),
         );
-        if (index < 0) {
-          _subagents.add(update);
+        final merged = observedIndex < 0
+            ? update
+            : _observedSubagents[observedIndex].merge(update);
+        if (observedIndex < 0) {
+          _observedSubagents.add(merged);
         } else {
-          _subagents[index] = _subagents[index].merge(update);
+          _observedSubagents[observedIndex] = merged;
+        }
+        if (_observedSubagents.length > 128) _observedSubagents.removeAt(0);
+        final index = _subagents.indexWhere(
+          (agent) => agent.matchesTask(merged),
+        );
+        if (index < 0) {
+          _subagents.add(merged);
+        } else {
+          _subagents[index] = merged;
         }
         if (_subagents.length > 128) _subagents.removeAt(0);
       }
@@ -1145,11 +1160,7 @@ class NormalGatewayChatOwner {
           _floor != null &&
           _history.any((row) => _responseRow(row, _floor!));
       if (canonical) {
-        _display.clear();
-        _priorDisplay.clear();
-        _timeline = _timeline.clear();
-        _tools.clear();
-        _subagents.clear();
+        _clearTransientPresentation();
       }
       _error = error;
       _status = completed == null
@@ -1282,36 +1293,36 @@ class NormalGatewayChatOwner {
       if (!_current(generation) || snapshot.hasActiveTurn) return;
       _historyKnown = true;
       _history = fresh;
-      // An old/empty sliding page must not erase the received final response.
-      if (phase == NormalGatewayTurnPhase.completed &&
-          (_floor != null && fresh.any((row) => _responseRow(row, _floor!)) ||
-              _canonicalTurnVisible(fresh))) {
-        _display.clear();
-        _priorDisplay.clear();
-        _timeline = _timeline.clear();
-        _tools.clear();
-        _subagents.clear();
-      }
+      _retireCompletedPresentation(fresh);
       _notify();
     } catch (_) {
       /* keep the received final response */
     }
   }
 
-  bool _canonicalTurnVisible(List<Map<String, dynamic>> fresh) {
-    // Presentation-only replacement AFTER a live terminal frame was durably
-    // settled. Never used as history-only completion evidence.
-    if (_display.isEmpty || _display.first['role'] != 'user') return false;
-    final user = fresh.lastIndexWhere((row) => row['role'] == 'user');
-    return user >= 0 &&
-        fresh[user]['content'] == _display.first['content'] &&
-        fresh
-            .skip(user + 1)
-            .any(
-              (row) =>
-                  const {'assistant', 'agent'}.contains(row['role']) &&
-                  (row['content']?.toString().isNotEmpty ?? false),
-            );
+  bool _retireCompletedPresentation(List<Map<String, dynamic>> fresh) {
+    // Settlement's first GET can lag persistence. A later latest read may
+    // replace the projection, but only durable identity beyond the known
+    // admission floor proves freshness. Repeated text is not identity.
+    if (phase != NormalGatewayTurnPhase.completed ||
+        (_display.isEmpty &&
+            _priorDisplay.isEmpty &&
+            _timeline.runs.isEmpty &&
+            _tools.isEmpty) ||
+        _floor == null ||
+        !fresh.any((row) => _responseRow(row, _floor!))) {
+      return false;
+    }
+    _clearTransientPresentation();
+    return true;
+  }
+
+  void _clearTransientPresentation() {
+    _display.clear();
+    _priorDisplay.clear();
+    _timeline = _timeline.clear();
+    _tools.clear();
+    _subagents.clear();
   }
 
   void _close() {

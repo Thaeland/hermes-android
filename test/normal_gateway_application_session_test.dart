@@ -70,6 +70,266 @@ void main() {
     },
   );
 
+  for (final role in ['assistant', 'agent']) {
+    test(
+      'later fresh $role history atomically retires completed presentation',
+      () async {
+        final f = _Fixture();
+        addTearDown(f.close);
+        await f.start();
+        f.emit('message.delta', {'text': 'Wire preview'});
+        f.emit('reasoning.delta', {'text': 'Transient reasoning'});
+        f.emit('tool.start', {'tool': 'read_file', 'tool_id': 't1'});
+        f.emit('subagent.start', {
+          'subagent_id': 'runtime-root',
+          'child_session_id': 'child-root',
+          'goal': 'Inspect',
+        });
+        f.emit('subagent.text', {
+          'subagent_id': 'runtime-root',
+          'child_session_id': 'child-tip',
+          'text': 'Progress',
+        });
+        f.emit('message.complete', {'text': 'Wire preview'});
+        await _flush();
+        final retained = f.owner.snapshot;
+        expect(retained.phase, NormalGatewayTurnPhase.completed);
+        expect(retained.rowFloor, 10);
+        expect(retained.displayRows.last['content'], 'Wire preview');
+        expect(retained.timeline.runs, isNotEmpty);
+        expect(retained.tools, isNotEmpty);
+        expect(retained.subagents, isNotEmpty);
+        final observations = <NormalGatewayChatSnapshot>[];
+        f.owner.subscribe(observations.add);
+        observations.clear();
+
+        f.owner.observeHistory([
+          {'id': 11, 'role': 'user', 'content': 'private prompt'},
+          {'id': 12, 'role': role, 'content': 'Canonical final'},
+        ]);
+
+        expect(observations, hasLength(1));
+        final hydrated = observations.single;
+        expect(hydrated.historyRows.last['content'], 'Canonical final');
+        expect(hydrated.displayRows, isEmpty);
+        expect(hydrated.timeline.runs, isEmpty);
+        expect(hydrated.tools, isEmpty);
+        expect(hydrated.subagents, isEmpty);
+        expect(hydrated.phase, NormalGatewayTurnPhase.completed);
+        expect(hydrated.turnId, retained.turnId);
+        expect(identical(f.session.findChat('stored'), f.owner), isTrue);
+
+        // Hydration retires presentation, not the observer's lineage knowledge.
+        f.emit('subagent.complete', {
+          'subagent_id': 'new-runtime-alias',
+          'child_session_id': 'child-tip',
+          'status': 'failed',
+        });
+        final child = f.owner.snapshot.subagents.single;
+        expect(child.id, 'runtime-root');
+        expect(child.childSessionId, 'child-root');
+        expect(child.latestChildSessionId, 'child-tip');
+        expect(child.goal, 'Inspect');
+        expect(child.failed, isTrue);
+        expect(f.owner.snapshot.hasActiveTurn, isFalse);
+        expect(f.owner.snapshot.displayRows, isEmpty);
+        f.owner.observeHistory(hydrated.historyRows);
+        expect(f.owner.snapshot.subagents.single.childSessionId, 'child-root');
+        expect(f.owner.snapshot.subagents.single.failed, isTrue);
+        expect(f.submissions, 1);
+      },
+    );
+  }
+
+  test(
+    'late old, interim, tool, user and empty pages retain completed response',
+    () async {
+      final f = _Fixture();
+      addTearDown(f.close);
+      await f.start();
+      f.emit('message.complete', {'text': 'Wire preview'});
+      await _flush();
+      for (final rows in <List<Map<String, dynamic>>>[
+        [],
+        [
+          {'id': 10, 'role': 'assistant', 'content': 'Old final'},
+        ],
+        [
+          {'id': 11, 'role': 'user', 'content': 'private prompt'},
+        ],
+        [
+          {
+            'id': 12,
+            'role': 'assistant',
+            'content': 'Interim',
+            'interim': true,
+          },
+        ],
+        [
+          {
+            'id': 12,
+            'role': 'assistant',
+            'content': 'Interim',
+            '_gateway_interim': true,
+          },
+        ],
+        [
+          {
+            'id': 12,
+            'role': 'assistant',
+            'content': 'Interim',
+            'is_interim': true,
+          },
+        ],
+        [
+          {
+            'id': 12,
+            'role': 'assistant',
+            'content': 'Tool',
+            'tool_calls': [
+              {'id': 't1'},
+            ],
+          },
+        ],
+        [
+          {
+            'id': 12,
+            'role': 'assistant',
+            'content': 'Tool',
+            'finish_reason': 'tool_calls',
+          },
+        ],
+        [
+          {
+            'id': 12,
+            'role': 'assistant',
+            'content': 'Tool',
+            'tool_call_id': 't1',
+          },
+        ],
+        [
+          {'id': 12, 'role': 'tool', 'content': 'Result'},
+        ],
+        [
+          {'id': 12, 'role': 'assistant', 'content': '  '},
+        ],
+        [
+          {'role': 'assistant', 'content': 'No durable identity'},
+        ],
+      ]) {
+        f.owner.observeHistory(rows);
+        expect(
+          f.owner.snapshot.displayRows.last['content'],
+          'Wire preview',
+          reason: '$rows',
+        );
+        expect(f.owner.snapshot.timeline.runs, isNotEmpty, reason: '$rows');
+        expect(f.owner.phase, NormalGatewayTurnPhase.completed);
+      }
+    },
+  );
+
+  test(
+    'latest history cannot replace an active reply or its admission baseline',
+    () async {
+      final f = _Fixture();
+      addTearDown(f.close);
+      await f.start();
+      f.emit('message.delta', {'text': 'Still running'});
+      final before = f.owner.snapshot;
+      f.owner.observeHistory([
+        {'id': 12, 'role': 'assistant', 'content': 'Not terminal evidence'},
+      ]);
+      expect(f.owner.snapshot.phase, NormalGatewayTurnPhase.running);
+      expect(f.owner.snapshot.historyRows, before.historyRows);
+      expect(f.owner.snapshot.displayRows, before.displayRows);
+      expect(f.owner.snapshot.timeline, same(before.timeline));
+      expect(f.owner.snapshot.rowFloor, 10);
+    },
+  );
+
+  test(
+    'unknown floor never retires materialized reply by matching an old prompt',
+    () async {
+      final f = _Fixture()
+        ..rows = [
+          {'id': 1, 'role': 'user', 'content': 'private prompt'},
+          {
+            'id': 2,
+            'role': 'assistant',
+            'content': 'Old identical-prompt answer',
+          },
+        ];
+      addTearDown(f.close);
+      await f.start(seedHistory: false);
+      f.emit('message.complete', {'text': 'New wire response'});
+      await _flush();
+      expect(f.owner.snapshot.rowFloor, isNull);
+      expect(f.owner.snapshot.displayRows.last['content'], 'New wire response');
+      f.owner.observeHistory([
+        ...f.rows,
+        {'id': 100, 'role': 'assistant', 'content': 'Uncorrelated final'},
+      ]);
+      expect(f.owner.snapshot.displayRows.last['content'], 'New wire response');
+      expect(f.owner.snapshot.timeline.runs, isNotEmpty);
+      expect(f.owner.snapshot.rowFloor, isNull);
+    },
+  );
+
+  test(
+    'late history preserves an unknown outcome and its materialized reply',
+    () async {
+      final f = _Fixture()
+        ..running = false
+        ..terminalStatus = 'idle';
+      addTearDown(f.close);
+      await f.start();
+      f.emit('message.delta', {'text': 'Unconfirmed wire response'});
+      f.rpc.complete();
+      await f.flight;
+      await _flush();
+      expect(f.owner.phase, NormalGatewayTurnPhase.reconciledUnknown);
+      f.owner.observeHistory([
+        {'id': 12, 'role': 'assistant', 'content': 'Later partial response'},
+      ]);
+      expect(f.owner.phase, NormalGatewayTurnPhase.reconciledUnknown);
+      expect(f.owner.snapshot.status!.kind, 'reconciled_unknown');
+      expect(
+        f.owner.snapshot.displayRows.last['content'],
+        'Unconfirmed wire response',
+      );
+      expect(f.owner.snapshot.timeline.runs, isNotEmpty);
+    },
+  );
+
+  test(
+    'fresh latest history retires prior and current completed projections together',
+    () async {
+      final f = _Fixture();
+      addTearDown(f.close);
+      await f.start();
+      f.emit('message.complete', {'text': 'First wire response'});
+      await _flush();
+      f.rpc.complete();
+      await f.flight;
+      f.resetRpc();
+      await f.start();
+      f.emit('message.complete', {'text': 'Second wire response'});
+      await _flush();
+      expect(
+        f.owner.snapshot.displayRows.map((row) => row['content']),
+        containsAll(['First wire response', 'Second wire response']),
+      );
+      f.owner.observeHistory([
+        {'id': 20, 'role': 'assistant', 'content': 'Latest canonical response'},
+      ]);
+      expect(f.owner.snapshot.displayRows, isEmpty);
+      expect(f.owner.snapshot.timeline.runs, isEmpty);
+      expect(f.owner.snapshot.historyRows.single['id'], 20);
+      expect(f.submissions, 2);
+    },
+  );
+
   test('RPC acknowledgement alone is unresolved, never terminal', () async {
     final f = _Fixture();
     await f.start();
@@ -550,6 +810,7 @@ class _Fixture {
   int resumes = 0;
   bool emitOnSubmit = true;
   bool? running = true;
+  String terminalStatus = 'completed';
   bool historyFails = false;
   Completer<List<Map<String, dynamic>>>? historyGate;
   List<Map<String, dynamic>> rows = [
@@ -581,7 +842,7 @@ class _Fixture {
           running: running,
           // This fixture's known-success reads include explicit terminal
           // evidence. Stock idle alone is covered separately as unknown.
-          status: running == false ? 'completed' : null,
+          status: running == false ? terminalStatus : null,
         );
       },
       history: (_) async {

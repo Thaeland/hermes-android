@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -8,6 +9,7 @@ import 'package:hermes_android/core/widgets/gateway_insight_card.dart';
 import 'package:hermes_android/core/services/composer_draft_store.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
 import 'package:hermes_android/core/services/gateway_turn_application_controller.dart';
+import 'package:hermes_android/core/services/normal_gateway_application_session.dart';
 import 'package:hermes_android/core/services/ws_client.dart';
 import 'package:hermes_android/l10n/app_localizations.dart';
 import 'package:http/http.dart' as http;
@@ -261,6 +263,269 @@ void main() {
   );
 
   testWidgets(
+    'canonical reopen replaces completed wire presentation after delayed persistence',
+    (tester) async {
+      final controller = GatewayTurnApplicationController();
+      addTearDown(controller.close);
+      final remote = _Remote();
+      var durable = <Map<String, dynamic>>[
+        {'id': 1, 'role': 'user', 'content': 'Previous question'},
+        {'id': 2, 'role': 'assistant', 'content': 'Previous answer'},
+      ];
+      var settlementReads = 0;
+      final session = controller.normalSessionFor(
+        _connection,
+        submit: remote.submit,
+        history: (_) async {
+          settlementReads++;
+          return durable;
+        },
+      );
+      await session.ready;
+      await _open(tester, controller, remote, history: () => durable);
+      await tester.pumpAndSettle();
+      await tester.enterText(find.byType(TextField), 'Ask');
+      await tester.tap(find.byTooltip('Send'));
+      await tester.pump();
+      await tester.pump();
+      remote.event('message.delta', {'text': 'Wire preview'});
+      remote.event('message.complete', {'text': 'Wire preview'});
+      remote.rpc.complete();
+      await tester.pumpAndSettle();
+      final owner = session.findChat('stored-chat')!;
+      expect(owner.phase, NormalGatewayTurnPhase.completed);
+      expect(owner.snapshot.rowFloor, 2);
+      expect(settlementReads, 1);
+      expect(owner.snapshot.historyRows.last['id'], 2);
+      expect(find.text('Wire preview'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      durable = [
+        ...durable,
+        {'id': 3, 'role': 'user', 'content': 'Ask'},
+        {'id': 4, 'role': 'assistant', 'content': 'Canonical final'},
+      ];
+      await _open(
+        tester,
+        controller,
+        remote,
+        id: 'stored-chat',
+        key: const ValueKey('canonical-reopen'),
+        history: () => durable,
+      );
+      await tester.pumpAndSettle();
+      expect(session.findChat('stored-chat'), same(owner));
+      expect(owner.snapshot.historyRows.last['content'], 'Canonical final');
+      expect(owner.snapshot.displayRows, isEmpty);
+      expect(owner.snapshot.timeline.runs, isEmpty);
+      expect(
+        tester
+            .widgetList<MessageBubble>(find.byType(MessageBubble))
+            .map((bubble) => bubble.content),
+        ['Previous question', 'Previous answer', 'Ask', 'Canonical final'],
+      );
+      expect(find.text('Wire preview'), findsNothing);
+      expect(find.byTooltip('Stop response'), findsNothing);
+      expect(remote.submissions, 1);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    },
+  );
+
+  testWidgets('older-only paging preserves completed wire chronology', (
+    tester,
+  ) async {
+    final controller = GatewayTurnApplicationController();
+    addTearDown(controller.close);
+    final remote = _Remote();
+    final latest = <Map<String, dynamic>>[
+      for (var id = 11; id <= 60; id++)
+        {
+          'id': id,
+          'role': id.isOdd ? 'user' : 'assistant',
+          'content': 'History $id',
+        },
+    ];
+    final session = controller.normalSessionFor(
+      _connection,
+      submit: remote.submit,
+      history: (_) async => latest,
+    );
+    await session.ready;
+    final offsets = <int>[];
+    await _open(
+      tester,
+      controller,
+      remote,
+      historyClient: MockClient((request) async {
+        final offset = int.parse(request.url.queryParameters['offset'] ?? '0');
+        offsets.add(offset);
+        return http.Response(
+          jsonEncode({
+            'data': offset == 0
+                ? latest
+                : [
+                    {'id': 1, 'role': 'user', 'content': 'Older question'},
+                    {'id': 2, 'role': 'assistant', 'content': 'Older answer'},
+                  ],
+          }),
+          200,
+        );
+      }),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'Ask');
+    await tester.tap(find.byTooltip('Send'));
+    await tester.pump();
+    await tester.pump();
+    remote.event('message.delta', {'text': 'Before tool'});
+    remote.event('tool.start', {'tool': 'read_file', 'tool_id': 't1'});
+    remote.event('message.delta', {'text': 'After tool'});
+    remote.event('tool.complete', {
+      'tool': 'read_file',
+      'tool_id': 't1',
+      'status': 'completed',
+    });
+    remote.event('message.complete', {'text': 'Before toolAfter tool'});
+    remote.rpc.complete();
+    await tester.pumpAndSettle();
+    final owner = session.findChat('stored-chat')!;
+    final retained = owner.snapshot;
+    expect(retained.phase, NormalGatewayTurnPhase.completed);
+    expect(retained.rowFloor, 60);
+    final olderButton = find.byKey(const Key('chat-load-older'));
+    await tester.scrollUntilVisible(
+      olderButton,
+      -400,
+      scrollable: find.byType(Scrollable).first,
+    );
+    await tester.tap(olderButton);
+    await tester.pumpAndSettle();
+    expect(offsets, [0, 50]);
+    expect(owner.snapshot.historyRows, retained.historyRows);
+    expect(owner.snapshot.displayRows, retained.displayRows);
+    expect(owner.snapshot.timeline, same(retained.timeline));
+    final parentScroll = tester
+        .state<ScrollableState>(find.byType(Scrollable).first)
+        .position;
+    parentScroll.jumpTo(0);
+    await tester.pumpAndSettle();
+    expect(find.text('Older question'), findsOneWidget);
+    expect(find.text('Older answer'), findsOneWidget);
+    parentScroll.jumpTo(parentScroll.maxScrollExtent);
+    await tester.pumpAndSettle();
+    final labels = tester
+        .widgetList(
+          find.byWidgetPredicate(
+            (widget) =>
+                widget is MessageBubble || widget is GatewayActivityCard,
+          ),
+        )
+        .map(
+          (widget) => switch (widget) {
+            MessageBubble bubble => bubble.content,
+            GatewayActivityCard _ => 'tool',
+            _ => throw StateError('Unexpected widget'),
+          },
+        )
+        .toList();
+    expect(labels.sublist(labels.length - 4), [
+      'Ask',
+      'Before tool',
+      'tool',
+      'After tool',
+    ]);
+    expect(remote.submissions, 1);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+  });
+
+  for (final width in [400.0, 1000.0]) {
+    testWidgets(
+      'canonical parent hydration preserves open child observation ($width)',
+      (tester) async {
+        await tester.binding.setSurfaceSize(Size(width, 800));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final controller = GatewayTurnApplicationController();
+        addTearDown(controller.close);
+        final remote = _Remote();
+        final history = _OwnerTaskHistory();
+        var durable = <Map<String, dynamic>>[];
+        final session = controller.normalSessionFor(
+          _connection,
+          submit: remote.submit,
+          history: (_) async => durable,
+        );
+        await session.ready;
+        await _open(tester, controller, remote, taskHistory: history);
+        await tester.enterText(find.byType(TextField), 'Delegate');
+        await tester.tap(find.byTooltip('Send'));
+        await tester.pump();
+        await tester.pump();
+        remote.event('subagent.start', {
+          'subagent_id': 'runtime-root',
+          'child_session_id': 'child-root',
+          'goal': 'Inspect',
+        });
+        remote.event('subagent.text', {
+          'subagent_id': 'runtime-root',
+          'child_session_id': 'child-tip',
+          'text': 'Progress',
+        });
+        await tester.pump();
+        await tester.enterText(find.byType(TextField), 'Keep draft');
+        final card = tester.widget<GatewaySubagentCard>(
+          find.byType(GatewaySubagentCard),
+        );
+        card.onOpenTask!(card.activities.single);
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
+        final overlay = tester.widget<DelegatedTaskTimeline>(
+          find.byType(DelegatedTaskTimeline),
+        );
+        expect(overlay.controller.task.childSessionId, 'child-root');
+        durable = [
+          {'id': 1, 'role': 'user', 'content': 'Delegate'},
+          {'id': 2, 'role': 'assistant', 'content': 'Canonical parent final'},
+        ];
+        remote.event('message.complete', {'text': 'Wire parent preview'});
+        remote.rpc.complete();
+        for (var i = 0; i < 6; i++) {
+          await tester.pump();
+        }
+        final owner = session.findChat('stored-chat')!;
+        expect(owner.phase, NormalGatewayTurnPhase.completed);
+        expect(owner.snapshot.displayRows, isEmpty);
+        expect(owner.snapshot.subagents, isEmpty);
+        remote.event('subagent.complete', {
+          'subagent_id': 'new-runtime-alias',
+          'child_session_id': 'child-tip',
+          'status': 'failed',
+        });
+        await tester.pump();
+        expect(find.text('Status: Failed'), findsOneWidget);
+        expect(overlay.controller.task.childSessionId, 'child-root');
+        expect(overlay.controller.task.latestChildSessionId, 'child-tip');
+        expect(owner.snapshot.subagents.single.childSessionId, 'child-root');
+        expect(owner.snapshot.displayRows, isEmpty);
+        expect(owner.snapshot.hasActiveTurn, isFalse);
+        expect(remote.submissions, 1);
+        await tester.tap(find.widgetWithText(TextButton, 'Close'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 350));
+        expect(
+          tester.widget<TextField>(find.byType(TextField)).controller!.text,
+          'Keep draft',
+        );
+        expect(find.text('Canonical parent final'), findsOneWidget);
+        expect(find.text('Wire parent preview'), findsNothing);
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
+      },
+    );
+  }
+
+  testWidgets(
     'retained owner preserves timeline order across snapshots and route reattachment',
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(1000, 2400));
@@ -486,6 +751,8 @@ Future<void> _open(
   Key? key,
   Future<void> Function(String, String)? prepare,
   TaskHistorySource? taskHistory,
+  List<Map<String, dynamic>> Function()? history,
+  http.Client? historyClient,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
@@ -510,9 +777,14 @@ Future<void> _open(
         testApiClient: ApiClient(
           baseUrl: _connection.baseUrl,
           apiKey: 'fixture',
-          httpClient: MockClient(
-            (_) async => http.Response('{"data":[]}', 200),
-          ),
+          httpClient:
+              historyClient ??
+              MockClient(
+                (_) async => http.Response(
+                  jsonEncode({'data': history?.call() ?? []}),
+                  200,
+                ),
+              ),
         ),
         testRemotePromptSubmit: remote.submit,
         testStoredSessionKey: (_) => 'stored-chat',
