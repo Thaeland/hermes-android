@@ -62,7 +62,9 @@ shows only the three latest releases.
   prompt or retain a stale denied/granted latch. Optional chat preferences do
   not suppress Android's required foreground-service disclosure.
 - Stock-turn recovery distinguishes interrupted/failed outcomes from successful
-  completion. Canonical session identity retains per-chat drafts across
+  completion. A proven-idle turn without a recorded outcome becomes inactive
+  with an outcome-unknown status; partial assistant prose does not trigger a
+  success alert. Canonical session identity retains per-chat drafts across
   reattachment. Pre-wire setup failures release send/alert admission without
   inventing a submitted turn or erasing a newer composer draft.
 - Mobile-push operations select the saved Hermes profile for capabilities,
