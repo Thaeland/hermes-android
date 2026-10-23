@@ -9,6 +9,22 @@ class MobilePushApi {
   final DashboardClient client;
   static const prefix = 'plugins/mobile-push';
 
+  /// Match Registration.session_ids and config.IDENTIFIER exactly. Validate all
+  /// supplied tokens before deduplicating; never trim/drop a malformed ID into a
+  /// different subscription scope, or prompt for permission on an invalid one.
+  static List<String> validateSessionIds(List<String> sessions) {
+    final identifier = RegExp(r'[A-Za-z0-9_.:@-]{1,200}');
+    if (sessions.isEmpty ||
+        sessions.length > 128 ||
+        sessions.any((id) => identifier.stringMatch(id) != id)) {
+      throw StateError(
+        'Select 1–128 durable session IDs, each 1–200 ASCII characters using '
+        'only letters, digits, _ . : @ or -. Remove blank IDs and whitespace.',
+      );
+    }
+    return sessions.toSet().toList();
+  }
+
   Future<Map<String, dynamic>> capabilities() async {
     final result = await client.apiGet('$prefix/capabilities');
     final key = result['vapid_public_key'];

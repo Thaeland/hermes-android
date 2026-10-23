@@ -1,10 +1,14 @@
 package com.hermesagent.hermes_android
 
+import org.json.JSONArray
 import org.json.JSONObject
 
 /** Pure policy, also exercised by JVM tests. Hints are never routing authority. */
 internal object MobilePushPolicy {
     val kinds = setOf("turn_done", "turn_error", "input", "input_resolved")
+    fun validSessions(sessions: JSONArray): Boolean = sessions.length() in 1..128 &&
+        (0 until sessions.length()).all { sessions.opt(it) is String &&
+            Regex("[A-Za-z0-9_.:@-]{1,200}").matches(sessions.getString(it)) }
     fun valid(state: JSONObject, hint: JSONObject, instance: String, decrypted: Boolean, now: Long): Boolean {
         if (!decrypted || !state.optBoolean("enabled") || instance != state.optString("installation")) return false
         if (hint.opt("schema") != 1 || hint.opt("registration_nonce") !is String ||

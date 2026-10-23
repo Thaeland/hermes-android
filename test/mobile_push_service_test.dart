@@ -39,12 +39,13 @@ class Fixture {
   final MethodChannel channel = const MethodChannel(
     MobilePushService.channelName,
   );
-  late final MobilePushService service;
+  late MobilePushService service;
   late final ConnectionManager manager;
   late final SavedConnection connection;
   int capsStatus = 200;
   bool permission = true;
   bool failRevoke = false;
+  String? failCommand;
   Future<http.Response> Function(http.Request)? onPut;
   Future<http.Response> Function(http.Request)? onConfirm;
   List<Map<String, dynamic>> feed = [];
@@ -70,6 +71,12 @@ class Fixture {
         .setMockMethodCallHandler(channel, (call) async {
           methods.add(call.method);
           final args = Map<String, dynamic>.from(call.arguments as Map? ?? {});
+          if (call.method == failCommand) {
+            failCommand = null;
+            throw PlatformException(
+              code: 'fixture-process-died-before-persist',
+            );
+          }
           switch (call.method) {
             case 'permission':
               return permission;
@@ -91,6 +98,41 @@ class Fixture {
                 'generation': 0,
               });
               return clone(native);
+            case 'recoverRegistration':
+            case 'beginRegistration':
+            case 'beginConfirmation':
+              if (args['nonce'] != native['nonce'] ||
+                  args['revision'] != native['revision'] ||
+                  args['generation'] != native['generation'] ||
+                  native['active'] == true ||
+                  native['enabled'] != true) {
+                throw PlatformException(code: 'stale');
+              }
+              if (call.method == 'recoverRegistration') {
+                native.addAll({
+                  'nonce': 'recovered-nonce-${native['revision']}',
+                  'revision': (native['revision'] as int) + 1,
+                  'generation': 0,
+                  'active': false,
+                });
+                for (final key in [
+                  'registration_attempt',
+                  'confirmation_attempt',
+                  'pending_until',
+                  'challenges',
+                  'tap',
+                  'seen',
+                  'issued',
+                ]) {
+                  native.remove(key);
+                }
+              } else if (call.method == 'beginRegistration') {
+                native['registration_attempt'] = true;
+                native['pending_until'] = expiry - 3300;
+              } else {
+                native['confirmation_attempt'] = true;
+              }
+              return clone(native);
             case 'generation':
               if (args['nonce'] != native['nonce'] ||
                   args['revision'] != native['revision'] ||
@@ -98,6 +140,7 @@ class Fixture {
                 throw PlatformException(code: 'stale');
               }
               native['generation'] = args['generation'];
+              native.remove('registration_attempt');
               return clone(native);
             case 'activate':
               if (args['nonce'] != native['nonce'] ||
@@ -106,6 +149,8 @@ class Fixture {
               }
               native['active'] = true;
               native.remove('challenges');
+              native.remove('confirmation_attempt');
+              native.remove('pending_until');
               return clone(native);
             case 'disable':
               final revokes = native['revocations'] as List? ?? [];
@@ -141,6 +186,16 @@ class Fixture {
               throw StateError(call.method);
           }
         });
+    createService();
+  }
+
+  void restart() {
+    service.dispose();
+    // Recreate the Dart controller, retaining only the native durable snapshot.
+    createService();
+  }
+
+  void createService() {
     service = MobilePushService(
       supported: true,
       channel: channel,
@@ -189,7 +244,7 @@ class Fixture {
           }
           if (request.url.path.endsWith('/confirm')) {
             if (onConfirm != null) return onConfirm!(request);
-            return http.Response('{"status":"active"}', 200);
+            return http.Response('{"status":"active","generation":7}', 200);
           }
           if (request.method == 'DELETE') {
             return http.Response('{}', failRevoke ? 503 : 200);
@@ -502,7 +557,7 @@ void main() {
           'generation': 0,
           'active': false,
         });
-        return http.Response('{"status":"active"}', 200);
+        return http.Response('{"status":"active","generation":7}', 200);
       };
       await f.service.initialize(f.manager);
       expect(f.native['active'], isFalse);

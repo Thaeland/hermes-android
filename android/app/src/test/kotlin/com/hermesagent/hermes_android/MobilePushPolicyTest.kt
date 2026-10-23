@@ -40,6 +40,14 @@ class MobilePushPolicyTest {
         assertFalse(MobilePushPolicy.valid(state(), hint().put("generation", "3"), "i", true, 100))
         assertFalse(MobilePushPolicy.valid(state(), hint().put("expires_at", 200.5), "i", true, 100))
     }
+    @Test fun sessionScopeMatchesServerAsciiAndCountContract() {
+        assertTrue(MobilePushPolicy.validSessions(org.json.JSONArray((0 until 128).map { "session-$it" })))
+        assertFalse(MobilePushPolicy.validSessions(org.json.JSONArray((0 until 129).map { "session-$it" })))
+        assertTrue(MobilePushPolicy.validSessions(org.json.JSONArray(listOf("a".repeat(200), "AZaz09_.:@-"))))
+        listOf("a".repeat(201), "invalid/session", "non-ascii-é", "", " leading", "trailing\n").forEach {
+            assertFalse(MobilePushPolicy.validSessions(org.json.JSONArray(listOf("valid", it))))
+        }
+    }
     @Test fun casRejectsRenewalAndRevocation() {
         val expected = state()
         assertTrue(MobilePushPolicy.current(state(), expected))

@@ -159,16 +159,17 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
     String distributor,
     List<String> sessions,
   ) async {
-    final ids = sessions
-        .map((s) => s.trim())
-        .where((s) => s.isNotEmpty)
-        .toSet()
-        .toList();
-    if (!supported ||
-        _manager == null ||
-        ids.isEmpty ||
-        ids.length > 256 ||
-        ids.any((s) => s.length > 256)) {
+    final List<String> ids;
+    try {
+      ids = MobilePushApi.validateSessionIds(sessions);
+    } on StateError catch (e) {
+      // The settings surface reads this safe, local validation message rather
+      // than exposing platform/server exception bodies that may contain secrets.
+      error = e.message;
+      if (!_closed) notifyListeners();
+      rethrow;
+    }
+    if (!supported || _manager == null) {
       throw StateError(
         'Choose durable session IDs and an Android distributor first.',
       );
@@ -283,10 +284,32 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> _drain() async {
     while (_dirty && !_closed) {
       _dirty = false;
+      final epoch = _epoch;
       try {
         await _refresh();
       } catch (e) {
-        if (!_closed) {
+        // An uncertain handshake is journalled natively. Do not let callbacks
+        // queued by its challenge cause a tight rotate/PUT/fail loop. A later
+        // foreground/manual refresh recovers it; a newer consent epoch still
+        // gets its queued pass (e.g. disable while the old request failed).
+        if (epoch != _epoch) continue;
+        if (_dirty && !_closed) {
+          try {
+            final live = await _call('snapshot');
+            // Do hand off to a newer native authority (endpoint renewal or
+            // revocation), rather than suppressing its queued foreground pass.
+            if (epoch != _epoch ||
+                live['nonce'] != _state['nonce'] ||
+                live['revision'] != _state['revision'] ||
+                live['enabled'] != _state['enabled']) {
+              continue;
+            }
+          } catch (_) {
+            /* Keep the durable intent for a later explicit retry. */
+          }
+        }
+        _dirty = false;
+        if (!_closed && epoch == _epoch) {
           error = _message(e);
           status = 'Error';
           notifyListeners();
@@ -362,9 +385,24 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
         notifyListeners();
         return;
       }
+      if (state['active'] != true && _needsRegistrationRecovery(state)) {
+        if (!await _current(state, epoch)) return;
+        // Atomic native rotation retains ONLY already-consented account/scope
+        // and endpoint keys. It invalidates old proofs/taps before any new PUT.
+        state = await _call('recoverRegistration', state);
+        if (!await _current(state, epoch)) return;
+        _state = state;
+        _tap = null;
+        events = [];
+      }
       if (state['generation'] == 0) {
         status = 'Registering';
         notifyListeners();
+        if (!await _current(state, epoch)) return;
+        // Write-ahead intent must survive process death after server commit but
+        // before the response/generation can reach native encrypted storage.
+        state = await _call('beginRegistration', state);
+        if (!await _current(state, epoch)) return;
         final response = await api.register(state);
         if (!await _current(state, epoch)) return;
         final generation = response['generation'];
@@ -391,13 +429,17 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
                   DateTime.now().millisecondsSinceEpoch ~/ 1000) {
             continue;
           }
+          state = await _call('beginConfirmation', state);
+          if (!await _current(state, epoch)) return;
           final response = await api.confirm(
             state['installation'] as String,
             state['generation'] as int,
             hint['challenge'] as String,
           );
           if (!await _current(state, epoch)) return;
-          if (response['status'] != 'active') {
+          if (response['status'] != 'active' ||
+              response['generation'] is! int ||
+              response['generation'] != state['generation']) {
             throw const FormatException('Server did not confirm activation.');
           }
           state = await _call('activate', state);
@@ -424,6 +466,33 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
     } finally {
       client.close();
     }
+  }
+
+  bool _needsRegistrationRecovery(Map<String, dynamic> state) {
+    if (state['registration_attempt'] == true ||
+        state['confirmation_attempt'] == true) {
+      return true;
+    }
+    if (state['generation'] == 0) return false;
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    var hasLiveProof = false;
+    for (final raw in state['challenges'] as List? ?? []) {
+      final hint = Map<String, dynamic>.from(raw as Map);
+      if (hint['generation'] != state['generation'] ||
+          hint['registration_nonce'] != state['nonce'] ||
+          hint['expires_at'] is! int) {
+        continue;
+      }
+      if ((hint['expires_at'] as int) <= now) return true;
+      hasLiveProof = true;
+    }
+    // A proof may never arrive (or native may discard an already-expired one).
+    // The local wait ceiling is durable, not a timer reset by every app launch.
+    final until = state['pending_until'];
+    if (until is int) return until <= now;
+    // Migrate pre-journal pending registrations without discarding a usable
+    // encrypted proof. No proof and no deadline otherwise means infinite Pending.
+    return !hasLiveProof;
   }
 
   Future<List<Map<String, dynamic>>> _events(

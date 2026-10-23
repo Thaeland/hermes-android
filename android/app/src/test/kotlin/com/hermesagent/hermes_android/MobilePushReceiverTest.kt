@@ -106,6 +106,80 @@ class MobilePushReceiverTest {
         assertFalse(MobilePushStore.read(context).getBoolean("enabled"))
         deliver(); assertEquals(0, manager.activeNotifications.size)
     }
+    @Test fun invalidScopeCannotWriteNativeConsentOrReachDistributor() {
+        MobilePushStore.write(context, JSONObject().put("enabled", false))
+        listOf((0 until 129).map { "s$it" }, listOf("a".repeat(201)), listOf("bad/id")).forEach { ids ->
+            val error = assertThrows(IllegalStateException::class.java) {
+                // No distributor exists; invalid scope must fail even before
+                // that lookup, without consent persistence or connector IPC.
+                MobilePushBridge.command(context, "enable", mapOf("sessions" to ids))
+            }
+            assertTrue(error.message!!.contains("1-128"))
+            val state = MobilePushStore.read(context)
+            assertFalse(state.getBoolean("enabled"))
+            assertFalse(state.has("installation"))
+        }
+    }
+    private fun authority(): Map<String, Any> {
+        val state = MobilePushStore.read(context)
+        return mapOf("installation" to state.getString("installation"), "nonce" to state.getString("nonce"),
+            "revision" to state.getLong("revision"), "generation" to state.getLong("generation"))
+    }
+    @Test fun uncertainHandshakeJournalAndRecoverySurviveSealedStoreReload() {
+        save(active = false)
+        val original = authority()
+        MobilePushBridge.command(context, "beginRegistration", original)
+        MobilePushBridge.detach() // no Dart owner survives the attempted PUT
+        assertTrue(MobilePushStore.read(context).getBoolean("registration_attempt"))
+        assertTrue(MobilePushStore.read(context).getLong("pending_until") > System.currentTimeMillis() / 1000)
+        deliver(payload("challenge").put("challenge", "old-proof"))
+        MobilePushBridge.command(context, "recoverRegistration", original)
+        val recovered = MobilePushStore.read(context)
+        assertTrue(recovered.getBoolean("enabled"))
+        assertFalse(recovered.getBoolean("active"))
+        assertEquals(0L, recovered.getLong("generation"))
+        assertNotEquals(original["nonce"], recovered.getString("nonce"))
+        assertEquals(3L, recovered.getLong("revision"))
+        assertEquals("https://distributor.invalid/private-endpoint", recovered.getString("endpoint"))
+        assertEquals("durable-session", recovered.getJSONArray("sessions").getString(0))
+        listOf("registration_attempt", "confirmation_attempt", "pending_until", "challenges", "tap", "seen", "issued").forEach { assertFalse(recovered.has(it)) }
+        deliver(payload("challenge").put("challenge", "late-old-proof"))
+        assertFalse(MobilePushStore.read(context).has("challenges"))
+        assertThrows(IllegalStateException::class.java) { MobilePushBridge.command(context, "recoverRegistration", original) }
+    }
+    @Test fun confirmationJournalSurvivesRestartUntilAuthenticatedActivation() {
+        save(active = false)
+        MobilePushBridge.command(context, "beginRegistration", authority())
+        MobilePushBridge.command(context, "generation", authority() + ("generation" to 3))
+        MobilePushBridge.command(context, "beginConfirmation", authority())
+        MobilePushBridge.detach()
+        val persisted = MobilePushStore.read(context)
+        assertFalse(persisted.optBoolean("registration_attempt"))
+        assertTrue(persisted.getBoolean("confirmation_attempt"))
+        assertFalse(persisted.getBoolean("active"))
+        deliver(); assertEquals(0, manager.activeNotifications.size)
+        MobilePushBridge.command(context, "activate", authority())
+        assertTrue(MobilePushStore.read(context).getBoolean("active"))
+        assertFalse(MobilePushStore.read(context).has("confirmation_attempt"))
+        assertFalse(MobilePushStore.read(context).has("pending_until"))
+        deliver(); assertEquals(1, manager.activeNotifications.size)
+    }
+    @Test fun disableAndRenewalFenceRecoveryAndLateConfirmationCommands() {
+        save(active = false)
+        MobilePushBridge.command(context, "beginRegistration", authority())
+        MobilePushBridge.command(context, "generation", authority() + ("generation" to 3))
+        val old = authority()
+        MobilePushBridge.command(context, "beginConfirmation", old)
+        MobilePushBridge.endpoint(context, PushEndpoint("https://renewed.invalid/endpoint", PublicKeySet("new-public", "new-auth"), false), "i")
+        listOf("recoverRegistration", "beginConfirmation", "activate").forEach { method ->
+            assertThrows(IllegalStateException::class.java) { MobilePushBridge.command(context, method, old) }
+        }
+        val renewed = authority()
+        assertFalse(MobilePushStore.read(context).has("confirmation_attempt"))
+        MobilePushBridge.command(context, "disable", emptyMap<Any, Any>())
+        assertThrows(IllegalStateException::class.java) { MobilePushBridge.command(context, "recoverRegistration", renewed) }
+        assertFalse(MobilePushStore.read(context).getBoolean("enabled"))
+    }
     @Test fun dedupIsBoundedAndCiphertextTamperingFailsClosed() {
         for (i in 0..260) deliver(payload().put("event_id", "event-$i"))
         assertEquals(256, MobilePushStore.read(context).getJSONArray("seen").length())

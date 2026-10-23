@@ -16,7 +16,9 @@ subscribe other connections, all users, or every session automatically.
 3. Open this connection's Settings → Android UnifiedPush. Choose the installed
    distributor, paste durable session IDs from your server session browser (one
    per line), check explicit consent, then Enable. IDs are not titles or local
-   temporary chat IDs. No wildcard/all-users subscription is offered.
+   temporary chat IDs. No wildcard/all-users subscription is offered. Select
+   1–128 IDs of 1–200 ASCII letters, digits or `_ . : @ -`; invalid/blank IDs are
+   rejected before permission or native enable, never silently trimmed/dropped.
 4. Android notification permission is requested only on that explicit action.
    An endpoint from the distributor is registered over the connection's existing
    authenticated DashboardClient. Subscriber `p256dh` and `auth` come from the
@@ -27,7 +29,22 @@ subscribe other connections, all users, or every session automatically.
    authenticated PUT has not returned its generation yet. Only an authenticated
    confirmation response activates the installation.
 
-Pending is not active. `Reconcile / retry` refreshes the authenticated event feed,
+Pending is not active. Before each registration PUT and confirmation POST,
+Hermes writes an attempt journal into the native encrypted store. If the server
+commits but its response (or the local generation/activation write) is lost, the
+next foreground reconciliation—including after process restart—atomically rotates
+the native nonce/revision, clears old proof/tap/activation authority, and registers
+the **same already-consented** endpoint, account and session scope again. It must
+receive a fresh encrypted proof and authenticated confirmation of that exact
+new generation. This recovery does not request permission, enable a new binding,
+or contact the distributor. A waiting registration also has a durable five-minute
+local wait ceiling (not a claim about the server's configured proof TTL); an
+expired proof or elapsed ceiling renews on the next foreground reconciliation.
+A missing proof therefore cannot leave a nonzero generation permanently Pending.
+Network failures wait for the next resume/manual retry, rather than continuously
+rotating registrations from queued challenge callbacks.
+
+`Reconcile / retry` also refreshes the authenticated event feed,
 retries distributor registration when it failed, and retries failed server
 revocations. Delivery is best-effort, not a guarantee. A changed endpoint
 immediately clears local generation/active authority and queued old taps; the
@@ -165,8 +182,9 @@ export ANDROID_HOME="$HOME/Library/Android/sdk"
 flutter pub get
 flutter analyze lib/core/services/mobile_push_api.dart \
   lib/core/services/mobile_push_service.dart lib/core/widgets/mobile_push_settings.dart \
-  lib/core/services/connection_manager.dart test/mobile_push_service_test.dart
-flutter test test/mobile_push_service_test.dart
+  lib/core/services/connection_manager.dart test/mobile_push_service_test.dart \
+  test/mobile_push_recovery_test.dart
+flutter test test/mobile_push_service_test.dart test/mobile_push_recovery_test.dart
 flutter build apk --debug
 (cd android && ./gradlew :app:testDebugUnitTest --tests '*MobilePush*Test')
 ```
@@ -174,7 +192,12 @@ flutter build apk --debug
 Dart tests use controlled native MethodChannel callbacks and an authenticated
 HTTP fixture for opt-in, permissions, unavailable/forbidden servers, challenge
 race, stale generations, renewal/disable races, durable failed revoke retry,
-per-kind preferences, event cursor paging and authenticated routing. Native JVM
+per-kind preferences, event cursor paging and authenticated routing. The recovery
+suite uses a consuming-nonce/one-use-proof HTTP fixture (not an idempotent success
+stub), lost responses and held acknowledgements after server commit, replacement
+production controllers, failed local commits, persisted expiry/missing-proof
+waits, retry single-flight, renewal handoff, and 128-ID/200-character ASCII scope
+boundaries. Native JVM
 Robolectric tests exercise the real headless service/bridge with the connector's
 decrypted flag controlled, durable encrypted storage with a test-injected AES
 key (not AndroidKeystore acquisition), generic notifications, bounded dedup,
