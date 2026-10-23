@@ -108,12 +108,64 @@ No original test file was deleted or skipped. Both independent append/barrier ti
 - Scratch authority evidence: `android-2131-merge-public-conflict-diffs.txt`, `android-2131-merge-hardening-conflict-diffs.txt`, `android-2131-original-hunks.json`, `android-2131-hunk-decisions.json`, `android-2131-source-test-manifest.json`.
 - Frozen integration gate script/result: `verify_android_2131_neutral.py` and `android-2131-neutral-final-<merge-sha>.json` in the same scratch directory. It records exact commands, exit codes, test counts, commit/tree/parents, artifact hash and final status.
 
-## Known follow-up review blockers — not resolved or approved here
+## Focused late-identity follow-up integrated
 
-1. **P1 push account mutation:** initially disabled, enable(A) held while editing saved connection to B can activate obsolete A. Separate focused account-mutation worker owns the fix; this merge deliberately retains f36 behavior until parent applies/reviews it.
-2. **Canonical cold-open before receipt restoration:** missing L→S presentation alias can strand a persisted local next draft when canonical S mounted first. Separate late-identity/alias worker owns follow-up. This integration preserves public owner-readiness and alias checks, but does not claim the missing restored-local alias has been closed.
-3. **Failed alias publication/cache poison:** independent f36 review found same-cache retry can accept a phantom redirect. The public checked alias write plus reload-on-failure is retained here as a necessary merge decision and may address that path; independent exact probe/review is still required. Do not call this finding closed solely because the original suite passes.
-4. **Late learned tool ID after eviction:** a locally anonymous tool that learned an ID before eviction can resurrect through an ID-only terminal because its tombstone lacks the learned alias. Separate focused worker owns the change; no duplicate fix here.
-5. **Pre-ID explicit expansion pin:** a user choice made before durable tool ID arrives is not bridged to the later canonical row. Same focused worker owns the change; no duplicate fix here.
+After the base neutral merge, the parent supplied `e41b405f97c9129fe568a11372380a34754552df`
+(parent f36). Its six production files and five permanent regression files were
+cherry-picked onto the public+f36 combination. No new push/root/native changes were
+included. All 53 focused-worker cases remain unchanged; combined verification also
+includes the released composer-alias/rejection, unknown-floor/create proof, owner,
+stale-terminal and observation-epoch regressions.
 
-The independent f36 draft/timeline SPEC reports remain blocked; this merge is not approval of those findings or any later combined source. Parent must apply the focused commits, reconcile their new ownership changes, obtain new independent source approval and run signing/manual acceptance gates before release.
+### Additional textual conflicts
+
+The positions below refer to the halted focused cherry-pick. Both original blocks
+and the focused diff are retained as `android-2131-e41-original-hunks.json`,
+`android-2131-e41-hunk-decisions.json` and `android-2131-e41-focused-diff.txt`.
+
+| Original file:line / hunk | Class | Decision |
+| --- | --- | --- |
+| `lib/core/services/chat_presentation_state.dart:155` H1 | disjoint-intent | Retain the shared public storage lease token/getter used by rejection recovery, and add focused binding callback ownership/cleanup. Callback follows the same writer token; do not restore an independent Object owner. |
+| `lib/core/services/composer_draft_store.dart:235` H1 | same-question-different-answer | Use focused checked alias/target/marker rollback and physical ACK-loss handling within the existing shared _serialized queue. Keep public source retention and canonical ownership handoff (including a physically committed alias after ACK loss). Adapt resolved key helpers, not a second bind or queue. |
+
+### Clean-merge semantic integration
+
+- Preserve the focused actual incoming receipt alias for presentation binding
+  **and** the released public local-alias durable draft binding. A reused canonical
+  owner's immutable ID is not substituted for the receipt's local alias.
+- Binding repair callbacks follow the application root's current writer and are
+  cleared on close. Keep the shared `ComposerDraftHandle` token, public no-reclaim
+  rejection restoration, untouched-composer revision check and normal-owner-ready
+  hydration fence; do not restore the focused branch's independent Object token.
+- Transactional bind runs inside the existing shared physical queue. Keep the
+  public source copy after successful alias publication and canonical writer
+  ownership. Add focused target/clear-marker/alias rollback, physical reload and
+  ACK-loss handling. A physically committed alias after rejected rollback keeps
+  its target **and** reaches the same ownership handoff; it is not treated as a
+  phantom or allowed to erase a newer canonical draft. Source clear markers migrate.
+- Keep focused learned-tool-ID aliases in the same bounded eviction ledger and
+  shared unambiguous non-start correlation across stock/SSE. Bridge expansion pins
+  at ingress even with the route absent. Public delegated-task observation and
+  append/replacement reasoning, plus immutable admission/epoch/terminal fencing,
+  are unchanged.
+- Bounds remain 100 pins/aliases per pin kind, 1,024 tombstone **identity keys**
+  (a learned local/durable pair consumes two), 1,024 runs and 1 MiB retained text.
+
+The first combined focused run completed **138 tests, zero failures/skips,
+with terminal success; fatal-info analysis passed. The final frozen-head gate
+reruns the entire Flutter suite, APK build, native and server tests. Worker-only
+approval is not reused as approval of this combined source.
+
+## Remaining review/release status
+
+1. **P1 push account mutation remains pending:** initially disabled, enable(A)
+   held while editing the saved connection to B can activate obsolete A. Separate
+   focused account-mutation worker owns the fix. No duplicate implementation here.
+2. The four reported UI findings (canonical-first local receipt/draft alias,
+   failed alias publication/cache poison, learned-tool-ID resurrection, and pre-ID
+   expansion pin handoff) now have the supplied focused implementation and all
+   permanent regressions integrated. Their combined focused tests pass; fresh
+   independent SPEC/QUALITY approval of this exact combined source is still needed.
+3. Parent must reconcile the pending push fix, obtain independent combined-source
+   approval and run signing/manual acceptance gates before release. No release,
+   version bump, push, device or live-service action was performed here.

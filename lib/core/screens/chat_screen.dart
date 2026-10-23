@@ -538,7 +538,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             : GatewayTurnApplicationController.standalone);
     _presentationRegistry = _viewController.presentationFor(widget.connection);
     _presentation = _presentationRegistry.chatFor(widget.session.id);
-    _draftWriter = _presentation.openWriter();
+    _draftWriter = _presentation.openWriter(
+      onBindingChanged: () {
+        if (mounted && widget.initialComposerText == null) {
+          unawaited(_restoreComposerDraft());
+        }
+      },
+    );
     _textController.addListener(_onComposerChanged);
     if (widget.initialComposerText case final shared?) {
       _textController.text = shared;
@@ -3049,7 +3055,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       },
       onToolProgress: (progress) {
         if (!mounted || responseGeneration != _responseGeneration) return;
-        _upsertToolProgress(progress);
+        _upsertToolProgress(
+          progress,
+          eventType: progress['status'] == 'running'
+              ? 'tool.start'
+              : 'tool.update',
+        );
       },
       onDone: () async {
         if (!mounted || responseGeneration != _responseGeneration) return;
@@ -4589,30 +4600,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       progress,
       observedAt: DateTime.now(),
     );
-    if (update == null) return;
+    if (update == null || _timeline.excludesTool(update)) return;
     setState(() {
-      var idx = update.toolId == null
-          ? -1
-          : _toolActivities.indexWhere(
-              (activity) => activity.toolId == update.toolId,
-            );
-      // A name is not a call identity. Without a wire ID/correlated reference
-      // we cannot safely assign this receipt to another same-name call.
+      final idx = toolActivityUpdateIndex(_toolActivities, update, eventType);
       if (idx >= 0) {
         final previous = _toolActivities[idx];
         _toolActivities[idx] = previous.merge(update);
-        if (previous.toolId == null && update.toolId != null) {
-          _toolActivityPins.alias(previous.identity, 'tool:${update.toolId}');
-        }
       } else {
         _toolActivities.add(update);
       }
+      final activity = idx >= 0 ? _toolActivities[idx] : update;
+      final toolId = activity.toolId;
+      if (toolId != null) {
+        _toolActivityPins.alias(activity.identity, 'tool:$toolId');
+      }
       final assistant = _lastAssistantMessage();
       if (assistant != null) {
-        _timeline = _timeline.tool(
-          assistant,
-          idx >= 0 ? _toolActivities[idx] : update,
-        );
+        _timeline = _timeline.tool(assistant, activity);
         // A late completion of an evicted tool is not a new receipt/card.
         _toolActivities.removeWhere(
           (a) =>

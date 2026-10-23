@@ -39,6 +39,7 @@ class ChatPresentationRegistry {
       if (source._authority > target._authority) {
         target
           .._writer = source._writer
+          .._onBindingChanged = source._onBindingChanged
           .._authority = source._authority
           .._writerClosed = source._writerClosed;
       }
@@ -62,7 +63,17 @@ class ChatPresentationRegistry {
               storedSessionId: stored,
               isCurrent: () => !_closed,
             )
-            .then((_) => state._persist())
+            .then((_) async {
+              await state._persist();
+              final root = state._root;
+              if (!_closed && root._edit == 0) {
+                // The canonical composer may already have read an empty key.
+                // Invalidate that read, then offer migration to its live lease.
+                root._text = null;
+                root._binding++;
+                root._onBindingChanged?.call();
+              }
+            })
             .whenComplete(() => state._pendingWrites--),
       );
     }
@@ -90,10 +101,11 @@ class ChatPresentationState {
   int _authority = 0;
   int _binding = 0;
   Object? _writer;
+  void Function()? _onBindingChanged;
   bool _writerClosed = true;
   int _pendingWrites = 0;
 
-  ComposerDraftWriter openWriter() {
+  ComposerDraftWriter openWriter({void Function()? onBindingChanged}) {
     final state = _root;
     // Once a detached writer's checkpoint drains, re-read durable state on
     // the next mount, including writes made by another application embedder.
@@ -106,9 +118,10 @@ class ChatPresentationState {
       sessionId: state._sessionId,
     );
     state._writer = token;
+    state._onBindingChanged = onBindingChanged;
     state._writerClosed = false;
     state._authority = ++_registry._intent;
-    return ComposerDraftWriter._(this, token);
+    return ComposerDraftWriter._(this, token, onBindingChanged);
   }
 
   Future<void> _persist() {
@@ -136,11 +149,12 @@ class ChatPresentationState {
 /// Mounting admits a writer; only a subsequent explicit edit can reclaim it.
 /// Checkpoints/disposal/restoration never acquire authority from a newer route.
 class ComposerDraftWriter {
-  ComposerDraftWriter._(this._state, this._token);
+  ComposerDraftWriter._(this._state, this._token, this._onBindingChanged);
 
   final ChatPresentationState _state;
   final ComposerDraftHandle _token;
   ComposerDraftHandle get draftHandle => _token;
+  final void Function()? _onBindingChanged;
   bool _closed = false;
   ChatPresentationState get _root => _state._root;
   bool get isCurrent =>
@@ -170,6 +184,7 @@ class ComposerDraftWriter {
     _token.edited();
     state
       .._writer = _token
+      .._onBindingChanged = _onBindingChanged
       .._writerClosed = false
       .._edit = ++state._registry._intent
       .._authority = state._registry._intent
@@ -194,7 +209,10 @@ class ComposerDraftWriter {
 
   Future<void> close() {
     final saved = flush();
-    if (isCurrent) _root._writerClosed = true;
+    if (isCurrent) {
+      _root._writerClosed = true;
+      _root._onBindingChanged = null;
+    }
     _closed = true;
     return saved;
   }

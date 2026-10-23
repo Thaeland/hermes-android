@@ -107,10 +107,9 @@ abstract final class ComposerDraftStore {
     }).ignore();
   }
 
-  /// Register a binding before notifying routes. Copy before publishing the
-  /// alias, check both writes, and retain the source even after success. A
-  /// partial failure never deletes the only copy. Existing canonical text (or
-  /// a clear tombstone) wins over an old local bucket.
+  /// Copy before publishing the alias, with best-effort physical rollback.
+  /// Existing canonical text/clear wins; retain the public legacy source copy.
+  /// This shares the same physical queue and writer ownership as normal saves.
   static Future<void> bind({
     required String connectionId,
     required String localSessionId,
@@ -123,32 +122,46 @@ abstract final class ComposerDraftStore {
         final local = _resolve(prefs, connectionId, localSessionId);
         final stored = _resolve(prefs, connectionId, storedSessionId);
         if (local == stored) return;
-        final canonicalExists =
-            prefs.containsKey(stored) ||
-            prefs.getBool(_writtenKey(stored)) == true;
+        final targetMarker = _writtenKey(stored);
+        final aliasKey = _aliasKey(local);
+        final oldAlias = prefs.getString(aliasKey);
+        final oldText = prefs.getString(stored);
+        final oldMarker = prefs.getBool(targetMarker);
+        final canonicalExists = oldText != null || oldMarker == true;
+        var copied = false;
         try {
-          if (!canonicalExists && prefs.containsKey(local)) {
-            await _write(prefs, stored, prefs.getString(local)!);
+          if (!canonicalExists) {
+            final draft = prefs.getString(local);
+            if (draft != null || prefs.getBool(_writtenKey(local)) == true) {
+              await _write(prefs, stored, draft ?? '');
+              copied = true;
+            }
           }
-          if (isCurrent?.call() == false) return;
-          if (!await prefs.setString(_aliasKey(local), storedSessionId)) {
-            throw StateError('Could not persist composer draft alias.');
+          if (isCurrent?.call() == false ||
+              !await prefs.setString(aliasKey, storedSessionId)) {
+            throw StateError('Composer draft alias was not committed.');
           }
         } catch (_) {
-          // SharedPreferences optimistically updates its cache even when the
-          // platform rejects a write. Do not treat that phantom alias as durable
-          // or skip the next migration retry because it appears in the cache.
+          await _restoreValue(prefs, aliasKey, oldAlias);
           await prefs.reload();
-          rethrow;
+          // A physically committed alias after ACK loss and rejected rollback
+          // retains its copied target AND joins the same ownership handoff.
+          if (prefs.getString(aliasKey) != storedSessionId) {
+            if (copied) {
+              await _restoreValue(prefs, stored, oldText);
+              await _restoreValue(prefs, targetMarker, oldMarker);
+            }
+            await prefs.reload();
+            return;
+          }
         }
-        // A canonical route or pre-existing canonical draft must not be
-        // overwritten by a stale local route's later disposal. A real edit
-        // after binding can explicitly acquire the merged identity again.
+        // Never let an old local checkpoint/rejection steal a canonical draft.
+        // Only an explicit later edit can claim this shared lease again.
         _owners[stored] ??= canonicalExists ? 0 : _owners[local] ?? 0;
         _owners.remove(local);
       });
     } catch (_) {
-      // Best effort. The untouched source is available for a later bind retry.
+      // Best-effort; the untouched source remains available to retry migration.
     }
   }
 
@@ -234,6 +247,24 @@ abstract final class ComposerDraftStore {
 
   static String _writtenKey(String key) =>
       "$_writtenPrefix.${key.substring(_prefix.length + 1)}";
+
+  static Future<void> _restoreValue(
+    SharedPreferences prefs,
+    String key,
+    Object? value,
+  ) async {
+    try {
+      if (value == null) {
+        await prefs.remove(key);
+      } else if (value is String) {
+        await prefs.setString(key, value);
+      } else if (value is bool) {
+        await prefs.setBool(key, value);
+      }
+    } catch (_) {
+      // Continue restoring the other transaction keys if one rollback fails.
+    }
+  }
 
   /// Clear through aliases too; retain a tombstone against stale migration.
   static Future<void> remove({

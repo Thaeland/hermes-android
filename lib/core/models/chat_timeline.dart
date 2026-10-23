@@ -92,20 +92,26 @@ class ChatTimeline {
   }
 
   bool excludesTool(GatewayToolActivity activity) =>
-      _evictedTools.contains(activity.identity);
+      _evictedTools.contains(activity.identity) ||
+      activity.toolId != null &&
+          _evictedTools.contains('tool:${activity.toolId}');
 
   (Set<String>, bool) _rememberEvictions(Iterable<ChatTimelineRun> removed) {
     final tombstones = {..._evictedTools};
     var saturated = _tombstonesSaturated;
     for (final run in removed) {
-      if (run.kind != ChatTimelineKind.tool ||
-          tombstones.contains(run.activity!.identity)) {
-        continue;
-      }
-      if (tombstones.length < maxEvictedTools) {
-        tombstones.add(run.activity!.identity);
-      } else {
-        saturated = true;
+      if (run.kind != ChatTimelineKind.tool) continue;
+      final activity = run.activity!;
+      for (final identity in {
+        activity.identity,
+        if (activity.toolId != null) 'tool:${activity.toolId}',
+      }) {
+        if (tombstones.contains(identity)) continue;
+        if (tombstones.length < maxEvictedTools) {
+          tombstones.add(identity);
+        } else {
+          saturated = true;
+        }
       }
     }
     return (Set.unmodifiable(tombstones), saturated);

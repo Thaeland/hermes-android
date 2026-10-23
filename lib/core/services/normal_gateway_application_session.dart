@@ -301,7 +301,9 @@ class NormalGatewayApplicationSession {
       );
     }
     client?.bindStoredSession(owner.localSessionId, stored);
-    presentation?.bind(owner.localSessionId, stored);
+    // A canonical route may have created this owner before receipt hydration.
+    // Its immutable localSessionId is then canonical, not the receipt's alias.
+    presentation?.bind(localAlias ?? owner.localSessionId, stored);
     // A notification route can attach to this same owner while its previous
     // ChatScreen remains mounted. An unchanged binding is not a state change,
     // and synchronous fan-out here would dirty that sibling during its build.
@@ -1003,24 +1005,21 @@ class NormalGatewayChatOwner {
         event.data,
         observedAt: DateTime.now(),
       );
-      if (update != null) {
-        var index = update.toolId == null
-            ? -1
-            : _tools.indexWhere((tool) => tool.toolId == update.toolId);
-        if (index < 0) {
-          index = _tools.lastIndexWhere(
-            (tool) =>
-                !tool.isTerminal &&
-                (update.toolId == null || tool.toolId == null) &&
-                tool.name.toLowerCase() == update.name.toLowerCase(),
-          );
-        }
+      if (update != null && !_timeline.excludesTool(update)) {
+        final index = toolActivityUpdateIndex(_tools, update, event.type);
         if (index < 0) {
           _tools.add(update);
         } else {
           _tools[index] = _tools[index].merge(update);
         }
         final activity = index < 0 ? _tools.last : _tools[index];
+        final toolId = activity.toolId;
+        if (toolId != null) {
+          _session.presentation
+              ?.chatFor(storedSessionId ?? localSessionId)
+              .toolPins
+              .alias(activity.identity, 'tool:$toolId');
+        }
         if (assistant != null) {
           _timeline = _timeline.tool(
             assistant['_normal_projection_id']!,
