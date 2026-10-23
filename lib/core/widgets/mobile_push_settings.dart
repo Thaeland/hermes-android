@@ -183,7 +183,9 @@ class _MobilePushSettingsState extends State<MobilePushSettings> {
                         () => service.enable(
                           widget.connection,
                           distributor!,
-                          sessions.text.split(RegExp(r'[\n,]+')),
+                          // CRLF is one separator, never part of an ID. Preserve
+                          // empty entries; the service rejects them before effects.
+                          sessions.text.split(RegExp(r'\r\n|\n|,')),
                         ),
                       ),
                 child: const Text('Enable for selected sessions'),

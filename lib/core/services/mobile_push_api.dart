@@ -9,10 +9,28 @@ class MobilePushApi {
   final DashboardClient client;
   static const prefix = 'plugins/mobile-push';
 
-  Map<String, String> _query([Map<String, String> parameters = const {}]) => {
-    ...parameters,
-    if (client.gatewayProfile != null) 'profile': client.gatewayProfile!,
+  // Explicit on EVERY operation, including retries/revokes/event reads. Merely
+  // constructing DashboardClient(gatewayProfile: ...) does not scope generic HTTP.
+  Map<String, String> _query([Map<String, String> extra = const {}]) => {
+    'profile': ?client.gatewayProfile,
+    ...extra,
   };
+
+  /// Match Registration.session_ids and config.IDENTIFIER exactly. Validate all
+  /// supplied tokens before deduplicating; never trim/drop a malformed ID into a
+  /// different subscription scope, or prompt for permission on an invalid one.
+  static List<String> validateSessionIds(List<String> sessions) {
+    final identifier = RegExp(r'[A-Za-z0-9_.:@-]{1,200}');
+    if (sessions.isEmpty ||
+        sessions.length > 128 ||
+        sessions.any((id) => identifier.stringMatch(id) != id)) {
+      throw StateError(
+        'Select 1–128 durable session IDs, each 1–200 ASCII characters using '
+        'only letters, digits, _ . : @ or -. Remove blank IDs and whitespace.',
+      );
+    }
+    return sessions.toSet().toList();
+  }
 
   Future<Map<String, dynamic>> capabilities() async {
     final result = await client.apiGet(
@@ -21,6 +39,7 @@ class MobilePushApi {
     );
     final key = result['vapid_public_key'];
     if (result['schema'] != 1 ||
+        result['registration_fence'] != 1 ||
         result['enabled'] != true ||
         result['transports'] is! List ||
         !(result['transports'] as List).contains('webpush') ||
@@ -44,6 +63,7 @@ class MobilePushApi {
       'endpoint': state['endpoint'],
       'keys': state['keys'],
       'registration_nonce': state['nonce'],
+      'registration_revision': state['revision'],
       'event_kinds': const [
         'turn_done',
         'turn_error',

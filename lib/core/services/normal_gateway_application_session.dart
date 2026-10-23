@@ -8,6 +8,7 @@ import '../models/gateway_activity.dart';
 import '../models/gateway_insight.dart';
 import 'connection_manager.dart';
 import 'composer_draft_store.dart';
+import 'chat_presentation_state.dart';
 import 'desktop_gateway_client.dart';
 import 'normal_gateway_pending_store.dart';
 import 'notification_prefs.dart';
@@ -149,6 +150,7 @@ class NormalGatewayApplicationSession {
   final NormalGatewayHistory _history;
   final TurnNotificationService notifications;
   final void Function()? onActivityChanged;
+  final ChatPresentationRegistry? presentation;
   final Map<String, NormalGatewayChatOwner> _aliases = {};
   late final Future<void> ready;
   bool _initialized = false;
@@ -168,6 +170,7 @@ class NormalGatewayApplicationSession {
     NormalGatewayHistory? history,
     TurnNotificationService? notifications,
     this.onActivityChanged,
+    this.presentation,
   }) : client = client,
        _historyClient = historyClient,
        pendingStore = pendingStore ?? NormalGatewayPendingStore(),
@@ -208,11 +211,13 @@ class NormalGatewayApplicationSession {
   factory NormalGatewayApplicationSession.fromConnection(
     SavedConnection connection, {
     required String scope,
+    ChatPresentationRegistry? presentation,
     void Function()? onActivityChanged,
   }) {
     return NormalGatewayApplicationSession(
       connection: connection,
       scope: scope,
+      presentation: presentation,
       client: DesktopGatewayClient.fromConnection(connection),
       historyClient: ApiClient(
         baseUrl: connection.baseUrl,
@@ -273,6 +278,7 @@ class NormalGatewayApplicationSession {
     if (other != null && !identical(other, owner)) {
       throw StateError('Durable chat alias already owned.');
     }
+    final changed = owner.storedSessionId != stored || !identical(other, owner);
     owner.storedSessionId = stored;
     _aliases[stored] = owner;
     unawaited(
@@ -295,7 +301,11 @@ class NormalGatewayApplicationSession {
       );
     }
     client?.bindStoredSession(owner.localSessionId, stored);
-    owner._notify();
+    presentation?.bind(owner.localSessionId, stored);
+    // A notification route can attach to this same owner while its previous
+    // ChatScreen remains mounted. An unchanged binding is not a state change,
+    // and synchronous fan-out here would dirty that sibling during its build.
+    if (changed) owner._notify();
   }
 
   Future<void> _restore() async {
@@ -450,11 +460,14 @@ class NormalGatewayChatOwner {
   bool _draftRestoreAllowed = false;
   ComposerDraftHandle? _draftHandle;
   Timer? _retryTimer;
+  Timer? _baselineTimer;
+  Completer<List<Map<String, dynamic>>?>? _baselineRead;
   int _retry = 0;
   bool _recovering = false;
-  int? _recoveringGeneration;
+
   bool _recoveryQueued = false;
   bool _settling = false;
+  bool _submissionPending = false;
   ({bool? completed, String? error, int generation})? _terminalReceipt;
   NormalGatewayChatOwner._(
     this._session,
@@ -652,17 +665,27 @@ class NormalGatewayChatOwner {
         }
         _session._bind(this, stored);
       }
-      // An explicitly empty session.create is independent known-empty authority,
-      // consumed only by its first submission to this exact durable binding.
-      // Resume/bind/404 never imply zero, and HTTP cannot delay wire emission.
+      if (!_current(generation)) return;
+      // Exact session.create emptiness is stronger than a possibly delayed GET.
+      // Consume it once at this binding; resumed/unknown/404 are never empty.
+      final createdEmpty = _createdEmptySessionId == storedSessionId;
+      _createdEmptySessionId = null;
+      if (!_historyKnown && !createdEmpty) {
+        final stored = storedSessionId!;
+        final baseline = await _readAdmissionBaseline(stored);
+        if (!_current(generation)) return;
+        if (stored == storedSessionId && baseline != null) {
+          _history = baseline;
+          _historyKnown = true;
+        }
+      }
       _floor = protectUnknownPresentation
           ? null
           : _historyKnown
           ? _numericFloor(_history)
-          : _createdEmptySessionId == storedSessionId
+          : createdEmpty
           ? 0
           : null;
-      _createdEmptySessionId = null;
       _historyKnown = false;
       if (!_current(generation)) return;
       final now = DateTime.now().millisecondsSinceEpoch;
@@ -678,6 +701,7 @@ class NormalGatewayChatOwner {
       );
       await _session.pendingStore.put(_marker!);
       if (!_current(generation)) return;
+      _submissionPending = true;
       await (submit ?? _session._submit)(
         sessionId: localSessionId,
         text: text,
@@ -702,22 +726,56 @@ class NormalGatewayChatOwner {
           _notify();
         },
       );
+      if (_current(generation)) _submissionPending = false;
       if (!_current(generation) || !snapshot.hasActiveTurn || _settling) return;
       // A completed RPC future is NOT terminal evidence (including test seams).
       phase = NormalGatewayTurnPhase.reconciling;
       _notify();
       requestRecovery();
     } catch (error) {
+      if (_current(generation)) _submissionPending = false;
       if (!_current(generation) || !snapshot.hasActiveTurn || _settling) return;
       if (wireEmitted) {
         phase = NormalGatewayTurnPhase.reconciling;
-        _error = error.toString();
+        if (error is! JsonRpcError || error.reason != 'stream_terminal') {
+          _error = error.toString();
+        }
         _notify();
         requestRecovery();
         return;
       }
       await _settle(false, error.toString(), generation: generation);
       rethrow;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>?> _readAdmissionBaseline(
+    String stored,
+  ) async {
+    final read = Completer<List<Map<String, dynamic>>?>();
+    _baselineRead = read;
+    _baselineTimer = Timer(
+      const Duration(seconds: 2),
+      () => read.complete(null),
+    );
+    // A late response may finish after timeout, wire emission or close. It
+    // resolves only this read, never mutates the owner's baseline/history.
+    unawaited(
+      Future.sync(() => _session._history(stored)).then(
+        (rows) {
+          if (!read.isCompleted) read.complete(rows);
+        },
+        onError: (Object _, StackTrace _) {
+          if (!read.isCompleted) read.complete(null);
+        },
+      ),
+    );
+    try {
+      return await read.future;
+    } finally {
+      _baselineTimer?.cancel();
+      _baselineTimer = null;
+      _baselineRead = null;
     }
   }
 
@@ -834,12 +892,20 @@ class NormalGatewayChatOwner {
       return;
     }
     final wireTurn = event.turnId;
+    final terminal = const {
+      'message.complete',
+      'turn.end',
+      'turn.error',
+      'error',
+    }.contains(event.type);
     if (wireTurn != null) {
       if (_settledWireTurnIds.contains(wireTurn) ||
           _wireTurnId != null && _wireTurnId != wireTurn) {
         return;
       }
-      _wireTurnId ??= wireTurn;
+      // A terminal cannot establish ownership: it may be A's delayed bookend
+      // arriving after B's onSent, before B has emitted any activity.
+      if (!terminal) _wireTurnId ??= wireTurn;
     }
     if (phase == NormalGatewayTurnPhase.reconciling &&
         (event.type == 'message.delta' || event.type.startsWith('tool.'))) {
@@ -960,6 +1026,13 @@ class NormalGatewayChatOwner {
             assistant['_normal_projection_id']!,
             activity,
           );
+          _tools.removeWhere(
+            (tool) =>
+                tool.identity == activity.identity &&
+                !_timeline.runs.any(
+                  (run) => run.activity?.identity == tool.identity,
+                ),
+          );
         }
         if (_tools.length > 512) _tools.removeAt(0);
       }
@@ -985,18 +1058,27 @@ class NormalGatewayChatOwner {
       ].map((row) => row['_normal_projection_id']).whereType<String>(),
     );
     final failure = _failure(event.data);
-    if (event.type == 'turn.error' ||
-        event.type == 'error' ||
-        const {'turn.end', 'message.complete'}.contains(event.type) &&
-            failure != null) {
+    _tools.removeWhere(_timeline.excludesTool);
+    final ownedLifecycleTerminal =
+        wireTurn != null &&
+        wireTurn == _wireTurnId &&
+        const {'turn.end', 'turn.error'}.contains(event.type);
+    if (ownedLifecycleTerminal &&
+        (event.type == 'turn.error' || failure != null)) {
       unawaited(
         _settle(
           false,
           failure ?? event.data['message']?.toString() ?? 'Gateway turn failed',
         ),
       );
-    } else if (event.type == 'turn.end' || event.type == 'message.complete') {
+    } else if (ownedLifecycleTerminal) {
       unawaited(_settle(true, null));
+    } else if (terminal) {
+      // Stock message.complete precedes running=false (prompt_turn.py), and
+      // stock does not promise turn.end. Neither an ID-less trailing bookend
+      // nor a message completion proves the admitted lifecycle is settled.
+      // Resume/history are the authority; never infer ownership from arrival.
+      requestRecovery();
     }
     _notify();
   }
@@ -1069,7 +1151,6 @@ class NormalGatewayChatOwner {
     }
     _retryTimer?.cancel();
     _retryTimer = null;
-    if (_recovering && _recoveringGeneration == _generation) return;
     _recoveryQueued = true;
     if (!_recovering) unawaited(_recover());
   }
@@ -1079,7 +1160,7 @@ class NormalGatewayChatOwner {
     _recovering = true;
     _recoveryQueued = false;
     final generation = _generation;
-    _recoveringGeneration = generation;
+
     try {
       final terminal = _terminalReceipt;
       if (terminal != null && terminal.generation == generation) {
@@ -1092,6 +1173,10 @@ class NormalGatewayChatOwner {
       }
       final stored = storedSessionId;
       if (stored == null) return; // no safe recovery without a durable identity
+      // Recovery may attach while the submit wait is pending, but that read
+      // cannot become settlement authority merely by arriving after the ACK.
+      // Generation plus this immutable observation boundary identify its epoch.
+      final submissionWasPending = _submissionPending;
       final resumed = await (_session.client == null
           ? _session._resume(
               localSessionId: localSessionId,
@@ -1101,15 +1186,31 @@ class NormalGatewayChatOwner {
               localSessionId: localSessionId,
               storedSessionId: stored,
               acceptsResult: () =>
-                  _current(generation) && snapshot.hasActiveTurn,
+                  _current(generation) &&
+                  snapshot.hasActiveTurn &&
+                  !submissionWasPending &&
+                  !_submissionPending,
             ));
       if (!_current(generation) || !snapshot.hasActiveTurn || _settling) return;
       if (!_session._canRecover) return;
+      // The submit completion queues a fresh recovery. Never inspect retained
+      // errors, idle status or history from a pre-wait observation, even if its
+      // response is delivered after this submission's wait has finished.
+      if (submissionWasPending || _submissionPending) return;
+      final status = (resumed.inflight?['status'] ?? resumed.status)
+          ?.toString()
+          .toLowerCase();
+      final running =
+          resumed.running == true ||
+          const {'running', 'queued', 'pending', 'streaming'}.contains(status);
+      final inactive =
+          resumed.running == false ||
+          const {'completed', 'complete', 'done', 'idle'}.contains(status);
       final failure = _failure({
         ...?resumed.inflight,
         'status': resumed.inflight?['status'] ?? resumed.status,
       });
-      if (failure != null) {
+      if (!running && failure != null) {
         await _settle(false, failure, generation: generation);
         return;
       }
@@ -1118,18 +1219,8 @@ class NormalGatewayChatOwner {
       if (!_session._canRecover) return;
       _history = fresh;
       _historyKnown = true;
-      // Idle proves the remote work ended, NOT that it succeeded. Stock clears
-      // inflight on interruption and persists partial assistant prose without
-      // an outcome field. Only explicit terminal status can prove success.
-      final status = (resumed.inflight?['status'] ?? resumed.status)
-          ?.toString()
-          .toLowerCase();
-      final inactive =
-          resumed.running == false ||
-          const {'completed', 'complete', 'done', 'idle'}.contains(status);
-      final running =
-          resumed.running == true ||
-          const {'running', 'queued', 'pending', 'streaming'}.contains(status);
+      // Idle proves work ended, never success: stock may retain partial prose
+      // after interruption. Only explicit terminal status proves an outcome.
       if (running) phase = NormalGatewayTurnPhase.running;
       final completed = const {
         'completed',
@@ -1152,7 +1243,7 @@ class NormalGatewayChatOwner {
       // A failed resume/history read is unknown, never an empty completion.
     } finally {
       _recovering = false;
-      _recoveringGeneration = null;
+
       // Old flight A must hand off to a queued generation B, even when A was
       // invalidated by terminal settlement while its read was held.
       if (!_session._closed && _recoveryQueued && _session._canRecover) {
@@ -1200,13 +1291,19 @@ class NormalGatewayChatOwner {
           _listeners.isEmpty &&
           _draftRestoreAllowed &&
           _draftToRestore != null) {
+        bool canRestore() =>
+            _current(owned) &&
+            _draftRestoreAllowed &&
+            _listeners.isEmpty &&
+            _session.presentation?.isClosed != true;
         final handle = _draftHandle;
         await (handle != null
-            ? handle.save(_draftToRestore!)
+            ? handle.save(_draftToRestore!, isCurrent: canRestore)
             : ComposerDraftStore.save(
                 connectionId: _session.connection.id,
                 sessionId: localSessionId,
                 text: _draftToRestore!,
+                isCurrent: canRestore,
               ));
         if (!_current(owned)) return;
       }
@@ -1429,6 +1526,9 @@ class NormalGatewayChatOwner {
   void _close() {
     _generation++;
     _retryTimer?.cancel();
+    _baselineTimer?.cancel();
+    final baseline = _baselineRead;
+    if (baseline != null && !baseline.isCompleted) baseline.complete(null);
     _listeners.clear();
     _pendingInput.clear();
   }

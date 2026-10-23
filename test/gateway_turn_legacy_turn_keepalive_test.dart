@@ -81,9 +81,11 @@ void main() {
       );
       final submitGate = Completer<void>();
       var submitted = false;
+      var settled = false;
       await _pumpChat(
         tester,
         controller,
+        isSettled: () => settled,
         remoteSubmit:
             ({
               required sessionId,
@@ -94,10 +96,11 @@ void main() {
               onSent();
               submitted = true;
               await submitGate.future;
+              settled = true;
               onEvent(
                 StreamEvent(
-                  type: 'turn.end',
-                  data: const {'status': 'completed'},
+                  type: 'message.complete',
+                  data: const {'text': 'Stock final'},
                 ),
               );
             },
@@ -223,11 +226,12 @@ Future<void> _pumpChat(
   WidgetTester tester,
   GatewayTurnApplicationController controller, {
   required TestRemotePromptSubmit remoteSubmit,
+  bool Function()? isSettled,
 }) async {
   final apiClient = ApiClient(
     baseUrl: 'http://legacy.fixture',
     apiKey: 'legacy-key',
-    httpClient: _EmptyChatHttpClient(),
+    httpClient: _EmptyChatHttpClient(isSettled),
   );
   await tester.pumpWidget(
     MaterialApp(
@@ -254,6 +258,12 @@ Future<void> _pumpChat(
         turnApplicationController: controller,
         testApiClient: apiClient,
         testRemotePromptSubmit: remoteSubmit,
+        testNormalResume:
+            ({required localSessionId, required storedSessionId}) async =>
+                ResumedGatewaySession(
+                  runtimeSessionId: 'runtime',
+                  running: !(isSettled?.call() ?? false),
+                ),
         testVoiceComposerAdapter: FakeVoiceComposerAdapter(),
       ),
     ),
@@ -262,11 +272,23 @@ Future<void> _pumpChat(
 }
 
 class _EmptyChatHttpClient extends http.BaseClient {
+  final bool Function()? isSettled;
+  _EmptyChatHttpClient(this.isSettled);
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
     if (request.method == 'GET' && request.url.path.endsWith('/messages')) {
       return http.StreamedResponse(
-        Stream.value(utf8.encode(jsonEncode({'data': <Object>[]}))),
+        Stream.value(
+          utf8.encode(
+            jsonEncode({
+              'data': isSettled?.call() == true
+                  ? [
+                      {'id': 2, 'role': 'assistant', 'content': 'Stock final'},
+                    ]
+                  : <Object>[],
+            }),
+          ),
+        ),
         200,
         headers: {'content-type': 'application/json'},
       );

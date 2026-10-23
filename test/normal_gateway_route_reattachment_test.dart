@@ -217,6 +217,52 @@ void main() {
   }
 
   testWidgets(
+    'notification-style push keeps both real ChatScreens mounted without build-time notifications',
+    (tester) async {
+      final controller = GatewayTurnApplicationController();
+      addTearDown(controller.close);
+      final remote = _Remote();
+      await _open(tester, controller, remote);
+      await tester.enterText(find.byType(TextField), 'One prompt');
+      await tester.tap(find.byTooltip('Send'));
+      await tester.pump();
+      await tester.pump();
+      remote.event('message.delta', {'text': 'Active B'});
+      await tester.pump();
+      final owner = controller
+          .normalSessionFor(_connection)
+          .findChat('local-chat')!;
+      final turn = owner.turnId;
+      await _open(
+        tester,
+        controller,
+        remote,
+        id: 'stored-chat',
+        key: const ValueKey('notification-route'),
+        push: true,
+      );
+      expect(tester.takeException(), isNull);
+      expect(find.byType(ChatScreen, skipOffstage: false), findsNWidgets(2));
+      expect(find.text('Active B'), findsOneWidget);
+      expect(owner.turnId, turn);
+      expect(owner.snapshot.hasActiveTurn, isTrue);
+      expect(remote.submissions, 1);
+      remote.event('message.delta', {'text': ' continued'});
+      await tester.pump();
+      expect(find.text('Active B continued'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      Navigator.of(tester.element(find.byType(ChatScreen))).pop();
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pump();
+      expect(find.text('Active B continued'), findsOneWidget);
+      expect(remote.submissions, 1);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    },
+  );
+
+  testWidgets(
     'pop/reopen restores owner deltas and tools, terminal while absent settles',
     (tester) async {
       final controller = GatewayTurnApplicationController();
@@ -259,6 +305,69 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
       await controller.close();
+    },
+  );
+
+  testWidgets(
+    'late latest history retires a settled optimistic timeline on real route reopen',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1000, 2400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final controller = GatewayTurnApplicationController();
+      addTearDown(controller.close);
+      final remote = _Remote()..history = [];
+      await _open(tester, controller, remote);
+      await tester.enterText(find.byType(TextField), 'One prompt');
+      await tester.tap(find.byTooltip('Send'));
+      await tester.pump();
+      await tester.pump();
+      remote.event('message.start', {}, turnId: 'A');
+      remote.event('message.delta', {'text': 'Wire reply'}, turnId: 'A');
+      remote.event('tool.start', {
+        'tool': 'read_file',
+        'tool_id': 'optimistic-only',
+      }, turnId: 'A');
+      remote.event('message.complete', {'text': 'Wire reply'}, turnId: 'A');
+      // A correlated lifecycle can finish before HTTP persistence is visible.
+      // Stock ID-less terminals are separately covered by reconciliation tests.
+      remote.event('turn.end', {'status': 'completed'}, turnId: 'A');
+      remote.rpc.complete();
+      await tester.pump();
+      await tester.pump();
+      await tester.pump();
+      final owner = controller
+          .normalSessionFor(_connection)
+          .findChat('stored-chat')!;
+      expect(controller.hasActiveTurn, isFalse);
+      expect(find.text('Wire reply'), findsOneWidget);
+      expect(find.byType(GatewayActivityCard), findsOneWidget);
+      expect(owner.snapshot.tools, hasLength(1));
+      final before = remote.historyRequests;
+      remote.history = [
+        {'id': 1, 'role': 'user', 'content': 'One prompt'},
+        {'id': 2, 'role': 'assistant', 'content': 'Canonical reply'},
+      ];
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+      await _open(
+        tester,
+        controller,
+        remote,
+        id: 'stored-chat',
+        key: const ValueKey('late-canonical'),
+      );
+      await tester.pump();
+      expect(remote.historyRequests, greaterThan(before));
+      expect(find.text('One prompt'), findsOneWidget);
+      expect(find.text('Canonical reply'), findsOneWidget);
+      expect(find.text('Wire reply'), findsNothing);
+      expect(find.byType(GatewayActivityCard), findsNothing);
+      expect(owner.snapshot.displayRows, isEmpty);
+      expect(owner.snapshot.tools, isEmpty);
+      expect(owner.snapshot.timeline.runs, isEmpty);
+      expect(remote.submissions, 1);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
     },
   );
 
@@ -524,7 +633,6 @@ void main() {
       },
     );
   }
-
   testWidgets(
     'retained owner preserves timeline order across snapshots and route reattachment',
     (tester) async {
@@ -750,52 +858,76 @@ Future<void> _open(
   String id = 'local-chat',
   Key? key,
   Future<void> Function(String, String)? prepare,
+  bool push = false,
   TaskHistorySource? taskHistory,
   List<Map<String, dynamic>> Function()? history,
   http.Client? historyClient,
 }) async {
-  await tester.pumpWidget(
-    MaterialApp(
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
-      supportedLocales: AppLocalizations.supportedLocales,
-      home: ChatScreen(
-        key: key,
-        connection: _connection,
-        session: Session(
-          id: id,
-          title: 'Owner chat',
-          model: 'fixture',
-          source: 'test',
-          messageCount: 0,
-          isActive: true,
-          preview: '',
-          startedAt: 1,
-          isLocalDraft: prepare != null,
-        ),
-        projectWorkingDirectory: prepare == null ? null : '/project',
-        turnApplicationController: controller,
-        testApiClient: ApiClient(
-          baseUrl: _connection.baseUrl,
-          apiKey: 'fixture',
-          httpClient:
-              historyClient ??
-              MockClient(
-                (_) async => http.Response(
-                  jsonEncode({'data': history?.call() ?? []}),
-                  200,
-                ),
-              ),
-        ),
-        testRemotePromptSubmit: remote.submit,
-        testStoredSessionKey: (_) => 'stored-chat',
-        testLegacyProjectSessionEnsure: prepare,
-        testTaskHistorySource: taskHistory == null ? null : () => taskHistory,
-        testVoiceComposerAdapter: FakeVoiceComposerAdapter(),
-      ),
+  final screen = ChatScreen(
+    key: key,
+    connection: _connection,
+    session: Session(
+      id: id,
+      title: 'Owner chat',
+      model: 'fixture',
+      source: 'test',
+      messageCount: 0,
+      isActive: true,
+      preview: '',
+      startedAt: 1,
+      isLocalDraft: prepare != null,
     ),
+    projectWorkingDirectory: prepare == null ? null : '/project',
+    turnApplicationController: controller,
+    testApiClient: ApiClient(
+      baseUrl: _connection.baseUrl,
+      apiKey: 'fixture',
+      httpClient:
+          historyClient ??
+          MockClient((_) async {
+            remote.historyRequests++;
+            return http.Response(
+              history == null
+                  ? remote.historyJson
+                  : jsonEncode({'data': history()}),
+              200,
+            );
+          }),
+    ),
+    testRemotePromptSubmit: remote.submit,
+    testNormalResume:
+        ({required localSessionId, required storedSessionId}) async =>
+            ResumedGatewaySession(
+              runtimeSessionId: 'runtime',
+              running: !remote.completed,
+              status: remote.completed ? 'completed' : null,
+            ),
+    testStoredSessionKey: (_) => 'stored-chat',
+    testLegacyProjectSessionEnsure: prepare,
+    testVoiceComposerAdapter: FakeVoiceComposerAdapter(),
+    testTaskHistorySource: taskHistory == null ? null : () => taskHistory,
   );
+  if (push) {
+    unawaited(
+      Navigator.of(
+        tester.element(find.byType(ChatScreen)),
+      ).push<void>(MaterialPageRoute(builder: (_) => screen)),
+    );
+  } else {
+    await tester.pumpWidget(
+      MaterialApp(
+        localizationsDelegates: AppLocalizations.localizationsDelegates,
+        supportedLocales: AppLocalizations.supportedLocales,
+        home: screen,
+      ),
+    );
+  }
   await tester.pump();
   await tester.pump();
+  if (push) {
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pump();
+  }
 }
 
 class _OwnerTaskHistory implements TaskHistorySource {
@@ -835,6 +967,19 @@ class _Remote {
   StreamCallback? onEvent;
   int submissions = 0;
   bool emitOnSent = true;
+  bool completed = false;
+  String finalText = '';
+  int historyRequests = 0;
+  List<Map<String, dynamic>>? history;
+  String get historyJson => jsonEncode({
+    'data':
+        history ??
+        (completed
+            ? [
+                {'id': 2, 'role': 'assistant', 'content': finalText},
+              ]
+            : []),
+  });
   Future<void> submit({
     required String sessionId,
     required String text,
@@ -847,6 +992,22 @@ class _Remote {
     return rpc.future;
   }
 
-  void event(String type, Map<String, dynamic> data) =>
-      onEvent!(StreamEvent(type: type, data: data));
+  void event(String type, Map<String, dynamic> data, {String? turnId}) {
+    if (type == 'message.complete' || type == 'turn.end') {
+      completed = true;
+      finalText = data['text']?.toString() ?? 'Final';
+    }
+    final id = turnId ?? 'route-turn-$submissions';
+    onEvent!(StreamEvent(type: 'turn.start', data: const {}, turnId: id));
+    onEvent!(StreamEvent(type: type, data: data, turnId: id));
+    if (type == 'message.complete') {
+      onEvent!(
+        StreamEvent(
+          type: 'turn.end',
+          data: const {'status': 'completed'},
+          turnId: id,
+        ),
+      );
+    }
+  }
 }

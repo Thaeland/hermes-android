@@ -726,10 +726,24 @@ class ApiClient {
 
   /// Fetches one session by exact id, paging through the list until it is
   /// found: a notification may name a session older than the first page.
-  Future<Session?> getSessionById(String sessionId) async {
+  /// [canContinue] fences each page, not just the final result. Notification
+  /// navigation uses it to revoke captured credentials/consent while a request
+  /// is suspended; other callers retain the original paging behaviour.
+  /// [isCurrent] rechecks synchronous lifetime/configuration authority after
+  /// every await, including the asynchronous continuation fence itself.
+  Future<Session?> getSessionById(
+    String sessionId, {
+    Future<bool> Function()? canContinue,
+    bool Function()? isCurrent,
+  }) async {
     var offset = 0;
     while (true) {
+      if (canContinue != null && !await canContinue()) return null;
+      if (isCurrent != null && !isCurrent()) return null;
       final result = await getSessionsPage(limit: 50, offset: offset);
+      if (isCurrent != null && !isCurrent()) return null;
+      if (canContinue != null && !await canContinue()) return null;
+      if (isCurrent != null && !isCurrent()) return null;
       for (final session in result.sessions) {
         if (session.id == sessionId) return session;
       }
@@ -1363,7 +1377,6 @@ class DashboardClient {
   final String? _username;
   final String? _password;
   final String? _gatewayProfile;
-  String? get gatewayProfile => _gatewayProfile;
   String? _token;
   String? _cookie;
   int _authGeneration = 0;
@@ -1374,6 +1387,9 @@ class DashboardClient {
   Future<String>? _tokenInFlight;
 
   String get baseUrl => _baseUrl;
+
+  /// Selected connection profile; generic API helpers deliberately do not add it.
+  String? get gatewayProfile => _gatewayProfile;
 
   bool get _usesPasswordAuth =>
       (_username?.isNotEmpty ?? false) && (_password?.isNotEmpty ?? false);

@@ -95,6 +95,13 @@ void main() {
   testWidgets(
     'root resume and mounted Settings refresh grants and the visible denial hint without re-prompting',
     (tester) async {
+      await TurnNotificationService.shared.ensureInitialized(
+        requestPermission: true,
+      );
+      expect(
+        calls.where((c) => c.method == 'requestNotificationsPermission'),
+        hasLength(1),
+      );
       final prefs = await SharedPreferences.getInstance();
       await tester.pumpWidget(HermesApp(connManager: ConnectionManager(prefs)));
       await tester.pumpAndSettle();
@@ -116,7 +123,9 @@ void main() {
       expect(TurnNotificationService.shared.permissionGranted, isTrue);
       expect(
         calls.where((c) => c.method == 'requestNotificationsPermission'),
-        isEmpty,
+        hasLength(
+          1,
+        ), // Initial foreground opt-in only; resumes never re-prompt.
       );
 
       granted = false;

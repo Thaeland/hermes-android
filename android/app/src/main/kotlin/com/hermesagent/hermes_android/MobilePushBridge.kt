@@ -51,6 +51,14 @@ internal object MobilePushBridge {
     @Synchronized fun command(context: Context, method: String, args: Map<*, *>): Any? {
         if (method == "distributors") return UnifiedPush.getDistributors(context)
         val state = MobilePushStore.read(context)
+        // Upgrade old sealed consent without resetting its installation/revision.
+        // Legacy delivery/proofs cannot remain active across a server migration.
+        if (state.optBoolean("enabled") && state.optInt("registration_fence") != 1 &&
+            method in listOf("snapshot", "preferences")) {
+            invalidateRegistration(state)
+            MobilePushStore.write(context, state)
+            cancelNotifications(context)
+        }
         val expected = JSONObject(args)
         when (method) {
             "snapshot" -> { /* no mutation */ }
@@ -63,15 +71,15 @@ internal object MobilePushBridge {
             "retryDistributor" -> { retryDistributor(context); return map(MobilePushStore.read(context)) }
             "enable" -> {
                 check(!state.optBoolean("enabled")) { "Disable the existing binding first" }
-                check(allowed(context)) { "Notification permission required" }
                 val sessions = JSONArray(args["sessions"] as List<*>)
-                check(sessions.length() > 0)
+                check(MobilePushPolicy.validSessions(sessions)) { "Select 1-128 session IDs of 1-200 ASCII letters, digits, _ . : @ or -" }
+                check(allowed(context)) { "Notification permission required" }
                 val distributor = args["distributor"] as String
                 check(distributor in UnifiedPush.getDistributors(context))
                 val revoke = state.optJSONArray("revocations") ?: JSONArray()
                 val fresh = JSONObject().put("enabled", true).put("active", false)
                     .put("installation", UUID.randomUUID().toString()).put("nonce", UUID.randomUUID().toString())
-                    .put("revision", 1).put("generation", 0).put("connection", args["connection"])
+                    .put("registration_fence", 1).put("revision", 1).put("generation", 0).put("connection", args["connection"])
                     .put("binding", args["binding"]).put("sessions", sessions)
                     .put("distributor", distributor).put("vapid", args["vapid"])
                     .put("revocations", revoke).put("master", args["master"])
@@ -92,7 +100,7 @@ internal object MobilePushBridge {
                 state.put("enabled", false).put("active", false).put("nonce", "")
                     .put("generation", 0).put("revision", state.optLong("revision") + 1)
                     .remove("endpoint")
-                listOf("keys", "challenges", "tap", "issued", "seen").forEach { state.remove(it) }
+                listOf("keys", "challenges", "tap", "issued", "seen", "registration_attempt", "confirmation_attempt", "pending_until").forEach { state.remove(it) }
                 MobilePushStore.write(context, state) // revoke locally BEFORE any IPC/network
                 cancelNotifications(context)
                 if (id.isNotEmpty()) runCatching { UnifiedPush.unregister(context, id) }
@@ -117,16 +125,46 @@ internal object MobilePushBridge {
                 MobilePushStore.write(context, state)
                 return map(state)
             }
+            "recoverRegistration", "beginRegistration", "beginConfirmation" -> {
+                check(MobilePushPolicy.current(state, expected) &&
+                    state.optLong("generation") == expected.optLong("generation") &&
+                    !state.optBoolean("active") && state.has("endpoint") && state.has("keys")) { "Stale registration" }
+                when (method) {
+                    "recoverRegistration" -> {
+                        // One atomic sealed write fences every old HTTP response,
+                        // encrypted proof, notification and tap without new consent
+                        // or distributor IPC. Installation/account/scope stay fixed.
+                        invalidateRegistration(state)
+                        MobilePushStore.write(context, state)
+                        cancelNotifications(context)
+                        return map(state)
+                    }
+                    "beginRegistration" -> {
+                        check(state.optLong("generation") == 0L && !state.optBoolean("registration_attempt"))
+                        state.put("registration_attempt", true)
+                            // Local maximum wait, NOT a claim about server TTL.
+                            // A missing/expired delivery must not strand Pending.
+                            .put("pending_until", now() + 300)
+                    }
+                    "beginConfirmation" -> {
+                        check(state.optLong("generation") > 0 && !state.optBoolean("confirmation_attempt"))
+                        state.put("confirmation_attempt", true)
+                    }
+                }
+                MobilePushStore.write(context, state) // write-ahead before HTTP
+                return map(state)
+            }
             "generation", "activate" -> {
                 check(MobilePushPolicy.current(state, expected)) { "Stale registration" }
                 val generation = (args["generation"] as Number).toLong()
                 check(generation > 0)
                 if (method == "generation") {
-                    check(state.optLong("generation") == 0L)
-                    state.put("generation", generation)
+                    check(state.optLong("generation") == 0L && state.optBoolean("registration_attempt"))
+                    state.put("generation", generation).remove("registration_attempt")
                 } else {
-                    check(state.optLong("generation") == generation)
-                    state.put("active", true).remove("challenges")
+                    check(state.optLong("generation") == generation && state.optBoolean("confirmation_attempt"))
+                    state.put("active", true)
+                    listOf("challenges", "confirmation_attempt", "pending_until").forEach { state.remove(it) }
                 }
                 MobilePushStore.write(context, state)
                 return map(state)
@@ -159,9 +197,9 @@ internal object MobilePushBridge {
         val keys = endpoint.pubKeySet ?: return
         val nextKeys = JSONObject().put("p256dh", keys.pubKey).put("auth", keys.auth)
         if (endpoint.url == state.optString("endpoint") && nextKeys.toString() == state.optJSONObject("keys")?.toString()) return
-        state.put("endpoint", endpoint.url).put("keys", nextKeys).put("active", false).put("generation", 0)
-            .put("nonce", UUID.randomUUID().toString()).put("revision", state.optLong("revision") + 1)
-        listOf("challenges", "tap", "issued", "seen", "error").forEach { state.remove(it) }
+        state.put("endpoint", endpoint.url).put("keys", nextKeys)
+        invalidateRegistration(state)
+        state.remove("error")
         MobilePushStore.write(context, state)
         cancelNotifications(context)
         changed()
@@ -170,9 +208,9 @@ internal object MobilePushBridge {
     @Synchronized fun failure(context: Context, instance: String, reason: String) {
         val state = MobilePushStore.read(context)
         if (!state.optBoolean("enabled") || instance != state.optString("installation")) return
-        state.put("active", false).put("generation", 0).put("error", reason)
-            .put("nonce", UUID.randomUUID().toString()).put("revision", state.optLong("revision") + 1)
-        listOf("endpoint", "keys", "challenges", "tap", "issued").forEach { state.remove(it) }
+        invalidateRegistration(state)
+        state.put("error", reason)
+        listOf("endpoint", "keys").forEach { state.remove(it) }
         MobilePushStore.write(context, state)
         cancelNotifications(context)
         changed()
@@ -238,6 +276,13 @@ internal object MobilePushBridge {
         MobilePushStore.write(context, state)
         intent.removeExtra("mobile_push_tap")
         changed()
+    }
+    private fun invalidateRegistration(state: JSONObject) {
+        val revision = state.optLong("revision")
+        check(revision in 0 until 9007199254740991L) { "Revision exhausted; disable and enable again" }
+        state.put("registration_fence", 1).put("active", false).put("generation", 0)
+            .put("nonce", UUID.randomUUID().toString()).put("revision", revision + 1)
+        listOf("registration_attempt", "confirmation_attempt", "pending_until", "challenges", "tap", "issued", "seen").forEach { state.remove(it) }
     }
     private fun validTap(state: JSONObject, tap: JSONObject) =
         MobilePushPolicy.current(state, tap) && state.optBoolean("active") && state.optBoolean("master") &&

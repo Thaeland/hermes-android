@@ -36,6 +36,17 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
 - Previous upstream releases remain available from the
   [Releases](https://github.com/rusty4444/hermes-android/releases) page.
 
+## Unreleased hardening after v2.1.31
+
+This branch preserves the published v2.1.31 features and adds stricter submission
+observation epochs, confirmed background-policy ownership, targeted notification
+cleanup, canonical draft/expansion lifetime and paired push registration fences.
+The release identity above remains unchanged; this branch is not a new release.
+See the [background-work guide](docs/android-background-work.md),
+[Android push guide](docs/mobile-push-android.md) and
+[server companion guide](docs/mobile-push-server.md) for the additional contracts
+and acceptance checks. Upgrade the companion together with the fenced client.
+
 ## Remote Gateway edition highlights
 
 - One Desktop Gateway JSON-RPC session for text, images, and files.

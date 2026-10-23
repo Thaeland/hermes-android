@@ -436,7 +436,17 @@ class _Fixture {
             required onSent,
           }) {
             submissions++;
-            if (emit) onSent();
+            if (emit) {
+              onSent();
+              session.receiveEvent(
+                'local',
+                StreamEvent(
+                  type: 'turn.start',
+                  data: const {},
+                  turnId: 'fixture-turn-$submissions',
+                ),
+              );
+            }
             entered.complete();
             return rpc.future;
           },
@@ -473,8 +483,20 @@ class _Fixture {
     await entered.future;
   }
 
-  void emit(String type, Map<String, dynamic> data) =>
-      session.receiveEvent('local', StreamEvent(type: type, data: data));
+  void emit(String type, Map<String, dynamic> data) {
+    final id = 'fixture-turn-$submissions';
+    session.receiveEvent(
+      'local',
+      StreamEvent(type: type, data: data, turnId: id),
+    );
+    if (type == 'message.complete') {
+      session.receiveEvent(
+        'local',
+        StreamEvent(type: 'turn.end', data: data, turnId: id),
+      );
+    }
+  }
+
   Future<void> close() async {
     await session.close();
     if (!rpc.isCompleted) rpc.complete();

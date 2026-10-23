@@ -73,6 +73,13 @@ void main() {
               }
               return http.Response(jsonEncode({'data': []}), 200);
             }
+            if (submissions == 0 &&
+                const {
+                  'stored-held-initial',
+                  'local-initial-404',
+                }.contains(mode)) {
+              return http.Response('admission unavailable', 503);
+            }
             return http.Response(jsonEncode({'data': canonical}), 200);
           }),
         );
@@ -130,11 +137,26 @@ void main() {
           mode == 'known-empty-control' ? 0 : isNull,
         );
         emit(
-          StreamEvent(type: 'message.delta', data: {'text': 'Early answer'}),
+          StreamEvent(
+            type: 'message.delta',
+            data: {'text': 'Early answer'},
+            turnId: 'owned-turn',
+          ),
         );
         await tester.pump();
         emit(
-          StreamEvent(type: 'message.complete', data: {'text': 'Early answer'}),
+          StreamEvent(
+            type: 'message.complete',
+            data: {'text': 'Early answer'},
+            turnId: 'owned-turn',
+          ),
+        );
+        emit(
+          StreamEvent(
+            type: 'turn.end',
+            data: const {'status': 'completed'},
+            turnId: 'owned-turn',
+          ),
         );
         rpc.complete();
         for (var i = 0; i < 10; i++) {

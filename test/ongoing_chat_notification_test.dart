@@ -128,8 +128,189 @@ void main() {
     () async {
       await show();
       expect(sink.permissionRequestCount, 0);
+      expect(sink.permissionCheckCount, 0);
       await service.ensureInitialized(requestPermission: true);
       expect(sink.permissionRequestCount, 1);
+    },
+  );
+
+  test(
+    'passive authorization observes external grant and revocation without another prompt',
+    () async {
+      sink.permissionResult = false;
+      await service.ensureInitialized(requestPermission: true);
+      await show();
+      expect(sink.shown, isEmpty);
+      sink.permissionResult = true;
+      await service.refreshAuthorization();
+      await show();
+      expect(sink.shown.single.ongoing, isTrue);
+      expect(
+        await service.sendTestNotification(title: 'test', body: 'test'),
+        isTrue,
+      );
+      sink.permissionResult = false;
+      await service.refreshAuthorization();
+      final before = sink.shown.length;
+      await show();
+      expect(
+        await service.sendTestNotification(title: 'test', body: 'test'),
+        isFalse,
+      );
+      expect(sink.shown, hasLength(before));
+      expect(sink.cancelled, contains(sink.shown.first.id));
+      expect(sink.permissionRequestCount, 1);
+      expect(sink.permissionCheckCount, 4);
+    },
+  );
+
+  test(
+    'explicit foreground test passively discovers an external grant without resume',
+    () async {
+      sink.permissionResult = false;
+      expect(
+        await service.sendTestNotification(title: 'test', body: 'test'),
+        isFalse,
+      );
+      sink.permissionResult = true;
+      expect(
+        await service.sendTestNotification(title: 'test', body: 'test'),
+        isTrue,
+      );
+      expect(sink.permissionRequestCount, 1);
+    },
+  );
+
+  test(
+    'passive authorization reads are singleflight and fail closed without prompting',
+    () async {
+      sink.permissionCheckGate = Completer<void>();
+      sink.permissionResult = false;
+      final first = service.refreshAuthorization();
+      final second = service.refreshAuthorization();
+      await pumpEventQueue();
+      expect(sink.permissionCheckCount, 1);
+      sink.permissionCheckGate!.complete();
+      await Future.wait([first, second]);
+      expect(service.permissionGranted, isFalse);
+      sink.permissionCheckError = StateError('platform unavailable');
+      await service.refreshAuthorization();
+      expect(service.permissionGranted, isFalse);
+      expect(sink.permissionRequestCount, 0);
+    },
+  );
+
+  test(
+    'passive read cannot overwrite the result of a newer explicit prompt',
+    () async {
+      sink.permissionResult = false;
+      sink.permissionCheckGate = Completer<void>();
+      final passive = service.refreshAuthorization();
+      await pumpEventQueue();
+      expect(sink.permissionCheckCount, 1);
+      sink.permissionResult = true;
+      await service.ensureInitialized(requestPermission: true);
+      expect(service.permissionGranted, isTrue);
+      sink.permissionCheckGate!.complete();
+      await passive;
+      expect(service.permissionGranted, isTrue);
+      expect(sink.permissionRequestCount, 1);
+    },
+  );
+
+  for (final initiallyGranted in [false, true]) {
+    test(
+      'new passive demand coalesces one fresh trailing read $initiallyGranted',
+      () async {
+        sink.permissionResult = initiallyGranted;
+        sink.permissionCheckGate = Completer<void>();
+        final first = service.refreshAuthorization();
+        await pumpEventQueue();
+        expect(sink.permissionCheckCount, 1);
+        sink.permissionResult = !initiallyGranted;
+        final second = service.refreshAuthorization();
+        final third = service.refreshAuthorization();
+        await pumpEventQueue();
+        expect(sink.permissionCheckCount, 1);
+        sink.permissionCheckGate!.complete();
+        await Future.wait([first, second, third]);
+        expect(sink.permissionCheckCount, 2);
+        expect(service.permissionGranted, !initiallyGranted);
+        expect(sink.permissionRequestCount, 0);
+      },
+    );
+  }
+
+  for (final initial in [false, true]) {
+    test(
+      'RECHECK stale passive waiter joins a newer still-held foreground prompt $initial',
+      () async {
+        sink.permissionResult = initial;
+        await service.refreshAuthorization();
+        sink.permissionCheckGate = Completer<void>();
+        var oldReturned = false;
+        final old = service.refreshAuthorization().then(
+          (_) => oldReturned = true,
+        );
+        await pumpEventQueue();
+        expect(sink.permissionCheckCount, 2);
+        sink.permissionResult = !initial;
+        sink.permissionGate = Completer<void>();
+        final prompt = service.ensureInitialized(requestPermission: true);
+        await pumpEventQueue();
+        expect(sink.permissionRequestCount, 1);
+        var newerReturned = false;
+        final newer = service.refreshAuthorization().then(
+          (_) => newerReturned = true,
+        );
+        sink.permissionCheckGate!.complete();
+        await pumpEventQueue();
+        expect(oldReturned, isFalse);
+        expect(newerReturned, isFalse);
+        expect(service.permissionGranted, initial);
+        expect(sink.permissionCheckCount, 2);
+        sink.permissionGate!.complete();
+        await Future.wait([old, prompt, newer]);
+        expect(oldReturned && newerReturned, isTrue);
+        expect(service.permissionGranted, !initial);
+        expect(sink.permissionCheckCount, 3);
+        expect(sink.permissionRequestCount, 1);
+      },
+    );
+  }
+
+  test(
+    'RECHECK demand during a trailing read requires a third observation and no early return',
+    () async {
+      sink.permissionResult = true;
+      final firstGate = Completer<void>();
+      final secondGate = Completer<void>();
+      final thirdGate = Completer<void>();
+      sink.permissionCheckGate = firstGate;
+      final returned = <int>[];
+      final first = service.refreshAuthorization().then((_) => returned.add(1));
+      await pumpEventQueue();
+      sink.permissionResult = false;
+      final second = service.refreshAuthorization().then(
+        (_) => returned.add(2),
+      );
+      sink.permissionCheckGate = secondGate;
+      firstGate.complete();
+      await pumpEventQueue();
+      expect(sink.permissionCheckCount, 2);
+      expect(returned, isEmpty);
+      sink.permissionResult = true;
+      final third = service.refreshAuthorization().then((_) => returned.add(3));
+      sink.permissionCheckGate = thirdGate;
+      secondGate.complete();
+      await pumpEventQueue();
+      expect(sink.permissionCheckCount, 3);
+      expect(returned, isEmpty);
+      thirdGate.complete();
+      await Future.wait([first, second, third]);
+      expect(returned.toSet(), {1, 2, 3});
+      expect(service.permissionGranted, isTrue);
+      expect(sink.permissionRequestCount, 0);
     },
   );
 
@@ -377,6 +558,8 @@ void main() {
       sink.permissionResult = false;
       await service.ensureInitialized();
       await service.ensureInitialized();
+      await service
+          .refreshAuthorization(); // Explicit read; headless show is initialization-only.
       await show();
       expect(service.permissionGranted, isFalse);
       expect(sink.permissionCheckCount, 3);
@@ -411,7 +594,7 @@ void main() {
   );
 
   test(
-    'held passive denial finishes before a concurrent foreground grant',
+    'held passive denial cannot overwrite a concurrent foreground grant',
     () async {
       sink.permissionResult = false;
       sink.permissionCheckGate = Completer<void>();
@@ -425,23 +608,25 @@ void main() {
       final sibling = service.ensureInitialized(requestPermission: true);
       final passiveSibling = service.ensureInitialized();
       await pumpEventQueue();
-      expect(sink.permissionRequestCount, 0);
+      expect(sink.permissionRequestCount, 1);
       expect(sink.permissionCheckCount, 1);
       sink.permissionCheckGate!.complete();
       await pumpEventQueue();
       expect(sink.permissionRequestCount, 1);
-      expect(service.permissionGranted, isFalse);
+      // The old denial was invalidated when the prompt started; its response
+      // cannot become current while the explicit grant is still held.
+      expect(service.permissionGranted, isTrue);
       sink.permissionGate!.complete();
       await Future.wait([headless, foreground, sibling, passiveSibling]);
       expect(service.permissionGranted, isTrue);
       expect(sink.permissionRequestCount, 1);
-      expect(sink.permissionCheckCount, 1);
+      expect(sink.permissionCheckCount, 2);
 
       // Finished flights must be released so the next check reads fresh state.
       sink.permissionResult = false;
       await service.ensureInitialized();
       expect(service.permissionGranted, isFalse);
-      expect(sink.permissionCheckCount, 2);
+      expect(sink.permissionCheckCount, 3);
     },
   );
 
@@ -530,6 +715,31 @@ void main() {
     expect(notice.silent, isFalse);
     expect(notice.onlyAlertOnce, isFalse);
   });
+
+  test(
+    'Android passive authorization uses only areNotificationsEnabled, never a prompt',
+    () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      AndroidFlutterLocalNotificationsPlugin.registerWith();
+      const channel = MethodChannel(
+        'dexterous.com/flutter/local_notifications',
+      );
+      final calls = <String>[];
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        calls.add(call.method);
+        return true;
+      });
+      addTearDown(() {
+        messenger.setMockMethodCallHandler(channel, null);
+        debugDefaultTargetPlatformOverride = null;
+      });
+      final pluginSink = PluginTurnNotificationSink();
+      expect(await pluginSink.checkPermission(), isTrue);
+      expect(calls, ['areNotificationsEnabled']);
+    },
+  );
 
   test('plugin sink maps ongoing flags to real Android arguments', () async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;

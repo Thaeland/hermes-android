@@ -937,6 +937,10 @@ class WsClient {
             JsonRpcError(
               'prompt.submit',
               event.data['message']?.toString() ?? 'Gateway turn failed',
+              // A session event has no request correlation. The application
+              // owner must reconcile it, not attribute its error text to the
+              // prompt whose terminal watcher happened to receive it.
+              reason: 'stream_terminal',
             ),
           );
         } else {

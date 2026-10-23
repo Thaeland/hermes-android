@@ -94,6 +94,7 @@ def env(tmp_path, subscription, monkeypatch):
         "endpoint": "https://push.example.test/subscription/secret-token",
         "keys": subscription[1],
         "registration_nonce": "nonce_0123456789abcdef",
+        "registration_revision": 1,
         "event_kinds": ["turn_done", "turn_error", "input", "input_resolved"],
         "session_ids": ["session-a"],
     }
@@ -115,6 +116,13 @@ def env(tmp_path, subscription, monkeypatch):
 
 def pending(env, installation="phone", **changes):
     body = {**env.body, **changes}
+    if "registration_revision" not in changes:
+        with env.runtime.store.connection() as db:
+            row = db.execute(
+                "SELECT registration_revision FROM registrations WHERE installation=?",
+                (installation,),
+            ).fetchone()
+        body["registration_revision"] = row[0] + 1 if row else 1
     response = env.client.put(f"{PREFIX}/registrations/{installation}", json=body)
     assert response.status_code == 200, response.text
     with env.runtime.store.connection() as db:

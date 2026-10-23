@@ -92,6 +92,7 @@ void main() {
       if (mode == 'resume-held-history') {
         expect(gateway.initialHistory.isCompleted, isFalse);
       }
+      gateway.event('turn.start', {});
       gateway.event('message.delta', {'text': 'First answer'});
       await _until(
         tester,
@@ -99,6 +100,7 @@ void main() {
       );
       gateway.persisted = true;
       gateway.event('message.complete', {'text': 'First answer'});
+      gateway.event('turn.end', {'status': 'completed'});
       await _until(
         tester,
         () =>
@@ -227,7 +229,7 @@ class _Gateway {
         if (first && mode == 'resume-held-history') await initialHistory.future;
         if (_closed) return;
         request.response.headers.contentType = ContentType.json;
-        if (!persisted && mode == 'resume-unavailable-history') {
+        if (!persisted && !provesEmpty && (created || existing)) {
           request.response.statusCode = 503;
           request.response.write('{"error":"history unavailable"}');
         } else if (!created && !existing) {
@@ -311,6 +313,7 @@ class _Gateway {
       'method': 'event',
       'params': {
         'type': type,
+        'turn_id': 'owned-first',
         'session_id': 'runtime-first',
         'payload': payload,
       },

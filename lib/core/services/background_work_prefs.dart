@@ -13,25 +13,38 @@ abstract final class BackgroundWorkPrefsStore {
   static int _revision = 0;
   static bool _confirmedEnabled = true;
 
+  /// Last successfully read or written value, never the optimistic UI choice.
+  /// Callers must establish readiness through a successful load or write.
+  static bool get confirmedEnabled => _confirmedEnabled;
+
+  /// Successful durable choices can establish policy even if startup hydration
+  /// failed. Optimistic notifier changes alone must never grant that authority.
+  static final _confirmedChanges = ValueNotifier<int>(0);
+  static ValueListenable<int> get confirmedChanges => _confirmedChanges;
+  static final _pendingChoice = ValueNotifier<bool>(false);
+
+  /// A new enabled choice cannot grant protection until its own save settles.
+  /// Separate from UI changes, including when the requested value is unchanged.
+  static ValueListenable<bool> get pendingChoice => _pendingChoice;
+
   static Future<void> load() {
     final revision = _revision;
     return _enqueue(() async {
-      try {
-        final prefs = await SharedPreferences.getInstance();
-        await prefs.reload();
-        final raw = prefs.get(storageKey);
-        _confirmedEnabled = raw is bool ? raw : true;
-        if (revision == _revision) {
-          backgroundWorkEnabled.value = _confirmedEnabled;
-        }
-      } catch (_) {
-        // Unavailable preferences must not prevent the first frame.
+      // Let the root distinguish an unavailable store from a fresh install.
+      // It catches this failure without blocking startup and remains disabled.
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.reload();
+      final raw = prefs.get(storageKey);
+      _confirmedEnabled = raw is bool ? raw : true;
+      if (revision == _revision) {
+        backgroundWorkEnabled.value = _confirmedEnabled;
       }
     });
   }
 
   static Future<void> setEnabled(bool enabled) {
     final revision = ++_revision;
+    _pendingChoice.value = true;
     backgroundWorkEnabled.value = enabled;
     return _enqueue(() async {
       try {
@@ -40,9 +53,15 @@ abstract final class BackgroundWorkPrefsStore {
           throw StateError('Background work preference was not saved');
         }
         _confirmedEnabled = enabled;
+        if (revision == _revision) _pendingChoice.value = false;
+        // Every committed value changes durable authority, even when a newer
+        // optimistic choice is queued behind it. Observers must use the
+        // confirmed value, not treat this signal as a grant for that choice.
+        _confirmedChanges.value++;
       } catch (_) {
         // Restore confirmed state, never a sibling's failed optimism.
         if (revision == _revision) {
+          _pendingChoice.value = false;
           backgroundWorkEnabled.value = _confirmedEnabled;
         }
         rethrow;

@@ -370,7 +370,7 @@ class TurnNotificationService {
     required String turnId,
     required String status,
   }) => _queueOngoing(() async {
-    await ensureInitialized();
+    await ensureInitialized(refreshPermission: false);
     if (!_initialized) return;
     final id = ongoingChatNotificationIdFor(
       connectionId: connectionId,
@@ -414,7 +414,7 @@ class TurnNotificationService {
     required String connectionId,
     required String localSessionId,
   }) => _queueOngoing(() async {
-    await ensureInitialized();
+    await ensureInitialized(refreshPermission: false);
     if (!_initialized) return;
     await _cancelOngoingId(
       ongoingChatNotificationIdFor(
@@ -433,7 +433,7 @@ class TurnNotificationService {
   /// Targeted cleanup only. Never calls the plugin's broad cancelAll, which
   /// could remove the foreground-service disclosure or attention notifications.
   Future<void> cancelAllOngoingChats() => _queueOngoing(() async {
-    await ensureInitialized();
+    await ensureInitialized(refreshPermission: false);
     if (!_initialized) return;
     for (final id in _ongoingIds.toList()) {
       await _cancelOngoingId(id);
@@ -469,7 +469,10 @@ class TurnNotificationService {
   bool _permissionRequested = false;
   Future<void>? _initializing;
   Future<void>? _requestingPermission;
-  Future<void>? _refreshingPermission;
+  Future<void>? _refreshingAuthorization;
+  int _permissionRevision = 0;
+  int _authorizationDemand = 0;
+  int _authorizationSatisfied = 0;
 
   TurnNotificationService({
     TurnNotificationSink? sink,
@@ -487,7 +490,10 @@ class TurnNotificationService {
   /// Only explicit foreground callers may request permission, once after a
   /// successful platform request. Later checks never re-prompt, even after a
   /// denial. Failed platform operations degrade silently and may be retried.
-  Future<void> ensureInitialized({bool requestPermission = false}) async {
+  Future<void> ensureInitialized({
+    bool requestPermission = false,
+    bool refreshPermission = true,
+  }) async {
     if (!_initialized) {
       final flight = _initializing ??= _initialize();
       try {
@@ -508,19 +514,8 @@ class TurnNotificationService {
           _requestingPermission = null;
         }
       }
-    } else {
-      // Join an active prompt rather than reading its pre-prompt state. Passive
-      // checks also coalesce, and cannot overwrite a newer request result.
-      final flight =
-          _requestingPermission ??
-          (_refreshingPermission ??= _refreshPermission());
-      try {
-        await flight;
-      } finally {
-        if (identical(_refreshingPermission, flight)) {
-          _refreshingPermission = null;
-        }
-      }
+    } else if (refreshPermission) {
+      await refreshAuthorization();
     }
   }
 
@@ -535,9 +530,7 @@ class TurnNotificationService {
   }
 
   Future<void> _requestPermission() async {
-    // A headless refresh may already be reading the old grant. Let it finish
-    // before prompting so its late result cannot replace the user's answer.
-    await _refreshingPermission;
+    ++_permissionRevision;
     try {
       _permissionGranted = await _sink.requestPermission() ?? true;
       _permissionRequested = true;
@@ -547,13 +540,57 @@ class TurnNotificationService {
     }
   }
 
-  Future<void> _refreshPermission() async {
-    try {
-      _permissionGranted = await _sink.checkPermission() ?? true;
-    } catch (_) {
-      // Unknown is not a grant, but a later passive check may recover.
-      _permissionGranted = false;
+  /// Foreground resume/Settings may observe grants or revocations made in OS
+  /// settings. Refreshing is separate from the one-shot permission prompt:
+  /// denial never causes repeated dialogs, and headless initialization does
+  /// neither. Join an active prompt and fence older passive results behind it.
+  Future<void> refreshAuthorization() async {
+    // Register demand before initialization awaits. Joining an older platform
+    // read is not evidence about an OS change observed by a later caller.
+    ++_authorizationDemand;
+    if (!_initialized) {
+      final flight = _initializing ??= _initialize();
+      try {
+        await flight;
+      } finally {
+        if (identical(_initializing, flight)) _initializing = null;
+      }
     }
+    if (!_initialized) return;
+    final request = _requestingPermission;
+    if (request != null) await request;
+    // Coalesce callers before each read, but drain a fresh trailing read when
+    // demand arrives after its snapshot. The watermark also covers callers
+    // joining a completed flight before its finalizer has cleared the slot.
+    while (_authorizationSatisfied < _authorizationDemand) {
+      final flight = _refreshingAuthorization ??= _refreshAuthorization();
+      try {
+        await flight;
+      } finally {
+        if (identical(_refreshingAuthorization, flight)) {
+          _refreshingAuthorization = null;
+        }
+      }
+    }
+  }
+
+  Future<void> _refreshAuthorization() async {
+    final demand = _authorizationDemand;
+    final revision = _permissionRevision;
+    var granted = false;
+    try {
+      granted = await _sink.checkPermission() ?? true;
+    } catch (_) {
+      // An unavailable permission read is not a grant.
+    }
+    if (revision == _permissionRevision && demand == _authorizationDemand) {
+      _permissionGranted = granted;
+    }
+    // A newer explicit prompt owns permission; do not let this passive caller
+    // finish against the old cache while that prompt is still unresolved.
+    final request = _requestingPermission;
+    if (request != null) await request;
+    _authorizationSatisfied = demand;
   }
 
   /// Posts a notification when a gateway turn completes while the app is
@@ -734,7 +771,8 @@ class TurnNotificationService {
     required String title,
     required String body,
   }) async {
-    await ensureInitialized(requestPermission: true);
+    await ensureInitialized(requestPermission: true, refreshPermission: false);
+    await refreshAuthorization();
     if (!_initialized || !_permissionGranted) return false;
 
     try {

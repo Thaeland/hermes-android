@@ -59,7 +59,9 @@ List<dynamic> buildChatDisplayItems({
   bool verbose = false,
   ChatTimeline? timeline,
 }) {
-  final toolQueue = List<GatewayToolActivity>.from(toolActivities);
+  final toolQueue = toolActivities
+      .where((a) => timeline?.excludesTool(a) != true)
+      .toList();
   // A turn can contain several canonical interim rows. Project their receipt
   // runs together at the first live anchor so consuming an earlier preview
   // cannot pull later tools/reasoning ahead of intervening commentary.
@@ -77,7 +79,9 @@ List<dynamic> buildChatDisplayItems({
   final liveRuns =
       timeline?.runs.where((r) => scopeTurns.containsKey(r.scope)).toList() ??
       const <ChatTimelineRun>[];
-  final liveScopes = liveRuns.map((r) => r.scope).toSet();
+  // Ownership survives full eviction of a scope's runs. Otherwise its canonical
+  // assistant accumulator would silently re-render all the evicted prose.
+  final liveScopes = timeline?.scopes ?? const <Object>{};
   final anchors = <int, Object>{};
   for (final message in messages) {
     final scope = scopeFor(message);
@@ -149,7 +153,7 @@ List<dynamic> buildChatDisplayItems({
       continue;
     }
     final runs = anchoredRuns[scope] ?? const <ChatTimelineRun>[];
-    if (role == 'assistant' && runs.isNotEmpty) {
+    if (role == 'assistant' && liveScopes.contains(scope)) {
       for (final run in runs) {
         if (run.kind == ChatTimelineKind.tool) {
           currentGroupId ??= run.activity!.identity;
@@ -203,9 +207,10 @@ List<dynamic> buildChatDisplayItems({
   }
   flushToolGroup();
 
-  // Tools from gateway events that arrived during streaming but were never
-  // matched to a stored message — show them as a trailing card.
-  if (toolQueue.isNotEmpty) {
+  // An active receipt projection is authoritative even after eviction. Only
+  // legacy snapshots without receipt ownership get an unmatched trailing card;
+  // otherwise this queue could resurrect tools removed by the live budget.
+  if (toolQueue.isNotEmpty && (timeline == null || timeline.scopes.isEmpty)) {
     displayItems.add(
       ChatToolActivityGroup(
         id: toolQueue.first.identity,

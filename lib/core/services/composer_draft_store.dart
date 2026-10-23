@@ -16,12 +16,14 @@ class ComposerDraftHandle {
   /// An explicit edit may take ownership back, including a deliberate clear.
   void edited() => ComposerDraftStore._claim(this);
 
-  Future<void> save(String text) => ComposerDraftStore._save(
-    connectionId: connectionId,
-    sessionId: sessionId,
-    text: text,
-    owner: _owner,
-  );
+  Future<void> save(String text, {bool Function()? isCurrent}) =>
+      ComposerDraftStore._save(
+        connectionId: connectionId,
+        sessionId: sessionId,
+        text: text,
+        owner: _owner,
+        isCurrent: isCurrent,
+      );
 }
 
 /// Connection-scoped composer drafts and durable local -> stored aliases.
@@ -31,6 +33,7 @@ class ComposerDraftHandle {
 abstract final class ComposerDraftStore {
   static const _prefix = 'composer_draft';
   static const _aliasPrefix = 'composer_draft_alias';
+  static const _writtenPrefix = 'composer_draft_written';
   static Future<void>? _tail;
   static int _nextOwner = 0;
   static final Map<String, int> _owners = {};
@@ -112,19 +115,22 @@ abstract final class ComposerDraftStore {
     required String connectionId,
     required String localSessionId,
     required String storedSessionId,
+    bool Function()? isCurrent,
   }) async {
     try {
       await _serialized((prefs) async {
+        if (isCurrent?.call() == false) return;
         final local = _resolve(prefs, connectionId, localSessionId);
         final stored = _resolve(prefs, connectionId, storedSessionId);
         if (local == stored) return;
-        final canonicalExists = prefs.containsKey(stored);
+        final canonicalExists =
+            prefs.containsKey(stored) ||
+            prefs.getBool(_writtenKey(stored)) == true;
         try {
           if (!canonicalExists && prefs.containsKey(local)) {
-            if (!await prefs.setString(stored, prefs.getString(local)!)) {
-              throw StateError('Could not copy composer draft.');
-            }
+            await _write(prefs, stored, prefs.getString(local)!);
           }
+          if (isCurrent?.call() == false) return;
           if (!await prefs.setString(_aliasKey(local), storedSessionId)) {
             throw StateError('Could not persist composer draft alias.');
           }
@@ -164,27 +170,70 @@ abstract final class ComposerDraftStore {
     required String connectionId,
     required String sessionId,
     required String text,
-  }) => _save(connectionId: connectionId, sessionId: sessionId, text: text);
+    bool Function()? isCurrent,
+  }) => _save(
+    connectionId: connectionId,
+    sessionId: sessionId,
+    text: text,
+    isCurrent: isCurrent,
+  );
 
   static Future<void> _save({
     required String connectionId,
     required String sessionId,
     required String text,
     int? owner,
+    bool Function()? isCurrent,
   }) async {
     try {
       await _serialized((prefs) async {
+        if (isCurrent?.call() == false) return;
         final key = _resolve(prefs, connectionId, sessionId);
         if (owner != null && _owners[key] != owner) return;
         if (owner == null) _owners[key] = 0;
-        if (!await prefs.setString(key, text.trim().isEmpty ? '' : text)) {
-          throw StateError('Could not persist composer draft.');
-        }
+        await _write(prefs, key, text);
       });
     } catch (_) {
       // Best-effort: a failed save must never break the screen.
     }
   }
+
+  static Future<void> _write(
+    SharedPreferences prefs,
+    String key,
+    String text,
+  ) async {
+    // A clear is a deliberate value, even though the string entry is removed.
+    // Without this marker, a delayed local alias migration can resurrect it.
+    final marker = _writtenKey(key);
+    final oldText = prefs.getString(key);
+    final oldMarker = prefs.getBool(marker);
+    try {
+      final saved = text.trim().isEmpty
+          ? await prefs.remove(key)
+          : await prefs.setString(key, text);
+      if (!saved || !await prefs.setBool(marker, true)) {
+        throw StateError('Composer draft write was rejected.');
+      }
+    } catch (_) {
+      // SharedPreferences updates its cache even when the platform rejects a
+      // write. Restore that cache as well as making a best-effort disk rollback.
+      if (oldText == null) {
+        await prefs.remove(key);
+      } else {
+        await prefs.setString(key, oldText);
+      }
+      if (oldMarker == null) {
+        await prefs.remove(marker);
+      } else {
+        await prefs.setBool(marker, oldMarker);
+      }
+      rethrow;
+    }
+  }
+
+  static String _writtenKey(String key) =>
+      "$_writtenPrefix.${key.substring(_prefix.length + 1)}";
 
   /// Clear through aliases too; retain a tombstone against stale migration.
   static Future<void> remove({
@@ -202,6 +251,8 @@ abstract final class ComposerDraftStore {
               ? _prefix
               : key.startsWith('$_aliasPrefix.')
               ? _aliasPrefix
+              : key.startsWith('$_writtenPrefix.')
+              ? _writtenPrefix
               : null;
           if (prefix == null) continue;
           final decoded = _decode(key, prefix);
