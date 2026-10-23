@@ -379,9 +379,12 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
   @override
   void didUpdateWidget(covariant WorkspaceSessionsScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // Home can deliver its first five (or more human rows from the first
-    // background page) after Chats has already mounted. Never replace a
-    // completed metadata read with provisional data from a parent rebuild.
+    // The default Chats pane can mount before the root hydrates preferences.
+    if (oldWidget.pinStore != widget.pinStore) {
+      _pinnedIds = const [];
+      unawaited(_refreshPins());
+    }
+    // Never replace a complete read with a provisional parent snapshot.
     if ((_data == null || _data!.isPartial) && widget.initialData != null) {
       _data = _withProjectMoves(
         _withSessionTitles(widget.initialData!, {
@@ -438,7 +441,9 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
     if (store == null) return;
     try {
       final pins = await store.load();
-      if (mounted) setState(() => _pinnedIds = pins);
+      if (mounted && identical(store, widget.pinStore)) {
+        setState(() => _pinnedIds = pins);
+      }
     } catch (_) {
       // A failed pin read must not hide conversations on a visible pane.
     }
@@ -521,10 +526,13 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
           ? widget.load()
           : progressive(apply));
       if (!mounted) return;
-      final pins = await widget.pinStore?.load() ?? const <String>[];
+      final store = widget.pinStore;
+      final pins = await store?.load() ?? const <String>[];
       if (mounted) {
         apply(data);
-        setState(() => _pinnedIds = pins);
+        if (identical(store, widget.pinStore)) {
+          setState(() => _pinnedIds = pins);
+        }
       }
     } catch (error) {
       debugPrint('[workspace-sessions] load failed: $error');

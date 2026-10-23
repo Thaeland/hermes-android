@@ -463,7 +463,7 @@ void main() {
     tester,
   ) async {
     await pumpWorkspace(tester);
-    await tester.tap(find.text(l10n.nav_home).last);
+    await tester.tap(find.text(l10n.chats).last);
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip(l10n.search_all_chats));
     await tester.pumpAndSettle();
@@ -491,7 +491,7 @@ void main() {
     'leaving standalone view during destination lookup never opens a late picker',
     (tester) async {
       await pumpWorkspace(tester);
-      await tester.tap(find.text(l10n.nav_home).last);
+      await tester.tap(find.text(l10n.chats).last);
       await tester.pumpAndSettle();
       await tester.tap(find.byTooltip(l10n.search_all_chats));
       await tester.pumpAndSettle();
