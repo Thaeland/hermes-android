@@ -445,6 +445,9 @@ void main() {
           controller.jumpTo(controller.position.maxScrollExtent);
           await tester.pump(const Duration(milliseconds: 300));
         }
+        // Tool sections now start closed. Explicitly open, then pin closed.
+        await tester.tap(find.text('Tool activity'));
+        await tester.pump(const Duration(milliseconds: 300));
         await tester.tap(find.text('Tool activity'));
         remote.emit('message.complete', {'text': 'AB'});
         remote.finish();
@@ -453,7 +456,16 @@ void main() {
         await tester.pump(const Duration(milliseconds: 300));
         await tester.tap(find.byKey(const Key('chat-load-older')));
         await tester.pump(const Duration(milliseconds: 300));
-        controller.jumpTo(controller.position.maxScrollExtent);
+        // Lazy-list extent estimates change as the older rows are laid out.
+        // Scroll to the actual final bubble rather than an estimated end.
+        await tester.scrollUntilVisible(
+          find.byWidgetPredicate((w) => w is MessageBubble && w.content == 'B'),
+          500,
+          scrollable: find.descendant(
+            of: find.byType(ListView).first,
+            matching: find.byType(Scrollable),
+          ),
+        );
         await tester.pump(const Duration(milliseconds: 300));
         final order = _timelineLabels(tester);
         expect(order.sublist(order.length - 4), ['Continue', 'A', 't1', 'B']);
@@ -560,6 +572,8 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('R'), findsOneWidget);
       await tester.tap(find.text('Reasoning'));
+      await tester.tap(find.text('Tool activity').first);
+      await tester.pump(const Duration(milliseconds: 300));
       await tester.tap(find.text('Tool activity').first);
       await tester.pump(const Duration(milliseconds: 300));
       remote.emit('tool.complete', {'tool_id': 't1', 'name': 'terminal'});

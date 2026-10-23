@@ -262,6 +262,99 @@ void main() {
     },
   );
 
+  for (final completesAway in [false, true]) {
+    testWidgets(
+      'tool sections reset on canonical chat reopen and show only the current/latest call (completesAway=$completesAway)',
+      (tester) async {
+        final controller = GatewayTurnApplicationController();
+        addTearDown(controller.close);
+        final remote = _Remote();
+        await _open(tester, controller, remote);
+        await tester.enterText(find.byType(TextField), 'Inspect files');
+        await tester.tap(find.byTooltip('Send'));
+        await tester.pump();
+        await tester.pump();
+        remote.event('tool.start', {
+          'tool': 'terminal',
+          'tool_id': 'call-1',
+          'detail': 'First call detail',
+        });
+        remote.event('tool.complete', {
+          'tool': 'terminal',
+          'tool_id': 'call-1',
+        });
+        remote.event('tool.start', {
+          'tool': 'read_file',
+          'tool_id': 'call-2',
+          'detail': 'Current call detail',
+        });
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+
+        bool expanded() => tester
+            .widget<ExpansionTile>(
+              find.descendant(
+                of: find.byType(GatewayActivityCard),
+                matching: find.byType(ExpansionTile),
+              ),
+            )
+            .controller!
+            .isExpanded;
+
+        expect(expanded(), isFalse);
+        expect(find.text('Read file: Running'), findsOneWidget);
+        expect(find.textContaining('Terminal'), findsNothing);
+        await tester.tap(find.text('Tool activity'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(expanded(), isTrue);
+        expect(find.text('First call detail'), findsOneWidget);
+        expect(find.text('Current call detail'), findsOneWidget);
+
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
+        if (completesAway) {
+          remote.event('tool.complete', {
+            'tool': 'read_file',
+            'tool_id': 'call-2',
+          });
+          remote.event('message.complete', {'text': 'Inspection finished'});
+          remote.rpc.complete();
+          await tester.pump();
+          await tester.pump();
+        }
+        await _open(tester, controller, remote, id: 'stored-chat');
+        await tester.pump(const Duration(milliseconds: 400));
+        expect(expanded(), isFalse);
+        expect(
+          find.text('Read file: ${completesAway ? 'Completed' : 'Running'}'),
+          findsOneWidget,
+        );
+        expect(find.textContaining('Terminal'), findsNothing);
+        expect(find.text('First call detail'), findsNothing);
+        expect(find.text('Current call detail'), findsNothing);
+
+        if (!completesAway) {
+          remote.event('tool.start', {
+            'tool': 'search_files',
+            'tool_id': 'call-3',
+          });
+          await tester.pump();
+          await tester.pump();
+          expect(expanded(), isFalse);
+          expect(find.text('Search files: Running'), findsOneWidget);
+          expect(find.textContaining('Read file'), findsNothing);
+          remote.event('message.complete', {'text': 'Inspection finished'});
+          remote.rpc.complete();
+          await tester.pump();
+        }
+        expect(remote.submissions, 1);
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
+      },
+    );
+  }
+
   testWidgets(
     'canonical reopen replaces completed wire presentation after delayed persistence',
     (tester) async {

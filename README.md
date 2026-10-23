@@ -75,7 +75,10 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
   segments show **Partial history**. See [Task timelines](#inspect-a-delegated-task).
 - Follow text, exposed reasoning and consecutive tool groups in receipt order
   across REST/SSE and Remote Gateway replies. Expanding a card keeps that choice
-  while its contents update.
+  while its contents update. Tool sections start collapsed on each chat visit,
+  showing only the current call (or the latest call when none are running).
+  Tap to view the full group; leaving and reopening the chat resets that choice.
+  Verbose mode explicitly opens tool details by default.
 - Persistent reconnect/session resume and defensive retry handling.
 - App-owned stock Gateway turns outlive an open chat route. Reopen a chat to
   reattach, including while other chats run. Pending markers survive process
