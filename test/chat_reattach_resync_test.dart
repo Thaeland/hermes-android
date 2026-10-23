@@ -765,6 +765,7 @@ void main() {
   testWidgets(
     'retained terminal failure stops polling and re-enables sending',
     (tester) async {
+      String? retainedError;
       final hook = TestDesktopConnectionHook();
       final asyncHook = TestDesktopAsyncEventHook();
       final submission = Completer<void>();
@@ -790,6 +791,7 @@ void main() {
               onSent();
               return submission.future;
             },
+        retainedError: () => retainedError,
       );
 
       hook.handler?.call(DesktopConnectionState.connected);
@@ -839,6 +841,7 @@ void main() {
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
 
+      retainedError = 'Provider unavailable';
       asyncHook.handler?.call(
         StreamEvent(
           type: 'turn.error',
@@ -893,6 +896,15 @@ void main() {
               required onSent,
             }) {
               onSent();
+              // This regression settles A while its old history read is held:
+              // give that lifecycle terminal a previously bound identity.
+              onEvent(
+                StreamEvent(
+                  type: 'message.start',
+                  data: const {},
+                  turnId: 'generation-${submissions.length}',
+                ),
+              );
               final submission = Completer<void>();
               submissions.add(submission);
               return submission.future;
@@ -918,6 +930,7 @@ void main() {
           type: 'turn.error',
           data: const {'status': 'error', 'message': 'Generation A failed'},
           isComplete: true,
+          turnId: 'generation-0',
         ),
       );
       await tester.pump();
@@ -1060,6 +1073,7 @@ Future<void> _pumpChat(
   required TestRemotePromptSubmit remoteSubmit,
   String? storedKey,
   TestProjectOverviewLoader? projectOverviewLoader,
+  String? Function()? retainedError,
 }) async {
   final connection = SavedConnection(
     id: 'reattach-fixture',
@@ -1101,9 +1115,13 @@ Future<void> _pumpChat(
                 throw StateError('Fixture socket is disconnected');
               }
               ensureCount();
-              return const ResumedGatewaySession(
+              final error = retainedError?.call();
+              return ResumedGatewaySession(
                 runtimeSessionId: 'fixture-runtime',
                 running: false,
+                inflight: error == null
+                    ? null
+                    : {'status': 'error', 'error': error},
               );
             },
         testDesktopConnectionHook: hook,

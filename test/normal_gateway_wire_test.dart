@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
 import 'package:hermes_android/core/services/gateway_turn_application_controller.dart';
 import 'package:hermes_android/core/services/normal_gateway_application_session.dart';
+import 'package:hermes_android/core/services/normal_gateway_pending_store.dart';
 import 'package:hermes_android/core/services/ws_client.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -79,6 +80,9 @@ void main() {
         'status': 'failed',
         'error': 'Retained failure',
       });
+      gateway.running = false;
+      gateway.inflight = {'status': 'error', 'error': 'Retained failure'};
+      chat.requestRecovery();
       await _until(() => !controller.hasActiveTurn);
       expect(chat.phase, NormalGatewayTurnPhase.failed);
       expect(chat.snapshot.error, 'Retained failure');
@@ -222,6 +226,214 @@ void main() {
       await _until(() => gateway.responses.length == 2);
     },
   );
+  for (final terminal in ['turn.end', 'turn.error', 'error']) {
+    for (final identified in [false, true]) {
+      test(
+        'real wire: trailing A $terminal identified=$identified cannot clear emitted B',
+        () async {
+          final controller = GatewayTurnApplicationController();
+          addTearDown(controller.close);
+          final session = controller.normalSessionFor(gateway.connection);
+          await session.ready;
+          final chat = session.chatFor(
+            'local',
+            storedSessionId: 'stored',
+            title: 'Wire chat',
+          );
+          chat.observeHistory(gateway.rows);
+          final first = chat.submitPrepared(
+            reservation: chat.reserve()!,
+            text: 'First',
+            localContent: 'First',
+          );
+          first.ignore();
+          await gateway.submitted.future;
+          gateway.event('message.start', {}, turnId: identified ? 'A' : null);
+          gateway.rows.add({
+            'id': 12,
+            'role': 'assistant',
+            'content': 'First final',
+          });
+          gateway.event('message.complete', {'text': 'First final'});
+          await first;
+          await session.client!.getSessionReasoning(
+            'local',
+          ); // ordered wire barrier
+          expect(
+            chat.reserve(),
+            isNull,
+            reason: 'stock post-complete hooks still running',
+          );
+          gateway.running = false;
+          chat.requestRecovery();
+          await _until(() => !chat.snapshot.hasActiveTurn);
+          expect(await session.pendingStore.load(session.scope), isEmpty);
+
+          final second = chat.submitPrepared(
+            reservation: chat.reserve()!,
+            text: 'Second',
+            localContent: 'Second',
+          );
+          second.ignore();
+          await _until(
+            () =>
+                gateway.requests
+                    .where((r) => r['method'] == 'prompt.submit')
+                    .length ==
+                2,
+          );
+          final b = chat.turnId;
+          expect(chat.snapshot.rowFloor, 12);
+          gateway.event(
+            terminal,
+            terminal == 'turn.end'
+                ? {'status': 'completed'}
+                : {'status': 'failed', 'error': 'Old A failure'},
+            turnId: identified ? 'A' : null,
+          );
+          // This actually completes WsClient's B watcher. It must not complete B.
+          await second;
+          await session.client!.getSessionReasoning('local');
+          expect(chat.snapshot.hasActiveTurn, isTrue);
+          expect(chat.snapshot.error, isNull);
+          expect(
+            (await NormalGatewayPendingStore().load(
+              session.scope,
+            )).single.turnId,
+            b,
+          );
+          expect(chat.reserve(), isNull);
+          expect(
+            gateway.requests.where((r) => r['method'] == 'prompt.submit'),
+            hasLength(2),
+          );
+
+          gateway.rows.add({
+            'id': 14,
+            'role': 'assistant',
+            'content': 'Second final',
+          });
+          gateway.running = false;
+          // Message-complete-only gateways remain supported, without turn.end.
+          gateway.event('message.complete', {'text': 'Second final'});
+          chat.requestRecovery();
+          await _until(() => !chat.snapshot.hasActiveTurn);
+          expect(chat.phase, NormalGatewayTurnPhase.completed);
+          expect(await session.pendingStore.load(session.scope), isEmpty);
+        },
+      );
+    }
+  }
+
+  test(
+    'real wire: old idle error before B ACK cannot retire its receipt',
+    () async {
+      gateway.holdSubmitAck = true;
+      final controller = GatewayTurnApplicationController();
+      addTearDown(controller.close);
+      final session = controller.normalSessionFor(gateway.connection);
+      await session.ready;
+      final chat = session.chatFor(
+        'local',
+        storedSessionId: 'stored',
+        title: 'Wire chat',
+      );
+      chat.observeHistory(gateway.rows);
+      final flight = chat.submitPrepared(
+        reservation: chat.reserve()!,
+        text: 'B',
+        localContent: 'B',
+      );
+      flight.ignore();
+      await gateway.submitted.future;
+      gateway.running = false;
+      gateway.inflight = {'status': 'error', 'error': 'Old A retained error'};
+      final resumed = gateway.nextResume = Completer<void>();
+      gateway.event('turn.error', {'message': 'Old A error'});
+      await resumed.future;
+      await session.client!.getSessionReasoning('local');
+      expect(chat.snapshot.hasActiveTurn, isTrue);
+      expect(
+        (await session.pendingStore.load(session.scope)).single.turnId,
+        chat.turnId,
+      );
+      gateway.running = true;
+      gateway.inflight = null;
+      gateway.releaseSubmitAck!();
+      await flight;
+      await session.client!.getSessionReasoning('local');
+      expect(chat.snapshot.hasActiveTurn, isTrue);
+      expect(chat.snapshot.error, isNull);
+      expect(
+        gateway.requests.where((r) => r['method'] == 'prompt.submit'),
+        hasLength(1),
+      );
+    },
+  );
+
+  test(
+    'real wire: disconnected old-socket terminals cannot settle resumed B',
+    () async {
+      final controller = GatewayTurnApplicationController();
+      addTearDown(controller.close);
+      final session = controller.normalSessionFor(gateway.connection);
+      await session.ready;
+      final chat = session.chatFor(
+        'local',
+        storedSessionId: 'stored',
+        title: 'Wire chat',
+      );
+      chat.observeHistory(gateway.rows);
+      final flight = chat.submitPrepared(
+        reservation: chat.reserve()!,
+        text: 'B',
+        localContent: 'B',
+      );
+      flight.ignore();
+      await gateway.submitted.future;
+      final old = gateway.socket!;
+      final oldRuntime = gateway.runtime;
+      await old.close();
+      await flight;
+      final resumed = gateway.nextResume = Completer<void>();
+      chat.requestRecovery();
+      await resumed.future;
+      // Exercise the old server peer explicitly after the replacement bound.
+      // It may accept a buffered send or reject it locally; neither may dispatch.
+      try {
+        old.add(
+          jsonEncode({
+            'jsonrpc': '2.0',
+            'method': 'event',
+            'params': {
+              'type': 'turn.end',
+              'session_id': oldRuntime,
+              'payload': {'status': 'completed'},
+            },
+          }),
+        );
+      } on StateError {
+        // dart:io rejects writes after its close handshake on this platform.
+      }
+      // Also deliver an old-runtime frame on the new peer: no alias owns it.
+      gateway.event('turn.error', {
+        'message': 'old socket',
+      }, sessionId: oldRuntime);
+      gateway.event('message.delta', {'text': 'Resumed B'});
+      await _until(
+        () => chat.snapshot.displayRows.last['content'] == 'Resumed B',
+      );
+      expect(chat.snapshot.hasActiveTurn, isTrue);
+      expect(
+        (await session.pendingStore.load(session.scope)).single.turnId,
+        chat.turnId,
+      );
+      expect(
+        gateway.requests.where((r) => r['method'] == 'prompt.submit'),
+        hasLength(1),
+      );
+    },
+  );
 }
 
 Future<void> _until(bool Function() condition) async {
@@ -245,6 +457,13 @@ class _Gateway {
   Completer<void>? nextResume;
   bool rejectSubmit = false;
   bool rejectResume = false;
+  bool holdSubmitAck = false;
+  void Function()? releaseSubmitAck;
+  bool running = true;
+  Map<String, dynamic>? inflight;
+  final rows = <Map<String, dynamic>>[
+    {'id': 10, 'role': 'assistant', 'content': 'Before'},
+  ];
   SavedConnection get connection => SavedConnection(
     id: 'real-wire',
     label: 'Wire fixture',
@@ -264,9 +483,7 @@ class _Gateway {
         await request.response.close();
       } else if (request.uri.path.endsWith('/messages')) {
         request.response.headers.contentType = ContentType.json;
-        request.response.write(
-          '{"data":[{"id":10,"role":"assistant","content":"Before"}]}',
-        );
+        request.response.write(jsonEncode({'data': rows}));
         await request.response.close();
       } else if (request.uri.path == '/api/ws') {
         final ws = await WebSocketTransformer.upgrade(request);
@@ -293,11 +510,12 @@ class _Gateway {
           }
           requests.add(frame);
           final method = frame['method'];
+          if (method == 'prompt.submit') running = true;
           final rejected =
               method == 'prompt.submit' && rejectSubmit ||
               method == 'session.resume' && rejectResume;
           try {
-            ws.add(
+            void reply() => ws.add(
               jsonEncode({
                 'jsonrpc': '2.0',
                 'id': frame['id'],
@@ -308,10 +526,19 @@ class _Gateway {
                   }
                 else
                   'result': method == 'session.resume'
-                      ? {'session_id': runtime, 'running': true}
+                      ? {
+                          'session_id': runtime,
+                          'running': running,
+                          if (inflight != null) 'inflight': inflight,
+                        }
                       : {'ok': true},
               }),
             );
+            if (method == 'prompt.submit' && holdSubmitAck) {
+              releaseSubmitAck = reply;
+            } else {
+              reply();
+            }
           } on StateError {
             // An already accepted request may reach the fixture while the
             // test closes the owner; a closed peer cannot receive the reply.
@@ -332,11 +559,21 @@ class _Gateway {
     });
   }
 
-  void event(String type, Map<String, dynamic> payload) => socket!.add(
+  void event(
+    String type,
+    Map<String, dynamic> payload, {
+    String? sessionId,
+    String? turnId,
+  }) => socket!.add(
     jsonEncode({
       'jsonrpc': '2.0',
       'method': 'event',
-      'params': {'type': type, 'session_id': runtime, 'payload': payload},
+      'params': {
+        'type': type,
+        'session_id': sessionId ?? runtime,
+        'turn_id': ?turnId,
+        'payload': payload,
+      },
     }),
   );
   void approval() => socket!.add(

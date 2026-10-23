@@ -383,9 +383,10 @@ class NormalGatewayChatOwner {
   Timer? _retryTimer;
   int _retry = 0;
   bool _recovering = false;
-  int? _recoveringGeneration;
+
   bool _recoveryQueued = false;
   bool _settling = false;
+  bool _submissionPending = false;
   ({bool completed, String? error, int generation})? _terminalReceipt;
   NormalGatewayChatOwner._(
     this._session,
@@ -571,6 +572,7 @@ class NormalGatewayChatOwner {
       );
       await _session.pendingStore.put(_marker!);
       if (!_current(generation)) return;
+      _submissionPending = true;
       await (submit ?? _session._submit)(
         sessionId: localSessionId,
         text: text,
@@ -595,16 +597,20 @@ class NormalGatewayChatOwner {
           _notify();
         },
       );
+      if (_current(generation)) _submissionPending = false;
       if (!_current(generation) || !snapshot.hasActiveTurn || _settling) return;
       // A completed RPC future is NOT terminal evidence (including test seams).
       phase = NormalGatewayTurnPhase.reconciling;
       _notify();
       requestRecovery();
     } catch (error) {
+      if (_current(generation)) _submissionPending = false;
       if (!_current(generation) || !snapshot.hasActiveTurn || _settling) return;
       if (wireEmitted) {
         phase = NormalGatewayTurnPhase.reconciling;
-        _error = error.toString();
+        if (error is! JsonRpcError || error.reason != 'stream_terminal') {
+          _error = error.toString();
+        }
         _notify();
         requestRecovery();
         return;
@@ -694,12 +700,20 @@ class NormalGatewayChatOwner {
       return;
     }
     final wireTurn = event.turnId;
+    final terminal = const {
+      'message.complete',
+      'turn.end',
+      'turn.error',
+      'error',
+    }.contains(event.type);
     if (wireTurn != null) {
       if (_settledWireTurnIds.contains(wireTurn) ||
           _wireTurnId != null && _wireTurnId != wireTurn) {
         return;
       }
-      _wireTurnId ??= wireTurn;
+      // A terminal cannot establish ownership: it may be A's delayed bookend
+      // arriving after B's onSent, before B has emitted any activity.
+      if (!terminal) _wireTurnId ??= wireTurn;
     }
     if (phase == NormalGatewayTurnPhase.reconciling &&
         (event.type == 'message.delta' || event.type.startsWith('tool.'))) {
@@ -859,18 +873,26 @@ class NormalGatewayChatOwner {
       ].map((row) => row['_normal_projection_id']).whereType<String>(),
     );
     final failure = _failure(event.data);
-    if (event.type == 'turn.error' ||
-        event.type == 'error' ||
-        const {'turn.end', 'message.complete'}.contains(event.type) &&
-            failure != null) {
+    final ownedLifecycleTerminal =
+        wireTurn != null &&
+        wireTurn == _wireTurnId &&
+        const {'turn.end', 'turn.error'}.contains(event.type);
+    if (ownedLifecycleTerminal &&
+        (event.type == 'turn.error' || failure != null)) {
       unawaited(
         _settle(
           false,
           failure ?? event.data['message']?.toString() ?? 'Gateway turn failed',
         ),
       );
-    } else if (event.type == 'turn.end' || event.type == 'message.complete') {
+    } else if (ownedLifecycleTerminal) {
       unawaited(_settle(true, null));
+    } else if (terminal) {
+      // Stock message.complete precedes running=false (prompt_turn.py), and
+      // stock does not promise turn.end. Neither an ID-less trailing bookend
+      // nor a message completion proves the admitted lifecycle is settled.
+      // Resume/history are the authority; never infer ownership from arrival.
+      requestRecovery();
     }
     _notify();
   }
@@ -943,7 +965,6 @@ class NormalGatewayChatOwner {
     }
     _retryTimer?.cancel();
     _retryTimer = null;
-    if (_recovering && _recoveringGeneration == _generation) return;
     _recoveryQueued = true;
     if (!_recovering) unawaited(_recover());
   }
@@ -953,7 +974,7 @@ class NormalGatewayChatOwner {
     _recovering = true;
     _recoveryQueued = false;
     final generation = _generation;
-    _recoveringGeneration = generation;
+
     try {
       final terminal = _terminalReceipt;
       if (terminal != null && terminal.generation == generation) {
@@ -979,11 +1000,24 @@ class NormalGatewayChatOwner {
             ));
       if (!_current(generation) || !snapshot.hasActiveTurn || _settling) return;
       if (!_session._canRecover) return;
+      // A terminal may precede prompt.submit's acknowledgement, or belong to
+      // the preceding turn. Do not inspect idle/retained state until this
+      // submission has finished its request/terminal wait (or disconnected).
+      if (_submissionPending) return;
+      final status = (resumed.inflight?['status'] ?? resumed.status)
+          ?.toString()
+          .toLowerCase();
+      final running =
+          resumed.running == true ||
+          const {'running', 'queued', 'pending', 'streaming'}.contains(status);
+      final inactive =
+          resumed.running == false ||
+          const {'completed', 'complete', 'done', 'idle'}.contains(status);
       final failure = _failure({
         ...?resumed.inflight,
         'status': resumed.inflight?['status'] ?? resumed.status,
       });
-      if (failure != null) {
+      if (!running && failure != null) {
         await _settle(false, failure, generation: generation);
         return;
       }
@@ -991,17 +1025,10 @@ class NormalGatewayChatOwner {
       if (!_current(generation) || !snapshot.hasActiveTurn || _settling) return;
       if (!_session._canRecover) return;
       _history = fresh;
+      _historyKnown = true;
       // Unknown/running resume state cannot establish that an assistant row is
       // final: Hermes persists interim commentary during an active tool loop.
-      final status = (resumed.inflight?['status'] ?? resumed.status)
-          ?.toString()
-          .toLowerCase();
-      final inactive =
-          resumed.running == false ||
-          const {'completed', 'complete', 'done', 'idle'}.contains(status);
-      final running =
-          resumed.running == true ||
-          const {'running', 'queued', 'pending', 'streaming'}.contains(status);
+
       if (running) phase = NormalGatewayTurnPhase.running;
       if (inactive &&
           !running &&
@@ -1015,7 +1042,7 @@ class NormalGatewayChatOwner {
       // A failed resume/history read is unknown, never an empty completion.
     } finally {
       _recovering = false;
-      _recoveringGeneration = null;
+
       // Old flight A must hand off to a queued generation B, even when A was
       // invalidated by terminal settlement while its read was held.
       if (!_session._closed && _recoveryQueued && _session._canRecover) {

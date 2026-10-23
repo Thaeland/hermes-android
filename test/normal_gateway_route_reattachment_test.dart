@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -315,10 +316,16 @@ Future<void> _open(
           baseUrl: _connection.baseUrl,
           apiKey: 'fixture',
           httpClient: MockClient(
-            (_) async => http.Response('{"data":[]}', 200),
+            (_) async => http.Response(remote.historyJson, 200),
           ),
         ),
         testRemotePromptSubmit: remote.submit,
+        testNormalResume:
+            ({required localSessionId, required storedSessionId}) async =>
+                ResumedGatewaySession(
+                  runtimeSessionId: 'runtime',
+                  running: !remote.completed,
+                ),
         testStoredSessionKey: (_) => 'stored-chat',
         testLegacyProjectSessionEnsure: prepare,
         testVoiceComposerAdapter: FakeVoiceComposerAdapter(),
@@ -334,6 +341,15 @@ class _Remote {
   StreamCallback? onEvent;
   int submissions = 0;
   bool emitOnSent = true;
+  bool completed = false;
+  String finalText = '';
+  String get historyJson => jsonEncode({
+    'data': completed
+        ? [
+            {'id': 2, 'role': 'assistant', 'content': finalText},
+          ]
+        : [],
+  });
   Future<void> submit({
     required String sessionId,
     required String text,
@@ -346,6 +362,11 @@ class _Remote {
     return rpc.future;
   }
 
-  void event(String type, Map<String, dynamic> data) =>
-      onEvent!(StreamEvent(type: type, data: data));
+  void event(String type, Map<String, dynamic> data) {
+    if (type == 'message.complete' || type == 'turn.end') {
+      completed = true;
+      finalText = data['text']?.toString() ?? 'Final';
+    }
+    onEvent!(StreamEvent(type: type, data: data));
+  }
 }

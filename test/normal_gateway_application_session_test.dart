@@ -58,11 +58,17 @@ void main() {
       expect(restored!.tools, hasLength(1));
       expect(restored!.tools.single.isTerminal, isTrue);
       expect(f.submissions, 1);
+      f.rows = [
+        {'id': 12, 'role': 'assistant', 'content': 'Finished while absent'},
+      ];
+      f.running = false;
       f.emit('message.complete', {'text': 'Finished while absent'});
+      f.rpc.complete();
+      await f.flight;
       await _flush();
       expect(f.owner.snapshot.hasActiveTurn, isFalse);
       expect(
-        f.owner.snapshot.displayRows.last['content'],
+        f.owner.snapshot.historyRows.last['content'],
         'Finished while absent',
       );
       expect(await f.store.load('scope'), isEmpty);
@@ -273,7 +279,8 @@ void main() {
       f.owner.requestRecovery();
       await _flush();
       final firstTurn = f.owner.turnId;
-      f.emit('turn.end', {'status': 'completed'});
+      f.emit('message.start', {}, turnId: 'A');
+      f.emit('turn.end', {'status': 'completed'}, turnId: 'A');
       await _flush();
       expect(f.owner.snapshot.hasActiveTurn, isFalse);
       f.resetRpc();
@@ -422,6 +429,7 @@ void main() {
     'terminal state stays active until the settlement receipt is durable',
     () async {
       final store = _HeldSettlementStore();
+      var completed = false;
       final session = NormalGatewayApplicationSession(
         connection: _connection,
         scope: 'scope',
@@ -436,11 +444,13 @@ void main() {
               onSent();
             },
         resume: ({required localSessionId, required storedSessionId}) async =>
-            const ResumedGatewaySession(
+            ResumedGatewaySession(
               runtimeSessionId: 'runtime',
-              running: true,
+              running: !completed,
             ),
-        history: (_) async => [],
+        history: (_) async => [
+          {'id': 12, 'role': 'assistant', 'content': 'Final'},
+        ],
       );
       await session.ready;
       final chat = session.chatFor(
@@ -454,6 +464,7 @@ void main() {
         text: 'Run',
         localContent: 'Run',
       );
+      completed = true;
       session.receiveEvent(
         'local',
         StreamEvent(type: 'turn.end', data: const {'status': 'completed'}),
@@ -607,8 +618,11 @@ class _Fixture {
     await _flush();
   }
 
-  void emit(String type, Map<String, dynamic> data) =>
-      session.receiveEvent('local', StreamEvent(type: type, data: data));
+  void emit(String type, Map<String, dynamic> data, {String? turnId}) =>
+      session.receiveEvent(
+        'local',
+        StreamEvent(type: type, data: data, turnId: turnId),
+      );
   void resetRpc() {
     rpc = Completer<void>();
   }
