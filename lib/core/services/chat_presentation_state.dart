@@ -49,7 +49,9 @@ class ChatPresentationRegistry {
           .._writerClosed = source._writerClosed
           .._writerEdited = source._writerEdited;
       }
-      target._reasoningPins.mergeMissingFrom(source._reasoningPins);
+      // A view keeps its token through convergence, never another view's value.
+      target._reasoningVisits.addAll(source._reasoningVisits);
+      source._reasoningVisits.clear();
       target._toolAliases.mergeMissingFrom(source._toolAliases);
       target._toolVisits.addAll(source._toolVisits);
       source._toolVisits.clear();
@@ -133,6 +135,10 @@ class ChatPresentationRegistry {
   void close() {
     _closed = true; // Fences leases, held reads and queued migrations together.
     for (final state in _aliases.values.map((s) => s._root).toSet()) {
+      for (final pins in state._reasoningVisits) {
+        pins.clear();
+      }
+      state._reasoningVisits.clear();
       for (final pins in state._toolVisits) {
         pins.clear();
       }
@@ -149,11 +155,26 @@ class ChatPresentationState {
   String _sessionId;
   ChatPresentationState? _redirect;
   ChatPresentationState get _root => _redirect?._root ?? this;
-  final ToolActivityGroupPins _reasoningPins = ToolActivityGroupPins();
+  final Set<ToolActivityGroupPins> _reasoningVisits = {};
   // The application retains identity aliases, not cross-visit tool choices.
   final ToolActivityGroupPins _toolAliases = ToolActivityGroupPins();
   final Set<ToolActivityGroupPins> _toolVisits = {};
-  ToolActivityGroupPins get reasoningPins => _root._reasoningPins;
+
+  /// Reasoning run IDs are scope-stable from first render. Only this mounted
+  /// view owns manual choices; aliases transfer tokens, not their values.
+  ToolActivityGroupPins openReasoningVisit() {
+    if (_registry._closed) {
+      throw StateError('Chat presentation registry is closed.');
+    }
+    final pins = ToolActivityGroupPins();
+    _root._reasoningVisits.add(pins);
+    return pins;
+  }
+
+  void closeReasoningVisit(ToolActivityGroupPins pins) {
+    _root._reasoningVisits.remove(pins);
+    pins.clear();
+  }
 
   /// One actual ChatScreen State is one visit, even while covered by a route.
   /// Distinct prebinding routes keep independent choices after convergence.

@@ -84,9 +84,9 @@ void main() {
         await tester.pump();
         expect(
           reopened,
-          reasoning,
+          isFalse,
           reason:
-              'Reasoning retains its app-owned pin; tool choices reset on a new visit (v2.1.32).',
+              'MAIN81D third policy layer: both reasoning and tool manual choices reset on actual disposal/reopen; keys and retained bodies are unchanged.',
         );
       },
     );

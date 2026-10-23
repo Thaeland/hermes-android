@@ -156,17 +156,19 @@ void main() {
       final registry = controller.presentationFor(connection);
       final state = registry.chatFor('local');
       final toolPins = state.openToolVisit();
+      // MAIN81D policy: explicit visit, not application-global manual values.
+      final reasoningPins = state.openReasoningVisit();
       for (var i = 0; i < 150; i++) {
-        state.reasoningPins.pin('r-$i', true);
+        reasoningPins.pin('r-$i', true);
         toolPins.pin('t-$i', false);
         state.aliasTool('t-$i', 'durable-$i');
       }
       registry.bind('local', 'stored');
       expect(identical(registry.chatFor('stored'), state), isTrue);
-      expect(state.reasoningPins.length, ToolActivityGroupPins.maxPins);
+      expect(reasoningPins.length, ToolActivityGroupPins.maxPins);
       expect(toolPins.length, ToolActivityGroupPins.maxPins);
-      expect(registry.chatFor('stored').reasoningPins['r-149'], isTrue);
-      expect(registry.chatFor('sibling').reasoningPins['r-149'], isNull);
+      expect(reasoningPins['r-149'], isTrue);
+      expect(registry.chatFor('sibling').openReasoningVisit()['r-149'], isNull);
       final replacement = controller.presentationFor(
         SavedConnection(
           id: connection.id,
@@ -176,7 +178,11 @@ void main() {
           apiKey: 'second',
         ),
       );
-      expect(replacement.chatFor('stored').reasoningPins['r-149'], isNull);
+      expect(
+        replacement.chatFor('stored').openReasoningVisit()['r-149'],
+        isNull,
+      );
+      expect(reasoningPins.length, 0);
       expect(() => registry.chatFor('local'), throwsStateError);
       controller.revokeConnection(connection.id);
       expect(() => replacement.chatFor('stored'), throwsStateError);
@@ -194,7 +200,8 @@ void main() {
         final localVisit = local.openToolVisit()..pin('anonymous', true);
         final canonicalVisit = canonical.openToolVisit()
           ..pin('anonymous', false);
-        local.reasoningPins.pin('reasoning', true);
+        final reasoningVisit = local.openReasoningVisit()
+          ..pin('reasoning', true);
         final writer = canonical.openWriter()..edit('newer canonical draft');
         if (reverse) {
           registry.bind('stored', 'local');
@@ -211,7 +218,8 @@ void main() {
         final reopened = local.openToolVisit();
         expect(reopened['anonymous'], isNull);
         expect(reopened['tool:learned'], isNull);
-        expect(canonical.reasoningPins['reasoning'], isTrue);
+        expect(reasoningVisit['reasoning'], isTrue);
+        expect(canonical.openReasoningVisit()['reasoning'], isNull);
         canonical.aliasTool('next-local', 'tool:next');
         reopened.pin('next-local', true);
         expect(reopened['tool:next'], isTrue);

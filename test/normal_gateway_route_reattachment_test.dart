@@ -316,6 +316,113 @@ void main() {
 
   for (final completesAway in [false, true]) {
     testWidgets(
+      'reasoning defaults collapsed and resets on canonical reopen (completesAway=$completesAway)',
+      (tester) async {
+        // C/R headings occupy real space; keep both source cards tappable.
+        await tester.binding.setSurfaceSize(const Size(800, 1400));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final controller = GatewayTurnApplicationController();
+        addTearDown(controller.close);
+        final remote = _Remote();
+        await _open(tester, controller, remote, navigable: true);
+        await tester.tap(find.text('Open chat'));
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byType(TextField), 'Explain the result');
+        await tester.tap(find.byTooltip('Send'));
+        await tester.pump();
+        await tester.pump();
+        remote.event('reasoning.delta', {
+          'text': 'First reasoning. ',
+          'verbose': true,
+        });
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+
+        bool expanded() => tester
+            .widget<ExpansionTile>(
+              find.descendant(
+                of: find.byType(GatewayReasoningCard),
+                matching: find.byType(ExpansionTile),
+              ),
+            )
+            .controller!
+            .isExpanded;
+
+        expect(expanded(), isFalse);
+        expect(find.text('First reasoning. '), findsNothing);
+        // MAIN81D C/R geometry: reveal the actual lazy header before tapping.
+        await tester.ensureVisible(find.text('Reasoning'));
+        await tester.tap(find.text('Reasoning'));
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(expanded(), isTrue);
+        expect(find.text('First reasoning. '), findsOneWidget);
+        remote.event('reasoning.delta', {'text': 'More reasoning.'});
+        await tester.pump();
+        expect(expanded(), isTrue);
+        expect(find.text('First reasoning. More reasoning.'), findsOneWidget);
+
+        await tester.pageBack();
+        await tester.pumpAndSettle();
+        expect(find.byType(ChatScreen), findsNothing);
+        expect(find.text('Open chat'), findsOneWidget);
+        if (completesAway) {
+          remote.event('message.complete', {'text': 'Explained result'});
+          remote.rpc.complete();
+          await tester.pump();
+          await tester.pump();
+        }
+        await _open(
+          tester,
+          controller,
+          remote,
+          id: 'stored-chat',
+          navigable: true,
+        );
+        await tester.tap(find.text('Open chat'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(expanded(), isFalse);
+        expect(find.text('First reasoning. More reasoning.'), findsNothing);
+        // The reasoning itself is retained; only the expansion choice resets.
+        expect(
+          tester
+              .widget<GatewayReasoningCard>(find.byType(GatewayReasoningCard))
+              .text,
+          'First reasoning. More reasoning.',
+        );
+        if (!completesAway) {
+          remote.event('reasoning.available', {
+            'text': 'Final reasoning',
+            'verbose': true,
+          });
+          await tester.pump();
+          expect(expanded(), isFalse);
+          expect(find.text('Final reasoning'), findsNothing);
+          remote.event('message.complete', {'text': 'Explained result'});
+          remote.rpc.complete();
+          await tester.pump();
+        }
+        await tester.ensureVisible(find.text('Reasoning'));
+        await tester.tap(find.text('Reasoning'));
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(expanded(), isTrue);
+        expect(
+          find.text(
+            completesAway
+                ? 'First reasoning. More reasoning.'
+                : 'Final reasoning',
+          ),
+          findsOneWidget,
+        );
+        expect(remote.submissions, 1);
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
+      },
+    );
+  }
+
+  for (final completesAway in [false, true]) {
+    testWidgets(
       'tool sections reset on canonical chat reopen and show only the current/latest call (completesAway=$completesAway)',
       (tester) async {
         final controller = GatewayTurnApplicationController();
@@ -1090,6 +1197,7 @@ Future<void> _open(
   TaskHistorySource? taskHistory,
   List<Map<String, dynamic>> Function()? history,
   http.Client? historyClient,
+  bool navigable = false,
 }) async {
   final screen = ChatScreen(
     key: key,
@@ -1146,7 +1254,7 @@ Future<void> _open(
       MaterialApp(
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
-        home: screen,
+        home: _ChatRouteFixture(navigable: navigable, child: screen),
       ),
     );
   }
@@ -1155,6 +1263,26 @@ Future<void> _open(
   if (push) {
     await tester.pump(const Duration(seconds: 1));
     await tester.pump();
+  }
+}
+
+class _ChatRouteFixture extends StatelessWidget {
+  const _ChatRouteFixture({required this.navigable, required this.child});
+
+  final bool navigable;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!navigable) return child;
+    return Scaffold(
+      body: TextButton(
+        onPressed: () => Navigator.of(
+          context,
+        ).push<void>(MaterialPageRoute(builder: (_) => child)),
+        child: const Text('Open chat'),
+      ),
+    );
   }
 }
 

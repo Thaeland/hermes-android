@@ -115,6 +115,8 @@ void main() {
       final second = registry.chatFor('second');
       final firstPins = first.openToolVisit();
       final secondPins = second.openToolVisit();
+      // MAIN81D reasoning choice lifetime is an explicit bounded view visit.
+      final reasoningPins = first.openReasoningVisit();
       firstPins.pin('local:first', true);
       first.aliasTool('local:first', 'tool:shared-wire-id');
       secondPins.pin('local:second', false);
@@ -124,10 +126,10 @@ void main() {
       for (var i = 0; i < 600; i++) {
         firstPins.pin('local:$i', true);
         first.aliasTool('local:$i', 'tool:$i');
-        first.reasoningPins.pin('reasoning:$i', false);
+        reasoningPins.pin('reasoning:$i', false);
       }
       expect(firstPins.length, ToolActivityGroupPins.maxPins);
-      expect(first.reasoningPins.length, ToolActivityGroupPins.maxPins);
+      expect(reasoningPins.length, ToolActivityGroupPins.maxPins);
       registry.close();
       final replacement = ChatPresentationRegistry('connection');
       expect(

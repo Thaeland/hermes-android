@@ -203,6 +203,7 @@ void main() {
           await tester.pump(const Duration(milliseconds: 300));
           await tester.tap(find.text('Reasoning').last);
           await tester.pump(const Duration(milliseconds: 300));
+          await tester.tap(find.text('Reasoning').last);
           await tester.pump(const Duration(milliseconds: 300));
           expect(find.text('R1'), findsOneWidget);
           expect(find.text('R2'), findsNothing);
@@ -1133,7 +1134,7 @@ void main() {
 
     for (final event in ['reasoning.delta', 'reasoning.available']) {
       testWidgets(
-        'Remote completed preview preserves late $event and verbose display',
+        'Remote completed preview retains late $event without auto-expanding reasoning',
         (tester) async {
           tester.view.devicePixelRatio = 1;
           tester.view.physicalSize = const Size(800, 1200);
@@ -1166,10 +1167,7 @@ void main() {
             'verbose': lateVerbose,
           });
           await tester.pump(const Duration(milliseconds: 300));
-          expect(
-            find.text('Reasoning for $event'),
-            lateVerbose ? findsOneWidget : findsNothing,
-          );
+          expect(find.text('Reasoning for $event'), findsNothing);
           remote.emit('message.complete', {
             'text': 'Answer for $event',
             'response_previewed': true,
@@ -1189,9 +1187,11 @@ void main() {
           );
           expect(
             completedCards.map((card) => card.initiallyExpanded),
-            event == 'reasoning.available' ? [false] : [false, true],
+            everyElement(isFalse),
           );
-          await tester.tap(find.text('Reasoning').first);
+          for (final header in find.text('Reasoning').evaluate().toList()) {
+            await tester.tap(find.byWidget(header.widget));
+          }
           await tester.pumpAndSettle();
           expect(find.text('Reasoning for $event'), findsOneWidget);
           expect(

@@ -185,10 +185,12 @@ void main() {
           (r) => r.kind == ChatTimelineKind.reasoning,
         );
         expect(before.id, isNot('timeline:0'));
-        fixture.presentation
-            .chatFor(donor.localSessionId)
-            .reasoningPins
-            .pin(before.id, expanded);
+        // MAIN81D: the same mounted-view token follows stable run identity.
+        final pins =
+            fixture.presentation
+                .chatFor(donor.localSessionId)
+                .openReasoningVisit()
+              ..pin(before.id, expanded);
         winner.bindStoredSession(canonicalWins ? 'stored' : 'current-stored');
         await send(winner, 'Current prompt', reservation: winner.reserve());
         final currentScope =
@@ -198,7 +200,6 @@ void main() {
           (r) => r.scope == before.scope,
         );
         expect(after.id, before.id);
-        final pins = fixture.presentation.chatFor('stored').reasoningPins;
         expect(pins[after.id], expanded);
         fixture.session.receiveEvent(
           winner.localSessionId,

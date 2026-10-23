@@ -408,8 +408,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   late final GatewayTurnApplicationController _viewController;
   String _lastComposerText = '';
   bool _restoringComposer = false;
-  ToolActivityGroupPins get _reasoningExpansionPins =>
-      _presentation.reasoningPins;
+  // Keep manual expansion through streaming rebuilds/lazy-list eviction, but
+  // only for this route's visit. Leaving/reopening must start collapsed again.
+  late ChatPresentationRegistry _reasoningRegistry;
+  late ChatPresentationState _reasoningPresentation;
+  late ToolActivityGroupPins _reasoningExpansionPins;
   final ChatHistoryWindow _historyWindow = ChatHistoryWindow();
   bool _loadingOlder = false;
   int _historyReadIssued = 0;
@@ -572,6 +575,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             : GatewayTurnApplicationController.standalone);
     _presentationRegistry = _viewController.presentationFor(widget.connection);
     _presentation = _presentationRegistry.chatFor(widget.session.id);
+    _reasoningRegistry = _presentationRegistry;
+    _reasoningPresentation = _presentation;
+    _reasoningExpansionPins = _reasoningPresentation.openReasoningVisit();
     _toolActivityPins = _presentation.openToolVisit();
     _draftWriter = _presentation.openWriter(
       onBindingChanged: () {
@@ -1138,6 +1144,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   @override
+  void didUpdateWidget(covariant ChatScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final registry = (widget.turnApplicationController ?? _viewController)
+        .presentationFor(widget.connection);
+    if (!identical(registry, _reasoningRegistry) ||
+        !identical(
+          registry.chatFor(oldWidget.session.id),
+          registry.chatFor(widget.session.id),
+        )) {
+      _reasoningPresentation.closeReasoningVisit(_reasoningExpansionPins);
+      _reasoningRegistry = registry;
+      _reasoningPresentation = registry.chatFor(widget.session.id);
+      _reasoningExpansionPins = _reasoningPresentation.openReasoningVisit();
+    }
+  }
+
+  @override
   void dispose() {
     final normalChat = _normalChat;
     final reservation = _normalReservation;
@@ -1196,6 +1219,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       );
     }
     _presentation.closeToolVisit(_toolActivityPins);
+    _reasoningPresentation.closeReasoningVisit(_reasoningExpansionPins);
     final draftSaved = _draftWriter.close();
     unawaited(draftSaved.then((_) => _localTurnController?.close()));
     _textController.dispose();
@@ -5448,19 +5472,25 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       );
     }
     if (item is ChatReasoningItem) {
-      return GatewayReasoningCard(
-        key: ValueKey<String>('reasoning-${item.id}'),
-        id: item.id,
-        pinnedExpansion: item.id == null
-            ? null
-            : _reasoningExpansionPins[item.id!],
-        onPinChanged: (expanded) {
-          if (item.id != null) {
-            _reasoningExpansionPins.pin(item.id!, expanded);
-          }
-        },
-        text: item.text,
-        initiallyExpanded: item.initiallyExpanded,
+      // A same-State account/config replacement is a new preference scope.
+      // Keep the public inner run key while dropping only that card's old
+      // controller-local manual choice when its visit token changes.
+      return KeyedSubtree(
+        key: ValueKey((_reasoningExpansionPins, item.id)),
+        child: GatewayReasoningCard(
+          key: ValueKey<String>('reasoning-${item.id}'),
+          id: item.id,
+          pinnedExpansion: item.id == null
+              ? null
+              : _reasoningExpansionPins[item.id!],
+          onPinChanged: (expanded) {
+            if (item.id != null) {
+              _reasoningExpansionPins.pin(item.id!, expanded);
+            }
+          },
+          text: item.text,
+          initiallyExpanded: item.initiallyExpanded,
+        ),
       );
     }
     if (item is GatewayNotice) {
