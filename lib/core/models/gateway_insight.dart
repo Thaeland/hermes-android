@@ -183,7 +183,12 @@ class GatewaySubagentActivity {
   final GatewaySubagentPhase phase;
   final int? taskIndex;
   final int? taskCount;
+
+  /// First durable reference is the immutable task-lineage anchor.
   final String? childSessionId;
+
+  /// Latest advertised reference is only a candidate until history proves it.
+  final String? latestChildSessionId;
   final String? delegationId;
   final String? parentId;
   final String? status;
@@ -199,6 +204,7 @@ class GatewaySubagentActivity {
     this.taskIndex,
     this.taskCount,
     this.childSessionId,
+    this.latestChildSessionId,
     this.delegationId,
     this.parentId,
     this.status,
@@ -233,6 +239,11 @@ class GatewaySubagentActivity {
       phase: isComplete ? phase : next.phase,
       status: isComplete ? status : next.status ?? status,
       childSessionId: childSessionId ?? next.childSessionId,
+      latestChildSessionId:
+          next.latestChildSessionId ??
+          next.childSessionId ??
+          latestChildSessionId ??
+          childSessionId,
       delegationId: delegationId ?? next.delegationId,
       parentId: parentId ?? next.parentId,
       livePreview: next.livePreview ?? livePreview,

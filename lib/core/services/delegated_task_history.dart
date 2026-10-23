@@ -12,6 +12,7 @@ enum TaskHistoryProblem {
   authRejected,
   incompatible,
   identityUnproven,
+  partialCompression,
   missingReference,
   missingRowIdentity,
   notReady,
@@ -30,8 +31,30 @@ class TaskHistoryReadFailure implements Exception {
   final TaskHistoryProblem reason;
 }
 
+class TaskHistoryPage {
+  const TaskHistoryPage({
+    required this.rows,
+    required this.sessionId,
+    required this.offset,
+    required this.lineage,
+    this.partial = false,
+  });
+  final List<Map<String, dynamic>> rows;
+  final String sessionId;
+  final int offset;
+
+  /// Verified compression path, newest segment first and task root last.
+  final List<String> lineage;
+  final bool partial;
+}
+
 abstract interface class TaskHistorySource {
-  Future<List<Map<String, dynamic>>> fetch(String childId, int offset);
+  Future<TaskHistoryPage> fetch(
+    String childId,
+    int offset, {
+    String? latestChildId,
+    String? currentSessionId,
+  });
   void close();
 }
 
@@ -75,30 +98,116 @@ class DashboardTaskHistory implements TaskHistorySource {
   }
 
   @override
-  Future<List<Map<String, dynamic>>> fetch(String childId, int offset) async {
-    if (GatewaySubagentActivity.opaqueId(childId) == null || offset < 0) {
+  Future<TaskHistoryPage> fetch(
+    String childId,
+    int offset, {
+    String? latestChildId,
+    String? currentSessionId,
+  }) async {
+    if ([childId, latestChildId, currentSessionId].whereType<String>().any(
+          (id) => GatewaySubagentActivity.opaqueId(id) == null,
+        ) ||
+        offset < 0) {
       throw const TaskHistoryUnavailable(TaskHistoryProblem.invalidReference);
     }
     if (!authAvailable) {
       throw const TaskHistoryUnavailable(TaskHistoryProblem.authRequired);
     }
-    final Map<String, dynamic> data;
     try {
-      // Both stock endpoints resolve prefixes. Prove the exact durable row
-      // exists before asking for any transcript.
-      await _exactDetail(childId);
-      data = await dashboard.apiGet(
-        'sessions/${Uri.encodeComponent(childId)}/messages',
-        queryParameters: {
-          if (profile != null && profile!.isNotEmpty) 'profile': profile!,
-          'limit': '50',
-          'offset': '$offset',
-          'order': 'latest',
-          'inline_images': 'false',
-          'include_compacted': 'true',
-        },
+      // Per-read cache/budget, never a global session-store scan. References
+      // from live events and messages are candidates, not authority.
+      final details = <String, Map<String, dynamic>>{};
+      var reads = 0;
+      Future<Map<String, dynamic>> detail(
+        String id, {
+        bool fresh = false,
+      }) async {
+        if (!fresh && details.containsKey(id)) return details[id]!;
+        if (++reads > 100) {
+          throw const TaskHistoryUnavailable(
+            TaskHistoryProblem.identityUnproven,
+          );
+        }
+        final row = await _exactDetail(id);
+        final owner = details[childId]?['profile'];
+        if (owner != null && row['profile'] != owner) {
+          throw const TaskHistoryUnavailable(
+            TaskHistoryProblem.identityUnproven,
+          );
+        }
+        return details[id] = row;
+      }
+
+      await detail(childId); // Prefix resolution must never become identity.
+      var lineage = <String>[childId];
+      for (final candidate in [currentSessionId, latestChildId]) {
+        if (candidate == null || lineage.contains(candidate)) continue;
+        final path = await _proveCompressionLineage(childId, candidate, detail);
+        // Descendants of one compressed root can still be unrelated forks.
+        // Only advance on the verified branch, never choose by time.
+        if (!path.contains(lineage.first)) {
+          throw const TaskHistoryUnavailable(
+            TaskHistoryProblem.identityUnproven,
+          );
+        }
+        lineage = path;
+      }
+      var pageOffset =
+          currentSessionId != null && lineage.first != currentSessionId
+          ? 0
+          : offset;
+      var data = await _messages(lineage.first, pageOffset);
+      var path = await _proveCompressionLineage(
+        childId,
+        data['session_id'],
+        detail,
       );
-      await _proveCompressionLineage(childId, data['session_id']);
+      if (!path.contains(lineage.first)) {
+        throw const TaskHistoryUnavailable(TaskHistoryProblem.identityUnproven);
+      }
+      // OFFSET belongs to one canonical segment. Rotation found by messages
+      // restarts at the head before any rows are published.
+      if (pageOffset != 0 &&
+          path.first != (currentSessionId ?? lineage.first)) {
+        pageOffset = 0;
+        lineage = path;
+        data = await _messages(lineage.first, 0);
+        path = await _proveCompressionLineage(
+          childId,
+          data['session_id'],
+          detail,
+        );
+        if (!path.contains(lineage.first)) {
+          throw const TaskHistoryUnavailable(
+            TaskHistoryProblem.identityUnproven,
+          );
+        }
+      }
+      final messages = data['messages'];
+      final pagination = data['pagination'];
+      if (messages is! List ||
+          messages.length > 50 ||
+          messages.any((row) => row is! Map<String, dynamic>) ||
+          pagination is! Map ||
+          pagination['limit'] != 50 ||
+          pagination['offset'] != pageOffset ||
+          pagination['order'] != 'latest' ||
+          pagination['returned'] != messages.length ||
+          (profile?.isNotEmpty == true && data['profile'] != profile) ||
+          (details[childId]?['profile'] != null &&
+              data['profile'] != details[childId]!['profile'])) {
+        throw const TaskHistoryUnavailable(TaskHistoryProblem.incompatible);
+      }
+      final tip = await detail(path.first, fresh: true);
+      return TaskHistoryPage(
+        rows: messages.cast<Map<String, dynamic>>(),
+        sessionId: path.first,
+        offset: pageOffset,
+        lineage: path,
+        // Stock resume/latest-descendant exclude inherited delegation markers
+        // and tool sources. The original may be only a partial snapshot.
+        partial: tip['end_reason'] == 'compression',
+      );
     } on DashboardHttpException catch (error) {
       if (error.statusCode == 401 || error.statusCode == 403) {
         throw const TaskHistoryUnavailable(TaskHistoryProblem.authRejected);
@@ -108,22 +217,20 @@ class DashboardTaskHistory implements TaskHistorySource {
       }
       rethrow;
     }
-    final messages = data['messages'];
-    final pagination = data['pagination'];
-    if (GatewaySubagentActivity.opaqueId(data['session_id']) == null ||
-        messages is! List ||
-        messages.length > 50 ||
-        messages.any((row) => row is! Map<String, dynamic>) ||
-        pagination is! Map ||
-        pagination['limit'] != 50 ||
-        pagination['offset'] != offset ||
-        pagination['order'] != 'latest' ||
-        pagination['returned'] != messages.length ||
-        (profile?.isNotEmpty == true && data['profile'] != profile)) {
-      throw const TaskHistoryUnavailable(TaskHistoryProblem.incompatible);
-    }
-    return messages.cast<Map<String, dynamic>>();
   }
+
+  Future<Map<String, dynamic>> _messages(String id, int offset) =>
+      dashboard.apiGet(
+        'sessions/${Uri.encodeComponent(id)}/messages',
+        queryParameters: {
+          if (profile?.isNotEmpty == true) 'profile': profile!,
+          'limit': '50',
+          'offset': '$offset',
+          'order': 'latest',
+          'inline_images': 'false',
+          'include_compacted': 'true',
+        },
+      );
 
   Future<Map<String, dynamic>> _exactDetail(String id) async {
     final detail = await dashboard.apiGet(
@@ -137,40 +244,58 @@ class DashboardTaskHistory implements TaskHistorySource {
     return detail;
   }
 
-  Future<void> _proveCompressionLineage(
+  Future<List<String>> _proveCompressionLineage(
     String original,
     Object? canonical,
+    Future<Map<String, dynamic>> Function(String id) detail,
   ) async {
-    if (canonical == original) return;
     var current = GatewaySubagentActivity.opaqueId(canonical);
-    final seen = <String>{};
-    // No latest-descendant heuristic or invented lineage fields. Stock detail
-    // returns parent_session_id, end_reason, source and model_config.
+    final path = <String>[];
     for (var hop = 0; hop < 32 && current != null; hop++) {
-      if (!seen.add(current)) break;
-      final child = await _exactDetail(current);
+      if (path.contains(current)) break;
+      path.add(current);
+      if (current == original) return path;
+      final child = await detail(current);
       final parentId = GatewaySubagentActivity.opaqueId(
         child['parent_session_id'],
       );
-      if (parentId == null ||
+      if (parentId == null) break;
+      final parent = await detail(parentId);
+      final ended = parent['ended_at'];
+      final started = child['started_at'];
+      final parentStarted = parent['started_at'];
+      // publish_compression_child creates the child just BEFORE stamping the
+      // parent's ended_at in the same transaction (not after that timestamp).
+      if (parent['end_reason'] != 'compression' ||
+          ended is! num ||
+          started is! num ||
+          parentStarted is! num ||
+          !ended.isFinite ||
+          !started.isFinite ||
+          !parentStarted.isFinite ||
+          ended < parentStarted ||
+          started < parentStarted ||
+          child['source'] is! String ||
+          child['source'] != parent['source'] ||
           !child.containsKey('model_config') ||
-          !child.containsKey('source') ||
-          child['source'] == 'tool') {
+          !parent.containsKey('model_config')) {
         break;
       }
       final config = decodeTaskJson(child['model_config']);
-      if (config != null && config is! Map) break;
-      if (config is Map &&
-          const [
-            '_delegate_from',
-            '_branched_from',
-            '_reset_from',
-          ].any((key) => config[key] != null)) {
+      final parentConfig = decodeTaskJson(parent['model_config']);
+      if ((config != null && config is! Map) ||
+          (parentConfig != null && parentConfig is! Map)) {
         break;
       }
-      final parent = await _exactDetail(parentId);
-      if (parent['end_reason'] != 'compression') break;
-      if (parentId == original) return;
+      // Rotation copies _session_init_model_config and source, including tool.
+      // Inherited grandparent markers do not fork THIS edge; direct markers do.
+      if (const ['_delegate_from', '_branched_from', '_reset_from'].any((key) {
+        final marker = config is Map ? config[key] : null;
+        final inherited = parentConfig is Map ? parentConfig[key] : null;
+        return marker == parentId || marker != inherited;
+      })) {
+        break;
+      }
       current = parentId;
     }
     throw const TaskHistoryUnavailable(TaskHistoryProblem.identityUnproven);

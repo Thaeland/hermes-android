@@ -2665,6 +2665,10 @@ class AppLocalizationsFr extends AppLocalizations {
       'Task transcript unavailable: the Dashboard could not prove the exact stored session or its compression lineage. No transcript from another session is shown.';
 
   @override
+  String get task_partial_compression =>
+      'Partial history: this task continued after compression, but this gateway has not exposed a verifiable newer reference. The final reply may be missing. Automatic refresh is paused; use Refresh to retry.';
+
+  @override
   String get task_missing_reference =>
       'Task transcript unavailable: this server did not retain its session reference.';
 

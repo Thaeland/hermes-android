@@ -86,7 +86,7 @@ void main() {
             as Map<String, dynamic>;
       });
       final transcript = parseTaskTranscript(
-        await source.fetch('stored-child', 0),
+        (await source.fetch('stored-child', 0)).rows,
       );
       expect(
         transcript.any((row) => row.text == 'Archived tool result'),
@@ -198,14 +198,18 @@ void main() {
       final source = historyWith((request) {
         requests.add(request.url.path);
         if (request.url.path.endsWith('/messages')) {
-          return fixture['with_compacted'] as Map<String, dynamic>;
+          return fixture['tip_messages'] as Map<String, dynamic>;
         }
         return fixture[request.url.path.endsWith('/compression-tip')
                 ? 'tip_detail'
                 : 'detail']
             as Map<String, dynamic>;
       });
-      final result = await source.fetch('stored-child', 0);
+      final result = (await source.fetch(
+        'stored-child',
+        0,
+        latestChildId: 'compression-tip',
+      )).rows;
       expect(result.any((row) => row['content'] == 'After rotation'), isTrue);
       expect(requests.first, endsWith('/stored-child'));
       expect(requests, contains(endsWith('/compression-tip')));
@@ -219,7 +223,7 @@ void main() {
       final source = historyWith((request) {
         if (request.url.path.endsWith('/messages')) {
           return {
-            ...fixture['with_compacted'] as Map<String, dynamic>,
+            ...fixture['tip_messages'] as Map<String, dynamic>,
             'session_id': 'unrelated',
           };
         }
@@ -291,7 +295,7 @@ void main() {
     'branch',
     'delegate',
     'reset',
-    'tool',
+    'source-change',
     'not-compression',
     'cycle',
     'profile',
@@ -301,7 +305,7 @@ void main() {
     test('compression identity proof rejects $invalid metadata', () async {
       final source = historyWith((request) {
         if (request.url.path.endsWith('/messages')) {
-          return fixture['with_compacted'] as Map<String, dynamic>;
+          return fixture['tip_messages'] as Map<String, dynamic>;
         }
         final isOriginal = request.url.path.endsWith('/stored-child');
         final detail = {
@@ -321,7 +325,7 @@ void main() {
           if (invalid == 'reset') {
             detail['model_config'] = {'_reset_from': 'stored-child'};
           }
-          if (invalid == 'tool') detail['source'] = 'tool';
+          if (invalid == 'source-change') detail['source'] = 'tool';
           if (invalid == 'cycle') {
             detail['parent_session_id'] = 'compression-tip';
             detail['end_reason'] = 'compression';

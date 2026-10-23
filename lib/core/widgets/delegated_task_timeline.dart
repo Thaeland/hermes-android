@@ -145,6 +145,13 @@ class _DelegatedTaskTimelineState extends State<DelegatedTaskTimeline>
                   padding: const EdgeInsets.all(8),
                   child: Text(context.l10n.task_recorded_history),
                 ),
+                if (controller.limitation != null)
+                  _notice(
+                    taskHistoryProblemLabel(
+                      context.l10n,
+                      controller.limitation!,
+                    ),
+                  ),
                 if (controller.unavailable != null)
                   _notice(
                     taskHistoryProblemLabel(
@@ -171,7 +178,9 @@ class _DelegatedTaskTimelineState extends State<DelegatedTaskTimeline>
                     padding: const EdgeInsets.all(16),
                     child: Text(context.l10n.task_loading_history),
                   ),
-                if (controller.hasRead && transcript.isEmpty)
+                if (controller.hasRead &&
+                    transcript.isEmpty &&
+                    controller.limitation == null)
                   Padding(
                     padding: const EdgeInsets.all(16),
                     child: Text(context.l10n.task_empty_history),
@@ -218,7 +227,11 @@ class _DelegatedTaskTimelineState extends State<DelegatedTaskTimeline>
             ),
             Text(context.l10n.task_identity(task.id)),
             if (task.childSessionId != null)
-              Text(context.l10n.task_stored_session(task.childSessionId!)),
+              Text(
+                context.l10n.task_stored_session(
+                  controller.canonicalSessionId ?? task.childSessionId!,
+                ),
+              ),
             if (task.delegationId != null)
               Text(context.l10n.task_delegation(task.delegationId!)),
             Text(context.l10n.task_read_only_notice),

@@ -4474,6 +4474,12 @@ abstract class AppLocalizations {
   /// **'Task transcript unavailable: the Dashboard could not prove the exact stored session or its compression lineage. No transcript from another session is shown.'**
   String get task_identity_unproven;
 
+  /// No description provided for @task_partial_compression.
+  ///
+  /// In en, this message translates to:
+  /// **'Partial history: this task continued after compression, but this gateway has not exposed a verifiable newer reference. The final reply may be missing. Automatic refresh is paused; use Refresh to retry.'**
+  String get task_partial_compression;
+
   /// No description provided for @task_missing_reference.
   ///
   /// In en, this message translates to:

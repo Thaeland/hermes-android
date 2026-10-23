@@ -26,6 +26,9 @@ class DelegatedTaskController extends ChangeNotifier {
   bool loadingOlder = false;
   TaskHistoryProblem? error;
   TaskHistoryProblem? unavailable;
+  TaskHistoryProblem? limitation;
+  String? _canonicalSessionId;
+  String? get canonicalSessionId => _canonicalSessionId;
   bool get hasRead => _hasRead;
   bool _hasRead = false;
   bool _closed = false;
@@ -46,16 +49,16 @@ class DelegatedTaskController extends ChangeNotifier {
   void updateTask(GatewaySubagentActivity next) {
     if (_closed || next.id != _task.id) return;
     final wasComplete = _task.isComplete;
-    final oldChild = _task.childSessionId;
+    final oldChild = _task.latestChildSessionId ?? _task.childSessionId;
     _task = _task.merge(next);
-    notifyListeners();
     if ((!wasComplete && _task.isComplete) ||
-        oldChild != _task.childSessionId) {
+        oldChild != (_task.latestChildSessionId ?? _task.childSessionId)) {
       _generation++;
       _finalRetries = 0;
       _timer?.cancel();
       _queueRefresh();
     }
+    if (!_closed) notifyListeners();
   }
 
   void setForeground(bool foreground) {
@@ -132,18 +135,32 @@ class DelegatedTaskController extends ChangeNotifier {
       final page = await history.fetch(
         childId,
         older ? _window.olderOffset : 0,
+        latestChildId: _task.latestChildSessionId,
+        currentSessionId: _canonicalSessionId,
       );
       if (_closed || !_foreground || generation != _generation) return;
-      if (page.any((row) => taskRowId(row) == null)) {
+      if (page.rows.any((row) => taskRowId(row) == null)) {
         throw const TaskHistoryUnavailable(
           TaskHistoryProblem.missingRowIdentity,
         );
       }
-      if (older) {
-        _window.acceptOlder(page);
-      } else {
-        _window.acceptRecent(page);
+      if (_canonicalSessionId != page.sessionId) {
+        // Commit identity, generation and coverage together, after proof. Keep
+        // durable rows only when their previous segment is on this path.
+        _window.resetSegment(
+          retainRows:
+              _canonicalSessionId == null ||
+              page.lineage.contains(_canonicalSessionId),
+        );
+        _canonicalSessionId = page.sessionId;
+        _generation++;
       }
+      if (older && page.offset != 0) {
+        _window.acceptOlder(page.rows);
+      } else {
+        _window.acceptRecent(page.rows);
+      }
+      limitation = page.partial ? TaskHistoryProblem.partialCompression : null;
       _hasRead = true;
       _finalRetries = 0;
     } on TaskHistoryUnavailable catch (failure) {
@@ -160,7 +177,13 @@ class DelegatedTaskController extends ChangeNotifier {
 
   void _schedule() {
     _timer?.cancel();
-    if (!_started || !_foreground || _closed || unavailable != null) return;
+    if (!_started ||
+        !_foreground ||
+        _closed ||
+        unavailable != null ||
+        limitation != null) {
+      return;
+    }
     if (!_task.isComplete || (error != null && _finalRetries <= 3)) {
       _timer = Timer(const Duration(seconds: 2), () => unawaited(refresh()));
     }
@@ -191,6 +214,12 @@ class _TaskHistoryWindow {
   List<Map<String, dynamic>> get rows {
     final ids = _byId.keys.toList()..sort();
     return [for (final id in ids) _byId[id]!];
+  }
+
+  void resetSegment({required bool retainRows}) {
+    if (!retainRows) _byId.clear();
+    _coveredIds = {};
+    hasOlder = false;
   }
 
   void acceptRecent(List<Map<String, dynamic>> page) {

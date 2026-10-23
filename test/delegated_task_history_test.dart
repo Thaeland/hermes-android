@@ -311,7 +311,7 @@ void main() {
           );
         }),
       );
-      expect(await client.fetch(id, 0), hasLength(2));
+      expect((await client.fetch(id, 0)).rows, hasLength(2));
       expect(requests.last.url.host, 'gateway.test');
       expect(requests.last.url.scheme, 'https');
       client.close();
@@ -570,10 +570,20 @@ class FakeHistory implements TaskHistorySource {
   Object? failure;
   bool closed = false;
   @override
-  Future<List<Map<String, dynamic>>> fetch(String childId, int offset) async {
+  Future<TaskHistoryPage> fetch(
+    String childId,
+    int offset, {
+    String? latestChildId,
+    String? currentSessionId,
+  }) async {
     offsets.add(offset);
     if (failure != null) throw failure!;
-    return gate == null ? data : await gate!.future;
+    return TaskHistoryPage(
+      rows: gate == null ? data : await gate!.future,
+      sessionId: childId,
+      offset: offset,
+      lineage: [childId],
+    );
   }
 
   @override
