@@ -829,7 +829,9 @@ class NormalGatewayChatOwner {
         event.data,
       );
       if (update != null) {
-        final index = _subagents.indexWhere((agent) => agent.id == update.id);
+        final index = _subagents.indexWhere(
+          (agent) => agent.matchesTask(update),
+        );
         if (index < 0) {
           _subagents.add(update);
         } else {

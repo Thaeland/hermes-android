@@ -47,7 +47,7 @@ class DelegatedTaskController extends ChangeNotifier {
   }
 
   void updateTask(GatewaySubagentActivity next) {
-    if (_closed || next.id != _task.id) return;
+    if (_closed || !_task.matchesTask(next)) return;
     final wasComplete = _task.isComplete;
     final oldChild = _task.latestChildSessionId ?? _task.childSessionId;
     _task = _task.merge(next);

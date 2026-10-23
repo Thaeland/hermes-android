@@ -16,6 +16,7 @@ import 'core/services/background_work_prefs.dart';
 import 'core/services/gateway_turn_application_controller.dart';
 import 'core/services/local_chat_pin_store.dart';
 import 'core/services/notification_prefs.dart';
+import 'core/services/mobile_push_service.dart';
 import 'core/services/text_size_preference.dart';
 import 'core/services/turn_notification_service.dart';
 import 'core/screens/chat_screen.dart';
@@ -225,10 +226,18 @@ class HermesApp extends StatefulWidget {
   final ConnectionManager connManager;
   final AndroidShareIntentService? shareIntents;
   final AndroidLaunchIntentService? launchIntents;
+  final MobilePushService? mobilePush;
+
+  @visibleForTesting
+  final Future<Session?> Function(SavedConnection, String)?
+  testNotificationSessionLookup;
+
   const HermesApp({
     required this.connManager,
     this.shareIntents,
     this.launchIntents,
+    this.mobilePush,
+    this.testNotificationSessionLookup,
     super.key,
   });
 
@@ -280,6 +289,9 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
   String? _ongoingSignature;
   final Set<String> _ongoingChats = {};
   Future<void> _ongoingWrites = Future<void>.value();
+  late final MobilePushService _mobilePush =
+      widget.mobilePush ?? MobilePushService.shared;
+  bool _routingMobilePush = false;
 
   /// Pushes from the app root (notification taps) need a navigator below the
   /// MaterialApp this state builds.
@@ -300,6 +312,10 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
     _restoreNormalSessions();
     unawaited(NotificationPrefsStore.load());
     notificationResponseHandler = _handleNotificationResponse;
+    _mobilePush.addListener(_onMobilePushChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_initialiseMobilePushService());
+    });
     // A notification that launched a terminated app carries its tap/action in
     // the platform's launch details; route it once the first frame is up.
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -330,6 +346,46 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
       state,
       hasActiveTurn: _turnApplicationController.hasActiveTurn,
     );
+  }
+
+  Future<void> _initialiseMobilePushService() async {
+    try {
+      await _mobilePush.initialize(widget.connManager);
+      if (mounted && !_closingTurnOwner) _onMobilePushChanged();
+    } catch (_) {
+      // Optional transport failure must not block startup or other intents.
+    }
+  }
+
+  void _onMobilePushChanged() {
+    if (!mounted ||
+        _closingTurnOwner ||
+        _routingMobilePush ||
+        !_mobilePush.hasPendingTap) {
+      return;
+    }
+    unawaited(_routeMobilePush());
+  }
+
+  Future<void> _routeMobilePush() async {
+    _routingMobilePush = true;
+    try {
+      while (mounted && !_closingTurnOwner && _mobilePush.hasPendingTap) {
+        final route = await _mobilePush.takePendingNotificationRoute();
+        if (!mounted || _closingTurnOwner) return;
+        if (route == null || !await _mobilePush.isRouteCurrent(route)) continue;
+        if (!mounted || _closingTurnOwner) return;
+        await _openNotificationSession(
+          route.connection,
+          route.sessionId,
+          pushRoute: route,
+        );
+      }
+    } catch (_) {
+      // Invalid/revoked taps never gain action authority or submit a prompt.
+    } finally {
+      _routingMobilePush = false;
+    }
   }
 
   void _restoreNormalSessions() {
@@ -525,15 +581,20 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
   /// the session cannot be fetched (deleted, or outside the recent list).
   Future<void> _openNotificationSession(
     SavedConnection connection,
-    String? sessionId,
-  ) async {
+    String? sessionId, {
+    MobilePushRoute? pushRoute,
+  }) async {
     if (!mounted || _closingTurnOwner) return;
     Session? session;
     Session? retainedSession;
     if (sessionId != null && sessionId.isNotEmpty) {
       final normal = _turnApplicationController.normalSessionFor(connection);
       await normal.ready.catchError((Object _) {});
-      if (!mounted) return;
+      if (!mounted || _closingTurnOwner) return;
+      if (pushRoute != null && !await _mobilePush.isRouteCurrent(pushRoute)) {
+        return;
+      }
+      if (!mounted || _closingTurnOwner) return;
       final owner = normal.findChat(sessionId);
       sessionId = owner?.storedSessionId ?? sessionId;
       if (owner != null) {
@@ -556,14 +617,31 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
           apiKey: connection.apiKey,
           pathPrefix: connection.gatewayPrefix ?? '',
         );
-        session = await client.getSessionById(sessionId) ?? retainedSession;
+        session =
+            (widget.testNotificationSessionLookup == null
+                ? await client.getSessionById(sessionId)
+                : await widget.testNotificationSessionLookup!(
+                    connection,
+                    sessionId,
+                  )) ??
+            retainedSession;
       } catch (_) {
         session = retainedSession;
       } finally {
         client?.close();
       }
     }
-    if (!mounted || !identical(_connectionById(connection.id), connection)) {
+    if (pushRoute != null) {
+      if (!await _mobilePush.isRouteCurrent(pushRoute)) return;
+      // Reject prefix resolution or a local alias without durable identity proof.
+      if (session?.id != pushRoute.sessionId) session = null;
+    }
+    final currentConnection = _connectionById(connection.id);
+    if (!mounted ||
+        _closingTurnOwner ||
+        currentConnection == null ||
+        MobilePushService.binding(currentConnection) !=
+            MobilePushService.binding(connection)) {
       return;
     }
     widget.connManager.prefs.setString(
@@ -634,6 +712,7 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     final token = _keepAliveTurnActivityToken;
     _closingTurnOwner = true;
+    _mobilePush.removeListener(_onMobilePushChanged);
     backgroundWorkEnabled.removeListener(_onBackgroundWorkPolicyChanged);
     if (token != null) {
       _turnApplicationController.removeTurnActivityListener(token);

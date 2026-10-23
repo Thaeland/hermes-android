@@ -697,6 +697,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void _applyNormalSnapshot(
     NormalGatewayChatSnapshot snapshot, {
     bool hydrateHistory = true,
+    bool followStream = true,
   }) {
     if (!mounted) return;
     final rejectedDraft = snapshot.rejectedDraft;
@@ -876,17 +877,21 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _toolActivities[index] = tool;
         }
       }
-      _subagentActivities
-        ..clear()
-        ..addAll(snapshot.subagents);
+      // Hydrated child roots and owner runtime IDs may differ. Preserve the
+      // stable task anchor and forward all progress/final updates to the modal.
+      for (final update in snapshot.subagents) {
+        _mergeSubagentActivity(update);
+      }
       // App-owned runs use stable projection ids, so copying snapshot rows or
       // replacing a route cannot discard receipt chronology.
       _timeline = snapshot.timeline;
     });
-    if (snapshot.hasActiveTurn) {
-      _scheduleStreamingFollow();
-    } else {
-      _scheduleScrollTarget(_scrollCoordinator.endStreaming());
+    if (followStream) {
+      if (snapshot.hasActiveTurn) {
+        _scheduleStreamingFollow();
+      } else {
+        _scheduleScrollTarget(_scrollCoordinator.endStreaming());
+      }
     }
     if (snapshot.phase == NormalGatewayTurnPhase.failed) {
       _awaitingVoiceReply = false;
@@ -1039,7 +1044,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (current && _normalChat != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && ModalRoute.of(context)?.isCurrent == true) {
-          _applyNormalSnapshot(_normalChat!.snapshot);
+          _applyNormalSnapshot(_normalChat!.snapshot, followStream: false);
         }
       });
     }
@@ -1607,7 +1612,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _applyScrollTarget(ChatScrollTarget target) {
-    if (!_scrollController.hasClients) return;
+    if (_openTaskController != null || !_scrollController.hasClients) return;
     final maxExtent = _scrollController.position.maxScrollExtent;
     _scrollController.jumpTo(maxExtent);
     _syncEndAffordance(_scrollController.position);
@@ -1629,11 +1634,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _scheduleStreamingFollow() {
-    if (_streamFollowScheduled) return;
+    if (_openTaskController != null || _streamFollowScheduled) return;
     _streamFollowScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _streamFollowScheduled = false;
-      if (!mounted) return;
+      if (!mounted || _openTaskController != null) return;
       final target = _scrollCoordinator.streamingContentChanged();
       if (target != null) {
         _applyScrollTarget(target);
@@ -2079,10 +2084,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       // Real child references can reconnect a persisted row to live activity;
       // neither task goal nor task index is sufficient identity evidence.
       final index = _subagentActivities.indexWhere(
-        (activity) =>
-            activity.id == recovered.id ||
-            (recovered.childSessionId != null &&
-                activity.childSessionId == recovered.childSessionId),
+        (activity) => activity.matchesTask(recovered),
       );
       if (index < 0) {
         _subagentActivities.add(recovered);
@@ -3646,26 +3648,29 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _scheduleStreamingFollow();
   }
 
+  GatewaySubagentActivity _mergeSubagentActivity(
+    GatewaySubagentActivity update,
+  ) {
+    final index = _subagentActivities.indexWhere(
+      (activity) => activity.matchesTask(update),
+    );
+    final merged = index < 0
+        ? update
+        : _subagentActivities[index].merge(update);
+    if (index < 0) {
+      _subagentActivities.add(merged);
+    } else {
+      _subagentActivities[index] = merged;
+    }
+    _openTaskController?.updateTask(merged);
+    return merged;
+  }
+
   void _upsertSubagent(String eventType, Map<String, dynamic> data) {
     final update = GatewaySubagentActivity.fromGatewayEvent(eventType, data);
     if (update == null || !mounted) return;
     setState(() {
-      final index = _subagentActivities.indexWhere(
-        (activity) =>
-            activity.id == update.id ||
-            (update.childSessionId != null &&
-                activity.childSessionId == update.childSessionId),
-      );
-      if (index < 0) {
-        _subagentActivities.add(update);
-      } else {
-        _subagentActivities[index] = _subagentActivities[index].merge(update);
-      }
-      final merged =
-          _subagentActivities[index < 0
-              ? _subagentActivities.length - 1
-              : index];
-      _openTaskController?.updateTask(merged);
+      final merged = _mergeSubagentActivity(update);
       if (!merged.isComplete) {
         _gatewayTurnStatus = GatewayTurnStatus(
           kind: 'subagent',

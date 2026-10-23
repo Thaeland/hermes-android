@@ -86,9 +86,9 @@ server-side. Local authority remains off regardless.
 
 ## Root integration API (app owner)
 
-No `main.dart` edits are included, to keep this feature cherry-pick isolated from
-parallel background-chat/root changes. Settings is integrated and functional;
-the app root must install these hooks for startup confirmation and tap routing:
+`HermesAppState` installs the startup, serial validated-tap routing and teardown
+hooks after credential hydration and the first frame. Settings reuses the same
+app-lifetime service. The hooks below document that integration contract:
 
 ```dart
 final mobilePush = MobilePushService.shared;

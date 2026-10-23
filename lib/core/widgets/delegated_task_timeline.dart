@@ -136,6 +136,7 @@ class _DelegatedTaskTimelineState extends State<DelegatedTaskTimeline>
                           padding: const EdgeInsets.all(12),
                           child: SelectableText(
                             '${task.previewKind ?? context.l10n.task_preview}\n${task.livePreview}',
+                            key: PageStorageKey('task-preview-text-${task.id}'),
                           ),
                         ),
                       ],
@@ -308,7 +309,7 @@ class _TranscriptRow extends StatelessWidget {
         padding: const EdgeInsets.all(12),
         child: Align(
           alignment: Alignment.centerLeft,
-          child: SelectableText(text),
+          child: SelectableText(text, key: PageStorageKey('$identity-text')),
         ),
       ),
     ],

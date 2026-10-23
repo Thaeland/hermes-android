@@ -232,6 +232,18 @@ class GatewaySubagentActivity {
     return value;
   }
 
+  /// Match only runtime identity or explicitly advertised durable aliases.
+  /// Goals, task indexes and log paths are never identity evidence.
+  bool matchesTask(GatewaySubagentActivity other) {
+    if (id == other.id) return true;
+    final references = {childSessionId, latestChildSessionId}..remove(null);
+    return references.isNotEmpty &&
+        references.intersection({
+          other.childSessionId,
+          other.latestChildSessionId,
+        }).isNotEmpty;
+  }
+
   GatewaySubagentActivity merge(GatewaySubagentActivity next) {
     return GatewaySubagentActivity(
       id: id,

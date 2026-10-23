@@ -33,6 +33,7 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        BackgroundWorkPlatform.install(this, flutterEngine.dartExecutor.binaryMessenger)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, MobilePushBridge.CHANNEL).also { channel ->
             MobilePushBridge.attach(channel)
             channel.setMethodCallHandler { call, result ->
