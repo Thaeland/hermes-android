@@ -9,8 +9,24 @@ class AppLocalizationsZh extends AppLocalizations {
   AppLocalizationsZh([String locale = 'zh']) : super(locale);
 
   @override
-  String get a_one_off_question_archives_itself_after_72_hours_anything =>
-      '一次性问题。将在 72 小时后自动归档；任何值得保留的内容都会被记住。';
+  String get archive_chat => '归档聊天';
+
+  @override
+  String get unarchive_chat => '取消归档聊天';
+
+  @override
+  String get chat_archived => '聊天已归档';
+
+  @override
+  String get chat_unarchived => '聊天已取消归档';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return '无法更新聊天归档状态：$error';
+  }
+
+  @override
+  String get quick_chat_description => '一次性问题。';
 
   @override
   String get ai_full_text => 'AI + 全文';
@@ -119,7 +135,8 @@ class AppLocalizationsZh extends AppLocalizations {
   String get archived => '已归档';
 
   @override
-  String get archived_conversations_appear_here => '已归档的对话将显示在这里。';
+  String get archived_conversations_appear_here =>
+      '这里只显示已归档的对话。旧聊天仍保留在“所有聊天”中。';
 
   @override
   String get archived_quick_chats => '已归档的快速聊天';
@@ -153,9 +170,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get auto_device_default => '自动（设备默认）';
-
-  @override
-  String get auto_archives_after_72_hours => '72 小时后自动归档';
 
   @override
   String get automation => '自动化';
@@ -2736,8 +2750,24 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   AppLocalizationsZhHans() : super('zh_Hans');
 
   @override
-  String get a_one_off_question_archives_itself_after_72_hours_anything =>
-      '一次性问题。将在 72 小时后自动归档；任何值得保留的内容都会被记住。';
+  String get archive_chat => '归档聊天';
+
+  @override
+  String get unarchive_chat => '取消归档聊天';
+
+  @override
+  String get chat_archived => '聊天已归档';
+
+  @override
+  String get chat_unarchived => '聊天已取消归档';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return '无法更新聊天归档状态：$error';
+  }
+
+  @override
+  String get quick_chat_description => '一次性问题。';
 
   @override
   String get ai_full_text => 'AI + 全文';
@@ -2846,7 +2876,8 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get archived => '已归档';
 
   @override
-  String get archived_conversations_appear_here => '已归档的对话将显示在这里。';
+  String get archived_conversations_appear_here =>
+      '这里只显示已归档的对话。旧聊天仍保留在“所有聊天”中。';
 
   @override
   String get archived_quick_chats => '已归档的快速聊天';
@@ -2880,9 +2911,6 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get auto_device_default => '自动（设备默认）';
-
-  @override
-  String get auto_archives_after_72_hours => '72 小时后自动归档';
 
   @override
   String get automation => '自动化';

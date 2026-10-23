@@ -114,11 +114,41 @@ abstract class AppLocalizations {
     Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
   ];
 
-  /// No description provided for @a_one_off_question_archives_itself_after_72_hours_anything.
+  /// No description provided for @archive_chat.
   ///
   /// In en, this message translates to:
-  /// **'A one-off question. Archives itself after 72 hours; anything worth keeping is still remembered.'**
-  String get a_one_off_question_archives_itself_after_72_hours_anything;
+  /// **'Archive chat'**
+  String get archive_chat;
+
+  /// No description provided for @unarchive_chat.
+  ///
+  /// In en, this message translates to:
+  /// **'Unarchive chat'**
+  String get unarchive_chat;
+
+  /// No description provided for @chat_archived.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat archived'**
+  String get chat_archived;
+
+  /// No description provided for @chat_unarchived.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat unarchived'**
+  String get chat_unarchived;
+
+  /// No description provided for @could_not_update_chat_archive.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not update chat archive: {error}'**
+  String could_not_update_chat_archive(Object error);
+
+  /// No description provided for @quick_chat_description.
+  ///
+  /// In en, this message translates to:
+  /// **'A one-off question.'**
+  String get quick_chat_description;
 
   /// No description provided for @ai_full_text.
   ///
@@ -315,7 +345,7 @@ abstract class AppLocalizations {
   /// No description provided for @archived_conversations_appear_here.
   ///
   /// In en, this message translates to:
-  /// **'Archived conversations appear here.'**
+  /// **'Only archived conversations appear here. Older chats remain in All chats.'**
   String get archived_conversations_appear_here;
 
   /// No description provided for @archived_quick_chats.
@@ -377,12 +407,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Auto (device default)'**
   String get auto_device_default;
-
-  /// No description provided for @auto_archives_after_72_hours.
-  ///
-  /// In en, this message translates to:
-  /// **'Auto-archives after 72 hours'**
-  String get auto_archives_after_72_hours;
 
   /// No description provided for @automation.
   ///

@@ -9,8 +9,24 @@ class AppLocalizationsEs extends AppLocalizations {
   AppLocalizationsEs([String locale = 'es']) : super(locale);
 
   @override
-  String get a_one_off_question_archives_itself_after_72_hours_anything =>
-      'Una pregunta puntual. Se archiva sola a las 72 horas; lo que valga la pena conservar seguirá en la memoria.';
+  String get archive_chat => 'Archivar chat';
+
+  @override
+  String get unarchive_chat => 'Desarchivar chat';
+
+  @override
+  String get chat_archived => 'Chat archivado';
+
+  @override
+  String get chat_unarchived => 'Chat desarchivado';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return 'No se pudo actualizar el archivo del chat: $error';
+  }
+
+  @override
+  String get quick_chat_description => 'Una pregunta puntual.';
 
   @override
   String get ai_full_text => 'IA + texto completo';
@@ -122,7 +138,7 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get archived_conversations_appear_here =>
-      'Las conversaciones archivadas aparecen aquí.';
+      'Aquí solo aparecen conversaciones archivadas. Los chats antiguos siguen en Todos los chats.';
 
   @override
   String get archived_quick_chats => 'Chats rápidos archivados';
@@ -159,9 +175,6 @@ class AppLocalizationsEs extends AppLocalizations {
   @override
   String get auto_device_default =>
       'Automático (predeterminado del dispositivo)';
-
-  @override
-  String get auto_archives_after_72_hours => 'Se archiva solo a las 72 horas';
 
   @override
   String get automation => 'Automatización';

@@ -9,8 +9,24 @@ class AppLocalizationsJa extends AppLocalizations {
   AppLocalizationsJa([String locale = 'ja']) : super(locale);
 
   @override
-  String get a_one_off_question_archives_itself_after_72_hours_anything =>
-      '単発の質問用。72時間後に自動アーカイブされますが、残す価値のある内容は記憶されます。';
+  String get archive_chat => 'チャットをアーカイブ';
+
+  @override
+  String get unarchive_chat => 'チャットのアーカイブを解除';
+
+  @override
+  String get chat_archived => 'チャットをアーカイブしました';
+
+  @override
+  String get chat_unarchived => 'チャットのアーカイブを解除しました';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return 'チャットのアーカイブ状態を更新できませんでした: $error';
+  }
+
+  @override
+  String get quick_chat_description => '単発の質問用。';
 
   @override
   String get ai_full_text => 'AI + 全文';
@@ -119,7 +135,8 @@ class AppLocalizationsJa extends AppLocalizations {
   String get archived => 'アーカイブ済み';
 
   @override
-  String get archived_conversations_appear_here => 'アーカイブした会話がここに表示されます。';
+  String get archived_conversations_appear_here =>
+      'アーカイブした会話のみがここに表示されます。古いチャットは「すべてのチャット」に残ります。';
 
   @override
   String get archived_quick_chats => 'アーカイブ済みクイックチャット';
@@ -153,9 +170,6 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get auto_device_default => '自動（端末のデフォルト）';
-
-  @override
-  String get auto_archives_after_72_hours => '72時間後に自動アーカイブ';
 
   @override
   String get automation => '自動化';

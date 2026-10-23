@@ -9,8 +9,24 @@ class AppLocalizationsPt extends AppLocalizations {
   AppLocalizationsPt([String locale = 'pt']) : super(locale);
 
   @override
-  String get a_one_off_question_archives_itself_after_72_hours_anything =>
-      'Uma pergunta pontual. É arquivada automaticamente após 72 horas; o que valer a pena guardar continua na memória.';
+  String get archive_chat => 'Arquivar chat';
+
+  @override
+  String get unarchive_chat => 'Desarquivar chat';
+
+  @override
+  String get chat_archived => 'Chat arquivado';
+
+  @override
+  String get chat_unarchived => 'Chat desarquivado';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return 'Não foi possível alterar o arquivo do chat: $error';
+  }
+
+  @override
+  String get quick_chat_description => 'Uma pergunta pontual.';
 
   @override
   String get ai_full_text => 'IA + texto completo';
@@ -122,7 +138,7 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get archived_conversations_appear_here =>
-      'Conversas arquivadas aparecem aqui.';
+      'Só as conversas arquivadas aparecem aqui. Os chats antigos continuam em Todos os chats.';
 
   @override
   String get archived_quick_chats => 'Chats rápidos arquivados';
@@ -158,10 +174,6 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get auto_device_default => 'Automático (padrão do dispositivo)';
-
-  @override
-  String get auto_archives_after_72_hours =>
-      'Arquiva automaticamente após 72 horas';
 
   @override
   String get automation => 'Automação';
@@ -2837,8 +2849,24 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   AppLocalizationsPtBr() : super('pt_BR');
 
   @override
-  String get a_one_off_question_archives_itself_after_72_hours_anything =>
-      'Uma pergunta pontual. É arquivada automaticamente após 72 horas; o que valer a pena guardar continua na memória.';
+  String get archive_chat => 'Arquivar chat';
+
+  @override
+  String get unarchive_chat => 'Desarquivar chat';
+
+  @override
+  String get chat_archived => 'Chat arquivado';
+
+  @override
+  String get chat_unarchived => 'Chat desarquivado';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return 'Não foi possível alterar o arquivo do chat: $error';
+  }
+
+  @override
+  String get quick_chat_description => 'Uma pergunta pontual.';
 
   @override
   String get ai_full_text => 'IA + texto completo';
@@ -2950,7 +2978,7 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get archived_conversations_appear_here =>
-      'Conversas arquivadas aparecem aqui.';
+      'Só as conversas arquivadas aparecem aqui. Os chats antigos continuam em Todos os chats.';
 
   @override
   String get archived_quick_chats => 'Chats rápidos arquivados';
@@ -2986,10 +3014,6 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get auto_device_default => 'Automático (padrão do dispositivo)';
-
-  @override
-  String get auto_archives_after_72_hours =>
-      'Arquiva automaticamente após 72 horas';
 
   @override
   String get automation => 'Automação';

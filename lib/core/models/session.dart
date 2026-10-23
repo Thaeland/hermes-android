@@ -78,6 +78,43 @@ class Session {
     isLocalDraft: isLocalDraft,
   );
 
+  /// Replaces only the server archive flag, retaining rich list metadata.
+  Session withArchived(bool archived) => Session(
+    id: id,
+    title: title,
+    model: model,
+    source: source,
+    messageCount: messageCount,
+    isActive: isActive,
+    preview: preview,
+    startedAt: startedAt,
+    endedAt: endedAt,
+    lastActive: lastActive,
+    pinned: pinned,
+    lineageRootId: lineageRootId,
+    archived: archived,
+    isLocalDraft: isLocalDraft,
+  );
+
+  /// Rebinds presentation metadata to a server-confirmed stored identity.
+  /// A canonical conversation is no longer an unsaved local draft.
+  Session withStoredId(String storedId) => Session(
+    id: storedId,
+    title: title,
+    model: model,
+    source: source,
+    messageCount: messageCount,
+    isActive: isActive,
+    preview: preview,
+    startedAt: startedAt,
+    endedAt: endedAt,
+    lastActive: lastActive,
+    pinned: pinned,
+    lineageRootId: lineageRootId ?? (storedId == id ? null : id),
+    archived: archived,
+    isLocalDraft: false,
+  );
+
   /// Parses one session row.
   ///
   /// Set [ignoreIsActive] when the payload's `is_active` is a fixed

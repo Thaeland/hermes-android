@@ -51,6 +51,14 @@ void main() {
           baseUrl: connection.baseUrl,
           apiKey: connection.apiKey,
           httpClient: MockClient((request) async {
+            if (request.url.path == '/api/sessions/stored-chat') {
+              return http.Response(
+                jsonEncode({
+                  'session': {'id': 'stored-chat', 'archived': false},
+                }),
+                200,
+              );
+            }
             requests.add(request.url.toString());
             if (requests.length == 1) {
               if (mode == 'stored-held-initial') return first.future;

@@ -25,10 +25,24 @@ class _HistoryHttpClient extends http.BaseClient {
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
-    requests.add(request.url);
+    if (request.method == 'GET' &&
+        request.url.path == '/api/sessions/stored-history-fixture') {
+      return http.StreamedResponse(
+        Stream.value(
+          utf8.encode(
+            jsonEncode({
+              'session': {'id': 'stored-history-fixture', 'archived': false},
+            }),
+          ),
+        ),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
+    }
     if (request.method != 'GET' || !request.url.path.endsWith('/messages')) {
       return http.StreamedResponse(Stream.value(utf8.encode('{}')), 404);
     }
+    requests.add(request.url);
     final gate = responseGate;
     if (gate != null) await gate.future;
     if (failNextRequest) {

@@ -9,8 +9,24 @@ class AppLocalizationsKo extends AppLocalizations {
   AppLocalizationsKo([String locale = 'ko']) : super(locale);
 
   @override
-  String get a_one_off_question_archives_itself_after_72_hours_anything =>
-      '일회성 질문입니다. 72시간 후에 자동으로 보관 처리되며, 보관할 가치가 있는 내용은 기억에 유지됩니다.';
+  String get archive_chat => '채팅 보관';
+
+  @override
+  String get unarchive_chat => '채팅 보관 해제';
+
+  @override
+  String get chat_archived => '채팅이 보관되었습니다';
+
+  @override
+  String get chat_unarchived => '채팅 보관이 해제되었습니다';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return '채팅 보관 상태를 변경할 수 없습니다: $error';
+  }
+
+  @override
+  String get quick_chat_description => '일회성 질문입니다.';
 
   @override
   String get ai_full_text => 'AI + 전문 검색';
@@ -118,7 +134,8 @@ class AppLocalizationsKo extends AppLocalizations {
   String get archived => '보관됨';
 
   @override
-  String get archived_conversations_appear_here => '보관된 대화가 여기에 표시됩니다.';
+  String get archived_conversations_appear_here =>
+      '보관한 대화만 여기에 표시됩니다. 이전 채팅은 모든 채팅에 남아 있습니다.';
 
   @override
   String get archived_quick_chats => '보관된 빠른 채팅';
@@ -153,9 +170,6 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get auto_device_default => '자동 (기기 기본값)';
-
-  @override
-  String get auto_archives_after_72_hours => '72시간 후 자동 보관';
 
   @override
   String get automation => '자동화';
