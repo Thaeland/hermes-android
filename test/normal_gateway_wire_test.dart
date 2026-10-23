@@ -27,6 +27,75 @@ void main() {
   });
 
   test(
+    'fresh stock create binds cwd and canonical baseline before the first prompt wire',
+    () async {
+      gateway.createFresh = true;
+      gateway.rows.clear();
+      gateway.historyEntered = Completer<void>();
+      gateway.releaseHistory = Completer<void>();
+      final controller = GatewayTurnApplicationController();
+      addTearDown(controller.close);
+      final session = controller.normalSessionFor(gateway.connection);
+      await session.ready;
+      final chat = session.chatFor(
+        'mob-fresh',
+        title: 'Fresh stock chat',
+        workingDirectory: '/project',
+      );
+      final flight = chat.submitPrepared(
+        reservation: chat.reserve()!,
+        text: 'First prompt',
+        localContent: 'First prompt',
+      );
+      flight.ignore();
+      await gateway.historyEntered!.future;
+      expect(chat.storedSessionId, 'stored');
+      expect(gateway.historyPaths, ['/api/sessions/stored/messages']);
+      expect(
+        gateway.requests
+            .map((r) => r['method'])
+            .where((method) => method != 'client.capabilities'),
+        ['session.resume', 'session.create'],
+      );
+      expect(
+        gateway.requests.singleWhere(
+          (r) => r['method'] == 'session.create',
+        )['params'],
+        {'cwd': '/project'},
+      );
+      expect(await session.pendingStore.load(session.scope), isEmpty);
+      gateway.releaseHistory!.complete();
+      await gateway.submitted.future;
+      expect(chat.snapshot.rowFloor, 0);
+      expect(
+        (await session.pendingStore.load(session.scope)).single.rowFloor,
+        0,
+      );
+      gateway.rows.addAll([
+        {'id': 1, 'role': 'user', 'content': 'First prompt'},
+        {'id': 2, 'role': 'assistant', 'content': 'First final'},
+      ]);
+      gateway.event('message.complete', {'text': 'First final'});
+      await flight;
+      expect(chat.snapshot.hasActiveTurn, isTrue);
+      gateway.running = false; // stock completes its lifecycle after the frame
+      chat.requestRecovery();
+      await _until(() => !chat.snapshot.hasActiveTurn);
+      expect(chat.phase, NormalGatewayTurnPhase.completed);
+      expect(chat.snapshot.historyRows.last['content'], 'First final');
+      expect(await session.pendingStore.load(session.scope), isEmpty);
+      expect(
+        gateway.requests.where((r) => r['method'] == 'prompt.submit'),
+        hasLength(1),
+      );
+      expect(
+        gateway.requests.where((r) => r['method'] == 'session.create'),
+        hasLength(1),
+      );
+    },
+  );
+
+  test(
     'production ingress delivers tokens once, resumes continued tools/deltas without resending',
     () async {
       final controller = GatewayTurnApplicationController();
@@ -457,6 +526,11 @@ class _Gateway {
   Completer<void>? nextResume;
   bool rejectSubmit = false;
   bool rejectResume = false;
+  bool createFresh = false;
+  bool created = false;
+  Completer<void>? historyEntered;
+  Completer<void>? releaseHistory;
+  final historyPaths = <String>[];
   bool holdSubmitAck = false;
   void Function()? releaseSubmitAck;
   bool running = true;
@@ -482,6 +556,11 @@ class _Gateway {
         request.response.write('{"ticket":"fixture-ticket"}');
         await request.response.close();
       } else if (request.uri.path.endsWith('/messages')) {
+        historyPaths.add(request.uri.path);
+        if (historyEntered != null && !historyEntered!.isCompleted) {
+          historyEntered!.complete();
+        }
+        await releaseHistory?.future;
         request.response.headers.contentType = ContentType.json;
         request.response.write(jsonEncode({'data': rows}));
         await request.response.close();
@@ -511,9 +590,11 @@ class _Gateway {
           requests.add(frame);
           final method = frame['method'];
           if (method == 'prompt.submit') running = true;
+          if (method == 'session.create') created = true;
           final rejected =
               method == 'prompt.submit' && rejectSubmit ||
-              method == 'session.resume' && rejectResume;
+              method == 'session.resume' &&
+                  (rejectResume || createFresh && !created);
           try {
             void reply() => ws.add(
               jsonEncode({
@@ -531,6 +612,8 @@ class _Gateway {
                           'running': running,
                           if (inflight != null) 'inflight': inflight,
                         }
+                      : method == 'session.create'
+                      ? {'session_id': runtime, 'stored_session_id': 'stored'}
                       : {'ok': true},
               }),
             );

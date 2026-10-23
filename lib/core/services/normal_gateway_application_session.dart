@@ -385,6 +385,8 @@ class NormalGatewayChatOwner {
   String? _draftToRestore;
   bool _draftRestoreAllowed = false;
   Timer? _retryTimer;
+  Timer? _baselineTimer;
+  Completer<List<Map<String, dynamic>>?>? _baselineRead;
   int _retry = 0;
   bool _recovering = false;
 
@@ -580,9 +582,21 @@ class NormalGatewayChatOwner {
         }
         _session._bind(this, stored);
       }
-      // Use only a successfully observed, pre-admission canonical baseline.
-      // A slow/unavailable history endpoint must not block sending; unknown
-      // remains unknown and cannot later establish history-only completion.
+      if (!_current(generation)) return;
+      // A local draft's initial GET can legitimately 404 before session.create.
+      // Once durably bound, try one canonical read BEFORE write-ahead/wire if
+      // no successful history was observed. Existing baselines need no extra
+      // latency; the bounded fallback cannot hold a send on a slow endpoint.
+      // A 404/failure/timeout stays unknown, never an invented empty baseline.
+      if (!_historyKnown) {
+        final stored = storedSessionId!;
+        final baseline = await _readAdmissionBaseline(stored);
+        if (!_current(generation)) return;
+        if (stored == storedSessionId && baseline != null) {
+          _history = baseline;
+          _historyKnown = true;
+        }
+      }
       _floor = _historyKnown ? _numericFloor(_history) : null;
       _historyKnown = false;
       if (!_current(generation)) return;
@@ -644,6 +658,36 @@ class NormalGatewayChatOwner {
       }
       await _settle(false, error.toString(), generation: generation);
       rethrow;
+    }
+  }
+
+  Future<List<Map<String, dynamic>>?> _readAdmissionBaseline(
+    String stored,
+  ) async {
+    final read = Completer<List<Map<String, dynamic>>?>();
+    _baselineRead = read;
+    _baselineTimer = Timer(
+      const Duration(seconds: 2),
+      () => read.complete(null),
+    );
+    // A late response may finish after timeout, wire emission or close. It
+    // resolves only this read, never mutates the owner's baseline/history.
+    unawaited(
+      Future.sync(() => _session._history(stored)).then(
+        (rows) {
+          if (!read.isCompleted) read.complete(rows);
+        },
+        onError: (Object _, StackTrace _) {
+          if (!read.isCompleted) read.complete(null);
+        },
+      ),
+    );
+    try {
+      return await read.future;
+    } finally {
+      _baselineTimer?.cancel();
+      _baselineTimer = null;
+      _baselineRead = null;
     }
   }
 
@@ -1327,6 +1371,9 @@ class NormalGatewayChatOwner {
   void _close() {
     _generation++;
     _retryTimer?.cancel();
+    _baselineTimer?.cancel();
+    final baseline = _baselineRead;
+    if (baseline != null && !baseline.isCompleted) baseline.complete(null);
     _listeners.clear();
     _pendingInput.clear();
   }

@@ -201,9 +201,10 @@ void main() {
   test(
     'unknown settled floor cannot retire projection on old matching prompt text',
     () async {
-      final f = _Fixture();
+      final f = _Fixture()..historyFails = true;
       addTearDown(f.close);
       await f.start(seedHistory: false);
+      f.historyFails = false;
       f.rows = [
         {'id': 1, 'role': 'user', 'content': 'private prompt'},
         {'id': 2, 'role': 'assistant', 'content': 'Old identical prompt reply'},
@@ -399,6 +400,183 @@ void main() {
       await f.close();
     },
   );
+
+  test(
+    'unknown existing history is read before wire; retained old terminal cannot settle',
+    () async {
+      final f = _Fixture()
+        ..rows = [
+          {'id': 75, 'role': 'assistant', 'content': 'Retained old final'},
+        ];
+      addTearDown(f.close);
+      await f.start(seedHistory: false);
+      expect(f.historyIds, ['stored']);
+      expect(f.owner.snapshot.rowFloor, 75);
+      expect(f.atInvocation.single.rowFloor, 75);
+      expect(f.atInvocation.single.phase, 'write_ahead');
+      f.running = false;
+      f.emit('message.complete', {'text': 'Retained old final'});
+      f.rpc.complete();
+      await f.flight;
+      await _flush();
+      expect(f.owner.snapshot.hasActiveTurn, isTrue);
+      expect(await f.store.load('scope'), hasLength(1));
+      f.rows = [
+        {'id': 76, 'role': 'user', 'content': 'private prompt'},
+        {'id': 77, 'role': 'assistant', 'content': 'New final'},
+      ];
+      f.owner.requestRecovery();
+      await _flush();
+      expect(f.owner.snapshot.hasActiveTurn, isFalse);
+      expect(await f.store.load('scope'), isEmpty);
+      expect(f.submissions, 1);
+    },
+  );
+
+  for (final status in [404, 503]) {
+    test(
+      'pre-wire HTTP $status is unknown, never floor zero or old-history completion',
+      () async {
+        final f = _Fixture()..historyError = Exception('HTTP $status');
+        addTearDown(f.close);
+        await f.start(seedHistory: false);
+        expect(f.owner.snapshot.rowFloor, isNull);
+        expect(f.atInvocation.single.rowFloor, isNull);
+        expect(f.historyIds, ['stored']);
+        f.historyError = null;
+        f.rows = [
+          {'id': 100, 'role': 'assistant', 'content': 'Possibly old final'},
+        ];
+        f.running = false;
+        f.emit('message.complete', {'text': 'Possibly old final'});
+        f.rpc.complete();
+        await f.flight;
+        await _flush();
+        expect(f.owner.snapshot.hasActiveTurn, isTrue);
+        expect(f.owner.snapshot.rowFloor, isNull);
+        expect(await f.store.load('scope'), hasLength(1));
+        expect(f.submissions, 1);
+      },
+    );
+  }
+
+  test(
+    'known canonical baseline avoids a redundant slow pre-wire read',
+    () async {
+      final f = _Fixture()
+        ..historyGate = Completer<List<Map<String, dynamic>>>();
+      addTearDown(f.close);
+      await f.start();
+      expect(f.historyIds, isEmpty);
+      expect(f.submissions, 1);
+      expect(f.owner.snapshot.rowFloor, 10);
+      expect(f.atInvocation.single.rowFloor, 10);
+    },
+  );
+
+  test('close during binding cannot start an admission read or wire', () async {
+    final f = _Fixture();
+    addTearDown(f.close);
+    await f.session.ready;
+    final chat = f.chat('local');
+    chat.subscribe((snapshot) {
+      if (snapshot.storedSessionId != null) unawaited(f.session.close());
+    });
+    await chat.submitPrepared(
+      reservation: chat.reserve()!,
+      text: 'Prompt',
+      localContent: 'Prompt',
+      knownStoredSessionId: 'stored',
+    );
+    expect(f.historyIds, isEmpty);
+    expect(f.submissions, 0);
+    expect(await f.store.load('scope'), isEmpty);
+  });
+
+  for (final closeBeforeDeadline in [false, true]) {
+    test(
+      'bounded admission read closeBeforeDeadline=$closeBeforeDeadline fences late baseline and cancels timer',
+      () async {
+        final prefs = await SharedPreferences.getInstance();
+        fakeAsync((clock) {
+          final held = Completer<List<Map<String, dynamic>>>();
+          final rpc = Completer<void>();
+          var submissions = 0;
+          late NormalGatewayChatOwner chat;
+          final session = NormalGatewayApplicationSession(
+            connection: _connection,
+            scope: 'scope',
+            pendingStore: NormalGatewayPendingStore(
+              preferences: () async => prefs,
+            ),
+            history: (_) => held.future,
+            resume:
+                ({required localSessionId, required storedSessionId}) async =>
+                    const ResumedGatewaySession(
+                      runtimeSessionId: 'runtime',
+                      running: true,
+                    ),
+            submit:
+                ({
+                  required sessionId,
+                  required text,
+                  required onEvent,
+                  required onSent,
+                }) {
+                  submissions++;
+                  onSent();
+                  return rpc.future;
+                },
+          );
+          session.ready.then((_) {
+            chat = session.chatFor(
+              'local',
+              storedSessionId: 'stored',
+              title: 'Chat',
+            );
+            unawaited(
+              chat.submitPrepared(
+                reservation: chat.reserve()!,
+                text: 'Prompt',
+                localContent: 'Prompt',
+              ),
+            );
+          });
+          clock.flushMicrotasks();
+          expect(submissions, 0);
+          expect(clock.pendingTimers, hasLength(1));
+          if (closeBeforeDeadline) {
+            session.close(); // invalidates this submission's generation
+            clock.flushMicrotasks();
+            expect(clock.pendingTimers, isEmpty);
+          } else {
+            clock.elapse(const Duration(milliseconds: 1999));
+            expect(submissions, 0);
+            clock.elapse(const Duration(milliseconds: 1));
+            expect(submissions, 1);
+            expect(chat.snapshot.wireEmitted, isTrue);
+            expect(clock.pendingTimers, isEmpty);
+          }
+          held.complete([
+            {'id': 999, 'role': 'assistant', 'content': 'Too late'},
+          ]);
+          clock.flushMicrotasks();
+          expect(chat.snapshot.rowFloor, isNull);
+          expect(chat.snapshot.historyRows, isEmpty);
+          expect(submissions, closeBeforeDeadline ? 0 : 1);
+          session.close();
+          rpc.complete();
+          clock.flushMicrotasks();
+          expect(clock.pendingTimers, isEmpty);
+          session.pendingStore.load('scope').then((markers) {
+            expect(markers, hasLength(closeBeforeDeadline ? 0 : 1));
+            if (markers.isNotEmpty) expect(markers.single.rowFloor, isNull);
+          });
+          clock.flushMicrotasks();
+        });
+      },
+    );
+  }
 
   test(
     'recovery single flight hands old held history to next generation',
@@ -696,6 +874,8 @@ class _Fixture {
   bool emitOnSubmit = true;
   bool? running = true;
   bool historyFails = false;
+  Object? historyError;
+  final historyIds = <String>[];
   Completer<List<Map<String, dynamic>>>? historyGate;
   List<Map<String, dynamic>> rows = [
     {'id': 10, 'role': 'assistant', 'content': 'Before'},
@@ -726,7 +906,9 @@ class _Fixture {
           running: running,
         );
       },
-      history: (_) async {
+      history: (id) async {
+        historyIds.add(id);
+        if (historyError != null) throw historyError!;
         if (historyFails) throw StateError('history unavailable');
         return historyGate?.future ?? rows;
       },
