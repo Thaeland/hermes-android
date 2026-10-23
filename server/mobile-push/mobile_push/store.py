@@ -21,6 +21,12 @@ CREATE TABLE IF NOT EXISTS registrations (
  endpoint TEXT NOT NULL, keys_json TEXT NOT NULL, kinds_json TEXT NOT NULL,
  sessions_json TEXT NOT NULL, challenge_hash TEXT NOT NULL, challenge_expires INTEGER NOT NULL
 );
+-- Retain nonce tombstones across rotations/revocation. Never prune them with
+-- expiring events: a delayed authenticated PUT must not roll back a newer grant.
+CREATE TABLE IF NOT EXISTS registration_nonces (
+ installation TEXT NOT NULL, nonce_hash TEXT NOT NULL,
+ PRIMARY KEY(installation,nonce_hash)
+);
 CREATE TABLE IF NOT EXISTS events (
  cursor INTEGER PRIMARY KEY AUTOINCREMENT, event_id TEXT UNIQUE NOT NULL,
  provider TEXT NOT NULL, user_id TEXT NOT NULL, dedup TEXT NOT NULL,
@@ -56,6 +62,14 @@ class Store:
         with self.connection() as db:
             db.execute("PRAGMA journal_mode=WAL")
             db.executescript(SCHEMA)
+            # Seed current nonces when opening an older database.
+            db.executemany(
+                "INSERT OR IGNORE INTO registration_nonces VALUES(?,?)",
+                [
+                    (row["installation"], self.nonce_hash(row["nonce"]))
+                    for row in db.execute("SELECT installation,nonce FROM registrations")
+                ],
+            )
 
     @contextlib.contextmanager
     def connection(self):
@@ -87,6 +101,27 @@ class Store:
             self.owner(row, principal)
             return dict(row)
 
+    @staticmethod
+    def nonce_hash(nonce):
+        return hashlib.sha256(nonce.encode()).hexdigest()
+
+    @staticmethod
+    def registration_response(row):
+        return {
+            "generation": row["generation"],
+            "status": row["status"],
+            "registration_nonce": row["nonce"],
+        }
+
+    @staticmethod
+    def same_subscription(row, body):
+        return (
+            row["endpoint"] == body["endpoint"]
+            and json.loads(row["keys_json"]) == body["keys"]
+            and json.loads(row["kinds_json"]) == body["event_kinds"]
+            and json.loads(row["sessions_json"]) == body["session_ids"]
+        )
+
     def put(self, principal, installation, body, policy: Policy):
         now = self.now()
         challenge = secrets.token_urlsafe(32)
@@ -97,13 +132,29 @@ class Store:
             if previous:
                 self.owner(previous, principal)
                 if previous["nonce"] == body["registration_nonce"]:
-                    raise Rejected(409, "A fresh registration_nonce is required")
+                    if previous["status"] not in {
+                        "pending",
+                        "active",
+                    } or not self.same_subscription(previous, body):
+                        raise Rejected(409, "Registration nonce is revoked or subscription changed")
+                    if previous["status"] == "active" or previous["challenge_expires"] > now:
+                        # Recover only this exact committed operation. No challenge
+                        # disclosed and no active/outbox state changed on replay.
+                        return self.registration_response(previous)
+                    # Expired pending proof: reissue encrypted proof below. Keep
+                    # generation stable for a client that already persisted it.
+                elif db.execute(
+                    "SELECT 1 FROM registration_nonces WHERE installation=? AND nonce_hash=?",
+                    (installation, self.nonce_hash(body["registration_nonce"])),
+                ).fetchone():
+                    raise Rejected(409, "Registration nonce was superseded")
             elif (
                 db.execute("SELECT count(*) FROM registrations").fetchone()[0]
                 >= policy.max_registrations
             ):
                 raise Rejected(429, "Registration capacity reached")
-            generation = previous["generation"] + 1 if previous else 1
+            same_nonce = previous and previous["nonce"] == body["registration_nonce"]
+            generation = previous["generation"] + (0 if same_nonce else 1) if previous else 1
             db.execute("DELETE FROM outbox WHERE installation=?", (installation,))
             db.execute(
                 "UPDATE events SET cancelled=1 WHERE installation=? AND kind='challenge'",
@@ -125,10 +176,14 @@ class Store:
             db.execute(
                 "INSERT OR REPLACE INTO registrations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", values
             )
+            db.execute(
+                "INSERT OR IGNORE INTO registration_nonces VALUES(?,?)",
+                (installation, self.nonce_hash(body["registration_nonce"])),
+            )
             event_id = self._event(
                 db,
                 principal,
-                f"challenge:{installation}:{generation}",
+                f"challenge:{installation}:{generation}:{uuid.uuid4().hex}",
                 "challenge",
                 now,
                 now + policy.challenge_ttl,
@@ -158,8 +213,8 @@ class Store:
             self.owner(row, principal)
             if (
                 row["generation"] != generation
-                or row["status"] != "pending"
-                or row["challenge_expires"] <= self.now()
+                or row["status"] not in {"pending", "active"}
+                or (row["status"] == "pending" and row["challenge_expires"] <= self.now())
                 or not secrets.compare_digest(
                     row["challenge_hash"], hashlib.sha256(challenge.encode()).hexdigest()
                 )
@@ -167,8 +222,12 @@ class Store:
                 raise Rejected(409, "Challenge expired, invalid or superseded")
             if any(not policy.allowed(principal, sid) for sid in json.loads(row["sessions_json"])):
                 raise Rejected(403, "Session scope is no longer authorised")
+            if row["status"] == "active":
+                # A lost confirmation ACK is read recovery, not reactivation.
+                # Preserve subsequent notifications and retain only the proof hash.
+                return {"generation": generation, "status": "active"}
             db.execute(
-                "UPDATE registrations SET status='active',challenge_hash='' WHERE installation=?",
+                "UPDATE registrations SET status='active' WHERE installation=?",
                 (installation,),
             )
             db.execute("DELETE FROM outbox WHERE installation=?", (installation,))

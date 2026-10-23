@@ -112,7 +112,7 @@ def test_real_manager_rolls_back_initialisation_failure(env, monkeypatch):
     manager.unload()
 
 
-def test_real_dashboard_loader_captures_profile_and_fails_closed_without_session(env, monkeypatch):
+def test_dashboard_loader_reads_request_home_and_fails_closed_without_session(env, monkeypatch):
     host(env, monkeypatch)
     from hermes_constants import reset_hermes_home_override, set_hermes_home_override
 
@@ -133,17 +133,21 @@ def test_real_dashboard_loader_captures_profile_and_fails_closed_without_session
     second_home = other_home(env)
     second = load(second_home, "test_mobile_api_b")
     apps = [FastAPI(), FastAPI()]
-    for app, router in zip(apps, (first, second)):
+    for app, router, home in zip(apps, (first, second), (env.profile.home, second_home)):
 
         @app.middleware("http")
-        async def authenticated(request, call_next):
+        async def authenticated(request, call_next, home=home):
             if env.identity[0] is not None:
                 request.state.session = env.identity[0]
-            return await call_next(request)
+            token = set_hermes_home_override(str(home))
+            try:
+                return await call_next(request)
+            finally:
+                reset_hermes_home_override(token)
 
         app.include_router(router)
     with TestClient(apps[0]) as client_a, TestClient(apps[1]) as client_b:
-        # Root import has no runtime worker; authenticated read touches only the captured fake home.
+        # Root import has no runtime worker; each read uses the request-local fake home.
         assert client_a.get("/capabilities").json()["enabled"]
         assert client_b.get("/capabilities").json()["enabled"]
         assert client_b.get("/events").json()["events"] == []

@@ -98,13 +98,13 @@ def test_challenge_is_not_revealed_by_events_and_only_correct_proof_activates(en
             PREFIX + "/registrations/phone/confirm",
             json={"generation": 1, "challenge": hint["challenge"]},
         ).status_code
-        == 409
+        == 200  # exact confirmation ACK recovery, not reactivation
     )
 
 
 def test_rotation_and_revoke_invalidate_all_old_generations(env):
     first, old = pending(env)
-    assert env.client.put(PREFIX + "/registrations/phone", json=env.body).status_code == 409
+    assert env.client.put(PREFIX + "/registrations/phone", json=env.body).json() == first
     second, new = pending(env, registration_nonce="fresh_nonce_abcdef012345")
     assert second["generation"] == first["generation"] + 1
     assert (

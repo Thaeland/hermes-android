@@ -7,6 +7,7 @@ import 'package:hermes_android/core/widgets/mobile_push_settings.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
 import 'package:hermes_android/core/services/mobile_push_service.dart';
+import 'package:hermes_android/core/services/mobile_push_api.dart';
 import 'package:hermes_android/core/services/notification_prefs.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -39,7 +40,9 @@ class Fixture {
   final MethodChannel channel = const MethodChannel(
     MobilePushService.channelName,
   );
-  late final MobilePushService service;
+  late MobilePushService service;
+  late DashboardClient Function(SavedConnection) clientFactory;
+  String? failNativeOnce;
   late final ConnectionManager manager;
   late final SavedConnection connection;
   int capsStatus = 200;
@@ -69,6 +72,10 @@ class Fixture {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, (call) async {
           methods.add(call.method);
+          if (failNativeOnce == call.method) {
+            failNativeOnce = null;
+            throw PlatformException(code: 'process-died-before-persist');
+          }
           final args = Map<String, dynamic>.from(call.arguments as Map? ?? {});
           switch (call.method) {
             case 'permission':
@@ -141,82 +148,87 @@ class Fixture {
               throw StateError(call.method);
           }
         });
+    clientFactory = (c) => DashboardClient(
+      host: c.host,
+      port: c.dashboardPort,
+      useHttps: c.useHttps,
+      pathPrefix: c.dashboardPrefix!,
+      username: c.dashboardUsername,
+      password: c.dashboardPassword,
+      httpClient: MockClient((request) async {
+        requests.add(request);
+        if (request.url.path == '/dash/auth/password-login') {
+          expect(jsonDecode(request.body)['username'], 'fixture-user');
+          return http.Response(
+            '{}',
+            200,
+            headers: {
+              'set-cookie': 'hermes_session_at=fixture-cookie; HttpOnly',
+            },
+          );
+        }
+        expect(request.url.host, 'fixture.invalid');
+        expect(
+          request.url.path.startsWith('/dash/api/plugins/mobile-push/'),
+          isTrue,
+        );
+        expect(request.headers['Cookie'], 'hermes_session_at=fixture-cookie');
+        expect(request.headers.containsKey('Authorization'), isFalse);
+        if (request.url.path.endsWith('/capabilities')) {
+          return http.Response(
+            jsonEncode({
+              'schema': 1,
+              'enabled': true,
+              'transports': ['webpush'],
+              'vapid_public_key': base64Url
+                  .encode([4, ...List<int>.filled(64, 1)])
+                  .replaceAll('=', ''),
+            }),
+            capsStatus,
+          );
+        }
+        if (request.method == 'PUT') {
+          if (onPut != null) return onPut!(request);
+          return pending();
+        }
+        if (request.url.path.endsWith('/confirm')) {
+          if (onConfirm != null) return onConfirm!(request);
+          return http.Response('{"status":"active","generation":7}', 200);
+        }
+        if (request.method == 'DELETE') {
+          return http.Response('{}', failRevoke ? 503 : 200);
+        }
+        if (request.url.path.endsWith('/events')) {
+          final after = int.parse(request.url.queryParameters['after']!);
+          final page = feed.skip(after).take(eventPageSize).toList();
+          final next = after + page.length;
+          return http.Response(
+            jsonEncode({
+              'events': page,
+              'next_cursor': next,
+              'has_more': next < feed.length,
+            }),
+            200,
+          );
+        }
+        throw StateError('Unexpected fixture request');
+      }),
+    );
+    createService();
+  }
+
+  void createService() {
     service = MobilePushService(
       supported: true,
       channel: channel,
-      clientFactory: (c) => DashboardClient(
-        host: c.host,
-        port: c.dashboardPort,
-        useHttps: c.useHttps,
-        pathPrefix: c.dashboardPrefix!,
-        username: c.dashboardUsername,
-        password: c.dashboardPassword,
-        httpClient: MockClient((request) async {
-          requests.add(request);
-          if (request.url.path == '/dash/auth/password-login') {
-            expect(jsonDecode(request.body)['username'], 'fixture-user');
-            return http.Response(
-              '{}',
-              200,
-              headers: {
-                'set-cookie': 'hermes_session_at=fixture-cookie; HttpOnly',
-              },
-            );
-          }
-          expect(request.url.host, 'fixture.invalid');
-          expect(
-            request.url.path.startsWith('/dash/api/plugins/mobile-push/'),
-            isTrue,
-          );
-          expect(request.headers['Cookie'], 'hermes_session_at=fixture-cookie');
-          expect(request.headers.containsKey('Authorization'), isFalse);
-          if (request.url.path.endsWith('/capabilities')) {
-            return http.Response(
-              jsonEncode({
-                'schema': 1,
-                'enabled': true,
-                'transports': ['webpush'],
-                'vapid_public_key': base64Url
-                    .encode([4, ...List<int>.filled(64, 1)])
-                    .replaceAll('=', ''),
-              }),
-              capsStatus,
-            );
-          }
-          if (request.method == 'PUT') {
-            if (onPut != null) return onPut!(request);
-            return pending();
-          }
-          if (request.url.path.endsWith('/confirm')) {
-            if (onConfirm != null) return onConfirm!(request);
-            return http.Response('{"status":"active"}', 200);
-          }
-          if (request.method == 'DELETE') {
-            return http.Response('{}', failRevoke ? 503 : 200);
-          }
-          if (request.url.path.endsWith('/events')) {
-            final after = int.parse(request.url.queryParameters['after']!);
-            final page = feed.skip(after).take(eventPageSize).toList();
-            final next = after + page.length;
-            return http.Response(
-              jsonEncode({
-                'events': page,
-                'next_cursor': next,
-                'has_more': next < feed.length,
-              }),
-              200,
-            );
-          }
-          throw StateError('Unexpected fixture request');
-        }),
-      ),
+      clientFactory: clientFactory,
     );
   }
 
-  http.Response pending() => http.Response(
+  http.Response pending({String status = 'pending'}) => http.Response(
     jsonEncode({
       'generation': 7,
-      'status': 'pending',
+      'status': status,
       'registration_nonce': native['nonce'],
     }),
     200,
@@ -455,6 +467,183 @@ void main() {
       });
     },
   );
+  test(
+    'every push operation forwards named profile and event cursor',
+    () async {
+      final requests = <http.Request>[];
+      final client = DashboardClient(
+        host: 'fixture.invalid',
+        port: 443,
+        useHttps: true,
+        pathPrefix: '/dash',
+        proxied: true,
+        gatewayProfile: 'other-profile',
+        httpClient: MockClient((request) async {
+          requests.add(request);
+          return http.Response(
+            jsonEncode({
+              'schema': 1,
+              'enabled': true,
+              'transports': ['webpush'],
+              'vapid_public_key': base64Url
+                  .encode([4, ...List<int>.filled(64, 1)])
+                  .replaceAll('=', ''),
+            }),
+            200,
+          );
+        }),
+      );
+      final api = MobilePushApi(client);
+      f.seed();
+      await api.capabilities();
+      await api.register(f.native);
+      await api.confirm('phone', 7, 'proof');
+      await api.events('123');
+      await api.revoke('phone');
+      expect(requests, hasLength(5));
+      for (final request in requests) {
+        expect(request.url.queryParameters['profile'], 'other-profile');
+        expect(request.url.path, startsWith('/dash/api/plugins/mobile-push/'));
+        expect(request.headers.containsKey('Authorization'), isFalse);
+      }
+      expect(requests[3].url.queryParameters['after'], '123');
+      expect(requests[3].url.queryParameters['limit'], '100');
+      client.close();
+    },
+  );
+  test(
+    'lost PUT acknowledgement retries exact nonce and recovers generation',
+    () async {
+      f.seed();
+      var attempts = 0;
+      f.onPut = (_) async {
+        attempts++;
+        f.challenge();
+        if (attempts == 1) throw http.ClientException('response lost');
+        return f.pending();
+      };
+      await f.service.initialize(f.manager);
+      expect(f.native['generation'], 0);
+      expect(f.service.active, isFalse);
+      await f.service.retry();
+      expect(f.service.active, isTrue);
+      final puts = f.requests.where((r) => r.method == 'PUT').toList();
+      expect(puts, hasLength(2));
+      expect(puts[0].body, puts[1].body);
+    },
+  );
+  for (final method in ['generation', 'activate']) {
+    test(
+      'process death after server reply before native $method persists recovers',
+      () async {
+        f.seed();
+        f.challenge();
+        var serverActive = false;
+        f.onPut = (_) async =>
+            f.pending(status: serverActive ? 'active' : 'pending');
+        f.onConfirm = (_) async {
+          serverActive = true;
+          return http.Response('{"status":"active","generation":7}', 200);
+        };
+        f.failNativeOnce = method;
+        await f.service.initialize(f.manager);
+        expect(f.native['active'], isFalse);
+        f.service.dispose();
+        f.createService();
+        await f.service.initialize(f.manager);
+        expect(f.service.active, isTrue);
+        expect(serverActive, isTrue);
+      },
+    );
+  }
+  test(
+    'lost confirmation ACK recovers after challenge expiry without push authority',
+    () async {
+      f.seed();
+      f.challenge();
+      var attempts = 0;
+      var serverActive = false;
+      f.onPut = (_) async =>
+          f.pending(status: serverActive ? 'active' : 'pending');
+      f.onConfirm = (_) async {
+        serverActive = true;
+        if (++attempts == 1) throw http.ClientException('reply lost');
+        return http.Response('{"status":"active","generation":7}', 200);
+      };
+      await f.service.initialize(f.manager);
+      expect(f.service.active, isFalse);
+      (f.native['challenges'] as List).single['expires_at'] = 1;
+      await f.service.retry();
+      expect(f.service.active, isTrue);
+      expect(attempts, 2);
+    },
+  );
+  test(
+    'expired pending challenge retry requests fresh encrypted proof for same generation',
+    () async {
+      f.seed();
+      f.native['generation'] = 7;
+      f.challenge();
+      (f.native['challenges'] as List).single['expires_at'] = 1;
+      f.onPut = (_) async {
+        f.challenge(); // server reissues only an expired pending challenge
+        return f.pending();
+      };
+      await f.service.initialize(f.manager);
+      expect(f.requests.where((r) => r.method == 'PUT'), hasLength(1));
+      expect(f.service.active, isTrue);
+    },
+  );
+  test('active PUT recovery alone never grants native authority', () async {
+    f.seed();
+    f.onPut = (_) async => f.pending(status: 'active');
+    await f.service.initialize(f.manager);
+    expect(f.native['generation'], 7);
+    expect(f.service.active, isFalse);
+    expect(f.methods, isNot(contains('activate')));
+  });
+  test(
+    'disable during lost-confirmation recovery fences the late active ACK',
+    () async {
+      f.seed();
+      f.challenge();
+      var attempts = 0;
+      final started = Completer<void>();
+      final response = Completer<http.Response>();
+      f.onPut = (_) async =>
+          f.pending(status: attempts == 0 ? 'pending' : 'active');
+      f.onConfirm = (_) async {
+        if (++attempts == 1) throw http.ClientException('reply lost');
+        started.complete();
+        return response.future;
+      };
+      await f.service.initialize(f.manager);
+      final retry = f.service.retry();
+      await started.future;
+      final disable = f.service.disable();
+      await Future<void>.delayed(Duration.zero);
+      expect(f.native['enabled'], isFalse);
+      response.complete(
+        http.Response('{"status":"active","generation":7}', 200),
+      );
+      await retry;
+      await disable;
+      expect(f.native['active'], isFalse);
+      expect(f.methods, isNot(contains('activate')));
+    },
+  );
+  test(
+    'confirmation response for a different generation cannot activate',
+    () async {
+      f.seed();
+      f.challenge();
+      f.onConfirm = (_) async =>
+          http.Response('{"status":"active","generation":8}', 200);
+      await f.service.initialize(f.manager);
+      expect(f.service.active, isFalse);
+      expect(f.methods, isNot(contains('activate')));
+    },
+  );
   test('old challenge cannot activate a new generation', () async {
     f.seed();
     f.challenge(generation: 6);
@@ -502,7 +691,7 @@ void main() {
           'generation': 0,
           'active': false,
         });
-        return http.Response('{"status":"active"}', 200);
+        return http.Response('{"status":"active","generation":7}', 200);
       };
       await f.service.initialize(f.manager);
       expect(f.native['active'], isFalse);

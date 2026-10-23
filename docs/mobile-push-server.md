@@ -111,10 +111,16 @@ refuses automatic backend Python import from an untrusted project directory.
 `dashboard/manifest.json` declares `api: plugin_api.py`; its router is mounted at
 `/api/plugins/mobile-push`. The tiny hidden dashboard bundle intentionally adds no UI.
 
-The profile home is captured immutably at registration/API load. ACLs, endpoint
-exceptions, key path and enabled policy are re-read on operations and before sends;
-update this JSON by an atomic private-file replacement. Enabling after a disabled
-startup requires a lifecycle-process restart to acquire hooks/worker. Disabling the
+Each API operation uses the home selected by Hermes' vetted request-local
+`?profile=<name>` dependency, including capabilities, registration, confirmation,
+revocation and events. Stores are keyed by that home; the API never derives a path
+from client headers or chooses a principal from the profile parameter. Omitting
+`profile` selects the dashboard's launch profile. Each lifecycle runtime separately
+captures its own immutable home and must be enabled in the selected turn process;
+selecting a profile in the API does not install hooks or start a worker for it.
+ACLs, endpoint exceptions, key path and enabled policy are re-read on operations
+and before sends; update this JSON by an atomic private-file replacement. Enabling
+after a disabled startup requires a lifecycle-process restart to acquire hooks/worker. Disabling the
 JSON policy halts sends but keeps pending bounded state until expiry. Unload stops
 this owner's worker; a forced reload acquires a new owner, never another profile's
 worker. Managed Hermes interpreter replacement may require reinstalling these Python
@@ -182,11 +188,23 @@ Returns HTTP 200:
 P-256 point and a 16-byte auth secret, not merely plausible strings.
 
 An update, including endpoint/key/scope rotation, advances generation, requires a
-nonce different from the current one, immediately returns to pending and invalidates
+previously unused nonce, immediately returns to pending and invalidates
 all older queued deliveries/challenges. Generations are not reset after revocation.
 An existing installation belonging to another principal returns 404. Operator ACL
-failure/non-durable scope is 403; malformed/unsafe subscription is 422; reused nonce
-is 409; capacity is 429. No wildcard/default session grant is inferred.
+failure/non-durable scope is 403; malformed/unsafe subscription is 422; changed-body,
+revoked or superseded nonce replay is 409; capacity is 429. No wildcard/default
+session grant is inferred.
+
+An exact retry of the **current** nonce, endpoint, keys and ordered scope lists
+recovers the committed generation and current `pending`/`active` status, after all
+normal authentication, ACL, durable-session and endpoint checks. It does not
+activate anything or delete queued ordinary hints. An expired **pending** challenge
+is replaced by a fresh encrypted proof/event for the same generation; the old proof
+is invalidated. An unexpired proof is left unchanged. Nonce hashes are retained as
+per-installation tombstones across rotation/revocation, independently of event TTLs;
+this history grows with genuine registration updates and must not be pruned as an
+ordinary event-retention operation. Existing databases seed their current nonce on
+open; previously discarded history cannot be reconstructed.
 
 The pending registration receives an **encrypted challenge hint** through its supplied
 endpoint/keys. Until confirmation it receives no ordinary turn/input hints. Merely
@@ -201,11 +219,15 @@ activate it.
 
 Returns `{"generation":1,"status":"active"}` only if the principal owns the current
 pending registration, generation is exact, the proof matches in constant time and
-its five-minute deadline/current ACL permit activation. Invalid, expired, repeated,
-revoked or superseded confirmations return 409 (current ACL removal: 403).
-A late challenge can never reactivate a rotated/revoked generation. Challenge proof
-is stored hashed; the clear challenge is only in the private queued encrypted-push
-payload, cleared on successful send/confirmation/revocation/expiry.
+its five-minute deadline/current ACL permit activation. An exact retry against the
+already-active same generation/proof recovers `active` even after the original
+challenge deadline: it performs no activation or queue deletion. The proof hash is
+retained until rotation/revocation for that recovery; no clear proof is returned by
+PUT, confirmation or events. Invalid, expired-pending, revoked or superseded
+confirmations return 409 (current ACL removal: 403). A late challenge can never
+reactivate a rotated/revoked generation. Challenge proof is stored hashed; the
+clear challenge is only in the private queued encrypted-push payload, cleared on
+successful send/confirmation/revocation/expiry.
 
 ### `DELETE /api/plugins/mobile-push/registrations/{installation_id}`
 
@@ -338,11 +360,15 @@ export HERMES_AGENT_SITE_PACKAGES=/absolute/path/to/hermes-environment/lib/pytho
 # Repeat the pytest command above with these variables set.
 ```
 
-No source checkout means the three host integration tests are explicitly skipped;
-the ordinary protocol/crypto tests still run. With the inspected source/dependency
-paths set, the full suite ran with **80 passed** on Python 3.14.7, including real
-manager/loader lifecycle tests and an actual TLS loopback receiver. A Starlette
-TestClient/httpx deprecation warning is upstream, not a skipped test.
+Without a source checkout the host integration tests are explicitly skipped;
+the ordinary protocol/crypto tests still run. The host suite exercises one router
+mounted by real `_mount_one_plugin_api`, the real profile dependency/resolver,
+concurrent requests to two homes, and profile-bound lifecycle workers. A real Basic
+password-login/cookie middleware probe confirms and retries a challenge decrypted
+from an actual TLS loopback receiver. Recovery regressions cover lost PUT/confirm
+acknowledgements, server-store restart, client-persistence gaps, pending expiry,
+changed-body retries, policy removal and superseded/revoked nonce rejection.
+A Starlette TestClient/httpx deprecation warning is upstream, not a skipped test.
 
 The receiver uses real pywebpush encryption, independently decrypts with the generated
 subscriber private key/auth secret, verifies the VAPID JWT signature/audience and

@@ -3,13 +3,15 @@
 from __future__ import annotations
 
 import sqlite3
+import threading
+from collections.abc import Callable
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, ConfigDict, Field
 
-from .config import Rejected, identifier, validate_keys
+from .config import Profile, Rejected, identifier, validate_keys
 from .store import Store
 from .transport import validate_endpoint
 
@@ -76,16 +78,23 @@ def guarded(function, *args):
 Identity = Annotated[tuple[str, str], Depends(principal)]
 
 
-def create_router(profile):
+def create_router(profile_source: Profile | Callable[[], Profile]):
+    # The dashboard supplies a factory reading its vetted request-local home.
+    # Fixed Profile values remain useful for a single-profile embedded host.
     router = APIRouter(route_class=BoundedRoute)
-    stores = []
+    stores = {}
+    lock = threading.Lock()
 
-    def store():
-        if not stores:
-            stores.append(Store(profile.database))
-        return stores[0]
+    def selected_profile() -> Profile:
+        return profile_source() if callable(profile_source) else profile_source
 
-    def policy_for(identity):
+    def store(profile):
+        with lock:
+            if profile.database not in stores:
+                stores[profile.database] = Store(profile.database)
+            return stores[profile.database]
+
+    def policy_for(profile, identity):
         policy = profile.policy()
         if not policy.enabled:
             raise Rejected(503, "Mobile push disabled")
@@ -96,6 +105,7 @@ def create_router(profile):
     @router.get("/capabilities")
     def capabilities(identity: Identity):
         def read():
+            profile = selected_profile()
             policy = profile.policy()
             enabled = policy.enabled and policy.admitted(identity)
             return {
@@ -110,7 +120,8 @@ def create_router(profile):
     @router.put("/registrations/{installation_id}")
     def register(installation_id: str, body: Registration, identity: Identity):
         def update():
-            policy = policy_for(identity)
+            profile = selected_profile()
+            policy = policy_for(profile, identity)
             if not identifier(installation_id) or not all(
                 identifier(sid) for sid in body.session_ids
             ):
@@ -127,15 +138,16 @@ def create_router(profile):
                 raise Rejected(403, "Session scope not authorised or not durable")
             validate_keys(body.keys.model_dump())
             validate_endpoint(body.endpoint, policy)
-            return store().put(identity, installation_id, body.model_dump(), policy)
+            return store(profile).put(identity, installation_id, body.model_dump(), policy)
 
         return guarded(update)
 
     @router.post("/registrations/{installation_id}/confirm")
     def confirm(installation_id: str, body: Confirmation, identity: Identity):
         def activate():
-            policy = policy_for(identity)
-            return store().confirm(
+            profile = selected_profile()
+            policy = policy_for(profile, identity)
+            return store(profile).confirm(
                 identity, installation_id, body.generation, body.challenge, policy
             )
 
@@ -145,7 +157,7 @@ def create_router(profile):
     def revoke(installation_id: str, identity: Identity):
         def remove():
             # Revocation remains possible after an operator disables/removes a grant.
-            return store().revoke(identity, installation_id)
+            return store(selected_profile()).revoke(identity, installation_id)
 
         return guarded(remove)
 
@@ -156,8 +168,9 @@ def create_router(profile):
         limit: int = Query(default=100, ge=1, le=200),
     ):
         def read():
-            policy = policy_for(identity)
-            return store().events(identity, after, limit, policy, profile.durable)
+            profile = selected_profile()
+            policy = policy_for(profile, identity)
+            return store(profile).events(identity, after, limit, policy, profile.durable)
 
         return guarded(read)
 

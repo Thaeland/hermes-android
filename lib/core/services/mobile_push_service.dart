@@ -362,7 +362,11 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
         notifyListeners();
         return;
       }
-      if (state['generation'] == 0) {
+      var serverActive = false;
+      if (state['active'] != true) {
+        // Repeat the exact authenticated operation to recover a lost PUT ACK,
+        // or refresh an expired pending proof without changing consent/nonce.
+        // Even an active PUT response is NOT native activation authority.
         status = 'Registering';
         notifyListeners();
         final response = await api.register(state);
@@ -370,15 +374,26 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
         final generation = response['generation'];
         if (generation is! int ||
             generation <= 0 ||
-            response['status'] != 'pending' ||
-            response['registration_nonce'] != state['nonce']) {
+            !const ['pending', 'active'].contains(response['status']) ||
+            response['registration_nonce'] != state['nonce'] ||
+            (state['generation'] != 0 && state['generation'] != generation)) {
           throw const FormatException('Invalid registration response.');
         }
-        state = await _call('generation', {...state, 'generation': generation});
-        if (!await _current(state, epoch)) return;
-        _state = state;
+        serverActive = response['status'] == 'active';
+        if (state['generation'] == 0) {
+          state = await _call('generation', {
+            ...state,
+            'generation': generation,
+          });
+          if (!await _current(state, epoch)) return;
+          _state = state;
+        }
       }
       if (state['active'] != true) {
+        // A retained proof may outlive its push TTL after confirmation committed
+        // but its ACK was lost. Only an authenticated active PUT permits trying
+        // that proof again; confirm must still verify the exact generation/hash.
+        // Expired pending proofs can never grant new authority.
         final live = await _call('snapshot');
         if (!await _current(state, epoch)) return;
         final challenges = live['challenges'] as List? ?? [];
@@ -387,8 +402,9 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
           if (hint['generation'] != state['generation'] ||
               hint['registration_nonce'] != state['nonce'] ||
               hint['expires_at'] is! int ||
-              (hint['expires_at'] as int) <=
-                  DateTime.now().millisecondsSinceEpoch ~/ 1000) {
+              (!serverActive &&
+                  (hint['expires_at'] as int) <=
+                      DateTime.now().millisecondsSinceEpoch ~/ 1000)) {
             continue;
           }
           final response = await api.confirm(
@@ -397,7 +413,8 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
             hint['challenge'] as String,
           );
           if (!await _current(state, epoch)) return;
-          if (response['status'] != 'active') {
+          if (response['status'] != 'active' ||
+              response['generation'] != state['generation']) {
             throw const FormatException('Server did not confirm activation.');
           }
           state = await _call('activate', state);

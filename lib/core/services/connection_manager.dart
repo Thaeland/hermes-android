@@ -1363,6 +1363,7 @@ class DashboardClient {
   final String? _username;
   final String? _password;
   final String? _gatewayProfile;
+  String? get gatewayProfile => _gatewayProfile;
   String? _token;
   String? _cookie;
   int _authGeneration = 0;
