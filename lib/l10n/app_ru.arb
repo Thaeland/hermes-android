@@ -1,4 +1,9 @@
 {
+  "background_task_report": "Фоновая задача",
+  "background_process_report": "Фоновый процесс",
+  "background_report_issues": "Обнаружены проблемы — разверните для подробностей.",
+  "background_report_expand": "Развернуть отчёт",
+  "background_report_collapse": "Свернуть отчёт",
   "@@locale": "ru",
   "a_one_off_question_archives_itself_after_72_hours_anything": "Разовый вопрос. Автоматически архивируется через 72 часа; всё, что стоит сохранить, останется в памяти.",
   "ai_full_text": "ИИ + полный текст",

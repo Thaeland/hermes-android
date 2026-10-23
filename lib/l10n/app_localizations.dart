@@ -114,6 +114,36 @@ abstract class AppLocalizations {
     Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
   ];
 
+  /// No description provided for @background_task_report.
+  ///
+  /// In en, this message translates to:
+  /// **'Background task'**
+  String get background_task_report;
+
+  /// No description provided for @background_process_report.
+  ///
+  /// In en, this message translates to:
+  /// **'Background process'**
+  String get background_process_report;
+
+  /// No description provided for @background_report_issues.
+  ///
+  /// In en, this message translates to:
+  /// **'Issues reported — expand for details.'**
+  String get background_report_issues;
+
+  /// No description provided for @background_report_expand.
+  ///
+  /// In en, this message translates to:
+  /// **'Expand report'**
+  String get background_report_expand;
+
+  /// No description provided for @background_report_collapse.
+  ///
+  /// In en, this message translates to:
+  /// **'Collapse report'**
+  String get background_report_collapse;
+
   /// No description provided for @saved_history_heading.
   ///
   /// In en, this message translates to:

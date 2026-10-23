@@ -9,6 +9,22 @@ class AppLocalizationsFr extends AppLocalizations {
   AppLocalizationsFr([String locale = 'fr']) : super(locale);
 
   @override
+  String get background_task_report => 'Tâche en arrière-plan';
+
+  @override
+  String get background_process_report => 'Processus en arrière-plan';
+
+  @override
+  String get background_report_issues =>
+      'Des problèmes ont été signalés — développez pour les détails.';
+
+  @override
+  String get background_report_expand => 'Développer le rapport';
+
+  @override
+  String get background_report_collapse => 'Réduire le rapport';
+
+  @override
   String get saved_history_heading => 'Saved history';
 
   @override

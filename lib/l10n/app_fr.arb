@@ -1,4 +1,9 @@
 {
+  "background_task_report": "Tâche en arrière-plan",
+  "background_process_report": "Processus en arrière-plan",
+  "background_report_issues": "Des problèmes ont été signalés — développez pour les détails.",
+  "background_report_expand": "Développer le rapport",
+  "background_report_collapse": "Réduire le rapport",
   "@@locale": "fr",
   "a_one_off_question_archives_itself_after_72_hours_anything": "Une question ponctuelle. S'archive automatiquement après 72 heures ; tout ce qui mérite d'être conservé reste en mémoire.",
   "ai_full_text": "IA + texte intégral",

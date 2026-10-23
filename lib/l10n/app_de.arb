@@ -1,4 +1,9 @@
 {
+  "background_task_report": "Hintergrundaufgabe",
+  "background_process_report": "Hintergrundprozess",
+  "background_report_issues": "Probleme gemeldet — für Details aufklappen.",
+  "background_report_expand": "Bericht aufklappen",
+  "background_report_collapse": "Bericht zuklappen",
   "@@locale": "de",
   "a_one_off_question_archives_itself_after_72_hours_anything": "Eine einmalige Frage. Wird nach 72 Stunden automatisch archiviert; alles, was es wert ist, bleibt im Gedächtnis.",
   "ai_full_text": "KI + Volltext",

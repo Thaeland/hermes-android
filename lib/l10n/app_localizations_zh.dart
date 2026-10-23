@@ -9,6 +9,21 @@ class AppLocalizationsZh extends AppLocalizations {
   AppLocalizationsZh([String locale = 'zh']) : super(locale);
 
   @override
+  String get background_task_report => '后台任务';
+
+  @override
+  String get background_process_report => '后台进程';
+
+  @override
+  String get background_report_issues => '已报告问题，展开查看详情。';
+
+  @override
+  String get background_report_expand => '展开报告';
+
+  @override
+  String get background_report_collapse => '收起报告';
+
+  @override
   String get saved_history_heading => 'Saved history';
 
   @override
@@ -2692,6 +2707,21 @@ class AppLocalizationsZh extends AppLocalizations {
 /// The translations for Chinese, using the Han script (`zh_Hans`).
 class AppLocalizationsZhHans extends AppLocalizationsZh {
   AppLocalizationsZhHans() : super('zh_Hans');
+
+  @override
+  String get background_task_report => '后台任务';
+
+  @override
+  String get background_process_report => '后台进程';
+
+  @override
+  String get background_report_issues => '已报告问题，展开查看详情。';
+
+  @override
+  String get background_report_expand => '展开报告';
+
+  @override
+  String get background_report_collapse => '收起报告';
 
   @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>

@@ -41,6 +41,7 @@ import '../services/voice_composer_adapter.dart';
 import '../services/ws_client.dart';
 import '../utils/media_tags.dart';
 import '../models/attachment_draft.dart';
+import '../models/background_report.dart';
 import '../models/chat_timeline.dart';
 import '../models/received_scope_outcome.dart';
 import '../models/gateway_activity.dart';
@@ -57,6 +58,7 @@ import '../utils/message_content.dart';
 import '../utils/responsive.dart';
 import '../utils/turn_recovery_fallback.dart';
 import 'files_screen.dart';
+import '../widgets/background_report_card.dart';
 import '../widgets/gateway_activity_card.dart';
 import '../widgets/chat_context_header.dart';
 import '../widgets/markdown_code_block.dart';
@@ -415,6 +417,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   late ChatPresentationRegistry _reasoningRegistry;
   late ChatPresentationState _reasoningPresentation;
   late ToolActivityGroupPins _reasoningExpansionPins;
+  // Bounded, visit-local choices only; no bodies or cross-source correlation.
+  Map<Object, bool> _backgroundReportExpansions = {};
   final ChatHistoryWindow _historyWindow = ChatHistoryWindow();
   bool _loadingOlder = false;
   int _historyReadIssued = 0;
@@ -1163,6 +1167,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _reasoningRegistry = registry;
       _reasoningPresentation = registry.chatFor(widget.session.id);
       _reasoningExpansionPins = _reasoningPresentation.openReasoningVisit();
+      _backgroundReportExpansions = {};
     }
   }
 
@@ -5504,7 +5509,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  Widget _buildDisplayItem(dynamic item) {
+  Widget _buildDisplayItem(dynamic item, {ChatDisplaySource? source}) {
     if (item is ChatToolActivityGroup) {
       return GatewayActivityCard(
         key: ValueKey<String>('tool-activity-${item.id}'),
@@ -5553,6 +5558,25 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
 
     final msg = item as Map<String, dynamic>;
+    final report = BackgroundReport.fromMessage(msg);
+    if (report != null) {
+      final identity = (source, chatDisplayItemIdentity(msg));
+      return BackgroundReportCard(
+        key: ValueKey((_backgroundReportExpansions, identity)),
+        report: report,
+        initiallyExpanded: _backgroundReportExpansions[identity] ?? false,
+        onExpansionChanged: (expanded) {
+          _backgroundReportExpansions.remove(identity);
+          _backgroundReportExpansions[identity] = expanded;
+          if (_backgroundReportExpansions.length >
+              ToolActivityGroupPins.maxPins) {
+            _backgroundReportExpansions.remove(
+              _backgroundReportExpansions.keys.first,
+            );
+          }
+        },
+      );
+    }
     final role = (msg['role'] as String?) ?? 'assistant';
     final content =
         (msg['_display_content'] as String?) ??
@@ -5713,7 +5737,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 child: _buildSourceHeading(cell.source!),
               );
             }
-            final child = _buildDisplayItem(cell.item);
+            final child = _buildDisplayItem(cell.item, source: cell.source);
             if (cell.source == null) return child;
             return KeyedSubtree(
               key: cell.key,

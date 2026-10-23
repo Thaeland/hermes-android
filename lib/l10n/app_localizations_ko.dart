@@ -9,6 +9,21 @@ class AppLocalizationsKo extends AppLocalizations {
   AppLocalizationsKo([String locale = 'ko']) : super(locale);
 
   @override
+  String get background_task_report => '백그라운드 작업';
+
+  @override
+  String get background_process_report => '백그라운드 프로세스';
+
+  @override
+  String get background_report_issues => '문제가 보고되었습니다. 펼쳐서 자세히 확인하세요.';
+
+  @override
+  String get background_report_expand => '보고서 펼치기';
+
+  @override
+  String get background_report_collapse => '보고서 접기';
+
+  @override
   String get saved_history_heading => 'Saved history';
 
   @override

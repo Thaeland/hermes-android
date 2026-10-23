@@ -1,3 +1,4 @@
+import '../models/background_report.dart';
 import '../models/chat_timeline.dart';
 import '../models/received_scope_outcome.dart';
 import '../models/gateway_activity.dart';
@@ -242,6 +243,14 @@ List<dynamic> buildChatDisplayItems({
   for (final msg in messages) {
     final rawRole = (msg['role'] as String?) ?? 'assistant';
     final role = rawRole == 'agent' ? 'assistant' : rawRole;
+    if ((role == 'user' || role == 'assistant') &&
+        BackgroundReport.fromMessage(msg) != null) {
+      // Reports may consist entirely of tool-looking output. Preserve the raw
+      // row before the ordinary bubble/tool text filters can discard it.
+      flushToolGroup();
+      displayItems.add({...msg, 'role': role});
+      continue;
+    }
     if (isToolResultMessage(msg)) {
       final callId = msg['tool_call_id'] ?? msg['toolCallId'];
       final match = callId == null || callId == ''

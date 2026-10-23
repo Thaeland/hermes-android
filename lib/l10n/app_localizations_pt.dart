@@ -9,6 +9,22 @@ class AppLocalizationsPt extends AppLocalizations {
   AppLocalizationsPt([String locale = 'pt']) : super(locale);
 
   @override
+  String get background_task_report => 'Tarefa em segundo plano';
+
+  @override
+  String get background_process_report => 'Processo em segundo plano';
+
+  @override
+  String get background_report_issues =>
+      'Foram comunicados problemas — expanda para ver os detalhes.';
+
+  @override
+  String get background_report_expand => 'Expandir relatório';
+
+  @override
+  String get background_report_collapse => 'Recolher relatório';
+
+  @override
   String get saved_history_heading => 'Saved history';
 
   @override
@@ -2784,6 +2800,22 @@ class AppLocalizationsPt extends AppLocalizations {
 /// The translations for Portuguese, as used in Brazil (`pt_BR`).
 class AppLocalizationsPtBr extends AppLocalizationsPt {
   AppLocalizationsPtBr() : super('pt_BR');
+
+  @override
+  String get background_task_report => 'Tarefa em segundo plano';
+
+  @override
+  String get background_process_report => 'Processo em segundo plano';
+
+  @override
+  String get background_report_issues =>
+      'Problemas relatados — expanda para ver os detalhes.';
+
+  @override
+  String get background_report_expand => 'Expandir relatório';
+
+  @override
+  String get background_report_collapse => 'Recolher relatório';
 
   @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>

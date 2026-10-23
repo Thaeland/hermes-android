@@ -1,4 +1,9 @@
 {
+  "background_task_report": "Tarefa em segundo plano",
+  "background_process_report": "Processo em segundo plano",
+  "background_report_issues": "Foram comunicados problemas — expanda para ver os detalhes.",
+  "background_report_expand": "Expandir relatório",
+  "background_report_collapse": "Recolher relatório",
   "@@locale": "pt",
   "a_one_off_question_archives_itself_after_72_hours_anything": "Uma pergunta pontual. É arquivada automaticamente após 72 horas; o que valer a pena guardar continua na memória.",
   "ai_full_text": "IA + texto completo",

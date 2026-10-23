@@ -1,4 +1,9 @@
 {
+  "background_task_report": "バックグラウンドタスク",
+  "background_process_report": "バックグラウンドプロセス",
+  "background_report_issues": "問題が報告されています。展開して詳細を確認してください。",
+  "background_report_expand": "レポートを展開",
+  "background_report_collapse": "レポートを折りたたむ",
   "@@locale": "ja",
   "a_one_off_question_archives_itself_after_72_hours_anything": "単発の質問用。72時間後に自動アーカイブされますが、残す価値のある内容は記憶されます。",
   "ai_full_text": "AI + 全文",

@@ -1,4 +1,9 @@
 {
+  "background_task_report": "Background task",
+  "background_process_report": "Background process",
+  "background_report_issues": "Issues reported — expand for details.",
+  "background_report_expand": "Expand report",
+  "background_report_collapse": "Collapse report",
   "@@locale": "en",
   "saved_history_heading": "Saved history",
   "received_output_heading": "Received output — match to saved history unconfirmed",

@@ -9,6 +9,22 @@ class AppLocalizationsEn extends AppLocalizations {
   AppLocalizationsEn([String locale = 'en']) : super(locale);
 
   @override
+  String get background_task_report => 'Background task';
+
+  @override
+  String get background_process_report => 'Background process';
+
+  @override
+  String get background_report_issues =>
+      'Issues reported — expand for details.';
+
+  @override
+  String get background_report_expand => 'Expand report';
+
+  @override
+  String get background_report_collapse => 'Collapse report';
+
+  @override
   String get saved_history_heading => 'Saved history';
 
   @override

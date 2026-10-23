@@ -1,4 +1,9 @@
 {
+  "background_task_report": "Tarea en segundo plano",
+  "background_process_report": "Proceso en segundo plano",
+  "background_report_issues": "Se notificaron problemas; expande para ver los detalles.",
+  "background_report_expand": "Expandir informe",
+  "background_report_collapse": "Contraer informe",
   "@@locale": "es",
   "a_one_off_question_archives_itself_after_72_hours_anything": "Una pregunta puntual. Se archiva sola a las 72 horas; lo que valga la pena conservar seguirá en la memoria.",
   "ai_full_text": "IA + texto completo",

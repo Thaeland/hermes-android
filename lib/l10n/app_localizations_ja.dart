@@ -9,6 +9,21 @@ class AppLocalizationsJa extends AppLocalizations {
   AppLocalizationsJa([String locale = 'ja']) : super(locale);
 
   @override
+  String get background_task_report => 'バックグラウンドタスク';
+
+  @override
+  String get background_process_report => 'バックグラウンドプロセス';
+
+  @override
+  String get background_report_issues => '問題が報告されています。展開して詳細を確認してください。';
+
+  @override
+  String get background_report_expand => 'レポートを展開';
+
+  @override
+  String get background_report_collapse => 'レポートを折りたたむ';
+
+  @override
   String get saved_history_heading => 'Saved history';
 
   @override

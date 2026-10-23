@@ -9,6 +9,22 @@ class AppLocalizationsRu extends AppLocalizations {
   AppLocalizationsRu([String locale = 'ru']) : super(locale);
 
   @override
+  String get background_task_report => 'Фоновая задача';
+
+  @override
+  String get background_process_report => 'Фоновый процесс';
+
+  @override
+  String get background_report_issues =>
+      'Обнаружены проблемы — разверните для подробностей.';
+
+  @override
+  String get background_report_expand => 'Развернуть отчёт';
+
+  @override
+  String get background_report_collapse => 'Свернуть отчёт';
+
+  @override
   String get saved_history_heading => 'Saved history';
 
   @override
