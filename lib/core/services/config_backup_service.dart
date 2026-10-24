@@ -2,7 +2,6 @@
 
 import 'package:shared_preferences/shared_preferences.dart';
 
-import '../models/client_certificate.dart';
 import 'app_update_service.dart';
 import 'chat_density_preference.dart';
 import 'client_certificate_service.dart';
@@ -174,39 +173,39 @@ class ConfigBackupService {
     // connections are committed, so an imported mTLS profile works immediately
     // and a failure cannot leave a connection pointing at missing files.
     final restoredConnections = <SavedConnection>[];
-    final createdCertificates = <ClientCertificateConfig>[];
+    final fileLease = ClientCertificateFileLease();
     try {
-      for (final connection in backup.connections) {
-        final certificate = backup.clientCertificates[connection.id];
-        if (certificate == null) {
-          restoredConnections.add(connection);
-          continue;
-        }
-        final restored = await _certificates.restore(
-          certificatePem: certificate.certificatePem,
-          privateKeyPem: certificate.privateKeyPem,
-          label: certificate.label,
-          password: certificate.password,
-        );
-        createdCertificates.add(restored);
-        restoredConnections.add(
-          connection.copyWith(clientCertificate: restored),
-        );
-      }
+      await fileLease.run(() async {
+        for (final connection in backup.connections) {
+          final certificate = backup.clientCertificates[connection.id];
+          if (certificate == null) {
+            restoredConnections.add(connection);
+            continue;
+          }
+          final restored = await _certificates.restore(
+            certificatePem: certificate.certificatePem,
+            privateKeyPem: certificate.privateKeyPem,
+            label: certificate.label,
+            password: certificate.password,
+          );
 
-      await _connectionManager.importConnections(
-        restoredConnections,
-        replaceExisting: mode == ConfigImportMode.replace,
-      );
+          restoredConnections.add(
+            connection.copyWith(clientCertificate: restored),
+          );
+        }
+
+        await _connectionManager.importConnections(
+          restoredConnections,
+          replaceExisting: mode == ConfigImportMode.replace,
+        );
+      });
     } on ClientCertificateImportException catch (error) {
-      await _deleteCertificates(createdCertificates);
       throw ConfigBackupException(error.message);
     } on CredentialStorageException catch (error) {
-      await _deleteCertificates(createdCertificates);
       throw ConfigBackupException(error.message);
-    } catch (_) {
-      await _deleteCertificates(createdCertificates);
-      rethrow;
+    } finally {
+      await fileLease.close();
+      await _connectionManager.cleanupUnreferencedCertificates();
     }
 
     var applied = 0;
@@ -246,36 +245,5 @@ class ConfigBackupService {
       preferencesApplied: applied,
       preferencesSkipped: skipped,
     );
-  }
-
-  /// Best-effort removal of identities materialised by a failed import.
-  Future<void> _deleteCertificates(
-    List<ClientCertificateConfig> certificates,
-  ) async {
-    if (certificates.isEmpty) return;
-    final Set<String> referenced;
-    try {
-      // A metadata write can commit physically before its ACK is lost, and a
-      // persistent storage outage can also prevent rollback. Refresh the real
-      // list: the preference cache may already contain the attempted rollback.
-      await _preferences.reload();
-      referenced = {
-        for (final connection in _connectionManager.getConnections())
-          if (connection.clientCertificate case final certificate?)
-            certificate.directoryPath,
-      };
-    } catch (_) {
-      // Unknown reachability is not proof that a key is unreferenced. Keep it
-      // until a later successful connection commit can safely collect it.
-      return;
-    }
-    for (final certificate in certificates) {
-      if (referenced.contains(certificate.directoryPath)) continue;
-      try {
-        await _certificates.delete(certificate);
-      } catch (_) {
-        // A leftover file is harmless; the import failure is what matters.
-      }
-    }
   }
 }

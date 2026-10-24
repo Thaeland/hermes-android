@@ -1545,6 +1545,8 @@ class HomeScreenState extends State<HomeScreen> {
       context: context,
       builder: (_) => _AddDialog(
         initialConnection: existing,
+        onCertificateFilesReleased:
+            widget.connManager.cleanupUnreferencedCertificates,
         onSave:
             (
               label,
@@ -2159,6 +2161,7 @@ class HomeScreenState extends State<HomeScreen> {
 
 class _AddDialog extends StatefulWidget {
   final SavedConnection? initialConnection;
+  final Future<void> Function() onCertificateFilesReleased;
   final Future<void> Function(
     String label,
     String host,
@@ -2176,7 +2179,11 @@ class _AddDialog extends StatefulWidget {
     bool clearClientCertificate,
   })
   onSave;
-  const _AddDialog({required this.onSave, this.initialConnection});
+  const _AddDialog({
+    required this.onSave,
+    required this.onCertificateFilesReleased,
+    this.initialConnection,
+  });
 
   @override
   State<_AddDialog> createState() => _AddDialogState();
@@ -2196,6 +2203,8 @@ class _AddDialogState extends State<_AddDialog> {
   late final TextEditingController _gatewayProfile;
   late final TextEditingController _certificatePassword;
   late final ClientCertificateService _certificateService;
+  final _certificateFileLease = ClientCertificateFileLease();
+  Future<void>? _certificateCleanup;
   late bool _showDashboard;
   late bool _dashboardProxied;
   late bool _useClientCertificate;
@@ -2378,7 +2387,12 @@ class _AddDialogState extends State<_AddDialog> {
 
   Future<void> _runCertificateImport(
     Future<ClientCertificateConfig> Function() import,
+  ) => _certificateFileLease.run(() => _importCertificate(import));
+
+  Future<void> _importCertificate(
+    Future<ClientCertificateConfig> Function() import,
   ) async {
+    _scheduleCertificateCleanup();
     setState(() {
       _importingCertificate = true;
       _error = null;
@@ -2394,6 +2408,11 @@ class _AddDialogState extends State<_AddDialog> {
       final previous = _clientCertificate;
       if (previous != null) {
         await _certificateService.discard(previous);
+        _certificateFileLease.releaseIdentity(previous);
+      }
+      if (!mounted) {
+        await _certificateService.discard(config);
+        return;
       }
       setState(() {
         _clientCertificate = config;
@@ -2425,6 +2444,7 @@ class _AddDialogState extends State<_AddDialog> {
     if (previous != null && !_certificateSaved) {
       // A staged import that was never saved is simply abandoned.
       unawaited(_certificateService.discard(previous));
+      _certificateFileLease.releaseIdentity(previous);
     }
     setState(() {
       _clientCertificate = null;
@@ -2437,7 +2457,11 @@ class _AddDialogState extends State<_AddDialog> {
     });
   }
 
-  Future<void> _validateAndSave() async {
+  Future<void> _validateAndSave() =>
+      _certificateFileLease.run(_validateAndSaveOwned);
+
+  Future<void> _validateAndSaveOwned() async {
+    _scheduleCertificateCleanup();
     final label = _label.text.trim();
     final host = _host.text.trim();
     final port = int.tryParse(_port.text.trim());
@@ -2550,41 +2574,33 @@ class _AddDialogState extends State<_AddDialog> {
         if (!mounted) return;
       }
 
-      // Move a staged import into permanent storage only now that the
-      // connection has passed validation. If the save itself fails, the new
-      // files are removed and the previously saved identity (still referenced
-      // by the unchanged connection) is preserved.
+      // Keep the validated identity leased across queueing, commit, rollback
+      // and native cleanup. A thrown save does not prove physical rollback.
       var savedCertificate = clientCertificate;
-      var createdCertificate = false;
       if (savedCertificate != null &&
           await _certificateService.isStaged(savedCertificate)) {
         savedCertificate = await _certificateService.commit(savedCertificate);
-        createdCertificate = true;
+        // Retain the new paths for retry and disposal even if save reports an
+        // uncertain commit. The old staging directory no longer exists.
+        _clientCertificate = savedCertificate;
       }
 
-      try {
-        await widget.onSave(
-          label,
-          host,
-          port,
-          apiKey,
-          gatewayPrefix: gatewayPrefix,
-          dashboardPrefix: dashboardPrefix,
-          dashboardProxied: _dashboardProxied,
-          desktopGatewayUrl: desktopGatewayUrl,
-          dashboardPort: dashPort,
-          dashboardUsername: dashUser.isEmpty ? null : dashUser,
-          dashboardPassword: dashPass.isEmpty ? null : dashPass,
-          gatewayProfile: gatewayProfile.isEmpty ? null : gatewayProfile,
-          clientCertificate: savedCertificate,
-          clearClientCertificate: savedCertificate == null,
-        );
-      } catch (_) {
-        if (createdCertificate) {
-          await _certificateService.delete(savedCertificate!);
-        }
-        rethrow;
-      }
+      await widget.onSave(
+        label,
+        host,
+        port,
+        apiKey,
+        gatewayPrefix: gatewayPrefix,
+        dashboardPrefix: dashboardPrefix,
+        dashboardProxied: _dashboardProxied,
+        desktopGatewayUrl: desktopGatewayUrl,
+        dashboardPort: dashPort,
+        dashboardUsername: dashUser.isEmpty ? null : dashUser,
+        dashboardPassword: dashPass.isEmpty ? null : dashPass,
+        gatewayProfile: gatewayProfile.isEmpty ? null : gatewayProfile,
+        clientCertificate: savedCertificate,
+        clearClientCertificate: savedCertificate == null,
+      );
       _certificateSaved = true;
       if (mounted) Navigator.pop(context);
     } on CredentialStorageException {
@@ -2820,6 +2836,7 @@ class _AddDialogState extends State<_AddDialog> {
                         final previous = _clientCertificate;
                         if (!value && previous != null && !_certificateSaved) {
                           unawaited(_certificateService.discard(previous));
+                          _certificateFileLease.releaseIdentity(previous);
                         }
                         setState(() {
                           _useClientCertificate = value;
@@ -2981,12 +2998,27 @@ class _AddDialogState extends State<_AddDialog> {
     );
   }
 
+  void _scheduleCertificateCleanup() {
+    // Register once with the asynchronous file owner. Disposal only closes it;
+    // cleanup runs after admitted work, independently of the route's lifetime.
+    _certificateCleanup ??= _certificateFileLease.whenClosed.then(
+      (_) => _releaseCertificateFiles(),
+    );
+  }
+
+  Future<void> _releaseCertificateFiles() async {
+    try {
+      final certificate = _clientCertificate;
+      if (certificate != null) await _certificateService.discard(certificate);
+    } catch (_) {
+      // Best-effort; the shared physical reference check below is authoritative.
+    }
+    await widget.onCertificateFilesReleased();
+  }
+
   @override
   void dispose() {
-    final certificate = _clientCertificate;
-    if (certificate != null && !_certificateSaved) {
-      unawaited(_certificateService.discard(certificate));
-    }
+    unawaited(_certificateFileLease.close());
     _host.removeListener(_onHostChanged);
     _label.dispose();
     _host.dispose();
