@@ -23,8 +23,10 @@ shows only the three latest releases.
 ### Fixed
 
 - Request attachment-capable chat instructions explicitly rather than inheriting
-  the gateway host's terminal/TUI surface. Ordinary Remote Gateway prompts also
-  identify Android to gateways supporting per-turn Android surface notes.
+  the gateway host's terminal/TUI surface. Android adds its own versioned client
+  guidance through existing chat protocols, including reused TUI sessions;
+  no backend patch or Android companion is required. User-facing message text
+  remains clean while raw server history retains the app-added context.
 - Populate Activity from actual app-owned turn observations and honest gateway
   update metadata. Retain compression roots across restart and navigate older
   activity to the current conversation without duplicate continuation rows.

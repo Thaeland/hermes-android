@@ -3,16 +3,33 @@
 **Status: 3.0.0 release-candidate development.** This feature does not publish a
 release or change the stable app version.
 
+**Draft review status:** the app-only revision is not ready to merge. Review
+identified pending fixes for custom typed voice-stop phrases, image-only history
+presentation and literal client-note examples. Non-normal transport exports also
+need public-projection hardening. The full regression suite and APK builds must
+be rerun after those fixes; earlier attachment-build results do not validate this
+revision.
+
 ## Send a file from Hermes
 
-Android explicitly requests the stock gateway's attachment-capable rich-chat
-source (`desktop`) when creating or cold-resuming a session, instead of
-inheriting the host process's TUI instructions. Each ordinary Remote Gateway
-prompt also identifies its current surface as `android`. Gateways with Android
-surface-note support tell the agent it is talking to the native Android app,
-including when reattaching to an already-live TUI session, without rewriting the
-user's message or cached system prompt. Older gateways ignore the surface value;
-their already-live sessions retain the original instructions until rebuilt.
+These attachment features are implemented in the app and use existing Hermes
+gateway, history and authenticated file routes. They do not require a backend
+patch, Android-specific surface support, companion or new server configuration.
+
+For Remote Gateway connections, Android requests the stock rich-chat source
+(`desktop`) on create/resume. The app also adds a short, versioned Android
+client-context note to ordinary chat requests, including REST/SSE and reused
+TUI sessions. It explains the file-delivery syntax and distinguishes host paths
+from the phone. Slash commands and the fixed default stop controls remain
+unchanged; preserving custom voice-stop phrases is still a draft review item. No
+extra agent turn, agent reset or model/provider change is introduced.
+
+The note is ordinary user-message context, **not privileged or model-only
+metadata**. The backend saves it as part of the submitted user turn, so other
+clients, raw exports and future model context may include it. Android omits
+only its exact known note from user bubbles, edit/retry text, its chat export
+and recognised session previews. It never rewrites fetched transcript rows,
+alters earlier saved messages or strips assistant/tool output.
 
 Ask the agent to generate a file and deliver it in its reply. The standard Hermes
 contract is an explicit gateway-host path, on its own line:

@@ -54,6 +54,7 @@ import '../models/gateway_turn_contract.dart';
 import '../models/projects_tree_overview.dart';
 import '../services/tool_activity_group_pins.dart';
 import '../utils/chat_display_items.dart';
+import '../utils/android_prompt_context.dart';
 import '../utils/chat_history_scroll.dart';
 import '../utils/message_content.dart';
 import '../utils/responsive.dart';
@@ -1591,7 +1592,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final role = message['role']?.toString();
     if (role != 'user' && role != 'assistant' && role != 'agent') return;
     final content = stripToolResultText(
-      messageContentToText(message['_display_content'] ?? message['content']),
+      messageContentToText(
+        message['_display_content'] ??
+            AndroidPromptContext.displayContent(message, message['content']),
+      ),
     ).trim();
     if (content.isEmpty) return;
     buffer
@@ -3382,7 +3386,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         kind: 'starting',
         text: context.l10n.starting_hermes,
       );
-      _messages.add({'role': 'user', 'content': localContent});
+      _messages.add({
+        'role': 'user',
+        'content': localContent,
+        AndroidPromptContext.localUserTextKey: true,
+        AndroidPromptContext.wireContentKey: GatewayChatClient.buildUserContent(
+          message: text,
+          imageDataUrl: imageDataUrl,
+        ),
+      });
       // Insert a placeholder streaming message
       _messages.add({
         'role': 'assistant',
@@ -3751,7 +3763,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         text: context.l10n.starting_hermes,
       );
       _attachmentDrafts.clear();
-      _messages.add({'role': 'user', 'content': localContent});
+      _messages.add({
+        'role': 'user',
+        'content': localContent,
+        AndroidPromptContext.localUserTextKey: true,
+      });
       _messages.add({
         'role': 'assistant',
         'content': '',
@@ -5802,7 +5818,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final role = (msg['role'] as String?) ?? 'assistant';
     final content =
         (msg['_display_content'] as String?) ??
-        stripToolResultText(messageContentToText(msg['content']));
+        stripToolResultText(
+          messageContentToText(
+            AndroidPromptContext.displayContent(msg, msg['content']),
+          ),
+        );
     final isUser = role == 'user';
 
     return MessageBubble(

@@ -10,6 +10,7 @@ import 'dart:convert';
 import 'package:web_socket_channel/io.dart';
 
 import '../models/client_certificate.dart';
+import '../utils/android_prompt_context.dart';
 import 'tls_client_factory.dart';
 
 Object? _deepFreezeJson(Object? value) {
@@ -986,13 +987,13 @@ class WsClient {
     });
 
     try {
+      final promptText = AndroidPromptContext.forModel(message);
       final response = await send('prompt.submit', {
         'session_id': sessionId,
-        'text': message,
-        // Per-turn identity also covers reattaching to an already-live TUI
-        // session. Older gateways accept but ignore unknown surface values;
-        // create/resume still request their supported rich-chat source above.
-        'surface': 'android',
+        'text': promptText,
+        // Stock gateways use this only for title generation. The app's note
+        // must not become the subject of an otherwise short user prompt.
+        if (promptText != message) 'title_preview': message,
       }, onSent: onSent);
       final error = response['error'];
       if (error != null) {

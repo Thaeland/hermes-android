@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../models/gateway_insight.dart';
+import '../utils/android_prompt_context.dart';
 import 'connection_manager.dart';
 import 'desktop_gateway_client.dart';
 import 'tls_client_factory.dart';
@@ -544,9 +545,12 @@ List<TaskTranscriptRow> parseTaskTranscript(List<Map<String, dynamic>> rows) {
             : [
                 ..._projectedText(row['display_commentary']),
                 _prose(
-                  row.containsKey('display_content')
-                      ? row['display_content']
-                      : row['content'],
+                  AndroidPromptContext.displayContent(
+                    row,
+                    row.containsKey('display_content')
+                        ? row['display_content']
+                        : row['content'],
+                  ),
                 ),
               ].where((text) => text.isNotEmpty).join('\n\n'),
         reasoning: reasoning.map((entry) => entry.value).toList(),

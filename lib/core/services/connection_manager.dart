@@ -13,6 +13,7 @@ import 'package:uuid/uuid.dart';
 import '../models/client_certificate.dart';
 import '../models/connection.dart';
 import '../models/session.dart';
+import '../utils/android_prompt_context.dart';
 import 'client_certificate_service.dart';
 import 'connection_mutation_barrier.dart';
 import 'tls_client_factory.dart';
@@ -1530,24 +1531,41 @@ class GatewayChatClient {
     }
 
     final latest = message.trim();
-    final latestContent = imageDataUrl == null
-        ? latest
-        : <Map<String, dynamic>>[
-            if (latest.isNotEmpty) {'type': 'text', 'text': latest},
-            {
-              'type': 'image_url',
-              'image_url': {'url': imageDataUrl},
-            },
-          ];
+    final latestContent = buildUserContent(
+      message: latest,
+      imageDataUrl: imageDataUrl,
+    );
     final alreadyLast =
         imageDataUrl == null &&
         messages.isNotEmpty &&
         messages.last['role'] == 'user' &&
-        messages.last['content'] == latest;
-    if ((latest.isNotEmpty || imageDataUrl != null) && !alreadyLast) {
+        (messages.last['content'] == latest ||
+            messages.last['content'] == latestContent);
+    if (alreadyLast) {
+      messages[messages.length - 1] = {
+        'role': 'user',
+        'content': latestContent,
+      };
+    } else if (latest.isNotEmpty || imageDataUrl != null) {
       messages.add({'role': 'user', 'content': latestContent});
     }
     return messages;
+  }
+
+  /// Exact current-turn model content, also retained by local SSE history.
+  static dynamic buildUserContent({
+    required String message,
+    String? imageDataUrl,
+  }) {
+    final latest = message.trim();
+    if (imageDataUrl == null) return AndroidPromptContext.forModel(latest);
+    return <Map<String, dynamic>>[
+      {'type': 'text', 'text': AndroidPromptContext.forAttachment(latest)},
+      {
+        'type': 'image_url',
+        'image_url': {'url': imageDataUrl},
+      },
+    ];
   }
 
   /// Parse one SSE frame. Returns streamed text token, or null for non-token

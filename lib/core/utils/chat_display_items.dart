@@ -5,6 +5,7 @@ import '../models/chat_timeline.dart';
 import '../models/received_scope_outcome.dart';
 import '../models/gateway_activity.dart';
 import '../models/gateway_insight.dart';
+import 'android_prompt_context.dart';
 import 'delivered_files.dart';
 import 'generated_media.dart';
 import 'media_tags.dart';
@@ -451,7 +452,12 @@ List<dynamic> buildChatDisplayItems({
     final content = stripToolResultText(
       role == 'assistant'
           ? publicDeliveryText(msg)
-          : messageContentToText(publicDeliveryContent(msg)),
+          : messageContentToText(
+              AndroidPromptContext.displayContent(
+                msg,
+                publicDeliveryContent(msg),
+              ),
+            ),
     );
     final reasoning = msg['_gateway_reasoning']?.toString() ?? '';
     final hasReasoning =
