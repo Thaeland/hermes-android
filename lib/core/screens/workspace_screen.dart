@@ -1902,8 +1902,6 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     switch (entry.id) {
       case 'unassigned':
         _openWorkspaceSessionView(WorkspaceSessionView.unassigned);
-      case 'archived-quick':
-        _openWorkspaceSessionView(WorkspaceSessionView.archivedQuick);
       case 'files':
         unawaited(_openFiles());
       case 'assets':

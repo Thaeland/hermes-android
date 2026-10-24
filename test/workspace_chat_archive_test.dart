@@ -255,7 +255,7 @@ void main() {
   );
 
   testWidgets(
-    'restoring an expired Quick Chat clears its durable local archive',
+    'Chats Archived restores an expired Quick Chat and clears its local archive',
     (tester) async {
       final preferences = await SharedPreferences.getInstance();
       final store = QuickChatStore(preferences, connectionId: 'quick-restore');
@@ -314,7 +314,10 @@ void main() {
       await _tick(tester);
       await tester.tap(find.text('More').last);
       await _tick(tester);
-      await tester.tap(find.text('Archived quick chats'));
+      expect(find.text('Archived quick chats'), findsNothing);
+      await tester.tap(find.text('Chats').last);
+      await _tick(tester);
+      await tester.tap(find.widgetWithText(ChoiceChip, 'Archived'));
       await _tick(tester);
       expect(find.text(_chat().title), findsOneWidget);
       await _choose(tester, 'Unarchive chat');
@@ -328,11 +331,7 @@ void main() {
         (await reopened.load()).statusFor('stored-chat', DateTime.now()),
         QuickChatStatus.promoted,
       );
-      await tester.pageBack();
-      // The success snackbar temporarily overlaps the bottom navigation.
-      await tester.pump(const Duration(seconds: 5));
-      await _tick(tester);
-      await tester.tap(find.text('Chats').last);
+      await tester.tap(find.widgetWithText(ChoiceChip, 'All'));
       await _tick(tester);
       expect(find.text(_chat().title), findsOneWidget);
       expect(tester.takeException(), isNull);
