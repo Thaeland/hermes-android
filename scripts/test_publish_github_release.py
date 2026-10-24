@@ -10,6 +10,7 @@ from unittest import mock
 
 from scripts.publish_github_release import (
     APK_NAMES,
+    build_source_bundle,
     main,
     release_assets,
     release_command,
@@ -50,7 +51,12 @@ class PublishReleaseTest(unittest.TestCase):
             "v3.0.0-rc.1", "a" * 40, [Path("app-arm64-v8a-release.apk")]
         )
         self.assertEqual(command[:4], ["gh", "release", "create", "v3.0.0-rc.1"])
-        for flag in ("--verify-tag", "--draft=false", "--prerelease=true", "--latest=false"):
+        for flag in (
+            "--verify-tag",
+            "--draft=false",
+            "--prerelease=true",
+            "--latest=false",
+        ):
             self.assertIn(flag, command)
         self.assertNotIn("--clobber", command)
 
@@ -64,7 +70,9 @@ class PublishReleaseTest(unittest.TestCase):
             lines = (directory / "SHA256SUMS").read_text().splitlines()
             self.assertEqual(len(lines), 3)
             for apk_name, line in zip(APK_NAMES, lines):
-                self.assertEqual(line, f"{hashlib.sha256(apk_name.encode()).hexdigest()}  {apk_name}")
+                self.assertEqual(
+                    line, f"{hashlib.sha256(apk_name.encode()).hexdigest()}  {apk_name}"
+                )
 
     def test_missing_split_rejected(self):
         with tempfile.TemporaryDirectory() as name:
@@ -101,7 +109,10 @@ class PublisherMainTest(unittest.TestCase):
             (self.directory / name).write_bytes(b"test fixture, not an APK")
         self.head = "a" * 40
         self.target = self.head
-        self.reference = {"ref": "refs/tags/v3.0.0-rc.1", "object": {"type": "commit", "sha": self.head}}
+        self.reference = {
+            "ref": "refs/tags/v3.0.0-rc.1",
+            "object": {"type": "commit", "sha": self.head},
+        }
         self.tag_objects = {}
 
     def read_command(self, command, **kwargs):
@@ -117,12 +128,36 @@ class PublisherMainTest(unittest.TestCase):
         raise AssertionError(f"Unexpected command: {command}")
 
     def invoke(self):
-        argv = ["publisher", "--tag", "v3.0.0-rc.1", "--target", self.target,
-                "--assets-dir", str(self.directory)]
-        with mock.patch("sys.argv", argv), mock.patch.dict(os.environ, {"GITHUB_REPOSITORY": "rusty4444/hermes-android"}), mock.patch(
-            "scripts.publish_github_release.subprocess.check_output", side_effect=self.read_command
-        ), mock.patch("scripts.publish_github_release.subprocess.run") as publish:
+        argv = [
+            "publisher",
+            "--tag",
+            "v3.0.0-rc.1",
+            "--target",
+            self.target,
+            "--assets-dir",
+            str(self.directory),
+        ]
+        with (
+            mock.patch("sys.argv", argv),
+            mock.patch.dict(
+                os.environ, {"GITHUB_REPOSITORY": "rusty4444/hermes-android"}
+            ),
+            mock.patch(
+                "scripts.publish_github_release.subprocess.check_output",
+                side_effect=self.read_command,
+            ),
+            mock.patch(
+                "scripts.publish_github_release.build_source_bundle",
+                return_value=self.directory / "hermes-android-source-relink.zip",
+            ) as bundle,
+            mock.patch("scripts.publish_github_release.subprocess.run") as publish,
+        ):
             main()
+            bundle.assert_called_once_with(
+                self.directory,
+                self.target,
+                [self.directory / name for name in APK_NAMES],
+            )
             return publish
 
     def test_rejects_remote_tag_at_a_different_commit(self):
@@ -138,17 +173,24 @@ class PublisherMainTest(unittest.TestCase):
         self.assertIn("--latest=false", command)
         self.assertIn("--repo", command)
         self.assertIn("rusty4444/hermes-android", command)
+        self.assertIn(str(self.directory / "hermes-android-source-relink.zip"), command)
 
     def test_matching_annotated_tag_is_peeled(self):
         tag_sha = "c" * 40
         self.reference["object"] = {"type": "tag", "sha": tag_sha}
-        self.tag_objects[tag_sha] = {"sha": tag_sha, "object": {"type": "commit", "sha": self.head}}
+        self.tag_objects[tag_sha] = {
+            "sha": tag_sha,
+            "object": {"type": "commit", "sha": self.head},
+        }
         self.invoke().assert_called_once()
 
     def test_annotated_tag_at_wrong_commit_is_rejected(self):
         tag_sha = "c" * 40
         self.reference["object"] = {"type": "tag", "sha": tag_sha}
-        self.tag_objects[tag_sha] = {"sha": tag_sha, "object": {"type": "commit", "sha": "b" * 40}}
+        self.tag_objects[tag_sha] = {
+            "sha": tag_sha,
+            "object": {"type": "commit", "sha": "b" * 40},
+        }
         with self.assertRaisesRegex(SystemExit, "tag.*verified checkout"):
             self.invoke()
 
@@ -165,7 +207,10 @@ class PublisherMainTest(unittest.TestCase):
     def test_cyclic_tag_objects_fail_closed(self):
         tag_sha = "c" * 40
         self.reference["object"] = {"type": "tag", "sha": tag_sha}
-        self.tag_objects[tag_sha] = {"sha": tag_sha, "object": {"type": "tag", "sha": tag_sha}}
+        self.tag_objects[tag_sha] = {
+            "sha": tag_sha,
+            "object": {"type": "tag", "sha": tag_sha},
+        }
         with self.assertRaises(SystemExit):
             self.invoke()
 
@@ -173,6 +218,55 @@ class PublisherMainTest(unittest.TestCase):
         self.target = "b" * 40
         with self.assertRaisesRegex(SystemExit, "target.*checkout HEAD"):
             self.invoke()
+
+
+class SourceBundleTest(unittest.TestCase):
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.directory = Path(temporary.name)
+        previous_directory = Path.cwd()
+        os.chdir(self.directory)
+        self.addCleanup(os.chdir, previous_directory)
+        (self.directory / "tools").mkdir()
+        (self.directory / "tools/embedded_push_materials.py").write_text(
+            "# test-owned fixture\n"
+        )
+        self.bundle = self.directory / "hermes-android-source-relink.zip"
+
+    def test_generator_receives_exact_commit_and_every_apk(self):
+        apks = [self.directory / name for name in APK_NAMES]
+
+        def generate(command, **kwargs):
+            self.assertEqual(
+                command[2:6], ["--ref", "a" * 40, "--bundle", str(self.bundle)]
+            )
+            self.assertEqual(
+                command[6:], [value for apk in apks for value in ("--apk", str(apk))]
+            )
+            self.bundle.write_bytes(b"unit-test source-bundle fixture")
+
+        with mock.patch(
+            "scripts.publish_github_release.subprocess.run", side_effect=generate
+        ):
+            self.assertEqual(
+                build_source_bundle(self.directory, "a" * 40, apks), self.bundle
+            )
+
+    def test_missing_generator_fails_closed(self):
+        (self.directory / "tools/embedded_push_materials.py").unlink()
+        with self.assertRaisesRegex(SystemExit, "generator is missing"):
+            build_source_bundle(self.directory, "a" * 40, [])
+
+    def test_old_source_bundle_cannot_be_reused(self):
+        self.bundle.write_bytes(b"old test fixture")
+        with self.assertRaisesRegex(SystemExit, "existing source/relink"):
+            build_source_bundle(self.directory, "a" * 40, [])
+
+    def test_successful_command_without_a_bundle_is_rejected(self):
+        with mock.patch("scripts.publish_github_release.subprocess.run"):
+            with self.assertRaisesRegex(SystemExit, "did not produce a bundle"):
+                build_source_bundle(self.directory, "a" * 40, [])
 
 
 if __name__ == "__main__":

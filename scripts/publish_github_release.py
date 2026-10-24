@@ -8,6 +8,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -37,10 +38,18 @@ def release_command(
     if re.fullmatch(r"[0-9a-f]{40}", target) is None:
         raise ValueError("Release target must be a full 40-character commit SHA")
     command = [
-        "gh", "release", "create", tag,
-        "--verify-tag", "--target", target,
-        "--title", f"Hermes Android {tag}",
-        "--generate-notes", "--draft=false", *flags,
+        "gh",
+        "release",
+        "create",
+        tag,
+        "--verify-tag",
+        "--target",
+        target,
+        "--title",
+        f"Hermes Android {tag}",
+        "--generate-notes",
+        "--draft=false",
+        *flags,
         *(str(path) for path in assets),
     ]
     if repository:
@@ -100,6 +109,23 @@ def release_assets(directory: Path) -> list[Path]:
     return [*assets, checksum]
 
 
+def build_source_bundle(directory: Path, target: str, apks: list[Path]) -> Path:
+    """Accompany the APKs with exact tracked app and embedded-Library source."""
+    tool = Path("tools/embedded_push_materials.py")
+    if not tool.is_file():
+        raise SystemExit("Required source/relink material generator is missing")
+    bundle = directory / "hermes-android-source-relink.zip"
+    if bundle.exists():
+        raise SystemExit("Refusing to reuse an existing source/relink bundle")
+    command = [sys.executable, str(tool), "--ref", target, "--bundle", str(bundle)]
+    for apk in apks:
+        command.extend(["--apk", str(apk)])
+    subprocess.run(command, check=True)
+    if not bundle.is_file() or bundle.stat().st_size == 0:
+        raise SystemExit("Source/relink generator did not produce a bundle")
+    return bundle
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tag", required=True)
@@ -117,18 +143,23 @@ def main() -> None:
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     if args.target != head:
         raise SystemExit("Release target must match the verified checkout HEAD")
-    repository = os.environ.get("GITHUB_REPOSITORY") or subprocess.check_output(
-        ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
-        text=True,
-    ).strip()
+    repository = (
+        os.environ.get("GITHUB_REPOSITORY")
+        or subprocess.check_output(
+            ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
+            text=True,
+        ).strip()
+    )
     try:
         tag_commit = remote_tag_commit(repository, args.tag)
     except (ValueError, KeyError, TypeError) as error:
         raise SystemExit(f"Invalid remote release tag: {error}") from error
     if tag_commit != head:
         raise SystemExit("Remote release tag must match the verified checkout HEAD")
+    assets = release_assets(args.assets_dir)
+    bundle = build_source_bundle(args.assets_dir, args.target, assets[:-1])
     command = release_command(
-        args.tag, args.target, release_assets(args.assets_dir), repository=repository
+        args.tag, args.target, [*assets, bundle], repository=repository
     )
     # Create-only: a rerun must not silently overwrite an already published APK.
     subprocess.run(command, check=True)
