@@ -374,51 +374,74 @@ void main() {
   }
 
   for (final surface in ['selection', 'task']) {
-    testWidgets('closing $surface before launch fails shows no stale dialog', (
-      tester,
-    ) async {
-      final result = Completer<bool>();
-      launch = () => result.future;
-      if (surface == 'selection') {
-        await tester.pumpWidget(
-          _app(
-            const MessageBubble(
-              content: '[Release page]($_releaseUrl)',
-              isUser: false,
-            ),
-          ),
+    for (final width in [430.0, 1000.0]) {
+      for (final throws in [false, true]) {
+        testWidgets(
+          'popping $width $surface suppresses failure before unmount ($throws)',
+          (tester) async {
+            tester.view.devicePixelRatio = 1;
+            tester.view.physicalSize = Size(width, 800);
+            addTearDown(tester.view.resetPhysicalSize);
+            addTearDown(tester.view.resetDevicePixelRatio);
+            final result = Completer<bool>();
+            launch = () => result.future;
+            if (surface == 'selection') {
+              await tester.pumpWidget(
+                _app(
+                  const MessageBubble(
+                    content: '[Release page]($_releaseUrl)',
+                    isUser: false,
+                  ),
+                ),
+              );
+              await tester.longPress(find.byKey(const Key('message-bubble')));
+              await tester.pumpAndSettle();
+              await tester.tap(find.byTooltip('Select text'));
+            } else {
+              final history = FakeHistory()
+                ..data = [
+                  {
+                    'id': 1,
+                    'role': 'assistant',
+                    'content': '[Release page]($_releaseUrl)',
+                  },
+                ];
+              final controller = DelegatedTaskController(
+                task: task,
+                history: history,
+              );
+              await tester.pumpWidget(_app(_taskOpener(controller)));
+              await tester.tap(find.text('Open task'));
+            }
+            await tester.pumpAndSettle();
+            final link = find.text('Release page').hitTestable();
+            final originContext = tester.element(link);
+            final originRoute = ModalRoute.of(originContext)!;
+            await tester.tap(link);
+            await tester.pump();
+            expect(launches, hasLength(1));
+            expect(originRoute.isActive, isTrue);
+            await tester.tap(find.text('Close').hitTestable());
+            // Pop revokes the route before its reverse animation unmounts it.
+            expect(originRoute.isActive, isFalse);
+            expect(originContext.mounted, isTrue);
+            if (throws) {
+              result.completeError(PlatformException(code: 'NO_BROWSER'));
+            } else {
+              result.complete(false);
+            }
+            await tester.pump();
+            expect(originContext.mounted, isTrue);
+            expect(find.text('Could not open this link.'), findsNothing);
+            await tester.pumpAndSettle();
+            expect(originContext.mounted, isFalse);
+            expect(find.text('Could not open this link.'), findsNothing);
+            expect(find.byType(AlertDialog), findsNothing);
+            expect(tester.takeException(), isNull);
+          },
         );
-        await tester.longPress(find.byKey(const Key('message-bubble')));
-        await tester.pumpAndSettle();
-        await tester.tap(find.byTooltip('Select text'));
-      } else {
-        final history = FakeHistory()
-          ..data = [
-            {
-              'id': 1,
-              'role': 'assistant',
-              'content': '[Release page]($_releaseUrl)',
-            },
-          ];
-        final controller = DelegatedTaskController(
-          task: task,
-          history: history,
-        );
-        await tester.pumpWidget(_app(_taskOpener(controller)));
-        await tester.tap(find.text('Open task'));
       }
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Release page').hitTestable());
-      await tester.pump();
-      expect(launches, hasLength(1));
-      await tester.tap(find.text('Close').hitTestable());
-      await tester.pumpAndSettle();
-      result.complete(false);
-      await tester.pumpAndSettle();
-      expect(find.text('Could not open this link.'), findsNothing);
-      expect(find.byType(AlertDialog), findsNothing);
-      expect(tester.takeException(), isNull);
-    });
+    }
   }
 
   testWidgets(

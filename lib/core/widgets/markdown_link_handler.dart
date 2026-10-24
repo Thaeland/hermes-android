@@ -14,15 +14,16 @@ Future<void> openMarkdownWebLink(BuildContext context, String? href) async {
     return;
   }
 
+  final originatingRoute = ModalRoute.of(context);
   var opened = false;
   try {
     opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
   } catch (_) {
     // Missing browser/plugin and rejected platform intents have the same UI.
   }
-  if (opened || !context.mounted) return;
-  // A parent Scaffold's snackbar can sit behind a task sheet or selection
-  // dialog. Keep failure feedback on top of the active route instead.
+  if (opened || !context.mounted || originatingRoute?.isActive == false) return;
+  // Popped routes remain mounted during their reverse animation. Only the
+  // originating active route may present failure feedback above its modal.
   await showDialog<void>(
     context: context,
     builder: (dialogContext) => AlertDialog(
