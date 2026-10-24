@@ -116,6 +116,14 @@ void main() {
       }
       for (final projection in [null, '', 'Actual public text']) {
         final projected = {...row, 'display_content': projection};
+        if (projection == null || projection == '') {
+          expect(
+            parseTaskTranscript([
+              {'id': 1, ...projected},
+            ]),
+            isEmpty,
+          );
+        }
         final report = BackgroundReport.fromMessage(projected);
         if (kind != null && projection == 'Actual public text') {
           expect(report!.body, projection);
@@ -131,6 +139,19 @@ void main() {
         );
       }
     }
+  });
+
+  test('large malformed delegation fields avoid wildcard backtracking', () {
+    final fixture =
+        internalBackgroundMessageFixtures()['legacy_delegation_single']!;
+    final body = (fixture['row'] as Map)['content'] as String;
+    final intro = body.substring(0, body.indexOf('Original goal: '));
+    final malformed =
+        '$intro${'Original goal: fixture\nRole: leaf   Model: fixture\nStatus: invalid\n' * 1000}';
+    expect(
+      BackgroundReport.fromMessage({'role': 'user', 'content': malformed}),
+      isNull,
+    );
   });
 
   test(

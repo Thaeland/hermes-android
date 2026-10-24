@@ -515,6 +515,9 @@ List<TaskTranscriptRow> parseTaskTranscript(List<Map<String, dynamic>> rows) {
     final metadata = row['display_metadata'];
     if (row['display_kind'] == 'hidden' ||
         (metadata is Map && metadata['model_only'] == true) ||
+        (row['role'] == 'user' &&
+            row.containsKey('display_content') &&
+            (row['display_content'] == null || row['display_content'] == '')) ||
         !const {
           'user',
           'assistant',

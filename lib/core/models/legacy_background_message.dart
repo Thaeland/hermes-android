@@ -8,6 +8,7 @@ abstract final class LegacyBackgroundMessage {
   static bool isTask(String body) {
     final text = body.replaceAll('\r\n', '\n');
     return _fixedTasks.contains(text) ||
+        _isDelegationResult(text) ||
         _taskFrames.any((pattern) => _matchesWhole(pattern, text));
   }
 
@@ -22,6 +23,82 @@ abstract final class LegacyBackgroundMessage {
     final match = pattern.matchAsPrefix(text);
     return match != null && match.end == text.length;
   }
+
+  // tools/process_registry_notifications.py. Parse variable result walls once:
+  // wildcard searches for several repeated labels have polynomial worst cases.
+  static bool _isDelegationResult(String text) {
+    if (!text.startsWith('[ASYNC DELEGATION ')) return false;
+    final lines = text.split('\n');
+    if (lines.length < 5) return false;
+    if (_matchesWhole(_singleDelegationHeader, lines.first)) {
+      if (lines[1] != _singleDelegationIntro) return false;
+      final result = lines.indexOf('--- RESULT ---');
+      if (result < 4 || result == lines.length - 1) return false;
+      final status = lines[result - 1];
+      if (!status.startsWith('Status: ') ||
+          !status.contains('   API calls: ') ||
+          !status.contains('   Duration: ')) {
+        return false;
+      }
+      var hasGoal = false;
+      for (var index = 2; index < result - 1; index++) {
+        final line = lines[index];
+        if (line.startsWith('Original goal: ')) hasGoal = true;
+        if (hasGoal && _isDelegationRole(line)) return true;
+      }
+      return false;
+    }
+    if (!_matchesWhole(_batchDelegationHeader, lines.first) ||
+        !_matchesWhole(_batchDelegationIntro, lines[1])) {
+      return false;
+    }
+    var hasRole = false;
+    for (var index = 2; index < lines.length - 1; index++) {
+      final line = lines[index];
+      if (_isDelegationRole(line, batch: true)) hasRole = true;
+      if (hasRole &&
+          (line == '--- ERROR ---' ||
+              line.endsWith(' ---') && _matchesWhole(_batchTaskHeader, line))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  static final _singleDelegationHeader = RegExp(
+    r'\[ASYNC DELEGATION COMPLETE — [^\r\n\]]+\]',
+  );
+  static final _batchDelegationHeader = RegExp(
+    r'\[ASYNC DELEGATION BATCH COMPLETE — [^\r\n\]]+\]',
+  );
+  static const _singleDelegationIntro =
+      'A background subagent you dispatched earlier has finished. You may '
+      'have moved on since dispatching it; the full task source is below so '
+      'you can act on the result or re-dispatch if things have changed.';
+  static final _batchDelegationIntro = RegExp(
+    r'A background fan-out unit you dispatched earlier — [^\n]+ — has '
+    r'finished; its consolidated results are below\. Any other units from '
+    r'the same delegate_task call report separately as they finish\. You '
+    r'may have moved on since dispatching — act on these or re-dispatch '
+    r'if things have changed\. If you are still waiting on siblings, end '
+    r'your turn after acting on this one\.',
+  );
+  static bool _isDelegationRole(String line, {bool batch = false}) {
+    if (!line.startsWith('Role: ')) return false;
+    const modelLabel = '   Model: ';
+    final model = line.indexOf(modelLabel, 6);
+    if (model <= 6 || model + modelLabel.length >= line.length) return false;
+    if (!batch) return true;
+    const durationLabel = '   Total duration: ';
+    final duration = line.indexOf(durationLabel, model + modelLabel.length);
+    return duration > model + modelLabel.length &&
+        duration + durationLabel.length < line.length - 1 &&
+        line.endsWith('s');
+  }
+
+  static final _batchTaskHeader = RegExp(
+    r'--- [✓✗⚠] TASK [0-9]+/[0-9]+[^\n]* ---',
+  );
 
   // agent/conversation_loop.py and agent/context_compressor.py. Equality is
   // intentional: these ordinary-looking sentences must not swallow human prose.
@@ -118,27 +195,8 @@ abstract final class LegacyBackgroundMessage {
     // Mirror provenance is otherwise lost in gateway/mirror.py. There must be a
     // complete delivery header and payload, not a mention of one in user prose.
     RegExp(r'\[(?:Cron|Webhook) delivery: [^\r\n]+\]\n[\s\S]+'),
-    // tools/process_registry_notifications.py. Require the actual producer's
-    // introduction and evidence fields, never just an ASYNC DELEGATION header.
-    RegExp(
-      r'\[ASYNC DELEGATION COMPLETE — [^\r\n\]]+\]\n'
-      r'A background subagent you dispatched earlier has finished\. You may '
-      r'have moved on since dispatching it; the full task source is below so '
-      r'you can act on the result or re-dispatch if things have changed\.'
-      r'\n[\s\S]*Original goal: [\s\S]*\nRole: [^\n]+\n[\s\S]*'
-      r'Status: [^\n]+\n--- RESULT ---\n[\s\S]+',
-    ),
-    RegExp(
-      r'\[ASYNC DELEGATION BATCH COMPLETE — [^\r\n\]]+\]\n'
-      r'A background fan-out unit you dispatched earlier — [^\n]+ — has '
-      r'finished; its consolidated results are below\. Any other units from '
-      r'the same delegate_task call report separately as they finish\. You '
-      r'may have moved on since dispatching — act on these or re-dispatch '
-      r'if things have changed\. If you are still waiting on siblings, end '
-      r'your turn after acting on this one\.\n[\s\S]*'
-      r'Role: [^\n]+   Total duration: [^\n]+s\n[\s\S]*'
-      r'(?:--- [✓✗⚠] TASK [0-9]+/[0-9]+[^\n]* ---|--- ERROR ---)\n[\s\S]+',
-    ),
+    // Delegation result bodies are parsed linearly in _isDelegationResult;
+    // repeated output field labels must not cause wildcard backtracking here.
     RegExp(
       r'\[ASYNC DELEGATION TASK FAILED — [^\r\n\]]+, task [0-9]+/[0-9]+\]\n'
       r'One subagent in a background fan-out you dispatched has failed while '
