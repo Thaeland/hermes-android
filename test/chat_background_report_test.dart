@@ -38,7 +38,7 @@ void main() {
     for (final verbose in [false, true]) {
       for (final arrivesOnRefresh in [false, true]) {
         testWidgets(
-          'untagged compression task list ${snapshotCase.key} is a collapsed background card '
+          'untagged compression task list ${snapshotCase.key} follows quiet/verbose card policy '
           'verbose=$verbose arrivesOnRefresh=$arrivesOnRefresh',
           (tester) async {
             SharedPreferences.setMockInitialValues({'verbose_mode': verbose});
@@ -51,7 +51,12 @@ void main() {
               ..clear()
               ..addAll([
                 {'id': 1, 'role': 'user', 'content': 'Real user prompt'},
-                {'id': 2, 'role': 'assistant', 'content': 'Ordinary answer'},
+                {
+                  'id': 2,
+                  'role': 'assistant',
+                  'content': 'Ordinary answer',
+                  'finish_reason': 'stop',
+                },
                 if (!arrivesOnRefresh) {...snapshot, 'id': 3},
               ]);
             final controller = GatewayTurnApplicationController();
@@ -64,10 +69,14 @@ void main() {
                 await _refresh(tester);
               }
               final card = find.byType(BackgroundReportCard);
-              expect(card, findsOneWidget);
-              expect(find.text('Background task'), findsOneWidget);
-              expect(_expanded(tester, card), isFalse);
+              expect(card, verbose ? findsOneWidget : findsNothing);
+              expect(
+                find.text('Background task'),
+                verbose ? findsOneWidget : findsNothing,
+              );
+              if (verbose) expect(_expanded(tester, card), isFalse);
               expect(find.text(body, skipOffstage: false), findsNothing);
+              expect(find.text('Ordinary answer'), findsOneWidget);
               final humans = tester
                   .widgetList<MessageBubble>(find.byType(MessageBubble))
                   .where((bubble) => bubble.isUser)
@@ -76,21 +85,36 @@ void main() {
                 'Real user prompt',
               ]);
               expect(humans.single.onEdit, isNotNull);
+              expect(humans.single.verbose, verbose);
               await tester.enterText(find.byType(TextField), 'Keep this draft');
-              await tester.tap(
-                find.descendant(of: card, matching: find.text('Expand report')),
-              );
-              await tester.pumpAndSettle();
-              expect(_expanded(tester, card), isTrue);
-              expect(find.text(body), findsOneWidget);
-              expect(
-                find.descendant(of: card, matching: find.byType(MessageBubble)),
-                findsNothing,
-              );
-              final key = tester.widget(card).key;
+              if (verbose) {
+                await tester.tap(
+                  find.descendant(
+                    of: card,
+                    matching: find.text('Expand report'),
+                  ),
+                );
+                await tester.pumpAndSettle();
+                expect(_expanded(tester, card), isTrue);
+                expect(find.text(body), findsOneWidget);
+                expect(
+                  find.descendant(
+                    of: card,
+                    matching: find.byType(MessageBubble),
+                  ),
+                  findsNothing,
+                );
+              }
+              final key = verbose ? tester.widget(card).key : null;
               await _refresh(tester);
-              expect(tester.widget(card).key, key);
-              expect(_expanded(tester, card), isTrue);
+              if (verbose) {
+                expect(tester.widget(card).key, key);
+                expect(_expanded(tester, card), isTrue);
+              } else {
+                expect(card, findsNothing);
+                expect(find.text(body, skipOffstage: false), findsNothing);
+                expect(find.text('Ordinary answer'), findsOneWidget);
+              }
               expect(_draft(tester), 'Keep this draft');
               final canonical = controller
                   .normalSessionFor(fixture.connection)
@@ -104,7 +128,8 @@ void main() {
               await tester.pumpWidget(const SizedBox.shrink());
               await tester.pumpWidget(_app(fixture, controller));
               await tester.pumpAndSettle();
-              expect(_expanded(tester, card), isFalse);
+              expect(card, verbose ? findsOneWidget : findsNothing);
+              if (verbose) expect(_expanded(tester, card), isFalse);
               expect(find.text(body, skipOffstage: false), findsNothing);
               expect(fixture.submits, 0);
               expect(

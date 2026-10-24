@@ -10,6 +10,7 @@ import 'package:hermes_android/core/services/memory_repository.dart';
 import 'package:hermes_android/core/services/mobile_push_service.dart';
 import 'package:hermes_android/core/services/normal_gateway_application_session.dart';
 import 'package:hermes_android/core/services/ws_client.dart';
+import 'package:hermes_android/core/utils/android_prompt_context.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/mtls_fixture.dart';
@@ -303,7 +304,7 @@ void main() {
               jsonDecode(await utf8.decoder.bind(request).join()) as Map;
           expect((body['messages'] as List).last, {
             'role': 'user',
-            'content': 'prompt',
+            'content': AndroidPromptContext.forModel('prompt'),
           });
           request.response.headers.contentType = ContentType(
             'text',

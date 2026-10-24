@@ -288,6 +288,7 @@ void main() {
         httpClient: MockClient((request) async {
           captured = request;
           return http.Response(
+            'data: {"choices":[{"delta":{"content":"Done."}}]}\n\n'
             'data: [DONE]\n\n',
             200,
             headers: {'content-type': 'text/event-stream'},
