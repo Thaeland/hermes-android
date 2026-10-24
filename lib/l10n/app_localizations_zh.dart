@@ -24,6 +24,21 @@ class AppLocalizationsZh extends AppLocalizations {
   String get background_report_collapse => '收起报告';
 
   @override
+  String message_time_recorded(String time) {
+    return 'Recorded by server: $time (local time)';
+  }
+
+  @override
+  String message_time_sent(String time) {
+    return 'Send observed on this device: $time (local time)';
+  }
+
+  @override
+  String message_time_received(String time) {
+    return 'First received on this device: $time (local time)';
+  }
+
+  @override
   String get stop_and_send => '停止并发送';
 
   @override

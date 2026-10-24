@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:uuid/uuid.dart';
+import '../models/chat_message_time.dart';
 
 import '../models/chat_timeline.dart';
 import '../models/received_scope_outcome.dart';
@@ -1248,6 +1249,8 @@ class NormalGatewayChatOwner {
         'role': 'user',
         'display_kind': 'steer',
         'content': guidance,
+        ChatMessageTime.observedAtKey: DateTime.now().millisecondsSinceEpoch,
+        ChatMessageTime.sourceKey: 'sent',
         '_normal_projection_id': const Uuid().v4(),
       });
       return true;
@@ -1411,6 +1414,9 @@ class NormalGatewayChatOwner {
         onSent: () {
           if (!_current(generation) || !snapshot.hasActiveTurn) return;
           wireEmitted = true;
+          for (final row in _display.where((row) => row['role'] == 'user')) {
+            ChatMessageTime.observe(row, source: ChatMessageTimeSource.sent);
+          }
           invalidateDraftRecovery();
           phase = NormalGatewayTurnPhase.running;
           _marker = _marker!.withPhase('emitted');
@@ -1688,9 +1694,21 @@ class NormalGatewayChatOwner {
           reasoning.mode == GatewayReasoningEventMode.replace;
     } else if (event.type == 'message.start' && assistant != null) {
       _status = null;
+      ChatMessageTime.observe(
+        assistant,
+        source: ChatMessageTimeSource.received,
+        serverTimestamp: event.data['timestamp'],
+      );
       assistant.remove('_gateway_interim_boundary');
     } else if (event.type == 'message.delta' && assistant != null) {
       final token = event.data['text']?.toString() ?? '';
+      if (token.isNotEmpty) {
+        ChatMessageTime.observe(
+          assistant,
+          source: ChatMessageTimeSource.received,
+          serverTimestamp: event.data['timestamp'],
+        );
+      }
       assistant['content'] = '${assistant['content'] ?? ''}$token';
       _timeline = _timeline.appendText(
         assistant['_normal_projection_id']!,
@@ -1699,6 +1717,13 @@ class NormalGatewayChatOwner {
       _status = null;
     } else if (event.type == 'message.interim' && assistant != null) {
       _status = null;
+      if (event.data['text']?.toString().isNotEmpty == true) {
+        ChatMessageTime.observe(
+          assistant,
+          source: ChatMessageTimeSource.received,
+          serverTimestamp: event.data['timestamp'],
+        );
+      }
       final transition = GatewayInterimTransition.resolve(
         currentText: assistant['content']?.toString() ?? '',
         interimText: event.data['text']?.toString() ?? '',
@@ -1731,6 +1756,11 @@ class NormalGatewayChatOwner {
         event.data['text']?.toString() ?? text,
       );
       if (target != null) {
+        ChatMessageTime.observe(
+          target,
+          source: ChatMessageTimeSource.received,
+          serverTimestamp: event.data['timestamp'],
+        );
         if (text.isNotEmpty) {
           target['content'] = text;
           _timeline = _timeline.textSnapshot(

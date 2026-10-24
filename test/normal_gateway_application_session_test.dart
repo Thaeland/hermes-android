@@ -6,6 +6,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:hermes_android/core/models/chat_message_time.dart';
 // flutter_test supplies this deterministic timer clock via its SDK dependency.
 // ignore: depend_on_referenced_packages
 import 'package:fake_async/fake_async.dart';
@@ -21,6 +22,44 @@ import 'package:shared_preferences/shared_preferences.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => SharedPreferences.setMockInitialValues({}));
+
+  test(
+    'stock send and receipt times survive updates and canonical-alias reopen',
+    () async {
+      final f = _Fixture();
+      addTearDown(f.close);
+      await f.start();
+      final sent = ChatMessageTime.fromRow(f.owner.snapshot.displayRows.first)!;
+      expect(sent.source, ChatMessageTimeSource.sent);
+      f.emit('message.delta', {'text': 'first'});
+      final received = ChatMessageTime.fromRow(
+        f.owner.snapshot.displayRows.last,
+      )!;
+      f.emit('message.delta', {'text': 'second'});
+      expect(
+        ChatMessageTime.fromRow(f.owner.snapshot.displayRows.last)!.at,
+        received.at,
+      );
+      f.finish('message.complete', {
+        'text': 'final',
+        'timestamp': 1718456700.125,
+      });
+      final finalTime = ChatMessageTime.fromRow(
+        f.owner.snapshot.displayRows.last,
+      )!;
+      expect(finalTime.source, ChatMessageTimeSource.recorded);
+      expect(finalTime.at.millisecondsSinceEpoch, 1718456700125);
+      NormalGatewayChatSnapshot? reopened;
+      final owner = f.chat('stored', stored: 'stored');
+      owner.subscribe((value) => reopened = value);
+      expect(
+        ChatMessageTime.fromRow(reopened!.displayRows.last)!.at,
+        finalTime.at,
+      );
+      expect(ChatMessageTime.fromRow(reopened!.displayRows.first)!.at, sent.at);
+      expect(f.submissions, 1);
+    },
+  );
 
   test(
     'binding notifies real canonical changes but not duplicate route aliases',

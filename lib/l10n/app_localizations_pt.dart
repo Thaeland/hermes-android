@@ -25,6 +25,21 @@ class AppLocalizationsPt extends AppLocalizations {
   String get background_report_collapse => 'Recolher relatório';
 
   @override
+  String message_time_recorded(String time) {
+    return 'Recorded by server: $time (local time)';
+  }
+
+  @override
+  String message_time_sent(String time) {
+    return 'Send observed on this device: $time (local time)';
+  }
+
+  @override
+  String message_time_received(String time) {
+    return 'First received on this device: $time (local time)';
+  }
+
+  @override
   String get stop_and_send => 'Parar e enviar';
 
   @override

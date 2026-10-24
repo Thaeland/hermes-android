@@ -6,6 +6,16 @@ shows only the three latest releases.
 
 ## [Unreleased]
 
+### Added
+
+- Message-level local-time footers for user messages and completed Hermes
+  replies in quiet/Verbose Mode and both chat densities (#198). Prefer recorded
+  server times; label one-time device send/receipt observations in the tooltip.
+  Missing or invalid history times remain absent rather than using fetch or
+  rebuild time. Keep each completed message's footer when an earlier preview
+  completes after later interim commentary. Preserve existing completion,
+  source ownership and release gates.
+
 ## [3.0.0-rc.2] - 2026-10-24
 
 Testing candidate only. The latest stable release remains **2.1.33**. Back up

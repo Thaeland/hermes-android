@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hermes_android/core/models/chat_timeline.dart';
+import 'package:hermes_android/core/models/chat_message_time.dart';
 import 'package:hermes_android/core/screens/chat_screen.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
 import 'package:hermes_android/core/services/gateway_turn_application_controller.dart';
@@ -19,6 +20,50 @@ import 'support/pump_chat_updates.dart';
 void main() {
   setUp(mockChatImageRecovery);
   setUp(() => SharedPreferences.setMockInitialValues({'verbose_mode': true}));
+
+  testWidgets('SSE message times survive updates and empty history refresh', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(800, 1600));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final client = await _start(tester, 'message-times');
+    final user = _rows(
+      tester,
+    ).whereType<MessageBubble>().singleWhere((b) => b.isUser);
+    final sent = ChatMessageTime.fromRow(user.metadata)!;
+    expect(sent.source, ChatMessageTimeSource.sent);
+    client.emit(
+      _token('A') + _tool('timestamp-tool', 'completed') + _token('B'),
+    );
+    await tester.pump();
+    final received = _rows(tester).whereType<MessageBubble>().last;
+    final at = ChatMessageTime.fromRow(received.metadata)!;
+    expect(at.source, ChatMessageTimeSource.received);
+    expect(
+      find.byKey(const Key('message-timestamp')),
+      findsOneWidget,
+      reason: 'the partial assistant must not show a footer',
+    );
+    await tester.pump(const Duration(minutes: 5));
+    client.emit('${_token('C')}data: [DONE]\n\n');
+    await pumpChatUpdates(tester);
+    final completed = _rows(tester).whereType<MessageBubble>().last;
+    expect(ChatMessageTime.fromRow(completed.metadata)!.at, at.at);
+    expect(completed.metadata['_chat_response_complete'], isTrue);
+    expect(
+      find.byKey(const Key('message-timestamp')),
+      findsNWidgets(2),
+      reason:
+          'one user footer and one final assistant footer, not per text run',
+    );
+    expect(
+      ChatMessageTime.fromRow(
+        _rows(tester).whereType<MessageBubble>().first.metadata,
+      )!.at,
+      sent.at,
+    );
+    await _finish(tester, client);
+  });
 
   testWidgets('QUALITY SSE retained presentation obeys 1024-run bound', (
     tester,

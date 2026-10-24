@@ -17,6 +17,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:hermes_android/core/models/attachment_draft.dart';
 import 'package:hermes_android/core/screens/chat_screen.dart';
+import 'package:hermes_android/core/services/chat_density_preference.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
 import 'package:hermes_android/core/services/desktop_gateway_client.dart';
 import 'package:hermes_android/core/services/ws_client.dart';
@@ -1317,48 +1318,87 @@ void main() {
       },
     );
 
-    testWidgets(
-      'Remote previewed completion matches an earlier interim without discarding later commentary',
-      (tester) async {
-        final remote = _ControlledRemotePrompt();
-        await _pumpChat(
-          tester,
-          client: _ControlledChatHttpClient(const []),
-          connectionId: 'earlier-interim-preview',
-          sessionId: 'earlier-interim-preview',
-          remoteSubmit: remote.submit,
-        );
-        await tester.enterText(find.byType(TextField), 'Explain the result');
-        await tester.tap(find.byTooltip('Send'));
-        await tester.pump();
-        await remote.started.future;
+    for (final verbose in [false, true]) {
+      for (final density in ChatDensity.values) {
+        testWidgets(
+          'Remote previewed completion matches an earlier interim without discarding later commentary '
+          'verbose=$verbose density=$density',
+          (tester) async {
+            SharedPreferences.setMockInitialValues({
+              'verbose_mode': verbose,
+              ChatDensity.preferenceKey: density.storageValue,
+            });
+            await tester.binding.setSurfaceSize(const Size(800, 1600));
+            addTearDown(() => tester.binding.setSurfaceSize(null));
+            final remote = _ControlledRemotePrompt();
+            await _pumpChat(
+              tester,
+              client: _ControlledChatHttpClient(const []),
+              connectionId: 'earlier-interim-preview',
+              sessionId: 'earlier-interim-preview',
+              remoteSubmit: remote.submit,
+            );
+            await tester.enterText(
+              find.byType(TextField),
+              'Explain the result',
+            );
+            await tester.tap(find.byTooltip('Send'));
+            await tester.pump();
+            await remote.started.future;
 
-        remote.emit('message.start', {});
-        remote.emit('message.delta', {'text': 'First answer'});
-        remote.emit('message.interim', {
-          'text': 'First answer',
-          'already_streamed': true,
-        });
-        remote.emit('message.delta', {'text': 'Later commentary'});
-        remote.emit('message.interim', {
-          'text': 'Later commentary',
-          'already_streamed': true,
-        });
-        // No message.start between the interims and completion: the gateway
-        // only sends it at turn start, so this exercises the real boundary.
-        remote.emit('message.complete', {
-          'text': 'First answer',
-          'response_previewed': true,
-        });
-        remote.finish();
-        await pumpChatUpdates(tester);
-        expect(find.text('First answer', findRichText: true), findsOneWidget);
-        expect(
-          find.text('Later commentary', findRichText: true),
-          findsOneWidget,
+            remote.emit('message.start', {});
+            remote.emit('message.delta', {'text': 'First answer'});
+            remote.emit('message.interim', {
+              'text': 'First answer',
+              'already_streamed': true,
+            });
+            remote.emit('message.delta', {'text': 'Later commentary'});
+            remote.emit('message.interim', {
+              'text': 'Later commentary',
+              'already_streamed': true,
+            });
+            // No message.start between the interims and completion: the gateway
+            // only sends it at turn start, so this exercises the real boundary.
+            remote.emit('message.complete', {
+              'text': 'First answer',
+              'response_previewed': true,
+            });
+            remote.finish();
+            await pumpChatUpdates(tester);
+            expect(
+              find.text('First answer', findRichText: true),
+              findsOneWidget,
+            );
+            expect(
+              find.text('Later commentary', findRichText: true),
+              verbose ? findsOneWidget : findsNothing,
+            );
+            final completedBubble = find.byWidgetPredicate(
+              (widget) =>
+                  widget is MessageBubble && widget.content == 'First answer',
+            );
+            expect(
+              tester.widget<MessageBubble>(completedBubble).density,
+              density,
+            );
+            expect(
+              find.descendant(
+                of: completedBubble,
+                matching: find.byKey(const Key('message-timestamp')),
+              ),
+              findsOneWidget,
+              reason:
+                  'later interim text must not suppress the completed reply time',
+            );
+            expect(
+              find.byKey(const Key('message-timestamp')),
+              findsNWidgets(2),
+              reason: 'only the user and completed reply have time footers',
+            );
+          },
         );
-      },
-    );
+      }
+    }
 
     testWidgets(
       'Remote rendered completion matches raw interim text, then displays rendered text',
