@@ -145,6 +145,16 @@ Future<void> _expectFailClosedPromptDisconnect(
     socket.listen(
       (raw) {
         final request = jsonDecode(raw as String) as Map<String, dynamic>;
+        if (request['method'] == 'config.get') {
+          socket.add(
+            jsonEncode({
+              'jsonrpc': '2.0',
+              'id': request['id'],
+              'result': {'config': <String, dynamic>{}},
+            }),
+          );
+          return;
+        }
         if (request['method'] != 'prompt.submit') return;
         requests.add(request);
 
@@ -2480,6 +2490,16 @@ void main() {
               socket.listen((raw) {
                 final request =
                     jsonDecode(raw as String) as Map<String, dynamic>;
+                if (request['method'] == 'config.get') {
+                  socket.add(
+                    jsonEncode({
+                      'jsonrpc': '2.0',
+                      'id': request['id'],
+                      'result': {'config': <String, dynamic>{}},
+                    }),
+                  );
+                  return;
+                }
                 requests.add(request);
                 socket.add(
                   jsonEncode({

@@ -11,6 +11,7 @@ import 'package:hermes_android/core/services/connection_manager.dart';
 import 'package:hermes_android/core/services/desktop_gateway_client.dart';
 import 'package:hermes_android/core/services/gateway_turn_application_controller.dart';
 import 'package:hermes_android/core/services/normal_gateway_application_session.dart';
+import 'package:hermes_android/core/utils/android_prompt_context.dart';
 import 'package:hermes_android/l10n/app_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -125,8 +126,8 @@ void main() {
         await until(() => !local.snapshot.hasActiveTurn);
         expect(await session.pendingStore.load(session.scope), isEmpty);
         expect(server.prompts.map((p) => p['text']), [
-          'First explicit send',
-          'Second explicit send',
+          AndroidPromptContext.forModel('First explicit send'),
+          AndroidPromptContext.forModel('Second explicit send'),
         ]);
         expect(server.creates, 1);
       },
@@ -289,7 +290,10 @@ void main() {
           (await session.pendingStore.load(session.scope)).single.turnId,
           admittedTurn,
         );
-        expect(server.prompts.single['text'], 'Canonical admitted');
+        expect(
+          server.prompts.single['text'],
+          AndroidPromptContext.forModel('Canonical admitted'),
+        );
         server.finish('Canonical answer');
         await flight;
         await until(() => !canonical.snapshot.hasActiveTurn);
@@ -306,8 +310,8 @@ void main() {
         await retry;
         await until(() => !canonical.snapshot.hasActiveTurn);
         expect(server.prompts.map((p) => p['text']), [
-          'Canonical admitted',
-          'Explicit local retry',
+          AndroidPromptContext.forModel('Canonical admitted'),
+          AndroidPromptContext.forModel('Explicit local retry'),
         ]);
         expect(await session.pendingStore.load(session.scope), isEmpty);
       },
@@ -535,7 +539,9 @@ void main() {
         expect(server.prompts, hasLength(1));
         expect(
           server.prompts.single['text'],
-          active ? 'Canonical admitted' : 'Original local draft',
+          AndroidPromptContext.forModel(
+            active ? 'Canonical admitted' : 'Original local draft',
+          ),
         );
         if (active) {
           expect(
@@ -575,7 +581,10 @@ void main() {
         await widgetUntil(tester, () => server.prompts.length == 2);
         server.finish('Explicit route answer');
         await widgetUntil(tester, () => !local.snapshot.hasActiveTurn);
-        expect(server.prompts.last['text'], 'Explicit route retry');
+        expect(
+          server.prompts.last['text'],
+          AndroidPromptContext.forModel('Explicit route retry'),
+        );
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.pump();
         await controller.close();
@@ -683,7 +692,9 @@ class BindingServer {
       final method = frame['method'];
       if (method == null) return;
       final result = <String, dynamic>{'jsonrpc': '2.0', 'id': frame['id']};
-      if (method == 'session.resume') {
+      if (method == 'config.get' && frame['params']['key'] == 'full') {
+        result['result'] = {'config': <String, dynamic>{}};
+      } else if (method == 'session.resume') {
         resumes++;
         if (creates == 0) {
           result['error'] = {'code': 4007, 'message': 'session not found'};

@@ -35,13 +35,16 @@ class AndroidPromptContext {
   };
 
   /// Call once at an outbound boundary, never on drafts or stored history.
-  static String forModel(String text) {
+  static String forModel(
+    String text, {
+    Iterable<String> stopPhrases = const [],
+  }) {
     final trimmed = text.trim();
+    final control = trimmed.toLowerCase().replaceAll(_controlPunctuation, '');
     if (trimmed.isEmpty ||
         trimmed.startsWith('/') ||
-        _bareControls.contains(
-          trimmed.toLowerCase().replaceAll(_controlPunctuation, ''),
-        )) {
+        _bareControls.contains(control) ||
+        stopPhrases.any((phrase) => phrase.trim().toLowerCase() == control)) {
       return text;
     }
     return '$text$suffix';
@@ -52,7 +55,8 @@ class AndroidPromptContext {
       text.trim().isEmpty ? '$text$suffix' : forModel(text);
 
   /// Remove one complete known suffix, preserving the user's exact text.
-  static String userText(String text) => text.endsWith(suffix)
+  static String userText(String text) =>
+      !text.trimLeft().startsWith('/') && text.endsWith(suffix)
       ? text.substring(0, text.length - suffix.length)
       : text;
 
@@ -91,6 +95,8 @@ class AndroidPromptContext {
   /// A bounded server preview can end part-way through the app's known note.
   /// Never infer an unknown version or use preview text as turn identity.
   static String sessionPreview(String preview) {
+    // Slash inputs are never framed, so a matching note is the user's literal.
+    if (preview.trimLeft().startsWith('/')) return preview;
     final start = preview.indexOf(header);
     if (start < 0) return preview;
     final whitespace = RegExp(r'\s+');

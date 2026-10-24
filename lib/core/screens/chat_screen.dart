@@ -41,6 +41,7 @@ import '../services/voice_composer_adapter.dart';
 import '../services/ws_client.dart';
 import '../utils/media_tags.dart';
 import '../utils/delivered_files.dart';
+import '../utils/generated_media.dart';
 import '../models/attachment_draft.dart';
 import '../models/background_report.dart';
 import '../models/chat_timeline.dart';
@@ -1575,8 +1576,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         }
       }
     } else {
-      for (final message in _messages) {
-        _writeExportMessage(buffer, message);
+      // Export the same public projection as the transcript on every transport.
+      // Raw history can contain hidden/model-only rows and explicit empty
+      // replacements; neither is permission to expose physical model content.
+      for (final item in buildChatDisplayItems(messages: _messages)) {
+        if (item is Map<String, dynamic>) _writeExportMessage(buffer, item);
       }
     }
     await SharePlus.instance.share(
@@ -1591,10 +1595,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }) {
     final role = message['role']?.toString();
     if (role != 'user' && role != 'assistant' && role != 'agent') return;
+    if (!isPublicDeliveryMessage(message)) return;
     final content = stripToolResultText(
       messageContentToText(
-        message['_display_content'] ??
-            AndroidPromptContext.displayContent(message, message['content']),
+        message.containsKey('_display_content')
+            ? message['_display_content']
+            : AndroidPromptContext.displayContent(
+                message,
+                publicDeliveryContent(message),
+              ),
       ),
     ).trim();
     if (content.isEmpty) return;
