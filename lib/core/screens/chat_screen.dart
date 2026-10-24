@@ -540,6 +540,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _deferredHistoryRefreshPending = false;
   bool _deferredHistoryRefreshing = false;
   String? _persistedHistoryContextRequested;
+  Object? _persistedHistoryContextFlight;
   bool _stopResponseInFlight = false;
   bool _approvalDialogOpen = false;
   bool _approvalRouteOpen = false;
@@ -944,16 +945,28 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           if (!mounted ||
               !identical(owner, _normalChat) ||
               !identical(_normalSnapshot, snapshot) ||
-              _windowContainsLatest(snapshot.historyRows)) {
+              _windowContainsLatest(_ownerHistoryForPresentation(snapshot))) {
             return;
           }
           setState(() {
-            if (snapshot.turnId == null) {
-              _historyWindow.mergeObservedRows(snapshot.historyRows);
+            if (!_windowContainsLatest(snapshot.historyRows)) {
+              if (snapshot.turnId == null) {
+                _historyWindow.mergeObservedRows(snapshot.historyRows);
+                _historyWindowRevision++;
+                _extractToolMessages(_historyWindow.rows);
+              } else {
+                _acceptRecentMessages(snapshot.historyRows);
+              }
+            }
+            if (snapshot.historyPresentationRows.isNotEmpty) {
+              // A sibling can confirm a long turn while this route's own
+              // context read is held. Publish its canonical replacement here,
+              // without granting retained rows latest/read or cursor authority.
+              _historyWindow.mergeObservedRows(
+                _ownerHistoryForPresentation(snapshot),
+              );
               _historyWindowRevision++;
               _extractToolMessages(_historyWindow.rows);
-            } else {
-              _acceptRecentMessages(snapshot.historyRows);
             }
             _messages = _restHistoryForPresentation();
           });
@@ -1013,26 +1026,52 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   void _queuePersistedHistoryContext(NormalGatewayChatSnapshot snapshot) {
     final owner = _normalChat;
-    if (owner == null || snapshot.hasActiveTurn || _loading) return;
+    if (owner == null ||
+        snapshot.hasActiveTurn ||
+        _loading ||
+        _sending ||
+        _streaming ||
+        _stopResponseInFlight ||
+        _pendingReattachResync ||
+        _persistedHistoryContextFlight != null) {
+      return;
+    }
     final key = owner.persistedTurnContextKey(snapshot.historyRows);
     if (key == null || key == _persistedHistoryContextRequested) return;
     // One automatic bounded scan per receipt set. Incomplete/failed context
-    // remains retryable through Refresh, without a background retry loop.
+    // consumes its attempt only if that read remains valid. A new turn can
+    // invalidate a held scan without permanently suppressing its fresh retry.
     _persistedHistoryContextRequested = key;
+    final flight = Object();
+    _persistedHistoryContextFlight = flight;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !identical(owner, _normalChat)) return;
+      if (!mounted || !identical(owner, _normalChat)) {
+        _finishPersistedHistoryContext(flight, invalidated: true);
+        return;
+      }
       if (_sending ||
           _streaming ||
           _stopResponseInFlight ||
-          _pendingReattachResync) {
-        _persistedHistoryContextRequested = null;
+          _pendingReattachResync ||
+          owner.persistedTurnContextKey(owner.snapshot.historyRows) != key) {
+        _finishPersistedHistoryContext(flight, invalidated: true);
         return;
       }
-      if (owner.persistedTurnContextKey(owner.snapshot.historyRows) != key) {
-        return;
-      }
-      unawaited(_fetchMessages());
+      unawaited(_fetchMessages(persistedContextFlight: flight));
     });
+  }
+
+  void _finishPersistedHistoryContext(
+    Object flight, {
+    bool invalidated = false,
+  }) {
+    if (!identical(_persistedHistoryContextFlight, flight)) return;
+    _persistedHistoryContextFlight = null;
+    if (invalidated) _persistedHistoryContextRequested = null;
+    // This also covers a new turn which already settled while the old page
+    // was held. An accepted failure keeps its key, so it cannot retry-spin.
+    final snapshot = _normalChat?.snapshot;
+    if (mounted && snapshot != null) _queuePersistedHistoryContext(snapshot);
   }
 
   bool _sameHistoryRows(
@@ -1061,6 +1100,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _historyWindow.rows.where((row) => id(row) == null).toList(),
           latest.where((row) => id(row) == null).toList(),
         );
+  }
+
+  List<Map<String, dynamic>> _ownerHistoryForPresentation(
+    NormalGatewayChatSnapshot snapshot,
+  ) {
+    if (snapshot.historyPresentationRows.isEmpty) return snapshot.historyRows;
+    // The owner preserves per-row observation order through alias handoff.
+    // Its retained presentation may contain a newer veto than the winning
+    // owner's admission-only latest snapshot. Never overwrite that value.
+    final projection = ChatHistoryWindow()
+      ..mergeObservedRows(snapshot.historyRows)
+      ..mergeObservedRows(snapshot.historyPresentationRows);
+    return projection.rows;
   }
 
   String get _connectionIdentity =>
@@ -2196,7 +2248,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _fetchMessages({String? sessionId}) async {
+  Future<void> _fetchMessages({
+    String? sessionId,
+    Object? persistedContextFlight,
+  }) async {
     if (_pendingReattachResync && sessionId == null) return;
     final read = _beginHistoryRead(
       sessionId ?? _normalChat?.storedSessionId ?? widget.session.id,
@@ -2264,6 +2319,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       setState(() => _error = errStr);
     } finally {
       _finishHistoryLoading(read);
+      if (persistedContextFlight != null) {
+        _finishPersistedHistoryContext(
+          persistedContextFlight,
+          invalidated: !_canApplyHistoryRead(read),
+        );
+      }
     }
   }
 

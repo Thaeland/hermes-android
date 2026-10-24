@@ -13,6 +13,7 @@ import '../utils/chat_conversation_projection.dart';
 import '../utils/android_prompt_context.dart';
 import 'connection_manager.dart';
 import 'composer_draft_store.dart';
+import 'chat_history_window.dart';
 import 'chat_presentation_state.dart';
 import 'desktop_gateway_client.dart';
 import 'normal_gateway_pending_store.dart';
@@ -81,6 +82,10 @@ class NormalGatewayChatSnapshot {
   final List<Map<String, dynamic>> displayRows;
   final List<Map<String, dynamic>> historyRows;
 
+  /// Bounded raw canonical context for presentation, including receipt handoffs.
+  /// Never latest/admission authority, receipt confirmation, or a paging cursor.
+  final List<Map<String, dynamic>> historyPresentationRows;
+
   final List<GatewayToolActivity> tools;
   final List<GatewaySubagentActivity> subagents;
   final List<StreamEvent> pendingInput;
@@ -104,6 +109,7 @@ class NormalGatewayChatSnapshot {
     required this.rowFloor,
     required this.displayRows,
     required this.historyRows,
+    this.historyPresentationRows = const [],
     required this.tools,
     required this.subagents,
     required this.pendingInput,
@@ -371,6 +377,8 @@ class NormalGatewayApplicationSession {
     loser._subagents.clear();
     loser._observedSubagents.clear();
     loser._historyConfirmationRows = [];
+    loser._historyPresentation.clear();
+    loser._historyPresentationObservation = 0;
     final settledIds = {
       ...loser._settledWireTurnIds,
       ...winner._settledWireTurnIds,
@@ -723,6 +731,8 @@ class NormalGatewayChatOwner {
   int? _receivedObservation;
   List<Map<String, dynamic>> _history = [];
   List<Map<String, dynamic>> _historyConfirmationRows = [];
+  List<_HistoryPresentationRow> _historyPresentation = [];
+  int _historyPresentationObservation = 0;
   bool _historyKnown = false;
   int _historyObservation = 0;
   String? _createdEmptySessionId;
@@ -793,6 +803,9 @@ class NormalGatewayChatOwner {
           historyRows: _history
               .map((row) => Map<String, dynamic>.unmodifiable(row))
               .toList(growable: false),
+          historyPresentationRows: List.unmodifiable(
+            _historyPresentation.map((entry) => entry.row),
+          ),
           tools: List.unmodifiable([
             for (final settled in _settledPresentation) ...settled.tools,
             ..._tools,
@@ -930,9 +943,51 @@ class NormalGatewayChatOwner {
         .toList();
     _historyKnown = true;
     _historyObservation = fresh.observation;
+    _retainHistoryPresentation(
+      _historyConfirmationRows.map(
+        (row) => _HistoryPresentationRow(row, fresh.observation),
+      ),
+      fresh.observation,
+    );
     _reconcilePersistedTurns();
     _boundSettledPresentation();
     return true;
+  }
+
+  void _retainHistoryPresentation(
+    Iterable<_HistoryPresentationRow> incoming,
+    int observation,
+  ) {
+    final accepted = incoming.toList(growable: false);
+    final anonymous = observation >= _historyPresentationObservation
+        ? accepted
+        : _historyPresentation;
+    final byId = <int, _HistoryPresentationRow>{};
+    for (final entry in [..._historyPresentation, ...accepted]) {
+      final id = entry.row['id'];
+      if (id is! int) continue;
+      final previous = byId[id];
+      // Alias winners need not own the most recent value of every retained row.
+      if (previous == null || entry.observation >= previous.observation) {
+        byId[id] = entry;
+      }
+    }
+    final ids = byId.keys.toList()..sort();
+    final merged = [
+      for (final id in ids) byId[id]!,
+      // Unaddressed legacy rows cannot be unioned safely across observations.
+      for (final entry in anonymous)
+        if (entry.row['id'] is! int) entry,
+    ];
+    // Match the bounded cold/context scan, not an unbounded transcript cache.
+    const budget =
+        ChatHistoryWindow.pageSize * ChatHistoryWindow.initialPageBudget;
+    _historyPresentation = merged.length <= budget
+        ? merged
+        : merged.sublist(merged.length - budget);
+    if (observation > _historyPresentationObservation) {
+      _historyPresentationObservation = observation;
+    }
   }
 
   /// An explicit receipt can require context beyond the latest raw page. The
@@ -978,12 +1033,22 @@ class NormalGatewayChatOwner {
   }
 
   void _reconcilePersistedTurns() {
+    // Deliver the confirming read's replacement, not a truncated context or an
+    // alias's newer row borrowing this owner's older confirmation.
+    final presentedIds = {
+      for (final entry in _historyPresentation)
+        if (entry.row['id'] is int && entry.observation == _historyObservation)
+          entry.row['id'],
+    };
     final covered = _persistedTurns.entries
         .where(
           (entry) =>
               entry.value.settled &&
               _historyObservation > entry.value.afterObservation &&
-              entry.value.receipt.isConfirmedBy(_historyConfirmationRows),
+              entry.value.receipt.isConfirmedBy(_historyConfirmationRows) &&
+              // Bounding context must not retire half of a canonical turn.
+              // Presence here protects replacement delivery, never proves it.
+              entry.value.receipt.rowIds.every(presentedIds.contains),
         )
         .toList(growable: false);
     if (covered.isEmpty) return;
@@ -1057,6 +1122,10 @@ class NormalGatewayChatOwner {
   ];
 
   void _adoptSettledPresentation(NormalGatewayChatOwner other) {
+    _retainHistoryPresentation(
+      other._historyPresentation,
+      other._historyPresentationObservation,
+    );
     _persistedTurns.addAll(other._persistedTurns);
     other._persistedTurns.clear();
     _settledPresentation.addAll(other._settledPresentation);
@@ -2602,6 +2671,8 @@ class NormalGatewayChatOwner {
     _receivedOutcomes.clear();
     _persistedTurns.clear();
     _historyConfirmationRows = [];
+    _historyPresentation.clear();
+    _historyPresentationObservation = 0;
     _timeline = _timeline.clear();
     _tools.clear();
     _subagents.clear();
@@ -2661,6 +2732,33 @@ class _GatewayHistoryObservation {
   final List<Map<String, dynamic>> rows;
   final NormalGatewayHistoryRead read;
   int get observation => read._observation;
+}
+
+/// Per-row read order survives alias transfer without lending latest authority.
+class _HistoryPresentationRow {
+  _HistoryPresentationRow(Map<String, dynamic> row, this.observation)
+    : row = Map<String, dynamic>.unmodifiable({
+        for (final entry in row.entries)
+          entry.key: _immutableHistoryPresentationValue(entry.value),
+      });
+
+  final Map<String, dynamic> row;
+  final int observation;
+}
+
+Object? _immutableHistoryPresentationValue(Object? value) {
+  if (value is Map<String, dynamic>) {
+    return Map<String, dynamic>.unmodifiable({
+      for (final entry in value.entries)
+        entry.key: _immutableHistoryPresentationValue(entry.value),
+    });
+  }
+  if (value is List) {
+    return List<dynamic>.unmodifiable(
+      value.map(_immutableHistoryPresentationValue),
+    );
+  }
+  return value;
 }
 
 /// Received historical output, not a second admission or canonical transcript.
