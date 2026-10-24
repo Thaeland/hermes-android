@@ -312,7 +312,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get auto_device_default => '自动（设备默认）';
 
   @override
-  String get automation => '自动化';
+  String get agent => '智能体';
 
   @override
   String get autonomous_agents => '自主智能体';
@@ -2663,16 +2663,18 @@ class AppLocalizationsZh extends AppLocalizations {
       'Client certificates are only used for HTTPS connections.';
 
   @override
-  String get choose_p12_pfx => 'Choose .p12 / .pfx';
+  String get choose_certificate => 'Choose certificate';
 
   @override
-  String get choose_certificate_pem => 'Choose certificate (PEM)';
+  String get certificate_password => 'Certificate password';
 
   @override
-  String get choose_private_key_pem => 'Choose private key (PEM)';
+  String get this_certificate_is_password_protected =>
+      'This certificate is password-protected. It opens as you type.';
 
   @override
-  String get certificate_password_optional => 'Certificate password (optional)';
+  String get enter_the_certificate_password_to_finish_loading_it =>
+      'Enter the certificate password to finish loading the certificate you chose.';
 
   @override
   String get client_certificate_required =>
@@ -3224,7 +3226,7 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get auto_device_default => '自动（设备默认）';
 
   @override
-  String get automation => '自动化';
+  String get agent => '智能体';
 
   @override
   String get autonomous_agents => '自主智能体';

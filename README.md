@@ -789,6 +789,10 @@ details in v2.1.33. Existing contributor credits below remain unchanged.
 Automated checks do not substitute for device validation; release notes list
 the checks performed.
 
+- **smhc** — contributed optional imported client certificates in PR #166, then
+  improved Android/iOS certificate picking, protected-file password entry and
+  loaded-certificate layout in PR #187, including a physical Android mTLS report.
+  Maintainer follow-ups cover encrypted PEM imports and certificate-chain parsing.
 - **krotname** (Andrei Ovcharenko) — fixed duplicate final answers after
   Gateway interim previews, including late reasoning and widget regressions
   (PR #153, v2.1.23). A maintainer follow-up handles exact-match edge cases.

@@ -86,7 +86,7 @@
   "attachment_drafts": "附件草稿",
   "attachment_of": "附件 {index} / {total}",
   "auto_device_default": "自动（设备默认）",
-  "automation": "自动化",
+  "agent": "智能体",
   "autonomous_agents": "自主智能体",
   "background_recovery_unavailable_legacy_transport": "后台恢复不可用 — 旧版传输",
   "background_task_completed": "后台任务完成",
