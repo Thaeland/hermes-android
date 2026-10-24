@@ -16,6 +16,49 @@ void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
   test(
+    'late owner coalescence preserves canonical Activity root without replay',
+    () async {
+      final f = _Fixture();
+      addTearDown(f.close);
+      await f.start();
+      final turn = f.owner.turnId;
+      final canonical = f.session.chatFor(
+        'current-tip',
+        storedSessionId: 'current-tip',
+        lineageRootId: 'root',
+        title: 'Canonical',
+      );
+      final winner = f.session.chatFor(
+        'local',
+        storedSessionId: 'current-tip',
+        title: 'Canonical',
+      );
+      expect(winner, same(f.owner));
+      expect(f.session.findChat('current-tip'), same(winner));
+      expect(canonical.turnId, turn);
+      expect(canonical.snapshot.hasActiveTurn, isTrue);
+      f.emit('message.delta', {'text': 'received-once'});
+      final record = (await f.records()).single;
+      expect(record.turnId, turn);
+      expect(record.storedSessionId, 'current-tip');
+      expect(record.lineageRootId, 'root');
+      expect(record.state, OperationalActivityState.running);
+      expect(f.submissions, 1);
+      final completed = _phase(winner, NormalGatewayTurnPhase.completed);
+      f.emit('turn.end', {'status': 'completed'});
+      await completed;
+      await f.close();
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.reload();
+      final restored = (await OperationalActivityStore().load('scope')).single;
+      expect(restored.lineageRootId, 'root');
+      expect(restored.turnId, turn);
+      expect(restored.state, OperationalActivityState.completed);
+      expect(f.submissions, 1);
+    },
+  );
+
+  test(
     'opening and cancelled preparation never create Activity work',
     () async {
       final f = _Fixture();
@@ -168,6 +211,9 @@ void main() {
       addTearDown(f.close);
       await f.start();
       f.emit('message.complete', {'text': 'private-reply'});
+      expect(pending.entered.isCompleted, isFalse);
+      expect(f.owner.snapshot.hasActiveTurn, isTrue);
+      f.emit('turn.end', {'status': 'completed'});
       await pending.entered.future;
       expect(f.owner.snapshot.hasActiveTurn, isTrue);
       expect(
@@ -250,6 +296,8 @@ void main() {
       status: 'idle',
     );
     final unknown = _phase(f.owner, NormalGatewayTurnPhase.reconciledUnknown);
+    // A pre-ACK idle observation is not authority; observe after submission wait.
+    await f.releaseRpc();
     f.session.setLifecycle(background: false);
     await unknown;
     expect((await f.records()).single.state, OperationalActivityState.unknown);
@@ -375,6 +423,7 @@ void main() {
         status: 'idle',
       );
       f.historyGate = Completer<List<Map<String, dynamic>>>();
+      await f.releaseRpc();
       f.session.setLifecycle(background: false);
       await f.historyEntered.future;
       final completed = _phase(f.owner, NormalGatewayTurnPhase.completed);
@@ -692,6 +741,16 @@ class _Fixture {
           }) {
             submissions++;
             onSent();
+            // The stock contract requires identified activity before a terminal
+            // may settle this turn. Empty prose is not a fabricated reply.
+            session.receiveEvent(
+              'local',
+              StreamEvent(
+                type: 'message.delta',
+                turnId: 'wire-${owner.turnId}',
+                data: {'text': ''},
+              ),
+            );
             sent.complete();
             return rpc.future;
           },
@@ -733,8 +792,10 @@ class _Fixture {
     await sent.future;
   }
 
-  void emit(String type, Map<String, dynamic> data) =>
-      session.receiveEvent('local', StreamEvent(type: type, data: data));
+  void emit(String type, Map<String, dynamic> data) => session.receiveEvent(
+    'local',
+    StreamEvent(type: type, turnId: 'wire-${owner.turnId}', data: data),
+  );
 
   Future<List<OperationalActivityRecord>> records() => activity.load('scope');
 

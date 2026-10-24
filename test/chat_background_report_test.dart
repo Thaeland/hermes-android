@@ -7,6 +7,7 @@ import 'package:hermes_android/core/screens/chat_screen.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
 import 'package:hermes_android/core/services/gateway_turn_application_controller.dart';
 import 'package:hermes_android/core/widgets/background_report_card.dart';
+import 'package:hermes_android/core/theme/hermes_theme.dart';
 import 'package:hermes_android/l10n/app_localizations.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -76,7 +77,9 @@ void main() {
                       w is Container &&
                       w.decoration is BoxDecoration &&
                       (w.decoration! as BoxDecoration).color ==
-                          hermesUserMessageBubbleBackground,
+                          HermesTokens.of(
+                            tester.element(find.byWidget(humans.single)),
+                          ).accent,
                 ),
               ),
               findsWidgets,

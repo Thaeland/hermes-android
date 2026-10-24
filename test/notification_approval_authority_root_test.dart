@@ -34,6 +34,11 @@ import 'support/inert_turn_application_session.dart';
 import 'package:hermes_android/core/services/notification_approval_authority.dart';
 import 'package:hermes_android/core/services/normal_gateway_application_session.dart';
 
+Finder _chatComposer() => find.descendant(
+  of: find.byType(ChatScreen),
+  matching: find.byType(TextField),
+);
+
 class _RootServer extends BindingServer {
   _RootServer(super.server);
   static Future<_RootServer> start() async {
@@ -117,6 +122,16 @@ class _RootServer extends BindingServer {
       }
       request.response.headers.contentType = ContentType.json;
       request.response.write(jsonEncode({'data': captured}));
+      await request.response.close();
+      return;
+    }
+    if (request.uri.path == '/api/sessions' &&
+        request.uri.queryParameters['archived'] == 'only') {
+      // Consolidated Chats owns an independent Dashboard archive read. It uses
+      // this fixture's trusted proxy, never the API-server Bearer credential.
+      expect(request.headers.value('authorization'), isNull);
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode({'sessions': [], 'total': 0}));
       await request.response.close();
       return;
     }
@@ -586,7 +601,7 @@ void _lifecycle(WidgetTester tester, AppLifecycleState target) {
 
 Future<String> _startSource(WidgetTester tester, _RootAliasFixture f) async {
   final id = tester.widget<ChatScreen>(find.byType(ChatScreen)).session.id;
-  await tester.enterText(find.byType(TextField), 'Independent source request');
+  await tester.enterText(_chatComposer(), 'Independent source request');
   await tester.tap(find.byTooltip('Send'));
   await widgetUntil(tester, () => f.server.createEntered.isCompleted);
   return id;
@@ -735,7 +750,7 @@ void main() {
             final normal = f.controller.normalSessionFor(f.connection);
             final owner = normal.findChat('stored')!;
             final composer = tester
-                .widget<TextField>(find.byType(TextField))
+                .widget<TextField>(_chatComposer())
                 .controller!;
             // A physical route latest read captures an old C page and is held.
             f.server.nextMessagesGate = held;
@@ -749,7 +764,7 @@ void main() {
               () => f.server.messagesEntered!.isCompleted,
             );
             await tester.enterText(
-              find.byType(TextField),
+              _chatComposer(),
               'Combined explicit request',
             );
             await tester.tap(find.byTooltip('Send'));
@@ -791,10 +806,7 @@ void main() {
             await tester.ensureVisible(_tools());
             await tester.tap(find.text('Tool activity'));
             await tester.pump(const Duration(milliseconds: 350));
-            await tester.enterText(
-              find.byType(TextField),
-              'Combined retained draft',
-            );
+            await tester.enterText(_chatComposer(), 'Combined retained draft');
             composer.selection = const TextSelection(
               baseOffset: 2,
               extentOffset: 9,
@@ -1015,7 +1027,7 @@ void main() {
             expect(tester.state(find.byType(ChatScreen)), same(state));
             expect(ModalRoute.of(state.context), same(route));
             expect(
-              tester.widget<TextField>(find.byType(TextField)).controller,
+              tester.widget<TextField>(_chatComposer()).controller,
               same(composer),
             );
             expect(composer.selection, selection);
@@ -1198,7 +1210,7 @@ void main() {
             }
             expect(_toolExpanded(tester), false);
             expect(
-              tester.widget<TextField>(find.byType(TextField)).controller!.text,
+              tester.widget<TextField>(_chatComposer()).controller!.text,
               'Combined retained draft',
             );
             expect(f.server.prompts, hasLength(1));

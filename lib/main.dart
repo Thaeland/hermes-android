@@ -1071,7 +1071,11 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
                   isCurrent: currentSync,
                 );
           if (!await current() || !currentSync()) return;
-          if (session != null && session.id != sessionId) return;
+          if (session != null &&
+              session.id != sessionId &&
+              session.lineageRootId != sessionId) {
+            return;
+          }
           session ??= pushRoute == null ? retainedSession : null;
         } catch (_) {
           if (!await current() || !currentSync()) return;
@@ -2924,7 +2928,10 @@ class _AddDialogState extends State<_AddDialog> {
                           ?_pemCertificateName,
                           ?_pemPrivateKeyName,
                         ].join('  ·  '),
-                        style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                        style: TextStyle(
+                          color: HermesTokens.of(context).muted,
+                          fontSize: 12,
+                        ),
                       ),
                     ),
                   ],

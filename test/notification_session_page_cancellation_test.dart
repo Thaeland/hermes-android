@@ -7,12 +7,21 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hermes_android/core/screens/chat_screen.dart';
 import 'package:hermes_android/core/screens/workspace_screen.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
+import 'package:hermes_android/core/services/client_certificate_service.dart';
 import 'package:hermes_android/core/services/mobile_push_service.dart';
 import 'package:hermes_android/core/services/turn_notification_service.dart';
 import 'package:hermes_android/main.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'independent_push_quality_edit_race_test.dart' as race;
+import 'support/mtls_fixture.dart' show loopbackIdentity;
+
+class _FixtureCertificateFiles implements ClientCertificateFileStore {
+  @override
+  Future<void> deleteUnreferenced(
+    Iterable<String> referencedDirectoryPaths,
+  ) async {}
+}
 
 class _Push extends MobilePushService {
   _Push() : super(supported: false);
@@ -47,10 +56,16 @@ class _Push extends MobilePushService {
 // Only dart:io transport is replaced: root constructs the production ApiClient,
 // IOClient, authenticated requests and session pagination, not the lookup seam.
 class _Wire extends HttpOverrides {
+  _Wire({this.canonicalRoot = false});
+  final bool canonicalRoot;
+  final contexts = <SecurityContext?>[];
   final requests = <(Uri, Map<String, String>)>[];
   final firstPage = Completer<HttpClientResponse>();
   @override
-  HttpClient createHttpClient(SecurityContext? context) => _Client(this);
+  HttpClient createHttpClient(SecurityContext? context) {
+    contexts.add(context);
+    return _Client(this);
+  }
 
   Future<HttpClientResponse> respond(Uri uri, _Headers headers) async {
     requests.add((uri, Map.of(headers.values)));
@@ -59,7 +74,12 @@ class _Wire extends HttpOverrides {
     }
     return _Response({
       'data': [
-        {'id': 'exact', 'title': 'Target', 'source': 'mobile'},
+        {
+          'id': canonicalRoot ? 'current-tip' : 'exact',
+          if (canonicalRoot) '_lineage_root_id': 'exact',
+          'title': 'Target',
+          'source': 'mobile',
+        },
       ],
       'has_more': false,
     });
@@ -68,7 +88,12 @@ class _Wire extends HttpOverrides {
   void releaseFirst() => firstPage.complete(
     _Response({
       'data': [
-        {'id': 'not-the-target', 'title': 'Other', 'source': 'mobile'},
+        {
+          'id': 'not-the-target',
+          '_lineage_root_id': 'other-root',
+          'title': 'Other',
+          'source': 'mobile',
+        },
       ],
       'has_more': true,
     }),
@@ -171,6 +196,8 @@ void main() {
     'newer tap',
     'newer tap during continuation',
     'unchanged authority',
+    'canonical root',
+    'mTLS identity',
   ]) {
     testWidgets(
       boundary == 'unchanged authority'
@@ -181,6 +208,7 @@ void main() {
         final manager = ConnectionManager(
           await SharedPreferences.getInstance(),
           credentialStore: secrets,
+          certificateFiles: _FixtureCertificateFiles(),
         );
         await manager.saveConnection(
           'Fixture',
@@ -188,11 +216,14 @@ void main() {
           8642,
           'test-credential',
           gatewayProfile: 'selected-profile',
+          clientCertificate: boundary == 'mTLS identity'
+              ? loopbackIdentity
+              : null,
         );
         final c = manager.getConnections().single;
         final push = _Push()..tap(c, 'exact');
         addTearDown(push.dispose);
-        final wire = _Wire();
+        final wire = _Wire(canonicalRoot: boundary == 'canonical root');
         await HttpOverrides.runZoned(() async {
           await tester.pumpWidget(
             HermesApp(connManager: manager, mobilePush: push),
@@ -249,19 +280,25 @@ void main() {
           await _pump(tester);
           try {
             if (boundary.startsWith('newer tap') ||
-                boundary == 'unchanged authority') {
+                boundary == 'unchanged authority' ||
+                boundary == 'canonical root' ||
+                boundary == 'mTLS identity') {
               final pages = wire.requests.where(
                 (r) => r.$1.path == '/api/sessions',
               );
               expect(pages.map((r) => r.$1.queryParameters['offset']), [
                 '0',
-                boundary == 'unchanged authority' ? '1' : '0',
+                boundary.startsWith('newer tap') ? '0' : '50',
               ]);
               final chats = tester.widgetList<ChatScreen>(
                 find.byType(ChatScreen, skipOffstage: false),
               );
               expect(chats.map((c) => c.session.id), [
-                boundary == 'unchanged authority' ? 'exact' : 'not-the-target',
+                boundary == 'canonical root'
+                    ? 'current-tip'
+                    : boundary.startsWith('newer tap')
+                    ? 'not-the-target'
+                    : 'exact',
               ]);
             } else {
               expect(
@@ -280,6 +317,18 @@ void main() {
               findsNothing,
             );
             expect(pendingNotificationApprovals.value, isEmpty);
+            if (boundary == 'mTLS identity') {
+              expect(
+                wire.contexts.any(
+                  (context) =>
+                      context != null &&
+                      !identical(context, SecurityContext.defaultContext),
+                ),
+                isTrue,
+                reason:
+                    'The real root factory must load the saved TLS identity',
+              );
+            }
           } finally {
             if (gate != null) gate.release.complete();
             if (editing != null) await editing;

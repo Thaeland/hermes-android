@@ -107,13 +107,15 @@ void main() {
                 onEvent(
                   StreamEvent(
                     type: 'message.delta',
-                    data: const {'text': 'received', 'turn_id': 'wire-turn'},
+                    turnId: 'wire-turn',
+                    data: const {'text': 'received'},
                   ),
                 );
                 onEvent(
                   StreamEvent(
                     type: 'turn.end',
-                    data: const {'status': 'completed', 'turn_id': 'wire-turn'},
+                    turnId: 'wire-turn',
+                    data: const {'status': 'completed'},
                   ),
                 );
               },
@@ -216,6 +218,7 @@ void main() {
         expect(request.uri.queryParameters['profile'], 'fixture-profile');
         fixture.json(request, {
           'schema': 1,
+          'registration_fence': 1,
           'enabled': true,
           'transports': ['webpush'],
           'vapid_public_key': base64Url

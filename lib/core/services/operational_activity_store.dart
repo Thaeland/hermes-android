@@ -126,7 +126,15 @@ class OperationalActivityStore {
            nowEpochMs ?? (() => DateTime.now().millisecondsSinceEpoch);
 
   Future<T> _serialized<T>(Future<T> Function(SharedPreferences) action) {
-    Future<T> perform() async => action(await _preferences());
+    Future<T> perform() async {
+      final prefs = await _preferences();
+      // Receipt/account stores reload the same process-wide preferences cache.
+      // Join our accepted writes, then read physical state rather than a cache
+      // an overlapping unrelated reload may have rolled back.
+      await prefs.reload();
+      return action(prefs);
+    }
+
     final previous = _tail;
     final flight = previous == null
         ? perform()

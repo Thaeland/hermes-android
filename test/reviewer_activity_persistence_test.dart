@@ -110,6 +110,12 @@ void main() {
         .inMilliseconds;
     final before = platform.activityAttempts;
     final readsBefore = platform.preferenceReads;
+    final observationsBefore = f.observations;
+    int repairReads() =>
+        platform.preferenceReads -
+        readsBefore -
+        (f.observations - observationsBefore) -
+        (platform.activityAttempts - before);
     const tokenEvents = 20;
     for (var i = 0; i < tokenEvents; i++) {
       f.emit('message.delta', {'text': 'token'});
@@ -132,7 +138,10 @@ void main() {
     // One failed heartbeat and one immediate repair probe. Neither settled
     // failures nor arbitrarily many later frames can bypass the cooldown.
     expect(attempts, 2);
-    expect(platform.preferenceReads - readsBefore, attempts);
+    // Every explicit observer and accepted write now reads fresh physical
+    // state after the shared WAL/cache reload integration. Repair alone remains
+    // exactly one reload per failed write, not per streamed token.
+    expect(repairReads(), attempts);
 
     f.now +=
         NormalGatewayApplicationSession.activityRetryInterval.inMilliseconds -
@@ -142,14 +151,14 @@ void main() {
       await f.records();
     }
     expect(platform.activityAttempts - before, 2);
-    expect(platform.preferenceReads - readsBefore, 2);
+    expect(repairReads(), 2);
 
     platform.rejectActivity = false;
     f.now++;
     f.emit('message.delta', {'text': 'recovered'});
     final repaired = (await f.records()).single;
     expect(platform.activityAttempts - before, 3);
-    expect(platform.preferenceReads - readsBefore, 2);
+    expect(repairReads(), 2);
     expect(repaired.state, OperationalActivityState.running);
     expect(repaired.updatedAtEpochMs, f.now);
     for (var i = 0; i < tokenEvents; i++) {
@@ -455,6 +464,7 @@ class _OwnerFixture {
   Future<void>? _flight;
   int now = 2000000000000;
   int submissions = 0;
+  int observations = 0;
 
   _OwnerFixture({
     this.scope = 'review-scope',
@@ -481,6 +491,14 @@ class _OwnerFixture {
           }) {
             submissions++;
             onSent();
+            session.receiveEvent(
+              'local',
+              StreamEvent(
+                type: 'message.delta',
+                turnId: 'wire-${owner.turnId}',
+                data: {'text': ''},
+              ),
+            );
             _sent!.complete();
             return _rpc!.future;
           },
@@ -540,9 +558,14 @@ class _OwnerFixture {
     if (drainActivity) await records();
   }
 
-  void emit(String type, Map<String, dynamic> data) =>
-      session.receiveEvent('local', StreamEvent(type: type, data: data));
-  Future<List<OperationalActivityRecord>> records() => activity.load(scope);
+  void emit(String type, Map<String, dynamic> data) => session.receiveEvent(
+    'local',
+    StreamEvent(type: type, turnId: 'wire-${owner.turnId}', data: data),
+  );
+  Future<List<OperationalActivityRecord>> records() {
+    observations++;
+    return activity.load(scope);
+  }
 
   Future<void> close() async {
     await session.close();

@@ -67,6 +67,16 @@ void main() {
               baseUrl: connection.baseUrl,
               apiKey: 'fixture',
               httpClient: MockClient((request) async {
+                if (!request.url.path.endsWith('/messages')) {
+                  // Browser metadata is independent from transcript freshness.
+                  expectSync(request.url.path, '/api/sessions/stored-new-chat');
+                  return http.Response(
+                    jsonEncode({
+                      'session': {'id': 'stored-new-chat'},
+                    }),
+                    200,
+                  );
+                }
                 paths.add(request.url.path);
                 if (request.url.path.contains('/mob-new-chat/')) {
                   return http.Response('{"error":"session not found"}', 404);

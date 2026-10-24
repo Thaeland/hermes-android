@@ -29,6 +29,11 @@ import 'normal_gateway_alias_handoff_wire_test.dart'
     show BindingServer, widgetUntil;
 import 'support/memory_turn_journal_store.dart';
 
+Finder _chatComposer() => find.descendant(
+  of: find.byType(ChatScreen),
+  matching: find.byType(TextField),
+);
+
 class _RootServer extends BindingServer {
   _RootServer(super.server);
   static Future<_RootServer> start() async {
@@ -45,6 +50,16 @@ class _RootServer extends BindingServer {
   @override
   Future<void> handle(HttpRequest request) async {
     requests.add(request.uri.toString());
+    if (request.uri.path == '/api/sessions' &&
+        request.uri.queryParameters['archived'] == 'only') {
+      // Consolidated Chats owns an independent Dashboard archive read. It uses
+      // this fixture's trusted proxy, never the API-server Bearer credential.
+      expect(request.headers.value('authorization'), isNull);
+      request.response.headers.contentType = ContentType.json;
+      request.response.write(jsonEncode({'sessions': [], 'total': 0}));
+      await request.response.close();
+      return;
+    }
     if (request.uri.path == '/api/sessions') {
       expect(request.headers.value('authorization'), 'Bearer fixture');
       final gate = nextSessionListGate;
@@ -423,10 +438,7 @@ void main() {
             .session
             .id;
         final normal = f.controller.normalSessionFor(f.connection);
-        await tester.enterText(
-          find.byType(TextField),
-          'One held source prompt',
-        );
+        await tester.enterText(_chatComposer(), 'One held source prompt');
         await tester.tap(find.byTooltip('Send'));
         await widgetUntil(tester, () => f.server.createEntered.isCompleted);
         await f.canonicalTap(tester, viaPush: false);
@@ -495,7 +507,7 @@ void main() {
               .session
               .id;
           final normal = f.controller.normalSessionFor(f.connection);
-          await tester.enterText(find.byType(TextField), 'One source prompt');
+          await tester.enterText(_chatComposer(), 'One source prompt');
           await tester.tap(find.byTooltip('Send'));
           await widgetUntil(tester, () => f.server.createEntered.isCompleted);
 
@@ -620,10 +632,7 @@ void main() {
               final local = session.findChat(sourceId)!;
               final sourceSnapshots = <NormalGatewayChatSnapshot>[];
               final token = local.subscribe(sourceSnapshots.add);
-              await tester.enterText(
-                find.byType(TextField),
-                'Original root prompt',
-              );
+              await tester.enterText(_chatComposer(), 'Original root prompt');
               await tester.tap(find.byTooltip('Send'));
               await widgetUntil(
                 tester,
@@ -634,15 +643,12 @@ void main() {
               final canonicalState = tester.state(find.byType(ChatScreen));
               if (canonicalActive) {
                 await tester.enterText(
-                  find.byType(TextField),
+                  _chatComposer(),
                   'Canonical winning prompt',
                 );
                 await tester.tap(find.byTooltip('Send'));
                 await widgetUntil(tester, () => f.server.prompts.length == 1);
-                await tester.enterText(
-                  find.byType(TextField),
-                  'Canonical next draft',
-                );
+                await tester.enterText(_chatComposer(), 'Canonical next draft');
               }
               final canonical = session.findChat('stored')!;
               final winnerTurn = canonicalActive
