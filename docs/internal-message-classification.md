@@ -99,6 +99,8 @@ The fixture records its backend revision. Database access is restricted to the
 sandbox and network connections are forbidden; no existing chat is inspected.
 The capture supplies known display kinds when staging typed cases; it exercises
 the real API projection, not an end-to-end run of both history serializers.
+It supplies fixed timestamps and deterministic caller message UIDs so repeated
+captures are byte-identical without changing any producer body or projected field.
 
 The tests check full-body preservation, source separation, quiet/verbose policy,
 retry ownership, public/hidden precedence, quotes and human tails, CRLF bodies,

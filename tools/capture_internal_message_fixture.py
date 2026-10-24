@@ -17,6 +17,7 @@ import threading
 from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import unquote, urlsplit
+from uuid import NAMESPACE_URL, uuid5
 
 sys.dont_write_bytecode = True
 backend = Path(sys.argv[1]).resolve()
@@ -58,7 +59,9 @@ def add(name, body, kind=None, expected="task", metadata=None, sealed=True):
         SimpleNamespace(), body, None, 1700000000.0, None, kind, metadata)
     row_id = db.append_message(
         "fixture", "user", staged["content"], timestamp=staged["timestamp"],
-        display_kind=staged.get("display_kind"), display_metadata=staged.get("display_metadata"))
+        display_kind=staged.get("display_kind"), display_metadata=staged.get("display_metadata"),
+        # Exercise the real caller-supplied UID path without random fixture churn.
+        message_uid=uuid5(NAMESPACE_URL, f"hermes-android-internal-message:{name}").hex)
     stored = next(row for row in db.get_messages("fixture") if row["id"] == row_id)
     row = _project_client_message(stored)
     assert row["content"] == body
