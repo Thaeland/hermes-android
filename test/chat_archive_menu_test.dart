@@ -94,6 +94,7 @@ class _HydrationController extends GatewayTurnApplicationController {
   NormalGatewayApplicationSession normalSessionFor(
     SavedConnection connection, {
     NormalGatewayPromptSubmit? submit,
+    NormalGatewaySteer? steer,
     NormalGatewayResume? resume,
     NormalGatewayHistory? history,
     TurnNotificationService? notifications,
@@ -102,6 +103,7 @@ class _HydrationController extends GatewayTurnApplicationController {
     scope: 'archive-hydration',
     pendingStore: pendingStore,
     submit: submit,
+    steer: steer,
     resume: ({required localSessionId, required storedSessionId}) async =>
         const ResumedGatewaySession(
           runtimeSessionId: 'running-fixture',

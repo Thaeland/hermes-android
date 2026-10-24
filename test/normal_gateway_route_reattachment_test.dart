@@ -1081,7 +1081,13 @@ void main() {
         key: const ValueKey('replacement'),
       );
       await tester.enterText(find.byType(TextField), 'Keep this newer draft');
-      expect(find.byTooltip('Send'), findsNothing);
+      expect(find.byTooltip('Send'), findsOneWidget);
+      expect(find.byTooltip('Stop response'), findsOneWidget);
+      // The replacement can attempt guidance, never reserve or submit a
+      // second turn through the same app-owned stored/local alias.
+      await tester.tap(find.byTooltip('Send'));
+      await tester.pump();
+      await tester.pump();
       expect(remote.submissions, 1);
       remote.event('turn.end', {'status': 'completed'});
       remote.rpc.complete();

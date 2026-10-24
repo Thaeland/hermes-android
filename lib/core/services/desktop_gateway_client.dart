@@ -1029,6 +1029,20 @@ class DesktopGatewayClient {
         _serverRequests[activeRequestId]?.method == 'approval';
   }
 
+  /// Steers only the currently bound live session. Reconnect/create and
+  /// automatic retries could deliver the guidance to a different turn.
+  Future<bool> steerPrompt({
+    required String sessionId,
+    required String text,
+  }) async {
+    final gatewaySessionId = _gatewaySessionIds[sessionId];
+    final client = _ws;
+    if (gatewaySessionId == null || client == null || !client.isConnected) {
+      throw StateError('The Desktop gateway session is no longer connected');
+    }
+    return client.steerSession(gatewaySessionId, text);
+  }
+
   /// Interrupts the active turn in the Desktop gateway runtime.
   Future<bool> interruptPrompt({required String sessionId}) async {
     final gatewaySessionId = _gatewaySessionIds[sessionId];

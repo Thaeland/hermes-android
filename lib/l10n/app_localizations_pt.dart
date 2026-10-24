@@ -25,6 +25,21 @@ class AppLocalizationsPt extends AppLocalizations {
   String get background_report_collapse => 'Recolher relatório';
 
   @override
+  String get stop_and_send => 'Parar e enviar';
+
+  @override
+  String get message_queued_for_running_turn =>
+      'Mensagem em fila para a execução atual.';
+
+  @override
+  String get running_message_not_accepted =>
+      'O Hermes não conseguiu aceitar esta mensagem. O rascunho foi guardado; pare a resposta ou aguarde e volte a enviar.';
+
+  @override
+  String get running_message_delivery_unknown =>
+      'Não foi possível confirmar a entrega. O rascunho foi guardado. Verifique a conversa antes de tentar novamente.';
+
+  @override
   String get saved_history_heading => 'Saved history';
 
   @override
@@ -3071,6 +3086,21 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get background_report_collapse => 'Recolher relatório';
+
+  @override
+  String get stop_and_send => 'Parar e enviar';
+
+  @override
+  String get message_queued_for_running_turn =>
+      'Mensagem na fila da execução atual.';
+
+  @override
+  String get running_message_not_accepted =>
+      'O Hermes não conseguiu aceitar esta mensagem. Seu rascunho foi mantido; pare a resposta ou aguarde e envie novamente.';
+
+  @override
+  String get running_message_delivery_unknown =>
+      'Não foi possível confirmar a entrega. Seu rascunho foi mantido. Confira a conversa antes de tentar novamente.';
 
   @override
   String get theme_palette => 'Tema de cor';

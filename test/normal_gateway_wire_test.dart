@@ -27,6 +27,248 @@ void main() {
   });
 
   test(
+    'restored running guidance preserves the first received assistant activity',
+    () async {
+      final initialController = GatewayTurnApplicationController();
+      final initial = initialController.normalSessionFor(gateway.connection);
+      await initial.ready;
+      await initial.pendingStore.put(
+        NormalGatewayPendingMarker(
+          scope: initial.scope,
+          localSessionId: 'mobile',
+          storedSessionId: 'stored',
+          turnId: 'restored-turn',
+          rowFloor: 10,
+          phase: 'emitted',
+          createdAt: 1,
+          updatedAt: 1,
+        ),
+      );
+      await initialController.close();
+      final controller = GatewayTurnApplicationController();
+      addTearDown(controller.close);
+      final session = controller.normalSessionFor(gateway.connection);
+      await session.ready;
+      final chat = session.findChat('stored')!;
+      await _until(() => chat.canSteer);
+      expect(chat.snapshot.displayRows, isEmpty);
+      expect(await chat.steer('Continue after restart'), isTrue);
+      expect(chat.snapshot.displayRows.single['display_kind'], 'steer');
+
+      gateway.event('reasoning.delta', {'text': 'First reasoning'});
+      gateway.event('tool.start', {
+        'tool': 'read_file',
+        'tool_id': 'early-tool',
+      });
+      gateway.event('message.delta', {'text': 'After restart'});
+      await _until(() => chat.snapshot.tools.isNotEmpty);
+      expect(
+        chat.snapshot.displayRows.where((row) => row['role'] == 'assistant'),
+        hasLength(1),
+        reason: 'Acknowledged guidance is not an assistant response scaffold',
+      );
+      await _until(
+        () => chat.snapshot.displayRows.last['content'] == 'After restart',
+      );
+      expect(
+        chat.snapshot.displayRows.last['_gateway_reasoning'],
+        'First reasoning',
+      );
+      expect(
+        chat.snapshot.timeline.runs.map(
+          (run) => run.activity?.toolId ?? run.text,
+        ),
+        ['First reasoning', 'early-tool', 'After restart'],
+      );
+      expect(chat.turnId, 'restored-turn');
+      expect(
+        (await session.pendingStore.load(session.scope)).single.turnId,
+        'restored-turn',
+      );
+      expect(chat.snapshot.hasActiveTurn, isTrue);
+      expect(
+        gateway.requests.where(
+          (request) => request['method'] == 'session.steer',
+        ),
+        hasLength(1),
+      );
+      expect(
+        gateway.requests.where(
+          (request) =>
+              request['method'] == 'prompt.submit' ||
+              request['method'] == 'session.create' ||
+              request['method'] == 'session.interrupt',
+        ),
+        isEmpty,
+      );
+    },
+  );
+
+  test(
+    'steering uses the bound runtime once without interrupting or resubmitting',
+    () async {
+      gateway.holdSteerAck = true;
+      final controller = GatewayTurnApplicationController();
+      addTearDown(controller.close);
+      final session = controller.normalSessionFor(gateway.connection);
+      await session.ready;
+      final chat = session.chatFor(
+        'mobile',
+        storedSessionId: 'stored',
+        title: 'Chat',
+      );
+      final flight = chat.submitPrepared(
+        reservation: chat.reserve()!,
+        text: 'Original',
+        localContent: 'Original',
+      );
+      flight.ignore();
+      await gateway.submitted.future;
+      final turn = chat.turnId;
+      final steer = chat.steer('  Focus on authentication\nKeep the tests  ');
+      await _until(() => gateway.releaseSteerAck != null);
+      expect(await chat.steer('Duplicate callback'), isFalse);
+      expect(chat.snapshot.steering, isTrue);
+      expect(chat.snapshot.hasActiveTurn, isTrue);
+      expect(
+        gateway.requests
+            .where((r) => r['method'] == 'session.steer')
+            .single['params'],
+        {
+          'session_id': gateway.runtime,
+          'text': 'Focus on authentication\nKeep the tests',
+        },
+      );
+      expect(
+        gateway.requests.where((r) => r['method'] == 'session.interrupt'),
+        isEmpty,
+      );
+      // Stop stays independently usable while the steer acknowledgement waits.
+      expect(await chat.interrupt(), isTrue);
+      gateway.releaseSteerAck!();
+      expect(await steer, isTrue);
+      expect(chat.snapshot.steering, isFalse);
+      expect(chat.turnId, turn);
+      expect(
+        (await session.pendingStore.load(session.scope)).single.turnId,
+        turn,
+      );
+      expect(
+        chat.snapshot.displayRows
+            .where((r) => r['role'] == 'user')
+            .map((r) => r['content']),
+        ['Original', 'Focus on authentication\nKeep the tests'],
+      );
+      gateway.event('message.delta', {'text': 'Still the same response'});
+      await _until(
+        () =>
+            chat.snapshot.displayRows.last['content'] ==
+            'Still the same response',
+      );
+      expect(
+        gateway.requests.where((r) => r['method'] == 'prompt.submit'),
+        hasLength(1),
+      );
+      expect(
+        gateway.requests.where((r) => r['method'] == 'session.create'),
+        isEmpty,
+      );
+    },
+  );
+
+  for (final outcome in ['rejected', 'unsupported', 'invalid']) {
+    test(
+      '$outcome steer acknowledgement never falls back or retries',
+      () async {
+        gateway.steerStatus = outcome == 'invalid' ? 'steered' : 'rejected';
+        if (outcome == 'unsupported') gateway.steerError = -32601;
+        final controller = GatewayTurnApplicationController();
+        addTearDown(controller.close);
+        final session = controller.normalSessionFor(gateway.connection);
+        await session.ready;
+        final chat = session.chatFor(
+          'mobile',
+          storedSessionId: 'stored',
+          title: 'Chat',
+        );
+        final flight = chat.submitPrepared(
+          reservation: chat.reserve()!,
+          text: 'Original',
+          localContent: 'Original',
+        );
+        flight.ignore();
+        await gateway.submitted.future;
+        if (outcome == 'rejected') {
+          expect(await chat.steer('Guidance'), isFalse);
+        } else {
+          await expectLater(
+            chat.steer('Guidance'),
+            throwsA(isA<JsonRpcError>()),
+          );
+        }
+        expect(chat.snapshot.steering, isFalse);
+        expect(chat.snapshot.hasActiveTurn, isTrue);
+        expect(
+          chat.snapshot.displayRows.where((r) => r['role'] == 'user'),
+          hasLength(1),
+        );
+        expect(
+          gateway.requests.where((r) => r['method'] == 'session.steer'),
+          hasLength(1),
+        );
+        expect(
+          gateway.requests.where((r) => r['method'] == 'prompt.submit'),
+          hasLength(1),
+        );
+        expect(
+          gateway.requests.where((r) => r['method'] == 'session.interrupt'),
+          isEmpty,
+        );
+      },
+    );
+  }
+
+  test(
+    'late steering ack cannot append into a settled turn or reopen admission early',
+    () async {
+      gateway.holdSteerAck = true;
+      final controller = GatewayTurnApplicationController();
+      addTearDown(controller.close);
+      final session = controller.normalSessionFor(gateway.connection);
+      await session.ready;
+      final chat = session.chatFor(
+        'mobile',
+        storedSessionId: 'stored',
+        title: 'Chat',
+      );
+      final flight = chat.submitPrepared(
+        reservation: chat.reserve()!,
+        text: 'Original',
+        localContent: 'Original',
+      );
+      flight.ignore();
+      await gateway.submitted.future;
+      gateway.event('message.delta', {'text': 'Final'}, turnId: 'turn-A');
+      await _until(() => chat.snapshot.displayRows.last['content'] == 'Final');
+      final steering = chat.steer('Guidance');
+      await _until(() => gateway.releaseSteerAck != null);
+      gateway.event('turn.end', {'status': 'completed'}, turnId: 'turn-A');
+      await flight;
+      await _until(() => !chat.snapshot.hasActiveTurn);
+      final settled = chat.snapshot.displayRows;
+      expect(
+        chat.reserve(),
+        isNull,
+        reason: 'An unacknowledged steer still owns admission',
+      );
+      gateway.releaseSteerAck!();
+      await expectLater(steering, throwsStateError);
+      expect(chat.snapshot.displayRows, settled);
+      expect(chat.reserve(), isNotNull);
+    },
+  );
+
+  test(
     'fresh stock create binds cwd and canonical baseline before the first prompt wire',
     () async {
       gateway.createFresh = true;
@@ -687,6 +929,10 @@ class _Gateway {
   Completer<void>? releaseHistory;
   final historyPaths = <String>[];
   bool holdSubmitAck = false;
+  bool holdSteerAck = false;
+  void Function()? releaseSteerAck;
+  String steerStatus = 'queued';
+  int? steerError;
   void Function()? releaseSubmitAck;
   bool holdResumeReply = false;
   void Function()? releaseResumeReply;
@@ -751,6 +997,7 @@ class _Gateway {
           if (method == 'session.create') created = true;
           final rejected =
               method == 'prompt.submit' && rejectSubmit ||
+              method == 'session.steer' && steerError != null ||
               method == 'session.resume' &&
                   (rejectResume || createFresh && !created);
           try {
@@ -759,7 +1006,11 @@ class _Gateway {
               'id': frame['id'],
               if (rejected)
                 'error': {
-                  'code': method == 'prompt.submit' ? 4001 : 4007,
+                  'code': method == 'session.steer'
+                      ? steerError
+                      : method == 'prompt.submit'
+                      ? 4001
+                      : 4007,
                   'message': 'session not found',
                 }
               else
@@ -772,11 +1023,18 @@ class _Gateway {
                       }
                     : method == 'session.create'
                     ? {'session_id': runtime, 'stored_session_id': 'stored'}
+                    : method == 'session.steer'
+                    ? {
+                        'status': steerStatus,
+                        'text': (frame['params'] as Map)['text'],
+                      }
                     : {'ok': true},
             });
             void reply() => ws.add(encodedReply);
             if (method == 'prompt.submit' && holdSubmitAck) {
               releaseSubmitAck = reply;
+            } else if (method == 'session.steer' && holdSteerAck) {
+              releaseSteerAck = reply;
             } else if (method == 'session.resume' && holdResumeReply) {
               releaseResumeReply = reply;
             } else {

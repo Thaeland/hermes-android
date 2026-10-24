@@ -506,6 +506,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _sending = false;
   bool _streaming = false;
   bool _preparingSend = false;
+  bool _midTurnSendInFlight = false;
   GatewayTurnStatus? _gatewayTurnStatus;
   _ResponseTransport _activeResponseTransport = _ResponseTransport.none;
   String? _activeClientTurnId;
@@ -3303,8 +3304,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   /// Send message via SSE streaming (Gateway API Server).
   Future<void> _sendMessage({bool speakResponse = false}) async {
-    if (_voiceComposer.listening || _preparingSend || _archiving) return;
+    if (_voiceComposer.listening ||
+        _preparingSend ||
+        _archiving ||
+        _stopResponseInFlight ||
+        _midTurnSendInFlight ||
+        _normalChat?.snapshot.steering == true) {
+      return;
+    }
     final text = _textController.text.trim();
+    if (_streaming) {
+      if (text.isNotEmpty) await _sendWhileWorking(text);
+      return;
+    }
     final attachments = List<AttachmentDraft>.from(_attachmentDrafts);
     if (text.isEmpty && attachments.isEmpty) return;
     if (_sending || _streaming || _pendingReattachResync) return;
@@ -3362,6 +3374,82 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       attachments: attachments,
       speakResponse: speakResponse,
     );
+  }
+
+  Future<void> _sendWhileWorking(String text) async {
+    final normal = _normalChat;
+    if (normal?.snapshot.hasActiveTurn == true) {
+      if (!normal!.canSteer) return;
+      final revision = _composerRevision;
+      setState(() => _midTurnSendInFlight = true);
+      try {
+        final accepted = await normal.steer(text);
+        if (!mounted) return;
+        if (accepted) {
+          // An acknowledgement consumes only the submitted edit. Typing,
+          // clearing or changing route ownership while it waits wins.
+          if (_draftWriter.isCurrent && revision == _composerRevision) {
+            _setRestoredComposer('');
+          }
+          _commitComposerForSend();
+        }
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              accepted
+                  ? context.l10n.message_queued_for_running_turn
+                  : context.l10n.running_message_not_accepted,
+            ),
+          ),
+        );
+      } catch (error) {
+        if (!mounted) return;
+        final rejected =
+            error is JsonRpcError &&
+            const [-32601, 4001, 4002, 4010].contains(error.code);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              rejected
+                  ? context.l10n.running_message_not_accepted
+                  : context.l10n.running_message_delivery_unknown,
+            ),
+          ),
+        );
+      } finally {
+        if (mounted) setState(() => _midTurnSendInFlight = false);
+      }
+      return;
+    }
+
+    // The OpenAI-compatible SSE transport has no steerable run handle.
+    // Use the existing explicit Stop contract before sending a new prompt;
+    // never start a second stream over the active response. The button names
+    // this fallback "Stop and send" rather than claiming non-interruption.
+    setState(() => _midTurnSendInFlight = true);
+    var ownsHandoff = true;
+    _clearComposerForSend(text);
+    try {
+      final stopped = await _stopResponse();
+      if (!mounted) return;
+      if (!stopped) {
+        _restoreComposerAfterRejectedSend(text);
+        return;
+      }
+      // _submitMessage synchronously takes ownership of the next stream.
+      // Release this short handoff flight, not the lifetime of the new run.
+      _midTurnSendInFlight = false;
+      ownsHandoff = false;
+      await _submitMessage(
+        text: text,
+        attachments: const [],
+        speakResponse: false,
+      );
+    } finally {
+      if (mounted && ownsHandoff) {
+        setState(() => _midTurnSendInFlight = false);
+      }
+    }
   }
 
   Future<void> _submitMessage({
@@ -4877,11 +4965,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
   }
 
-  Future<void> _stopResponse() async {
-    if (!_streaming) return;
+  Future<bool> _stopResponse() async {
+    if (!_streaming || _stopResponseInFlight) return false;
     final normal = _normalChat;
     if (normal?.snapshot.hasActiveTurn == true) {
-      if (_stopResponseInFlight) return;
       final turn = normal!.turnId;
       setState(() {
         _stopResponseInFlight = true;
@@ -4889,7 +4976,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       });
       try {
         final requested = await normal.interrupt();
-        if (!mounted || turn != normal.turnId) return;
+        if (!mounted || turn != normal.turnId) return false;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
@@ -4899,6 +4986,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             ),
           ),
         );
+        return requested;
       } catch (error) {
         if (mounted && turn == normal.turnId) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -4908,7 +4996,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       } finally {
         if (mounted) setState(() => _stopResponseInFlight = false);
       }
-      return;
+      return false;
     }
 
     final transport = _activeResponseTransport;
@@ -4960,7 +5048,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         case _ResponseTransport.none:
           interrupted = false;
       }
-      if (!mounted) return;
+      if (!mounted) return false;
       if (interruptedTurnState != null) {
         // Route through the shared apply path (idempotent): the terminal
         // state updates the message content/markers and clears the
@@ -4974,7 +5062,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           }
         });
       }
-      if (!mounted) return;
+      if (!mounted) return false;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -4986,8 +5074,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           ),
         ),
       );
+      return interrupted;
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted) return false;
       ScaffoldMessenger.of(context).showSnackBar(
         hermesStatusSnackBar(
           context,
@@ -4998,6 +5087,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           duration: const Duration(seconds: 6),
         ),
       );
+      return false;
     } finally {
       _stopResponseInFlight = false;
       unawaited(_refreshDeferredHistoryIfIdle());
@@ -5169,16 +5259,29 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           if (_streaming)
             Padding(
               padding: EdgeInsets.only(right: 8),
-              child: Row(
-                children: [
-                  SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  ),
-                  SizedBox(width: 8),
-                  Text(context.l10n.responding, style: TextStyle(fontSize: 13)),
-                ],
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: MediaQuery.sizeOf(context).width * 0.45,
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        context.l10n.responding,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 13),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             )
           else
@@ -5343,6 +5446,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Widget _buildInputBar({required double availableHeight}) {
     final tokens = HermesTokens.of(context);
+    final sendEnabled =
+        !_transcriptLoadBlocksComposer &&
+        !_archiving &&
+        !_preparingSend &&
+        !_midTurnSendInFlight &&
+        !_stopResponseInFlight &&
+        !_pendingReattachResync &&
+        !_voiceComposer.listening &&
+        _normalChat?.snapshot.steering != true &&
+        (_streaming
+            ? (_normalChat?.snapshot.hasActiveTurn != true ||
+                  _normalChat!.canSteer)
+            : !_sending);
+    final sendTooltip =
+        _streaming && _normalChat?.snapshot.hasActiveTurn != true
+        ? context.l10n.stop_and_send
+        : context.l10n.send;
     const minimumControlsHeight = 56.0;
     final composerMaxHeight = availableHeight <= minimumControlsHeight
         ? availableHeight
@@ -5585,7 +5705,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   ),
                 ),
                 const SizedBox(width: 8),
-                if (!_voiceComposer.listening)
+                if (!_voiceComposer.listening && !_streaming)
                   VoiceComposerStartButton(
                     enabled:
                         !_transcriptLoadBlocksComposer &&
@@ -5622,64 +5742,63 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   ),
                 ),
                 const SizedBox(width: 4),
-                Semantics(
-                  label: _streaming
-                      ? context.l10n.stop_response
-                      : context.l10n.send_message,
-                  button: true,
-                  enabled:
-                      _streaming ||
-                      (!_transcriptLoadBlocksComposer &&
-                          !_archiving &&
-                          !_sending &&
-                          !_pendingReattachResync &&
-                          !_voiceComposer.listening),
-                  excludeSemantics: true,
-                  child: SizedBox.square(
-                    dimension: 48,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: tokens.accentContainer,
-                        shape: BoxShape.circle,
-                      ),
-                      child: _streaming
-                          ? IconButton(
-                              icon: const Icon(Icons.stop_rounded, size: 20),
-                              style: IconButton.styleFrom(
-                                foregroundColor: tokens.onAccentContainer,
-                              ),
-                              onPressed: _stopResponse,
-                              tooltip: context.l10n.stop_response,
-                              constraints: const BoxConstraints.tightFor(
-                                width: 48,
-                                height: 48,
-                              ),
-                            )
-                          : IconButton(
-                              icon: const Icon(Icons.send, size: 20),
-                              style: IconButton.styleFrom(
-                                foregroundColor: tokens.onAccentContainer,
-                              ),
-                              onPressed:
-                                  _transcriptLoadBlocksComposer ||
-                                      _archiving ||
-                                      _sending ||
-                                      _pendingReattachResync ||
-                                      _voiceComposer.listening
-                                  ? null
-                                  : _sendMessage,
-                              tooltip: context.l10n.send,
-                              constraints: const BoxConstraints.tightFor(
-                                width: 48,
-                                height: 48,
-                              ),
-                            ),
-                    ),
+                if (_streaming) ...[
+                  _buildComposerAction(
+                    key: const Key('chat-stop-response'),
+                    label: context.l10n.stop_response,
+                    tooltip: context.l10n.stop_response,
+                    icon: Icons.stop_rounded,
+                    onPressed: _stopResponseInFlight ? null : _stopResponse,
                   ),
+                  const SizedBox(width: 4),
+                ],
+                _buildComposerAction(
+                  key: const Key('chat-send-message'),
+                  label: sendTooltip == context.l10n.send
+                      ? context.l10n.send_message
+                      : sendTooltip,
+                  tooltip: sendTooltip,
+                  icon: Icons.send,
+                  onPressed: sendEnabled ? _sendMessage : null,
                 ),
               ],
             ),
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildComposerAction({
+    required Key key,
+    required String label,
+    required String tooltip,
+    required IconData icon,
+    required VoidCallback? onPressed,
+  }) {
+    final tokens = HermesTokens.of(context);
+    return Semantics(
+      label: label,
+      button: true,
+      enabled: onPressed != null,
+      excludeSemantics: true,
+      child: SizedBox.square(
+        dimension: 48,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: tokens.accentContainer,
+            shape: BoxShape.circle,
+          ),
+          child: IconButton(
+            key: key,
+            icon: Icon(icon, size: 20),
+            style: IconButton.styleFrom(
+              foregroundColor: tokens.onAccentContainer,
+            ),
+            onPressed: onPressed,
+            tooltip: tooltip,
+            constraints: const BoxConstraints.tightFor(width: 48, height: 48),
+          ),
         ),
       ),
     );
