@@ -290,13 +290,15 @@ class _NotificationNavigationIntent {
   final String? sessionId;
   final MobilePushRoute? pushRoute;
   final int generation;
+  final Object? mutationEpoch;
 
   _NotificationNavigationIntent(
     this.connection,
     this.sessionId,
     MobilePushRoute? pushRoute,
     this.generation,
-  ) : pushRoute = pushRoute == null
+  ) : mutationEpoch = ConnectionMutationBarrier.capture(connection.id),
+      pushRoute = pushRoute == null
           ? null
           : MobilePushRoute(
               pushRoute.connection,
@@ -928,7 +930,10 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
     String? sessionId, {
     MobilePushRoute? pushRoute,
   }) async {
-    if (!mounted || _closingTurnOwner || !_connectionIsCurrent(connection)) {
+    if (!mounted ||
+        _closingTurnOwner ||
+        ConnectionMutationBarrier.isPending(connection.id) ||
+        !_connectionIsCurrent(connection)) {
       return;
     }
     final identity = _notificationChatIdentity(connection, sessionId);
@@ -966,6 +971,10 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
     if (!mounted ||
         _closingTurnOwner ||
         intent.generation != _notificationGeneration ||
+        !ConnectionMutationBarrier.isCurrent(
+          connection.id,
+          intent.mutationEpoch,
+        ) ||
         !_connectionIsCurrent(connection)) {
       if (identical(_pendingNavigation, intent)) _pendingNavigation = null;
       return;
@@ -981,6 +990,10 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
       if (!mounted ||
           _closingTurnOwner ||
           generation != _notificationGeneration ||
+          !ConnectionMutationBarrier.isCurrent(
+            connection.id,
+            intent.mutationEpoch,
+          ) ||
           !_connectionIsCurrent(connection)) {
         return false;
       }

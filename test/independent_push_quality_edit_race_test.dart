@@ -296,6 +296,7 @@ void main() {
       // Whole-list ownership queues the sibling before snapshot capture.
       // Its synchronous per-ID lease must still block consent between owners.
       await enable(manager.getConnections().first);
+      expect(second.entered.isCompleted, isFalse);
       expect(f.requests, isEmpty);
       first.release.complete();
       await one;

@@ -10,8 +10,10 @@ import os
 import re
 import sqlite3
 import stat
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import ec
@@ -67,7 +69,7 @@ def private_file(path: Path) -> bytes:
 @dataclass(frozen=True)
 class Policy:
     enabled: bool
-    grants: dict[tuple[str, str], frozenset[str]]
+    grants: Mapping[tuple[str, str], frozenset[str]]
     owner_grants: frozenset[tuple[str, str]]
     vapid_key: Path | None = None
     vapid_subject: str = ""
@@ -77,6 +79,18 @@ class Policy:
     max_events: int = 10000
     max_registrations: int = 256
     max_attempts: int = 5
+
+    def __post_init__(self):
+        # A frozen dataclass alone does not freeze a caller-owned grants mapping.
+        # Admission must retain its original ACL even if the source later changes.
+        object.__setattr__(
+            self,
+            "grants",
+            MappingProxyType(
+                {principal: frozenset(sessions) for principal, sessions in self.grants.items()}
+            ),
+        )
+        object.__setattr__(self, "owner_grants", frozenset(self.owner_grants))
 
     def allowed(self, principal: tuple[str, str], session_id: str) -> bool:
         return principal in self.owner_grants or session_id in self.grants.get(principal, ())

@@ -10,9 +10,17 @@ import org.robolectric.annotation.Config
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [28], manifest = Config.NONE)
 class MobilePushPolicyTest {
-    private fun state() = JSONObject("""{"registration_fence":1,"enabled":true,"active":true,"installation":"i","nonce":"n","revision":2,"generation":3}""")
+    private fun state() = JSONObject("""{"registration_fence":1,"enabled":true,"active":true,"installation":"i","nonce":"n","revision":2,"generation":3,"sessions":["durable-session"]}""")
     private fun hint() = JSONObject("""{"schema":1,"event_id":"e","kind":"turn_done","registration_nonce":"n","generation":3,"expires_at":200}""")
     @Test fun acceptsEncryptedCurrentHint() { assertTrue(MobilePushPolicy.valid(state(), hint(), "i", true, 100)) }
+    @Test fun authorizedEmptyIdsAcceptsOnlyEncryptedCurrentAuthority() {
+        val authorized = state().put("session_scope", "authorized").put("sessions", org.json.JSONArray())
+        assertTrue(MobilePushPolicy.valid(authorized, hint(), "i", true, 100))
+        assertFalse(MobilePushPolicy.valid(authorized, hint(), "i", false, 100))
+        assertFalse(MobilePushPolicy.valid(authorized, hint().put("generation", 2), "i", true, 100))
+        assertFalse(MobilePushPolicy.valid(authorized.put("session_scope", "all"), hint(), "i", true, 100))
+        assertFalse(MobilePushPolicy.valid(state().put("session_scope", "authorized"), hint(), "i", true, 100))
+    }
     @Test fun rejectsPlaintext() { assertFalse(MobilePushPolicy.valid(state(), hint(), "i", false, 100)) }
     @Test fun rejectsDisabled() { assertFalse(MobilePushPolicy.valid(state().put("enabled", false), hint(), "i", true, 100)) }
     @Test fun rejectsWrongInstallation() { assertFalse(MobilePushPolicy.valid(state(), hint(), "other", true, 100)) }

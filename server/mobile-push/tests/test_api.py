@@ -35,6 +35,7 @@ def test_capabilities_default_deny_and_explicit_enable(env):
     assert response.json() == {
         "schema": 1,
         "registration_fence": 1,
+        "session_scope_modes": ["explicit", "authorized"],
         "enabled": True,
         "transports": ["webpush"],
         "vapid_public_key": env.profile.policy().public_key(),

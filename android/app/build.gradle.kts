@@ -84,6 +84,24 @@ flutter {
    source = "../.."
 }
 
+// Keep the Library notice/licence available in every distributed APK, not only
+// in a repository URL. Source/relink archives accompany the APK separately.
+val pushNotices = tasks.register<Sync>("prepareEmbeddedPushNotices") {
+    from(rootProject.projectDir.parentFile.resolve("third_party")) {
+        include("embedded-push-notice.md", "embedded-push-relink.md")
+        include("licenses/embedded-fcm-distributor-LGPL-2.1.txt")
+        include("sources/embedded-fcm-distributor-3.1.0/**")
+        // Android's asset merger transparently decompresses *.gz and strips its
+        // suffix. Preserve the verified archive bytes and hash with an alias.
+        rename { name -> if (name.endsWith(".tar.gz")) "$name.bin" else name }
+    }
+    into(layout.buildDirectory.dir("generated/embeddedPushAssets/third_party"))
+}
+android.sourceSets.getByName("main").assets.srcDir(layout.buildDirectory.dir("generated/embeddedPushAssets").get().asFile)
+tasks.matching { it.name.startsWith("merge") && it.name.endsWith("Assets") }.configureEach {
+    dependsOn(pushNotices)
+}
+
 // F-Droid ABI split: version codes are derived per ABI as base * 10 + abiCode,
 // with armeabi-v7a < arm64-v8a < x86_64 as required by fdroiddata.
 val abiCodes = mapOf("armeabi-v7a" to 1, "arm64-v8a" to 2, "x86_64" to 3)
@@ -100,6 +118,19 @@ android.applicationVariants.configureEach {
 }
 
 dependencies {
+   // Open-source C2DM IPC transport, not Firebase SDK/GMS client libraries.
+   val replacementEmbeddedPushAar = providers.gradleProperty("embeddedPushAar").orNull
+   if (replacementEmbeddedPushAar == null) {
+       implementation("org.unifiedpush.android:embedded-fcm-distributor:3.1.0")
+   } else {
+       // LGPL relinking path: use the recipient's rebuilt Library, without any
+       // release-signing secret. A local AAR has no POM, so retain runtime deps.
+       val replacement = file(replacementEmbeddedPushAar)
+       require(replacement.isFile && replacement.extension == "aar") { "embeddedPushAar must name an existing .aar" }
+       implementation(files(replacement))
+       implementation("org.jetbrains.kotlin:kotlin-stdlib:2.3.0")
+       implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core-jvm:1.10.2")
+   }
    implementation("org.unifiedpush.android:connector:3.3.5") {
        // flutter_secure_storage already uses tink-android. The JVM artifact
        // contains the same classes and cannot coexist in an APK.

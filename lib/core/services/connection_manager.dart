@@ -286,6 +286,30 @@ class ConnectionManager {
     }
   }
 
+  /// After native engine recovery, refresh metadata as well as secrets before
+  /// granting fresh push consent. A surviving isolate's owned list transaction
+  /// already protects its metadata projection; do not wait behind an unrelated
+  /// held mutation or reload over that transaction's optimistic cache.
+  Future<void> refreshMobilePushBinding(String id) {
+    if (_savedListTail != null) return refreshConnectionCredentials(id);
+    return _withSavedListTransaction(
+      [],
+      () => refreshConnectionCredentials(id),
+    );
+  }
+
+  /// Exact persisted metadata shape for native admission. Re-serializing the
+  /// model would add defaults absent in older saved lists. Never copy secrets.
+  Map<String, dynamic>? mobilePushConsentMetadata(String id) {
+    final rows = _readConnectionMaps().where((row) => row['id'] == id).toList();
+    if (rows.length != 1) return null;
+    return Map<String, dynamic>.unmodifiable(
+      Map<String, dynamic>.from(rows.single)
+        ..remove('api_key')
+        ..remove('dashboard_password'),
+    );
+  }
+
   /// Writes a whole set of connections at once, preserving their ids.
   ///
   /// Every credential bundle is written and verified before the metadata list

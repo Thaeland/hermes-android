@@ -10,6 +10,7 @@ import threading
 
 from .config import Rejected, identifier
 from .inbox import Inbox
+from .scope import SessionScope
 from .store import Store
 from .transport import Sender
 
@@ -132,16 +133,15 @@ class Runtime:
         principal = (registration["provider"], registration["user_id"])
         if not policy.admitted(principal):
             return False
+        scope = SessionScope.from_registration(registration)
         if event["kind"] == "challenge":
-            return registration["status"] == "pending" and all(
-                policy.allowed(principal, sid) and self.profile.durable(sid)
-                for sid in json.loads(registration["sessions_json"])
+            return registration["status"] == "pending" and scope.ready(
+                principal, policy, self.profile.durable
             )
         return (
             registration["status"] == "active"
             and event["kind"] in json.loads(registration["kinds_json"])
-            and event["session_id"] in json.loads(registration["sessions_json"])
-            and policy.allowed(principal, event["session_id"])
+            and scope.allows(principal, event["session_id"], policy)
             and self.profile.durable(event["session_id"])
         )
 
@@ -152,7 +152,9 @@ class Runtime:
         try:
             policy = self.profile.policy()
             if policy.enabled and self.profile.durable(event["session_id"]):
-                event = {**event, "registration_generations": self.store.targets()}
+                event = {**event, "registration_generations": self.store.targets(event, policy)}
+                # Even an empty delivery target map must retain resolution/turn
+                # cancellation, independently of subscriptions to those kinds.
                 try:
                     # Preserve order behind any events already queued during a network send.
                     if self.inbox.peek():
@@ -168,11 +170,12 @@ class Runtime:
 
     def _queue_inbox(self, event, policy):
         assert self.store is not None and self.inbox is not None
-        # An inbox item must never acquire a future consent generation when drained.
+        # Drain/send may narrow this observer-time decision, never add targets after
+        # a later consent or ACL grant. Preserve an already captured (even empty) map.
         captured = (
             event
             if "registration_generations" in event
-            else {**event, "registration_generations": self.store.targets()}
+            else {**event, "registration_generations": self.store.targets(event, policy)}
         )
         self.inbox.put(captured, policy)
 
