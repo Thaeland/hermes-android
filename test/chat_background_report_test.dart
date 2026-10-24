@@ -14,6 +14,7 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/fake_voice_composer_adapter.dart';
+import 'support/preserved_task_list_fixture.dart';
 
 const _quote =
     '[ASYNC DELEGATION COMPLETE] I am quoting a report, not sending one.';
@@ -32,6 +33,95 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(picker, null);
   });
+
+  for (final snapshotCase in preservedTaskListFixtures().entries) {
+    for (final verbose in [false, true]) {
+      for (final arrivesOnRefresh in [false, true]) {
+        testWidgets(
+          'untagged compression task list ${snapshotCase.key} is a collapsed background card '
+          'verbose=$verbose arrivesOnRefresh=$arrivesOnRefresh',
+          (tester) async {
+            SharedPreferences.setMockInitialValues({'verbose_mode': verbose});
+            await tester.binding.setSurfaceSize(const Size(1000, 1400));
+            addTearDown(() => tester.binding.setSurfaceSize(null));
+            final snapshot = snapshotCase.value;
+            final body = snapshot['content'] as String;
+            final fixture = _History();
+            fixture.rows
+              ..clear()
+              ..addAll([
+                {'id': 1, 'role': 'user', 'content': 'Real user prompt'},
+                {'id': 2, 'role': 'assistant', 'content': 'Ordinary answer'},
+                if (!arrivesOnRefresh) {...snapshot, 'id': 3},
+              ]);
+            final controller = GatewayTurnApplicationController();
+            try {
+              await tester.pumpWidget(_app(fixture, controller));
+              await tester.pumpAndSettle();
+              if (arrivesOnRefresh) {
+                expect(find.byType(BackgroundReportCard), findsNothing);
+                fixture.rows.add({...snapshot, 'id': 3});
+                await _refresh(tester);
+              }
+              final card = find.byType(BackgroundReportCard);
+              expect(card, findsOneWidget);
+              expect(find.text('Background task'), findsOneWidget);
+              expect(_expanded(tester, card), isFalse);
+              expect(find.text(body, skipOffstage: false), findsNothing);
+              final humans = tester
+                  .widgetList<MessageBubble>(find.byType(MessageBubble))
+                  .where((bubble) => bubble.isUser)
+                  .toList();
+              expect(humans.map((bubble) => bubble.content), [
+                'Real user prompt',
+              ]);
+              expect(humans.single.onEdit, isNotNull);
+              await tester.enterText(find.byType(TextField), 'Keep this draft');
+              await tester.tap(
+                find.descendant(of: card, matching: find.text('Expand report')),
+              );
+              await tester.pumpAndSettle();
+              expect(_expanded(tester, card), isTrue);
+              expect(find.text(body), findsOneWidget);
+              expect(
+                find.descendant(of: card, matching: find.byType(MessageBubble)),
+                findsNothing,
+              );
+              final key = tester.widget(card).key;
+              await _refresh(tester);
+              expect(tester.widget(card).key, key);
+              expect(_expanded(tester, card), isTrue);
+              expect(_draft(tester), 'Keep this draft');
+              final canonical = controller
+                  .normalSessionFor(fixture.connection)
+                  .findChat('stored-reports')!
+                  .snapshot
+                  .historyRows
+                  .singleWhere((row) => row['id'] == 3);
+              expect(canonical['role'], 'user');
+              expect(canonical['content'], body);
+              expect(canonical['display_kind'], isNull);
+              await tester.pumpWidget(const SizedBox.shrink());
+              await tester.pumpWidget(_app(fixture, controller));
+              await tester.pumpAndSettle();
+              expect(_expanded(tester, card), isFalse);
+              expect(find.text(body, skipOffstage: false), findsNothing);
+              expect(fixture.submits, 0);
+              expect(
+                fixture.requests.every((request) => request.method == 'GET'),
+                isTrue,
+              );
+              expect(tester.takeException(), isNull);
+            } finally {
+              await tester.pumpWidget(const SizedBox.shrink());
+              await controller.close();
+              await tester.pump();
+            }
+          },
+        );
+      }
+    }
+  }
 
   for (final width in [400.0, 1000.0]) {
     for (final verbose in [false, true]) {
