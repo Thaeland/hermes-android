@@ -9,8 +9,166 @@ class AppLocalizationsKo extends AppLocalizations {
   AppLocalizationsKo([String locale = 'ko']) : super(locale);
 
   @override
+  String get background_task_report => '백그라운드 작업';
+
+  @override
+  String get background_process_report => '백그라운드 프로세스';
+
+  @override
+  String get background_report_issues => '문제가 보고되었습니다. 펼쳐서 자세히 확인하세요.';
+
+  @override
+  String get background_report_expand => '보고서 펼치기';
+
+  @override
+  String get background_report_collapse => '보고서 접기';
+
+  @override
+  String get saved_history_heading => 'Saved history';
+
+  @override
+  String get received_output_heading =>
+      'Received output — match to saved history unconfirmed';
+
+  @override
+  String get received_output_explanation =>
+      'This may also appear in saved history. The app cannot confirm a match.';
+
+  @override
+  String get local_prompt_context => 'Local prompt context';
+
+  @override
+  String get received_output_badge => 'Received · match unconfirmed';
+
+  @override
+  String get received_output_lifetime =>
+      'Received output is kept temporarily in this app session and may be shortened or removed as limits are reached. It may not be available after the app or connection is closed.';
+
+  @override
+  String get theme_palette => '색상 테마';
+
+  @override
+  String get theme_palette_gold => '금색';
+
+  @override
+  String get theme_palette_purple => '보라색';
+
+  @override
+  String get theme_palette_orange => '주황색';
+
+  @override
+  String get theme_palette_green => '초록색';
+
+  @override
+  String get theme_palette_blue => '파란색';
+
+  @override
+  String get theme_palette_red => '빨간색';
+
+  @override
+  String get theme_palette_teal => '청록색';
+
+  @override
+  String get theme_palette_pink => '분홍색';
+
+  @override
+  String get theme_palette_indigo => '남색';
+
+  @override
+  String get theme_palette_cyan => '시안';
+
+  @override
+  String get assets_recent_subtitle => '저장된 채팅에서 Hermes가 공유한 파일 찾기';
+
+  @override
+  String get assets_scope_notice =>
+      '저장된 답변에서 Hermes가 명시적으로 공유한 생성된 파일입니다. 채팅 기록의 일부만 보여 주며, 모든 파일이나 첨부 파일을 망라한 목록은 아닙니다. 참조된 파일이 더 이상 존재하지 않을 수 있습니다.';
+
+  @override
+  String get assets_download_limit =>
+      '파일은 탭할 때만 불러옵니다. 미리보기와 다운로드는 각각 파일당 25 MiB로 제한됩니다. 더 큰 파일은 대시보드를 이용하세요.';
+
+  @override
+  String get assets_search_hint => '찾은 파일이나 원본 채팅 검색';
+
+  @override
+  String get assets_all => '전체';
+
+  @override
+  String get assets_images => '이미지';
+
+  @override
+  String get assets_audio => '오디오';
+
+  @override
+  String get assets_video => '동영상';
+
+  @override
+  String get assets_documents => '문서 및 기타 파일';
+
+  @override
+  String get assets_empty => '살펴본 메시지에서 에셋을 찾지 못했습니다';
+
+  @override
+  String get assets_empty_detail =>
+      '채팅을 더 살펴보거나 이전 메시지를 살펴보면 더 오래된 기록을 확인할 수 있습니다. 일반 첨부 파일과 링크가 없는 파일은 여기에 색인되지 않습니다.';
+
+  @override
+  String get assets_no_matches => '일치하는 에셋 없음';
+
+  @override
+  String get assets_load_more_chats => '채팅 더 살펴보기';
+
+  @override
+  String get assets_load_older_messages => '이전 메시지 살펴보기';
+
+  @override
+  String get assets_load_failed =>
+      '일부 기록을 읽지 못했습니다. 결과가 불완전합니다. 대시보드 연결을 확인하고 다시 시도하세요.';
+
+  @override
+  String get assets_retry_failed => '읽지 못한 기록 다시 불러오기';
+
+  @override
+  String get assets_partial => '서버에서 기록이 불완전하다고 보고했습니다. 대시보드를 확인한 후 새로고침하세요.';
+
+  @override
+  String assets_scan_summary(int files, int chats) {
+    return '살펴본 채팅 $chats개에서 파일 참조 $files개 발견';
+  }
+
+  @override
+  String assets_open_chat(String title) {
+    return '채팅 열기: $title';
+  }
+
+  @override
+  String get assets_file_too_large =>
+      '이 파일은 다운로드 크기 제한을 초과합니다. 대시보드를 열어 다운로드하세요.';
+
+  @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
       '일회성 질문입니다. 72시간 후에 자동으로 보관 처리되며, 보관할 가치가 있는 내용은 기억에 유지됩니다.';
+
+  @override
+  String get archive_chat => '채팅 보관';
+
+  @override
+  String get unarchive_chat => '채팅 보관 해제';
+
+  @override
+  String get chat_archived => '채팅이 보관되었습니다';
+
+  @override
+  String get chat_unarchived => '채팅 보관이 해제되었습니다';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return '채팅 보관 상태를 변경할 수 없습니다: $error';
+  }
+
+  @override
+  String get quick_chat_description => '일회성 질문입니다.';
 
   @override
   String get ai_full_text => 'AI + 전문 검색';
@@ -118,7 +276,8 @@ class AppLocalizationsKo extends AppLocalizations {
   String get archived => '보관됨';
 
   @override
-  String get archived_conversations_appear_here => '보관된 대화가 여기에 표시됩니다.';
+  String get archived_conversations_appear_here =>
+      '보관한 대화만 여기에 표시됩니다. 이전 채팅은 모든 채팅에 남아 있습니다.';
 
   @override
   String get archived_quick_chats => '보관된 빠른 채팅';
@@ -153,9 +312,6 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get auto_device_default => '자동 (기기 기본값)';
-
-  @override
-  String get auto_archives_after_72_hours => '72시간 후 자동 보관';
 
   @override
   String get automation => '자동화';
@@ -485,6 +641,16 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get cron => 'Cron';
+
+  @override
+  String get crons => 'Crons';
+
+  @override
+  String get cron_conversations_empty =>
+      'Conversations from scheduled jobs appear here, including older runs.';
+
+  @override
+  String get search_cron_conversations => 'Search cron conversations';
 
   @override
   String get cron_jobs => 'Cron 작업';
@@ -1865,6 +2031,9 @@ class AppLocalizationsKo extends AppLocalizations {
   String get trigger_now => '지금 트리거';
 
   @override
+  String get received_outcome_unknown => '턴 종료 — 결과 미확인';
+
+  @override
   String get turn_completed => '턴 완료';
 
   @override
@@ -2508,6 +2677,45 @@ class AppLocalizationsKo extends AppLocalizations {
       '컴팩트는 You 및 Hermes 라벨을 없애고 말풍선 여백, 간격, 좌우 여백을 줄입니다.';
 
   @override
+  String get client_certificate_mtls => 'Client certificate (mTLS)';
+
+  @override
+  String get client_certificate_mtls_description =>
+      'Present a certificate when an HTTPS proxy requires mutual TLS.';
+
+  @override
+  String get client_certificate_https_only =>
+      'Client certificates are only used for HTTPS connections.';
+
+  @override
+  String get choose_p12_pfx => 'Choose .p12 / .pfx';
+
+  @override
+  String get choose_certificate_pem => 'Choose certificate (PEM)';
+
+  @override
+  String get choose_private_key_pem => 'Choose private key (PEM)';
+
+  @override
+  String get certificate_password_optional => 'Certificate password (optional)';
+
+  @override
+  String get client_certificate_required =>
+      'Load a client certificate or turn off the client certificate option.';
+
+  @override
+  String client_certificate_loaded(String label) {
+    return 'Loaded: $label';
+  }
+
+  @override
+  String get remove_certificate => 'Remove certificate';
+
+  @override
+  String get certificate_import_failed =>
+      'That certificate could not be loaded.';
+
+  @override
   String get background_work => '백그라운드 작업';
 
   @override
@@ -2717,4 +2925,45 @@ class AppLocalizationsKo extends AppLocalizations {
   String task_tasks_finished(Object count) {
     return '$count delegated task(s) finished';
   }
+
+  @override
+  String get activity_status_unconfirmed => '상태 미확인';
+
+  @override
+  String get activity_recently_updated => '최근 업데이트됨';
+
+  @override
+  String get activity_reconnecting => '다시 연결 중 — 턴 상태 확인 중';
+
+  @override
+  String get activity_outcome_unknown => '턴의 결과를 확인할 수 없었습니다. 채팅을 열어 확인하세요.';
+
+  @override
+  String get activity_chat_updated_detail =>
+      '게이트웨이에 기록된 채팅 활동입니다. 턴의 실시간 상태는 확인할 수 없습니다.';
+
+  @override
+  String get activity_updated => '업데이트됨';
+
+  @override
+  String get activity_empty_title => '최근 활동 없음';
+
+  @override
+  String get activity_empty_detail =>
+      '이 앱에서 시작한 턴과 지난 7일 동안 업데이트된 게이트웨이 채팅이 여기에 표시됩니다.';
+
+  @override
+  String get activity_read_error =>
+      '활동에서 턴 기록이나 게이트웨이 채팅을 읽을 수 없었습니다. 연결을 확인한 후 다시 시도하세요.';
+
+  @override
+  String get activity_chat_unavailable =>
+      '이 채팅은 더 이상 사용할 수 없거나 게이트웨이에 연결할 수 없습니다.';
+
+  @override
+  String get activity_partial_title => '활동이 일부만 로드됨';
+
+  @override
+  String get activity_partial_detail =>
+      '게이트웨이 활동의 제한된 범위가 표시됩니다. 다른 채팅이 더 있을 수 있습니다. 아래로 당겨 새로고침하세요.';
 }

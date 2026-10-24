@@ -1,3 +1,7 @@
+// UNRECONCILED POLICY (second adaptation layer; original case IDs retained).
+// Raw: p2a-unreconciled-_flkt2h9/raw/base.tar::test/chat_history_widget_test.dart
+// Base 4a53e32 blob d9ab33d2ecc9b84ed810f8d6da3ec2e4e6918cbb; SHA256 1c6a3e4307b3ec1cd87d4f34f5da73a4811de1af67f7ea2e08fd35e83837b8b1.
+// See docs/unreconciled-output/ORACLE_MIGRATION.md; unchanged safety remains binding.
 import 'dart:async';
 import 'dart:convert';
 
@@ -25,10 +29,24 @@ class _HistoryHttpClient extends http.BaseClient {
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
-    requests.add(request.url);
+    if (request.method == 'GET' &&
+        request.url.path == '/api/sessions/stored-history-fixture') {
+      return http.StreamedResponse(
+        Stream.value(
+          utf8.encode(
+            jsonEncode({
+              'session': {'id': 'stored-history-fixture', 'archived': false},
+            }),
+          ),
+        ),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
+    }
     if (request.method != 'GET' || !request.url.path.endsWith('/messages')) {
       return http.StreamedResponse(Stream.value(utf8.encode('{}')), 404);
     }
+    requests.add(request.url);
     final gate = responseGate;
     if (gate != null) await gate.future;
     if (failNextRequest) {
@@ -291,8 +309,18 @@ void main() {
       ),
       isTrue,
     );
+    await tester.scrollUntilVisible(
+      find.text('Earlier question'),
+      -300,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.text('Earlier question'), findsOneWidget);
     expect(find.text('Earlier answer'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Detached final reply'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.text('Detached final reply'), findsOneWidget);
   });
 }

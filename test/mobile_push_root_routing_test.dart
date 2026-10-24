@@ -113,7 +113,7 @@ void main() {
   });
 
   testWidgets(
-    'cold and warm push taps serialize exact saved-profile navigation',
+    'newer warm push tap supersedes held cold lookup with exact saved profile',
     (tester) async {
       final manager = await _manager();
       final beta = manager.getConnections().singleWhere(
@@ -152,7 +152,8 @@ void main() {
       final chats = tester
           .widgetList<ChatScreen>(find.byType(ChatScreen, skipOffstage: false))
           .toList();
-      expect(chats.map((c) => c.session.id), ['first', 'second']);
+      expect(chats.map((c) => c.session.id), ['second']);
+      // Newer tap owns focus; the older held lookup must not create a stale route.
       expect(
         chats.every(
           (c) =>
@@ -168,6 +169,59 @@ void main() {
       push.tap(beta, 'third', 'event-3');
       await _pump(tester);
       expect(lookups, hasLength(2));
+    },
+  );
+
+  testWidgets(
+    'cold and warm push taps serialize exact saved-profile navigation',
+    (tester) async {
+      final manager = await _manager();
+      final beta = manager.getConnections().singleWhere(
+        (c) => c.gatewayProfile == 'beta',
+      );
+      final push = _Push()..tap(beta, 'first', 'event-1');
+      addTearDown(push.dispose);
+      final lookups = <(String, String?, String)>[];
+      await tester.pumpWidget(
+        HermesApp(
+          connManager: manager,
+          mobilePush: push,
+          testNotificationSessionLookup: (connection, id) async {
+            lookups.add((connection.id, connection.gatewayProfile, id));
+            return _session(id);
+          },
+        ),
+      );
+      await _pump(tester);
+      expect(find.byType(ChatScreen), findsOneWidget);
+      expect(
+        tester.widget<ChatScreen>(find.byType(ChatScreen)).session.id,
+        'first',
+      );
+      final coldTakes = push.takes;
+      push.tap(beta, 'second', 'event-2');
+      await _pump(tester);
+      final chats = tester.widgetList<ChatScreen>(
+        find.byType(ChatScreen, skipOffstage: false),
+      );
+      expect(chats.map((c) => c.session.id), ['first', 'second']);
+      expect(
+        chats.every(
+          (c) =>
+              c.connection.id == beta.id &&
+              c.connection.gatewayProfile == 'beta',
+        ),
+        isTrue,
+      );
+      expect(lookups, [
+        (beta.id, 'beta', 'first'),
+        (beta.id, 'beta', 'second'),
+      ]);
+      expect(push.takes, coldTakes + 1);
+      expect(pendingNotificationApprovals.value, isEmpty);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await _pump(tester);
+      expect(push.rootListeners, 0);
     },
   );
 

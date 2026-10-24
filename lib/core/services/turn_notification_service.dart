@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../l10n/app_localizations.dart';
 import '../l10n/l10n.dart' show resolvePreferredLocale;
 import 'notification_prefs.dart';
+import 'notification_approval_authority.dart';
 
 /// Delivered to the app root when the user taps a notification body or one of
 /// its action buttons. Set once by the root widget; every service instance
@@ -370,7 +371,7 @@ class TurnNotificationService {
     required String turnId,
     required String status,
   }) => _queueOngoing(() async {
-    await ensureInitialized();
+    await ensureInitialized(refreshPermission: false);
     if (!_initialized) return;
     final id = ongoingChatNotificationIdFor(
       connectionId: connectionId,
@@ -414,7 +415,7 @@ class TurnNotificationService {
     required String connectionId,
     required String localSessionId,
   }) => _queueOngoing(() async {
-    await ensureInitialized();
+    await ensureInitialized(refreshPermission: false);
     if (!_initialized) return;
     await _cancelOngoingId(
       ongoingChatNotificationIdFor(
@@ -433,7 +434,7 @@ class TurnNotificationService {
   /// Targeted cleanup only. Never calls the plugin's broad cancelAll, which
   /// could remove the foreground-service disclosure or attention notifications.
   Future<void> cancelAllOngoingChats() => _queueOngoing(() async {
-    await ensureInitialized();
+    await ensureInitialized(refreshPermission: false);
     if (!_initialized) return;
     for (final id in _ongoingIds.toList()) {
       await _cancelOngoingId(id);
@@ -469,7 +470,10 @@ class TurnNotificationService {
   bool _permissionRequested = false;
   Future<void>? _initializing;
   Future<void>? _requestingPermission;
-  Future<void>? _refreshingPermission;
+  Future<void>? _refreshingAuthorization;
+  int _permissionRevision = 0;
+  int _authorizationDemand = 0;
+  int _authorizationSatisfied = 0;
 
   TurnNotificationService({
     TurnNotificationSink? sink,
@@ -487,7 +491,10 @@ class TurnNotificationService {
   /// Only explicit foreground callers may request permission, once after a
   /// successful platform request. Later checks never re-prompt, even after a
   /// denial. Failed platform operations degrade silently and may be retried.
-  Future<void> ensureInitialized({bool requestPermission = false}) async {
+  Future<void> ensureInitialized({
+    bool requestPermission = false,
+    bool refreshPermission = true,
+  }) async {
     if (!_initialized) {
       final flight = _initializing ??= _initialize();
       try {
@@ -508,19 +515,8 @@ class TurnNotificationService {
           _requestingPermission = null;
         }
       }
-    } else {
-      // Join an active prompt rather than reading its pre-prompt state. Passive
-      // checks also coalesce, and cannot overwrite a newer request result.
-      final flight =
-          _requestingPermission ??
-          (_refreshingPermission ??= _refreshPermission());
-      try {
-        await flight;
-      } finally {
-        if (identical(_refreshingPermission, flight)) {
-          _refreshingPermission = null;
-        }
-      }
+    } else if (refreshPermission) {
+      await refreshAuthorization();
     }
   }
 
@@ -535,9 +531,7 @@ class TurnNotificationService {
   }
 
   Future<void> _requestPermission() async {
-    // A headless refresh may already be reading the old grant. Let it finish
-    // before prompting so its late result cannot replace the user's answer.
-    await _refreshingPermission;
+    ++_permissionRevision;
     try {
       _permissionGranted = await _sink.requestPermission() ?? true;
       _permissionRequested = true;
@@ -547,13 +541,57 @@ class TurnNotificationService {
     }
   }
 
-  Future<void> _refreshPermission() async {
-    try {
-      _permissionGranted = await _sink.checkPermission() ?? true;
-    } catch (_) {
-      // Unknown is not a grant, but a later passive check may recover.
-      _permissionGranted = false;
+  /// Foreground resume/Settings may observe grants or revocations made in OS
+  /// settings. Refreshing is separate from the one-shot permission prompt:
+  /// denial never causes repeated dialogs, and headless initialization does
+  /// neither. Join an active prompt and fence older passive results behind it.
+  Future<void> refreshAuthorization() async {
+    // Register demand before initialization awaits. Joining an older platform
+    // read is not evidence about an OS change observed by a later caller.
+    ++_authorizationDemand;
+    if (!_initialized) {
+      final flight = _initializing ??= _initialize();
+      try {
+        await flight;
+      } finally {
+        if (identical(_initializing, flight)) _initializing = null;
+      }
     }
+    if (!_initialized) return;
+    final request = _requestingPermission;
+    if (request != null) await request;
+    // Coalesce callers before each read, but drain a fresh trailing read when
+    // demand arrives after its snapshot. The watermark also covers callers
+    // joining a completed flight before its finalizer has cleared the slot.
+    while (_authorizationSatisfied < _authorizationDemand) {
+      final flight = _refreshingAuthorization ??= _refreshAuthorization();
+      try {
+        await flight;
+      } finally {
+        if (identical(_refreshingAuthorization, flight)) {
+          _refreshingAuthorization = null;
+        }
+      }
+    }
+  }
+
+  Future<void> _refreshAuthorization() async {
+    final demand = _authorizationDemand;
+    final revision = _permissionRevision;
+    var granted = false;
+    try {
+      granted = await _sink.checkPermission() ?? true;
+    } catch (_) {
+      // An unavailable permission read is not a grant.
+    }
+    if (revision == _permissionRevision && demand == _authorizationDemand) {
+      _permissionGranted = granted;
+    }
+    // A newer explicit prompt owns permission; do not let this passive caller
+    // finish against the old cache while that prompt is still unresolved.
+    final request = _requestingPermission;
+    if (request != null) await request;
+    _authorizationSatisfied = demand;
   }
 
   /// Posts a notification when a gateway turn completes while the app is
@@ -734,7 +772,8 @@ class TurnNotificationService {
     required String title,
     required String body,
   }) async {
-    await ensureInitialized(requestPermission: true);
+    await ensureInitialized(requestPermission: true, refreshPermission: false);
+    await refreshAuthorization();
     if (!_initialized || !_permissionGranted) return false;
 
     try {
@@ -811,6 +850,8 @@ class NotificationRoute {
   final String? actionId;
   final String? localSessionId;
   final String? turnId;
+  final String? approvalAccount;
+  final String? approvalMutation;
 
   const NotificationRoute({
     this.sessionId,
@@ -819,6 +860,8 @@ class NotificationRoute {
     this.actionId,
     this.localSessionId,
     this.turnId,
+    this.approvalAccount,
+    this.approvalMutation,
   });
 
   static NotificationRoute fromResponse(NotificationResponse response) {
@@ -827,6 +870,8 @@ class NotificationRoute {
     String? requestId;
     String? localSessionId;
     String? turnId;
+    String? approvalAccount;
+    String? approvalMutation;
     final raw = response.payload;
     if (raw != null && raw.isNotEmpty) {
       try {
@@ -837,6 +882,8 @@ class NotificationRoute {
           requestId = decoded['requestId']?.toString();
           localSessionId = decoded['localSessionId']?.toString();
           turnId = decoded['turnId']?.toString();
+          approvalAccount = decoded['approvalAccount'] as String?;
+          approvalMutation = decoded['approvalMutation'] as String?;
         }
       } catch (_) {
         // A plain-string payload (older turns) carries only the turn id.
@@ -849,6 +896,8 @@ class NotificationRoute {
       actionId: response.actionId,
       localSessionId: localSessionId,
       turnId: turnId,
+      approvalAccount: approvalAccount,
+      approvalMutation: approvalMutation,
     );
   }
 
@@ -871,11 +920,16 @@ class PendingNotificationApproval {
   final String requestId;
   final String choice;
 
+  /// Optional only for decoding/legacy fixture compatibility. Unscoped entries
+  /// have no automatic-answer authority and are never admitted to the queue.
+  final NotificationApprovalAuthority? authority;
+
   const PendingNotificationApproval({
     required this.connectionId,
     required this.sessionId,
     required this.requestId,
     required this.choice,
+    this.authority,
   });
 }
 
@@ -887,14 +941,18 @@ class PendingNotificationApproval {
 final ValueNotifier<List<PendingNotificationApproval>>
 pendingNotificationApprovals = ValueNotifier(const []);
 
-/// Queues [approval], deduplicating by connection + session + request.
+/// Queues only live captured authority; deduplication stays inside that exact
+/// account/mutation/owner plus session/request, never across replacements.
 void addPendingNotificationApproval(PendingNotificationApproval approval) {
+  if (approval.authority?.isCurrent != true) return;
+  prunePendingNotificationApprovals();
   final existing = pendingNotificationApprovals.value;
   final duplicate = existing.any(
     (item) =>
         item.connectionId == approval.connectionId &&
         item.sessionId == approval.sessionId &&
-        item.requestId == approval.requestId,
+        item.requestId == approval.requestId &&
+        item.authority?.sameCapture(approval.authority!) == true,
   );
   if (duplicate) return;
   pendingNotificationApprovals.value = [...existing, approval];
@@ -902,11 +960,43 @@ void addPendingNotificationApproval(PendingNotificationApproval approval) {
 
 /// Removes [approval] once its owner confirmed it was answered.
 void removePendingNotificationApproval(PendingNotificationApproval approval) {
+  if (!pendingNotificationApprovals.value.any(
+    (item) => identical(item, approval),
+  )) {
+    return;
+  }
   pendingNotificationApprovals.value = [
     for (final item in pendingNotificationApprovals.value)
-      if (item.connectionId != approval.connectionId ||
-          item.sessionId != approval.sessionId ||
-          item.requestId != approval.requestId)
-        item,
+      if (!identical(item, approval)) item,
   ];
 }
+
+void prunePendingNotificationApprovals() {
+  final existing = pendingNotificationApprovals.value;
+  final current = existing
+      .where((item) => item.authority?.isCurrent == true)
+      .toList();
+  if (current.length != existing.length) {
+    pendingNotificationApprovals.value = current;
+  }
+}
+
+final _answeringNotificationApprovals = <PendingNotificationApproval>{};
+
+bool claimNotificationApproval(PendingNotificationApproval approval) {
+  if (approval.authority?.isCurrent != true ||
+      _answeringNotificationApprovals.any(
+        (item) =>
+            item.authority?.isCurrent == true &&
+            item.connectionId == approval.connectionId &&
+            item.sessionId == approval.sessionId &&
+            item.requestId == approval.requestId &&
+            item.authority!.sameCapture(approval.authority!),
+      )) {
+    return false;
+  }
+  return _answeringNotificationApprovals.add(approval);
+}
+
+void releaseNotificationApproval(PendingNotificationApproval approval) =>
+    _answeringNotificationApprovals.remove(approval);

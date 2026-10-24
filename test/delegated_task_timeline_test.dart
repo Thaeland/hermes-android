@@ -7,6 +7,8 @@ import 'package:hermes_android/core/controllers/delegated_task_controller.dart';
 import 'package:hermes_android/core/models/gateway_insight.dart';
 import 'package:hermes_android/core/screens/chat_screen.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
+import 'package:hermes_android/core/services/gateway_turn_application_controller.dart';
+import 'package:hermes_android/core/theme/hermes_theme.dart';
 
 import 'package:hermes_android/core/services/ws_client.dart';
 import 'package:hermes_android/core/widgets/delegated_task_timeline.dart';
@@ -23,6 +25,7 @@ import 'support/fake_voice_composer_adapter.dart';
 import 'delegated_task_history_test.dart' show FakeHistory, rows, task;
 
 Widget app(Widget home) => MaterialApp(
+  theme: hermesTheme(Brightness.light),
   localizationsDelegates: AppLocalizations.localizationsDelegates,
   supportedLocales: AppLocalizations.supportedLocales,
   home: home,
@@ -536,17 +539,21 @@ void main() {
             {'id': 1, 'role': 'agent', 'content': 'Child answer'},
           ];
         final chatKey = GlobalKey();
+        final turnController = GatewayTurnApplicationController();
+        addTearDown(turnController.close);
+        final connection = SavedConnection(
+          id: 'c',
+          label: 'c',
+          host: 'parent.fixture',
+          port: 8642,
+          apiKey: 'unused',
+        );
         await tester.pumpWidget(
           app(
             ChatScreen(
               key: chatKey,
-              connection: SavedConnection(
-                id: 'c',
-                label: 'c',
-                host: 'parent.fixture',
-                port: 8642,
-                apiKey: 'unused',
-              ),
+              connection: connection,
+              turnApplicationController: turnController,
               session: const Session(
                 id: 'parent',
                 title: 'Parent',
@@ -755,12 +762,26 @@ void main() {
         // Receipt-ordered prose remains split around reasoning/tool runs.
         position.jumpTo(position.maxScrollExtent);
         await tester.pump();
+        // Source headings can move an earlier receipt outside a phone's lazy
+        // viewport. Prove the complete retained prose as well as the actual
+        // mounted final bubble; absence of an evicted child is not data loss.
+        final retained = turnController
+            .normalSessionFor(connection)
+            .findChat('parent')!
+            .snapshot;
+        expect(
+          retained.displayRows
+              .where((row) => row['role'] == 'assistant')
+              .map((row) => row['content'])
+              .join(),
+          endsWith(finalText),
+        );
         expect(
           tester
               .widgetList<MessageBubble>(find.byType(MessageBubble))
               .map((bubble) => bubble.content)
               .join(),
-          endsWith(finalText),
+          endsWith('Parent completed while inspecting'),
         );
         expect(
           tester
@@ -794,6 +815,7 @@ void main() {
               .failed,
           isTrue,
         );
+        await turnController.close();
         await tester.pumpWidget(const SizedBox());
       },
     );

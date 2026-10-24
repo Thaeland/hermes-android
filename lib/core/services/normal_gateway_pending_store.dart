@@ -104,7 +104,15 @@ class NormalGatewayPendingStore {
 
   Future<T> _serialized<T>(Future<T> Function(SharedPreferences) action) {
     final previous = _tail;
-    Future<T> perform() async => action(await _preferences());
+    Future<T> perform() async {
+      final prefs = await _preferences();
+      // SharedPreferences updates its process cache before physical ACK. A
+      // rejected or lost-ACK write must not hide an unresolved WAL on reload or
+      // let the next transaction persist a speculative tombstone.
+      await prefs.reload();
+      return action(prefs);
+    }
+
     final flight = previous == null
         ? perform()
         : previous.then((_) => perform());

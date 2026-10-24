@@ -34,20 +34,7 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         BackgroundWorkPlatform.install(this, flutterEngine.dartExecutor.binaryMessenger)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, MobilePushBridge.CHANNEL).also { channel ->
-            MobilePushBridge.attach(channel)
-            channel.setMethodCallHandler { call, result ->
-                if (call.method == "permission") {
-                    MobilePushBridge.permission(this, result)
-                } else {
-                    try {
-                        result.success(MobilePushBridge.command(this, call.method, call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()))
-                    } catch (_: Exception) {
-                        result.error("mobile_push", "Mobile push operation failed safely. Check consent, permission and distributor.", null)
-                    }
-                }
-            }
-        }
+        MobilePushPlugin.install(flutterEngine)
         shareChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, shareChannelName).apply {
             setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -95,7 +82,6 @@ class MainActivity : FlutterActivity() {
         if (isFinishing) {
             stopService(Intent(this, ConnectionKeepAliveService::class.java))
         }
-        MobilePushBridge.detach()
         super.onDestroy()
     }
 
@@ -128,10 +114,6 @@ class MainActivity : FlutterActivity() {
         }
     }
 
-    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode == MobilePushBridge.PERMISSION_REQUEST) MobilePushBridge.permissionReturned(this)
-    }
 
     private fun launchActionFor(intent: Intent?): String? =
         if (intent?.action == quickChatAction) "quickChat" else null

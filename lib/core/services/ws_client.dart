@@ -9,6 +9,9 @@ import 'dart:convert';
 
 import 'package:web_socket_channel/io.dart';
 
+import '../models/client_certificate.dart';
+import 'tls_client_factory.dart';
+
 Object? _deepFreezeJson(Object? value) {
   if (value is Map) {
     final copy = <String, dynamic>{};
@@ -266,6 +269,8 @@ class WsClient {
     String? token,
     String? ticket,
     String? profile,
+    ClientCertificateConfig? clientCertificate,
+    TlsClientFactory tlsClientFactory = const TlsClientFactory(),
     Duration heartbeatInterval = defaultHeartbeatInterval,
     Duration heartbeatDeadline = defaultHeartbeatDeadline,
   }) {
@@ -274,6 +279,8 @@ class WsClient {
       token,
       ticket,
       profile,
+      clientCertificate,
+      tlsClientFactory,
       heartbeatInterval,
       heartbeatDeadline,
     );
@@ -284,9 +291,14 @@ class WsClient {
     this._token,
     this._ticket,
     this._profile,
+    this._clientCertificate,
+    this._tlsClientFactory,
     this.heartbeatInterval,
     this.heartbeatDeadline,
   );
+
+  final ClientCertificateConfig? _clientCertificate;
+  final TlsClientFactory _tlsClientFactory;
 
   /// Keepalive cadence mirroring the desktop client
   /// (`apps/shared/src/json-rpc-channel.ts` DEFAULT_HEARTBEAT_*): a
@@ -317,7 +329,18 @@ class WsClient {
     // Observe that error future immediately; the waiter still receives it.
     readyCompleter.future.ignore();
     final wsUrl = buildWebSocketUrl(baseUrl, token: _token, ticket: _ticket);
-    final channel = IOWebSocketChannel.connect(Uri.parse(wsUrl));
+    // Without a client certificate the platform WebSocket default is kept:
+    // flutter_test's binding replaces every freshly constructed HttpClient
+    // with a mock, and only the SDK's shared default (built before tests
+    // install that override) still reaches a real loopback server. A
+    // certificate always needs its own context, so that path constructs one.
+    final customClient = _clientCertificate == null
+        ? null
+        : _tlsClientFactory.createHttpClient(_clientCertificate);
+    final channel = IOWebSocketChannel.connect(
+      Uri.parse(wsUrl),
+      customClient: customClient,
+    );
     _channel = channel;
     channel.stream.listen(
       (message) => _handleMessage(message, generation),
@@ -937,6 +960,10 @@ class WsClient {
             JsonRpcError(
               'prompt.submit',
               event.data['message']?.toString() ?? 'Gateway turn failed',
+              // A session event has no request correlation. The application
+              // owner must reconcile it, not attribute its error text to the
+              // prompt whose terminal watcher happened to receive it.
+              reason: 'stream_terminal',
             ),
           );
         } else {

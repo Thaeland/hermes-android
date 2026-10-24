@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'helpers/notification_approval_fixture.dart';
 import 'package:hermes_android/core/services/notification_prefs.dart';
 import 'package:hermes_android/core/services/turn_notification_service.dart';
 
@@ -592,7 +593,10 @@ void main() {
     tearDown(() => pendingNotificationApprovals.value = const []);
 
     test('deduplicates by connection + session + request', () {
-      const approval = PendingNotificationApproval(
+      final approval = PendingNotificationApproval(
+        authority: fixtureApprovalAuthority(
+          fixtureApprovalConnection('conn-a'),
+        ),
         connectionId: 'conn-a',
         sessionId: 's1',
         requestId: 'r1',
@@ -606,13 +610,19 @@ void main() {
     });
 
     test('keeps distinct requests and removes by identity', () {
-      const first = PendingNotificationApproval(
+      final first = PendingNotificationApproval(
+        authority: fixtureApprovalAuthority(
+          fixtureApprovalConnection('conn-a'),
+        ),
         connectionId: 'conn-a',
         sessionId: 's1',
         requestId: 'r1',
         choice: 'once',
       );
-      const second = PendingNotificationApproval(
+      final second = PendingNotificationApproval(
+        authority: fixtureApprovalAuthority(
+          fixtureApprovalConnection('conn-a'),
+        ),
         connectionId: 'conn-a',
         sessionId: 's1',
         requestId: 'r2',
@@ -630,7 +640,10 @@ void main() {
 
     test('an identical session id on another connection is distinct', () {
       addPendingNotificationApproval(
-        const PendingNotificationApproval(
+        PendingNotificationApproval(
+          authority: fixtureApprovalAuthority(
+            fixtureApprovalConnection('conn-a'),
+          ),
           connectionId: 'conn-a',
           sessionId: 's1',
           requestId: 'r1',
@@ -638,7 +651,10 @@ void main() {
         ),
       );
       addPendingNotificationApproval(
-        const PendingNotificationApproval(
+        PendingNotificationApproval(
+          authority: fixtureApprovalAuthority(
+            fixtureApprovalConnection('conn-b'),
+          ),
           connectionId: 'conn-b',
           sessionId: 's1',
           requestId: 'r1',

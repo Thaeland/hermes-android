@@ -36,6 +36,56 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
 - Previous upstream releases remain available from the
   [Releases](https://github.com/rusty4444/hermes-android/releases) page.
 
+## Integrated 3.0 release-candidate hardening
+
+This branch preserves the published v2.1.33 features and adds stricter submission
+observation epochs, confirmed background-policy ownership, targeted notification
+cleanup, canonical draft ownership and paired push registration fences.
+Tool expansion remains per visit: choices survive lazy scrolling and identity
+binding, but a genuinely closed and reopened chat starts collapsed. Covering a
+retained route is not a new visit. This is an unreleased candidate; device acceptance and publication gates remain
+separate.
+See the [background-work guide](docs/android-background-work.md),
+[Android push guide](docs/mobile-push-android.md) and
+[server companion guide](docs/mobile-push-server.md) for the additional contracts
+and acceptance checks. Upgrade the companion together with the fenced client.
+
+The unreleased integration also preserves main's compact delegated-task labels
+and full read-only task details. Reasoning, tools and delegated tasks start collapsed even with app Verbose
+selected; manual reasoning choices survive the current visit, not a true
+close/reopen. Saved history and unconfirmed received output remain separate,
+labelled sources, with possible repetition across them. See the
+[neutral integration and verification](docs/reviews/main-81d-neutral-integration.md).
+
+## Navigation changes (unreleased)
+
+The bottom bar is **Chats → Crons → Projects → Activity → More**. Chats is the
+default screen; the separate Home tab has been removed.
+
+- **Chats** lists human conversations with search and All, Recent, Unassigned
+  and Archived filters. A compact **Needs you / Running now** section appears
+  above the list only when the device has observed relevant work.
+- **Crons** lists conversations produced by scheduled jobs, including older
+  runs and runs whose job has since been deleted. It has its own search and
+  All, Recent and Archived filters. Cron conversations do not appear in Chats.
+  The settings button opens the existing cron-job manager; **More → Cron**
+  remains available too. Script-only jobs without a conversation are still
+  inspected through the job manager, not invented as chat sessions.
+- **Projects**, **Activity** and **More** retain their existing roles.
+
+Both conversation browsers show a small first preview while history loads.
+Older history is not silently cut off after 2,000 rows. Archived history uses
+the saved dashboard connection and profile; a failed read keeps available
+rows and offers Retry rather than claiming the archive is empty.
+
+## Unreleased development
+
+- **More → Assets** browses generated files explicitly shared in saved Hermes
+  replies. Search found filenames or source chats, filter by file type, preview
+  images and download/share files. History scans are incremental and downloads
+  are lazy, with a 25 MiB per-file limit. This is not a complete attachment or
+  filesystem catalogue. See [Browsing chat assets](docs/chat-assets.md).
+
 ## Remote Gateway edition highlights
 
 - One Desktop Gateway JSON-RPC session for text, images, and files.
@@ -79,6 +129,18 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
   showing only the current call (or the latest call when none are running).
   Tap to view the full group; leaving and reopening the chat resets that choice.
   Verbose mode explicitly opens tool details by default.
+- **Activity** shows app-observed Remote Gateway turns: waiting for input,
+  running, failed and completed, plus an explicit unconfirmed state during
+  recovery or when an outcome cannot be proven. Recent turn metadata survives
+  app restarts; no prompt, response, title or approval content is stored there.
+  It also lists gateway chats updated within seven days, including REST-only
+  connections and chats started elsewhere. These are labelled **Updated**, not
+  assumed to be running or completed. The tab refreshes while visible,
+  pauses beneath other tabs/chat routes and in the background, supports
+  pull-to-refresh and opens the relevant chat. A bounded gateway scan is
+  labelled partially loaded rather than claiming no activity or an exhaustive
+  count. This is not a complete server audit log: live outcomes from other
+  clients and historic per-turn outcomes predating this build are unavailable.
 - Persistent reconnect/session resume and defensive retry handling.
 - App-owned stock Gateway turns outlive an open chat route. Reopen a chat to
   reattach, including while other chats run. Pending markers survive process
@@ -86,9 +148,10 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
 - Background protection uses one foreground service with a required disclosure
   and quiet per-chat ongoing entries. Notification taps open the relevant chat;
   permission, preferences and Android lifecycle restrictions still apply.
-- Optional native UnifiedPush can notify you without an active app socket. It
-  requires a distributor, a separate server companion, explicit
-  consent and a selected durable-session allowlist. See
+- Background notifications can use built-in Google-backed delivery without a
+  separate app or manual push details. External UnifiedPush remains available.
+  Enable the separate server companion and opt in on the phone; server policy
+  controls which current and future chats are eligible. See
   [Background work and push](#background-work-and-notifications).
 
 ### Gateway transport compatibility
@@ -102,9 +165,11 @@ After an outage, the app keeps recovery pending until it can verify the server's
 state. A proven-idle turn with no recorded terminal outcome becomes inactive
 with an outcome-unknown status. It does not generate a completion alert.
 
-When a received reply has no verified history baseline, the app preserves it
-and known older messages. Unverified saved rows remain cached outside the
-combined transcript. The app does not match turns by message text.
+The app shows the complete loaded saved-history window followed by retained
+received output labelled as an unconfirmed match to saved history. Received
+output is bounded and temporary within the app/connection session, even after a
+successful turn. Repetition across these sources is intentional: an admission
+baseline or matching text cannot establish which saved row is a received reply.
 
 The experimental v2 path adds a separate durable exactly-once recovery contract
 when the gateway advertises support. A legacy-transport capability notice refers
@@ -178,7 +243,8 @@ sanitized implementation and validation record.
 
 ## Screenshots
 
-The Home, Chats, More, Cron Jobs and Settings screenshots use anonymised example details.
+These screenshots show the published release and use anonymised example details.
+The unreleased navigation above replaces its Home tab.
 
 <table>
   <tr>
@@ -471,26 +537,34 @@ drop or process restart, the app reconciles pending markers with saved server
 history. An acknowledgement or a lost connection does not prove completion;
 uncertain work remains unresolved and the app does not resubmit its prompt.
 
-For notifications without a live app socket, configure the optional push path:
+For notifications without a live app socket:
 
-1. Install and configure a compatible UnifiedPush distributor on Android.
-2. Ask the server operator to install and enable `server/mobile-push` in the
-   intended Hermes profile, configure its VAPID key and grant your verified
-   dashboard login access to the exact durable session IDs. Installing this APK
-   does not install or enable the companion. Follow
-   [Server companion setup](docs/mobile-push-server.md).
-3. Open the connection's **Settings → Android UnifiedPush (optional)**. Select
-   the installed distributor, enter durable session IDs one per line, check
-   consent, then tap **Enable for selected sessions**. One Android installation
-   binds one saved connection; it does not subscribe all chats or profiles.
-4. Allow notification permission when asked and keep or reopen Hermes until the
-   status is **Active**. The server's encrypted challenge and authenticated
-   confirmation establish registration. **Pending** does not mean active.
-   Use **Reconcile / retry** after a lost reply or connection failure.
-5. Use **Disable and revoke** to withdraw consent. Local delivery stops before
-   server revocation; a failed remote revocation remains pending for retry.
+1. The server operator installs/enables the paired `server/mobile-push` companion
+   and authorises your verified dashboard login. A personal-server owner can be
+   explicitly granted current and future chats with `owner_all_sessions: true`;
+   restricted accounts keep their restrictions. Installing the APK does not set
+   up the server. Follow [Server companion setup](docs/mobile-push-server.md).
+2. In the connection's Settings, enable **Background notifications** and accept
+   Android's notification permission prompt. On Google-enabled phones, the
+   built-in transport needs no separate app, URLs, keys or chat IDs. External
+   UnifiedPush is an optional advanced alternative for Google-free devices.
+3. Keep/reopen Hermes until **Active**. An encrypted challenge and authenticated
+   confirmation establish registration; **Pending** does not mean active. Retry
+   after a connection failure. If no supported transport or server is available,
+   the app explains the prerequisite rather than reporting success.
+4. Disable background notifications to revoke consent. Local delivery stops
+   before server revocation; failed remote revocations remain pending for retry.
 
-The native connector uses no Firebase/FCM SDK. Push hints and notifications omit
+One installation binds one saved connection. Automatic subscriptions cover only
+that login's currently authorised durable chats, including future chats allowed by
+server policy—not other users or profiles. Existing selected-session subscriptions
+are not silently expanded; disable and enable again to choose automatic scope.
+
+The built-in transport uses Google's network and Play Services, but bundles no
+Firebase or proprietary Google messaging SDK. Devices without working Play Services
+need a compatible external distributor. See the [dependency licence notice](third_party/embedded-push-notice.md)
+for the upstream licence discrepancy and pre-release review requirement.
+Push hints and notifications omit
 chat text; a tap resolves its destination through the authenticated server feed.
 Push cannot approve an action or resubmit a prompt. See
 [Android UnifiedPush setup and privacy](docs/mobile-push-android.md).
@@ -764,4 +838,24 @@ the checks performed.
 
 ## License
 
-MIT
+Application code is distributed under the [MIT License](LICENSE), as previously
+declared in this README. Copyright (c) 2026 Sam Russell and contributors. The
+canonical file records those existing terms, not a relicensing of third-party
+code or assets. Contributor attribution and source history are preserved.
+
+Third-party components retain their separate terms:
+
+- **Cinzel font:** [SIL Open Font License 1.1](assets/fonts/OFL.txt), copyright
+  2020 The Cinzel Project Authors.
+- **Embedded FCM distributor 3.1.0:** the retained upstream
+  [LGPL-2.1-or-later licence](third_party/licenses/embedded-fcm-distributor-LGPL-2.1.txt),
+  copyright 2022 Simon Gougeon. See the [Library notice](third_party/embedded-push-notice.md)
+  for the POM/source licence discrepancy and the
+  [local source/relink instructions](third_party/embedded-push-relink.md).
+- Other dependencies retain their own copyright and licence notices.
+
+The full application, Cinzel and embedded Library notices, including the local
+Library source/relink instructions, are available offline in **Settings → About
+→ Licences** (the label follows the device language). That page also includes
+Flutter's dependency notices. See [NOTICE.md](NOTICE.md) for attribution and
+community-edition status.

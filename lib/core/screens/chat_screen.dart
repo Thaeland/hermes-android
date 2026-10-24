@@ -4,6 +4,8 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
+
 import 'package:flutter/material.dart';
 import '../widgets/session_name_dialog.dart';
 import 'package:flutter/services.dart';
@@ -21,7 +23,7 @@ import '../widgets/delegated_task_timeline.dart';
 import '../widgets/delegated_task_labels.dart';
 import '../services/connection_manager.dart';
 import '../services/attachment_draft_service.dart';
-import '../services/composer_draft_store.dart';
+import '../services/chat_presentation_state.dart';
 import '../services/chat_model_override_store.dart';
 import '../services/chat_density_preference.dart';
 import '../services/chat_history_window.dart';
@@ -33,12 +35,15 @@ import '../services/gateway_turn_recovery.dart';
 import '../services/gateway_turn_ui_projection.dart';
 import '../services/remote_files_client.dart';
 import '../services/turn_notification_service.dart';
+import '../services/notification_approval_authority.dart';
 import '../services/notification_prefs.dart';
 import '../services/voice_composer_adapter.dart';
 import '../services/ws_client.dart';
 import '../utils/media_tags.dart';
 import '../models/attachment_draft.dart';
+import '../models/background_report.dart';
 import '../models/chat_timeline.dart';
+import '../models/received_scope_outcome.dart';
 import '../models/gateway_activity.dart';
 import '../models/gateway_approval.dart';
 import '../models/gateway_clarify.dart';
@@ -52,7 +57,9 @@ import '../utils/chat_history_scroll.dart';
 import '../utils/message_content.dart';
 import '../utils/responsive.dart';
 import '../utils/turn_recovery_fallback.dart';
+import '../theme/hermes_theme.dart';
 import 'files_screen.dart';
+import '../widgets/background_report_card.dart';
 import '../widgets/gateway_activity_card.dart';
 import '../widgets/chat_context_header.dart';
 import '../widgets/markdown_code_block.dart';
@@ -62,15 +69,11 @@ import '../widgets/gateway_approval_dialog.dart';
 import '../widgets/gateway_clarify_dialog.dart';
 import '../widgets/gateway_insight_card.dart';
 import '../widgets/gateway_sensitive_prompt_dialog.dart';
+import '../widgets/hermes_components.dart';
 import '../widgets/media_artifact_card.dart';
 import '../widgets/voice_composer_controls.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
-
-/// These colors remain identical in light and dark themes. Their 8.15:1
-/// contrast ratio keeps normal user-message text above WCAG AA.
-const hermesUserMessageBubbleBackground = Color(0xFFD4AF37);
-const hermesUserMessageForeground = Color(0xFF1C1B1F);
 
 /// Recovery v2 opens a new server session and cannot yet target an existing
 /// Gateway session. Keep it confined to locally-created drafts; a session from
@@ -94,6 +97,31 @@ bool shouldEstablishLegacyDesktopSession(
   Session session, {
   required bool legacyTransportFallback,
 }) => !session.isLocalDraft || legacyTransportFallback;
+
+/// Route identity and resource ownership around one physical history flight.
+/// Offset paging captures a fence without allocating latest-read authority.
+class _ChatHistoryRead {
+  const _ChatHistoryRead({
+    required this.owner,
+    required this.account,
+    required this.localSessionId,
+    required this.authority,
+    required this.sessionId,
+    required this.routeSessionId,
+    required this.responseGeneration,
+    required this.observation,
+    required this.windowRevision,
+  });
+  final NormalGatewayChatOwner? owner;
+  final Object account;
+  final String localSessionId;
+  final NormalGatewayHistoryRead? authority;
+  final String sessionId;
+  final String routeSessionId;
+  final int responseGeneration;
+  final int observation;
+  final int windowRevision;
+}
 
 class _ModelChoice {
   final String provider;
@@ -245,6 +273,14 @@ class ChatScreen extends StatefulWidget {
   final SavedConnection connection;
   final Session session;
 
+  /// Publishes a server-confirmed stored-session change to the owning list.
+  final Future<void> Function(String sessionId, bool archived)?
+  onArchiveChanged;
+
+  /// Lets a longer-lived list own PATCH, read-back and reconciliation even
+  /// when this route is popped before the request completes.
+  final Future<bool> Function(String sessionId, bool archived)? sessionArchiver;
+
   /// The server-owned Project this chat was opened from, when known.
   /// `null` stays explicit as Unassigned in the sticky context header.
   final String? projectName;
@@ -365,6 +401,8 @@ class ChatScreen extends StatefulWidget {
     this.testStoredSessionKey,
     this.testMediaFilesClient,
     this.testTaskHistorySource,
+    this.onArchiveChanged,
+    this.sessionArchiver,
     super.key,
   });
 
@@ -375,16 +413,32 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   List<Map<String, dynamic>> _messages = [];
   ChatTimeline _timeline = const ChatTimeline();
+  late final ChatPresentationRegistry _presentationRegistry;
+  late final ChatPresentationState _presentation;
+  late final ComposerDraftWriter _draftWriter;
+  late final GatewayTurnApplicationController _viewController;
+  String _lastComposerText = '';
+  bool _restoringComposer = false;
   // Keep manual expansion through streaming rebuilds/lazy-list eviction, but
   // only for this route's visit. Leaving/reopening must start collapsed again.
-  final Map<String, bool> _reasoningExpansionPins = {};
+  late ChatPresentationRegistry _reasoningRegistry;
+  late ChatPresentationState _reasoningPresentation;
+  late ToolActivityGroupPins _reasoningExpansionPins;
+  // Bounded, visit-local choices only; no bodies or cross-source correlation.
+  Map<Object, bool> _backgroundReportExpansions = {};
   final ChatHistoryWindow _historyWindow = ChatHistoryWindow();
   bool _loadingOlder = false;
+  int _historyReadIssued = 0;
+  int _historyReadAccepted = 0;
+  int _historyWindowRevision = 0;
+  _ChatHistoryRead? _loadingHistoryRead;
+  _ChatHistoryRead? _olderHistoryRead;
+  _ChatHistoryRead? _deferredHistoryRead;
   final List<GatewayToolActivity> _toolActivities = [];
 
   /// Expansion choices for tool-activity cards, keyed by group id so they
-  /// survive the list reordering and row eviction that a streaming turn causes.
-  final ToolActivityGroupPins _toolActivityPins = ToolActivityGroupPins();
+  /// survive reordering/eviction within this State's visit, never a real exit.
+  late final ToolActivityGroupPins _toolActivityPins;
   final List<GatewaySubagentActivity> _subagentActivities = [];
   DelegatedTaskController? _openTaskController;
   int _automaticScrollGeneration = 0;
@@ -394,6 +448,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _loading = true;
   late String _sessionTitle;
   bool _renaming = false;
+  late bool _sessionArchived;
+  bool _archiving = false;
+  int _archiveRevision = 0;
+  int _archiveReadGeneration = 0;
+  String? _archiveStateSessionId;
+  String? _archiveReadSessionId;
   String? _error;
   late final ApiClient _client;
   late final GatewayChatClient _gateway;
@@ -404,7 +464,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   DesktopGatewayClient? _desktopGateway;
   GatewayTurnApplicationController? _localTurnController;
   NormalGatewayApplicationSession? _normalSession;
+  bool _normalSessionReady = false;
   NormalGatewayChatOwner? _normalChat;
+  NormalGatewayChatSnapshot? _normalSnapshot;
+  late final Map<String, String> _notificationApprovalOrigin;
   Object? _normalSubscription;
   Object? _normalReservation;
   String? _normalTurnId;
@@ -427,7 +490,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final _textController = TextEditingController();
   int _composerRevision = 0;
   int _clearedComposerRevision = 0;
-  String? _pendingComposerPrompt;
+
   final _imagePicker = ImagePicker();
   final List<AttachmentDraft> _attachmentDrafts = [];
   String? _sessionModel;
@@ -519,18 +582,34 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   static final Map<String, List<GatewayNotice>> _savedGatewayNotices = {};
 
   late final TurnNotificationService _turnNotifications;
-  late final ComposerDraftHandle _composerDraft;
-  bool _restoringComposerDraft = false;
 
   @override
   void initState() {
     super.initState();
+    _notificationApprovalOrigin = NotificationApprovalAuthority.origin(
+      widget.connection,
+    );
     _sessionTitle = widget.session.title;
+    _sessionArchived = widget.session.archived;
     WidgetsBinding.instance.addObserver(this);
     _projectName = _normalisedProjectName(widget.projectName);
-    _composerDraft = ComposerDraftStore.open(
-      connectionId: widget.connection.id,
-      sessionId: widget.session.id,
+    _viewController =
+        widget.turnApplicationController ??
+        (widget.testRemotePromptSubmit != null
+            ? (_localTurnController ??= GatewayTurnApplicationController())
+            : GatewayTurnApplicationController.standalone);
+    _presentationRegistry = _viewController.presentationFor(widget.connection);
+    _presentation = _presentationRegistry.chatFor(widget.session.id);
+    _reasoningRegistry = _presentationRegistry;
+    _reasoningPresentation = _presentation;
+    _reasoningExpansionPins = _reasoningPresentation.openReasoningVisit();
+    _toolActivityPins = _presentation.openToolVisit();
+    _draftWriter = _presentation.openWriter(
+      onBindingChanged: () {
+        if (mounted && widget.initialComposerText == null) {
+          unawaited(_restoreComposerDraft());
+        }
+      },
     );
     _textController.addListener(_onComposerChanged);
     if (widget.initialComposerText case final shared?) {
@@ -558,6 +637,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           baseUrl: widget.connection.baseUrl,
           apiKey: widget.connection.apiKey,
           pathPrefix: widget.connection.gatewayPrefix ?? '',
+          clientCertificate: widget.connection.clientCertificate,
         );
     _gateway = GatewayChatClient(_client);
     _attachmentDraftService =
@@ -598,6 +678,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (widget.testRemotePromptSubmit != null && _normalSession == null) {
       _attachNormalSession();
     }
+    if (widget.initialComposerText == null) unawaited(_restoreComposerDraft());
     widget.testDesktopConnectionHook?.handler = (state) {
       widget.testDesktopConnectionHook?.currentState = state;
       _normalSession?.connectionChanged(state);
@@ -633,6 +714,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           .setSessionBoundListener(widget.session.id, _onSessionBound);
     }
     unawaited(_refreshProjectName());
+    unawaited(_refreshArchiveState());
     unawaited(_initializeChat());
     _loadVerboseMode();
     _loadChatDensity();
@@ -641,56 +723,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _recoverLostImage();
     _scrollController.addListener(_onScroll);
     if (_desktopGateway != null) unawaited(_ensureDesktopSession());
-    // Register app-owner aliases before reading, including a canonical reopen.
-    if (widget.initialComposerText == null) _restoreComposerDraft();
-  }
-
-  void _restoreComposerDraft() {
-    final composerRevision = _composerRevision;
-    final readDraft = widget.testComposerDraftReader ?? ComposerDraftStore.read;
-    Future<String?> readBoundDraft() async {
-      try {
-        // A restored receipt may be the first place we learn the local alias.
-        await _normalSession?.ready;
-        if (!mounted) return null;
-        return await readDraft(
-          connectionId: widget.connection.id,
-          sessionId: widget.session.id,
-        );
-      } catch (_) {
-        return null;
-      }
-    }
-
-    unawaited(
-      readBoundDraft().then((draft) {
-        if (!mounted ||
-            draft == null ||
-            _composerRevision != composerRevision ||
-            _textController.text.isNotEmpty) {
-          return;
-        }
-        // Hydration is not a new user edit or permission to steal draft ownership
-        // from a newer canonical route. Keep the existing revision fence intact.
-        _restoringComposerDraft = true;
-        try {
-          _textController.text = draft;
-          _textController.selection = TextSelection.collapsed(
-            offset: draft.length,
-          );
-        } finally {
-          _restoringComposerDraft = false;
-        }
-      }),
-    );
   }
 
   void _attachNormalSession() {
-    final controller =
-        widget.turnApplicationController ??
-        (widget.testRemotePromptSubmit != null
-            ? (_localTurnController ??= GatewayTurnApplicationController())
-            : GatewayTurnApplicationController.standalone);
+    final controller = _viewController;
     final testClient = widget.testApiClient;
     _normalSession = controller.normalSessionFor(
       widget.connection,
@@ -713,12 +749,25 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 widget.testStoredSessionKey?.call(widget.session.id) ??
                 widget.session.id,
       title: _sessionTitle,
+      lineageRootId: widget.session.lineageRootId,
       workingDirectory: widget.projectWorkingDirectory,
     );
     if (_textController.text.isNotEmpty || widget.initialComposerText != null) {
       _normalChat!.invalidateDraftRecovery();
     }
     _normalSubscription = _normalChat!.subscribe(_applyNormalSnapshot);
+    final session = _normalSession!;
+    unawaited(
+      session.ready.then(
+        (_) {
+          if (!mounted || !identical(_normalSession, session)) return;
+          setState(() => _normalSessionReady = true);
+        },
+        onError: (Object _, StackTrace _) {
+          // Failed receipt hydration cannot prove that the chat is idle.
+        },
+      ),
+    );
   }
 
   void _applyNormalSnapshot(
@@ -753,13 +802,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _handleDesktopAsyncEvent(widget.session.id, event);
       }
     }
-    if (snapshot.turnId == null &&
-        snapshot.subagents.isEmpty &&
-        snapshot.pendingInput.isEmpty &&
-        _normalPendingRequestIds.isEmpty) {
-      _desktopConnectionState = snapshot.connectionState;
-      return;
-    }
+    _normalSnapshot =
+        snapshot; // read-only owner projection, not a route buffer
     final justDetached =
         _desktopConnectionState == DesktopConnectionState.connected &&
         snapshot.connectionState != DesktopConnectionState.connected &&
@@ -797,7 +841,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         snapshot.storedSessionId != null &&
         _storedSessionId != snapshot.storedSessionId;
     _storedSessionId = snapshot.storedSessionId;
-    if (bindingChanged) unawaited(_refreshProjectName());
+    if (bindingChanged) {
+      unawaited(_refreshProjectName());
+      unawaited(_refreshArchiveState());
+    }
     final pendingIds = snapshot.pendingInput
         .map(
           (event) =>
@@ -835,6 +882,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _normalPendingRequestIds
       ..clear()
       ..addAll(pendingIds);
+    // Only this admission's received assistant scopes can create unread work.
+    // Imported donors and saved rows are not new current output.
+    final lastPrompt = snapshot.displayRows.lastIndexWhere(
+      (row) => row['role'] == 'user',
+    );
+    final currentRows = snapshot.displayRows.skip(lastPrompt + 1).toList();
     _normalMaterializedIds.retainAll(
       snapshot.displayRows
           .map((row) => row['_normal_projection_id'])
@@ -843,14 +896,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     for (final row in snapshot.displayRows) {
       final id = row['_normal_projection_id']?.toString();
       if (id != null &&
+          row['role'] == 'assistant' &&
           (row['content']?.toString().isNotEmpty ?? false) &&
-          _normalMaterializedIds.add(id)) {
+          _normalMaterializedIds.add(id) &&
+          snapshot.wireEmitted &&
+          snapshot.turnId != null &&
+          currentRows.contains(row)) {
         _registerMaterializedAssistantMessage();
       }
     }
     setState(() {
       _desktopConnectionState = snapshot.connectionState;
-      _loading = false;
+      if (snapshot.turnId != null || snapshot.displayRows.isNotEmpty) {
+        _loading = false;
+      }
       _sending = snapshot.hasActiveTurn && !snapshot.reconciling;
       _streaming =
           snapshot.hasActiveTurn &&
@@ -865,48 +924,32 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               text: 'Recovering without resending',
             )
           : snapshot.status;
-      if (hydrateHistory && snapshot.historyRows.isNotEmpty) {
-        _acceptRecentMessages(
-          snapshot.historyRows
-              .map((row) => Map<String, dynamic>.from(row))
-              .toList(),
-        );
+      if (hydrateHistory) {
+        // Finish synchronous owner fan-out before merging into the retained
+        // window: another subscriber can accept a newer snapshot reentrantly.
+        // An idle owner provides rows only; physical route pages still own the
+        // paging cursor, including during a held older/latest request.
+        final owner = _normalChat;
+        scheduleMicrotask(() {
+          if (!mounted ||
+              !identical(owner, _normalChat) ||
+              !identical(_normalSnapshot, snapshot) ||
+              _windowContainsLatest(snapshot.historyRows)) {
+            return;
+          }
+          setState(() {
+            if (snapshot.turnId == null) {
+              _historyWindow.mergeObservedRows(snapshot.historyRows);
+              _historyWindowRevision++;
+              _extractToolMessages(_historyWindow.rows);
+            } else {
+              _acceptRecentMessages(snapshot.historyRows);
+            }
+            _messages = _historyWindow.rows;
+          });
+        });
       }
-      if (snapshot.displayRows.isNotEmpty) {
-        final floor = snapshot.rowFloor;
-        final base = snapshot.historyForPresentation(_historyWindow.rows).where(
-          (row) {
-            final id = int.tryParse(row['id']?.toString() ?? '');
-            return snapshot.displayRows.first['role'] != 'user' ||
-                floor == null ||
-                id == null ||
-                id <= floor;
-          },
-        );
-        _messages = [
-          ...base,
-          ...snapshot.displayRows.map((row) => Map<String, dynamic>.from(row)),
-        ];
-      } else {
-        if (hydrateHistory) {
-          _acceptRecentMessages(
-            snapshot.historyRows
-                .map((row) => Map<String, dynamic>.from(row))
-                .toList(),
-          );
-        }
-        _messages = _historyWindow.rows;
-      }
-      for (final tool in snapshot.tools) {
-        final index = _toolActivities.indexWhere(
-          (old) => old.identity == tool.identity,
-        );
-        if (index < 0) {
-          _toolActivities.add(tool);
-        } else {
-          _toolActivities[index] = tool;
-        }
-      }
+      _messages = _historyWindow.rows;
       // Hydrated child roots and owner runtime IDs may differ. Preserve the
       // stable task anchor and forward all progress/final updates to the modal.
       for (final update in snapshot.subagents) {
@@ -929,9 +972,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     if (snapshot.phase == NormalGatewayTurnPhase.completed &&
         _awaitingVoiceReply) {
-      final rows = snapshot.displayRows.isNotEmpty
-          ? snapshot.displayRows
-          : snapshot.historyRows;
+      final rows = currentRows;
       for (final row in rows.reversed) {
         if (row['role'] == 'user') break;
         final text = row['content']?.toString() ?? '';
@@ -943,6 +984,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           break;
         }
       }
+      _awaitingVoiceReply = false;
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted || ModalRoute.of(context)?.isCurrent != true) return;
@@ -958,6 +1000,34 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
   }
 
+  bool _sameHistoryRows(
+    List<Map<String, dynamic>>? a,
+    List<Map<String, dynamic>> b,
+  ) =>
+      a != null &&
+      a.length == b.length &&
+      Iterable<int>.generate(b.length).every((i) => mapEquals(a[i], b[i]));
+
+  bool _windowContainsLatest(List<Map<String, dynamic>> latest) {
+    int? id(Map<String, dynamic> row) =>
+        int.tryParse(row['id']?.toString() ?? '');
+    final retained = {
+      for (final row in _historyWindow.rows)
+        if (id(row) != null) id(row): row,
+    };
+    return latest
+            .where((row) => id(row) != null)
+            .every(
+              (row) =>
+                  retained[id(row)] != null &&
+                  mapEquals(retained[id(row)], row),
+            ) &&
+        _sameHistoryRows(
+          _historyWindow.rows.where((row) => id(row) == null).toList(),
+          latest.where((row) => id(row) == null).toList(),
+        );
+  }
+
   String get _connectionIdentity =>
       '${widget.connection.baseUrl}|'
       '${widget.connection.gatewayPrefix ?? ''}|'
@@ -968,8 +1038,41 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   void _onComposerChanged() {
     _composerRevision += 1;
-    if (!_restoringComposerDraft) _composerDraft.edited();
     _normalChat?.invalidateDraftRecovery();
+    final text = _textController.text;
+    if (!_restoringComposer && text != _lastComposerText) {
+      _draftWriter.edit(text);
+    }
+    _lastComposerText = text;
+  }
+
+  Future<void> _restoreComposerDraft() async {
+    final revision = _composerRevision;
+    await _normalSession?.ready;
+    if (!mounted || !_draftWriter.isCurrent) return;
+    final draft = await _draftWriter.read(
+      reader: widget.testComposerDraftReader,
+    );
+    if (!mounted ||
+        !_draftWriter.isCurrent ||
+        draft == null ||
+        _composerRevision != revision ||
+        _textController.text.isNotEmpty) {
+      return;
+    }
+    _setRestoredComposer(draft);
+  }
+
+  void _setRestoredComposer(String text) {
+    _restoringComposer = true;
+    try {
+      _textController.value = TextEditingValue(
+        text: text,
+        selection: TextSelection.collapsed(offset: text.length),
+      );
+    } finally {
+      _restoringComposer = false;
+    }
   }
 
   bool get _usesNormalInputOwner =>
@@ -1027,8 +1130,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (localSessionId != widget.session.id) return;
     if (!mounted) return;
     _normalChat?.bindStoredSession(storedSessionId);
+    _presentationRegistry.bind(localSessionId, storedSessionId);
     setState(() => _storedSessionId = storedSessionId);
     unawaited(_refreshProjectName());
+    unawaited(_refreshArchiveState());
   }
 
   Future<void> _restoreSessionModelOverride() async {
@@ -1048,6 +1153,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Future<void> _loadVerboseMode() async {
     final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
     setState(() => _verboseMode = prefs.getBool('verbose_mode') ?? false);
   }
 
@@ -1083,6 +1189,24 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   @override
+  void didUpdateWidget(covariant ChatScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final registry = (widget.turnApplicationController ?? _viewController)
+        .presentationFor(widget.connection);
+    if (!identical(registry, _reasoningRegistry) ||
+        !identical(
+          registry.chatFor(oldWidget.session.id),
+          registry.chatFor(widget.session.id),
+        )) {
+      _reasoningPresentation.closeReasoningVisit(_reasoningExpansionPins);
+      _reasoningRegistry = registry;
+      _reasoningPresentation = registry.chatFor(widget.session.id);
+      _reasoningExpansionPins = _reasoningPresentation.openReasoningVisit();
+      _backgroundReportExpansions = {};
+    }
+  }
+
+  @override
   void dispose() {
     final normalChat = _normalChat;
     final reservation = _normalReservation;
@@ -1094,6 +1218,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     chatDensitySelection.removeListener(_onChatDensityChanged);
     _projectNameRefreshGeneration += 1;
+    _archiveReadGeneration += 1;
     pendingNotificationApprovals.removeListener(
       _consumePendingNotificationApproval,
     );
@@ -1118,7 +1243,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       ),
     );
     // Route disposal only unsubscribes; it never closes the app-owned socket.
-    if (_localTurnController != null) unawaited(_localTurnController!.close());
+
     final registration = _turnApplicationAsyncEventRegistration;
     if (registration != null) {
       _turnApplicationSession?.removeAsyncEventListener(
@@ -1140,7 +1265,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         boundRegistration,
       );
     }
-    unawaited(_composerDraft.save(_composerDraftForPersistence));
+    _presentation.closeToolVisit(_toolActivityPins);
+    _reasoningPresentation.closeReasoningVisit(_reasoningExpansionPins);
+    final draftSaved = _draftWriter.close();
+    unawaited(draftSaved.then((_) => _localTurnController?.close()));
     _textController.dispose();
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
@@ -1181,7 +1309,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _appInBackground = true;
       _normalSession?.setLifecycle(background: true);
       // Persist the draft on the way out: a process kill must not lose it.
-      unawaited(_composerDraft.save(_composerDraftForPersistence));
+      unawaited(_draftWriter.flush());
     } else if (state == AppLifecycleState.resumed) {
       _appInBackground = false;
       if (_normalChat?.snapshot.reconciling == true) {
@@ -1257,7 +1385,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _retryPrompt(String text) async {
-    if (_sending ||
+    if (_archiving ||
+        _sending ||
         _streaming ||
         _pendingReattachResync ||
         text.trim().isEmpty) {
@@ -1269,12 +1398,117 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   bool get _canRename =>
       !_renaming &&
+      !_archiving &&
       !_sending &&
+      !_streaming &&
       !_pendingReattachResync &&
       (!widget.session.isLocalDraft ||
           _storedSessionId != null ||
           _storedSessionKey != widget.session.id ||
           _messages.isNotEmpty);
+
+  String get _archiveSessionId => _storedSessionId ?? _storedSessionKey;
+
+  bool get _hasStoredArchiveTarget =>
+      !widget.session.isLocalDraft ||
+      _storedSessionId != null ||
+      _storedSessionKey != widget.session.id ||
+      _archiveStateSessionId == _archiveSessionId;
+
+  bool get _canArchive =>
+      _hasStoredArchiveTarget &&
+      (_normalSession == null || _normalSessionReady) &&
+      !_archiving &&
+      !_renaming &&
+      !_preparingSend &&
+      !_sending &&
+      !_streaming &&
+      !_recoveringTurn &&
+      !_pendingReattachResync;
+
+  /// Navigation metadata can precede a canonical binding or an edit on another
+  /// device. Read exact stored metadata once per identity/open, without ever
+  /// resuming/creating a chat. A pre-write read cannot undo a confirmed save.
+  Future<void> _refreshArchiveState() async {
+    if (!mounted || _archiving) return;
+    final sessionId = _archiveSessionId;
+    if (_archiveReadSessionId == sessionId) return;
+    if (!_hasStoredArchiveTarget && _messages.isEmpty) return;
+    _archiveReadSessionId = sessionId;
+    final generation = ++_archiveReadGeneration;
+    final revision = _archiveRevision;
+    try {
+      final saved = await _client.getSession(sessionId);
+      if (!mounted ||
+          generation != _archiveReadGeneration ||
+          revision != _archiveRevision ||
+          sessionId != _archiveSessionId) {
+        return;
+      }
+      if (saved['id'] != sessionId || saved['archived'] is! bool) return;
+      setState(() {
+        _sessionArchived = saved['archived'] as bool;
+        _archiveStateSessionId = sessionId;
+      });
+    } catch (_) {
+      // Older gateways may lack metadata. Keep navigation-time state; the
+      // mutation still requires an independently verified server read-back.
+    }
+  }
+
+  Future<void> _setSessionArchived(
+    bool archived, {
+    String? expectedSessionId,
+  }) async {
+    if (!mounted || !_canArchive) return;
+    final sessionId = _archiveSessionId;
+    if (expectedSessionId != null && expectedSessionId != sessionId) return;
+    setState(() => _archiving = true);
+    // Invalidate pending metadata before the first await, including failures.
+    _archiveReadGeneration++;
+    try {
+      final archiver = widget.sessionArchiver;
+      final saved = await (archiver != null
+          ? archiver(sessionId, archived)
+          : _client.setSessionArchived(
+              sessionId: sessionId,
+              archived: archived,
+            ));
+      if (!mounted || sessionId != _archiveSessionId) return;
+      setState(() {
+        _sessionArchived = saved;
+        _archiveStateSessionId = sessionId;
+        _archiveReadSessionId = sessionId;
+        _archiveRevision++;
+      });
+      // The owner may need to clear a device-local expiry before Unarchive
+      // becomes visible. Do not announce success ahead of that reconciliation.
+      await widget.onArchiveChanged?.call(sessionId, saved);
+      if (!mounted || sessionId != _archiveSessionId) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            saved ? context.l10n.chat_archived : context.l10n.chat_unarchived,
+          ),
+        ),
+      );
+    } catch (error) {
+      if (!mounted || sessionId != _archiveSessionId) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(context.l10n.could_not_update_chat_archive(error)),
+          action: SnackBarAction(
+            label: context.l10n.retry,
+            onPressed: () => unawaited(
+              _setSessionArchived(archived, expectedSessionId: sessionId),
+            ),
+          ),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _archiving = false);
+    }
+  }
 
   Future<void> _renameSession() async {
     if (!_canRename) return;
@@ -1310,26 +1544,66 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Future<void> _exportConversation() async {
     final buffer = StringBuffer('# $_sessionTitle\n\n');
-    for (final message in _messages) {
-      final role = message['role']?.toString();
-      if (role != 'user' && role != 'assistant' && role != 'agent') continue;
-      final content = stripToolResultText(
-        messageContentToText(message['content']),
-      ).trim();
-      if (content.isEmpty) continue;
-      buffer
-        ..writeln(
-          role == 'user'
-              ? context.l10n.you_heading
-              : context.l10n.hermes_heading,
-        )
-        ..writeln()
-        ..writeln(content)
-        ..writeln();
+    if (_normalChat != null) {
+      for (final section in _normalDisplaySections()) {
+        if (section.source == ChatDisplaySource.auxiliary) continue;
+        final received = section.source == ChatDisplaySource.received;
+        buffer.writeln(
+          '## ${received ? context.l10n.received_output_heading : context.l10n.saved_history_heading}\n',
+        );
+        if (received) {
+          buffer.writeln('${context.l10n.received_output_explanation}\n');
+          buffer.writeln('${context.l10n.received_output_lifetime}\n');
+        }
+        for (final item in section.items) {
+          final fact = section.outcomes[chatDisplayItemIdentity(item)];
+          if (fact != null) {
+            buffer.writeln('${_receivedOutcomeLabel(fact.outcome)}\n');
+          }
+          if (item is Map<String, dynamic>) {
+            _writeExportMessage(buffer, item, localPrompt: received);
+          } else if (item is ChatReasoningItem) {
+            buffer.writeln('${item.text}\n');
+          } else if (item is ChatToolActivityGroup) {
+            for (final tool in item.activities) {
+              buffer.writeln('${tool.displayName}: ${tool.statusLabel}');
+            }
+            buffer.writeln();
+          }
+        }
+      }
+    } else {
+      for (final message in _messages) {
+        _writeExportMessage(buffer, message);
+      }
     }
     await SharePlus.instance.share(
       ShareParams(subject: _sessionTitle, text: buffer.toString().trim()),
     );
+  }
+
+  void _writeExportMessage(
+    StringBuffer buffer,
+    Map<String, dynamic> message, {
+    bool localPrompt = false,
+  }) {
+    final role = message['role']?.toString();
+    if (role != 'user' && role != 'assistant' && role != 'agent') return;
+    final content = stripToolResultText(
+      messageContentToText(message['_display_content'] ?? message['content']),
+    ).trim();
+    if (content.isEmpty) return;
+    buffer
+      ..writeln(
+        role == 'user'
+            ? (localPrompt
+                  ? context.l10n.local_prompt_context
+                  : context.l10n.you_heading)
+            : context.l10n.hermes_heading,
+      )
+      ..writeln()
+      ..writeln(content)
+      ..writeln();
   }
 
   Future<void> _initVoice({bool requestSpeechPermission = false}) async {
@@ -1496,6 +1770,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           'sessionId': widget.session.id,
           'connectionId': widget.connection.id,
           'requestId': serverRequestId,
+          ..._notificationApprovalOrigin,
         }),
       ),
     );
@@ -1727,85 +2002,155 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
   }
 
+  // Value equality permits harmless SavedConnection rehydration, but fences
+  // credential/profile/origin replacement even when a parent retains State.
+  // This record is private in-memory authority, never logged or persisted.
+  Object get _historyAccountKey {
+    final c = widget.connection;
+    return (
+      c.id,
+      c.host,
+      c.port,
+      c.useHttps,
+      c.apiKey,
+      c.gatewayPrefix,
+      c.gatewayProfile,
+      c.desktopGatewayUrl,
+      c.dashboardUsername,
+      c.dashboardPassword,
+      c.dashboardPrefix,
+      c.dashboardPort,
+      c.dashboardProxied,
+    );
+  }
+
+  _ChatHistoryRead _beginHistoryRead(String sessionId, {bool older = false}) {
+    final owner = _normalChat;
+    return _ChatHistoryRead(
+      owner: owner,
+      account: _historyAccountKey,
+      localSessionId: widget.session.id,
+      authority: older
+          ? owner?.historyReadFence(sessionId)
+          : owner?.beginHistoryRead(sessionId),
+      sessionId: sessionId,
+      routeSessionId: _storedSessionKey,
+      responseGeneration: _responseGeneration,
+      observation: older ? _historyReadAccepted : ++_historyReadIssued,
+      windowRevision: _historyWindowRevision,
+    );
+  }
+
+  bool _historyReadAttached(_ChatHistoryRead read) =>
+      mounted &&
+      read.account == _historyAccountKey &&
+      read.localSessionId == widget.session.id &&
+      identical(read.owner, _normalChat) &&
+      read.routeSessionId == _storedSessionKey &&
+      (read.authority?.isAttached ?? true);
+
+  bool _canApplyHistoryRead(_ChatHistoryRead read) =>
+      _historyReadAttached(read) &&
+      read.responseGeneration == _responseGeneration &&
+      read.observation >= _historyReadAccepted &&
+      (read.authority?.isCurrent ?? true);
+
+  bool _acceptHistoryRead(
+    _ChatHistoryRead read,
+    List<Map<String, dynamic>> latest,
+  ) {
+    if (!_canApplyHistoryRead(read)) return false;
+    if (read.owner != null &&
+        !read.owner!.observeHistory(latest, read: read.authority)) {
+      return false;
+    }
+    // Owner delivery invokes arbitrary subscribers synchronously. A new turn,
+    // binding, close or newer successful read there invalidates this callback.
+    if (!_canApplyHistoryRead(read)) return false;
+    _historyReadAccepted = read.observation;
+    return true;
+  }
+
+  void _finishHistoryLoading(_ChatHistoryRead read) {
+    // Release only this loader's resource, even when its result was superseded.
+    // It must never clear a newer route loader or publish stale error/status.
+    if (!mounted || !identical(_loadingHistoryRead, read)) return;
+    _loadingHistoryRead = null;
+    if (_historyReadAttached(read) &&
+        read.responseGeneration == _responseGeneration) {
+      setState(() => _loading = false);
+    }
+  }
+
   Future<void> _fetchMessages({String? sessionId}) async {
     if (_pendingReattachResync && sessionId == null) return;
-    final responseGeneration = _responseGeneration;
+    final read = _beginHistoryRead(
+      sessionId ?? _normalChat?.storedSessionId ?? widget.session.id,
+    );
+    _loadingHistoryRead = read;
     setState(() {
       _loading = true;
       _error = null;
     });
-
+    List<Map<String, dynamic>>? latest;
     try {
-      final batch = await _historyWindow.fetchRecent(
-        (offset) => _client.getMessages(
-          sessionId ?? _normalChat?.storedSessionId ?? widget.session.id,
+      final batch = await _historyWindow.fetchRecent((offset) async {
+        final rows = await _client.getMessages(
+          read.sessionId,
           limit: ChatHistoryWindow.pageSize,
           offset: offset,
           latest: true,
-        ),
-        shouldContinue: () =>
-            mounted && responseGeneration == _responseGeneration,
-      );
-      if (!mounted) return;
-      // A remote turn can start while history is still hydrating. Its local
-      // optimistic messages and stream are newer than this response, so never
-      // replace them with a stale transcript page.
-      if (responseGeneration != _responseGeneration) {
-        setState(() => _loading = false);
+        );
+        // Only offset zero carries latest authority. Additional cold pages
+        // are context, never a new read-start sequence or admission snapshot.
+        if (offset == 0) latest = rows;
+        return rows;
+      }, shouldContinue: () => _canApplyHistoryRead(read));
+      if (!_historyReadAttached(read)) return;
+      if (read.responseGeneration != _responseGeneration) {
         _deferHistoryRefresh();
         return;
       }
+      if (!_acceptHistoryRead(read, latest!)) return;
       _historyWindow.acceptRecent(batch);
-      _normalChat?.observeHistory(batch.rows);
+      _historyWindowRevision++;
       final messages = _historyWindow.rows;
       _extractToolMessages(messages);
       setState(() {
         _messages = messages;
-        // Server history is now authoritative; a submit catch that starts
-        // after this point must not clobber it with composer-restore.
-        _loading = false;
+        _error = null;
       });
       _scheduleInitialEndAlignment();
-      if (_normalChat?.snapshot.turnId != null) {
-        _applyNormalSnapshot(_normalChat!.snapshot);
+      if (_normalChat != null) {
+        _applyNormalSnapshot(_normalChat!.snapshot, hydrateHistory: false);
       }
     } catch (e) {
-      if (!mounted) return;
-      if (responseGeneration != _responseGeneration) {
-        setState(() => _loading = false);
+      if (!_historyReadAttached(read)) return;
+      if (read.responseGeneration != _responseGeneration) {
         _deferHistoryRefresh();
         return;
       }
+      if (!_canApplyHistoryRead(read)) return;
       final errStr = e.toString();
       if (errStr.contains('404') || errStr.contains('not found')) {
-        if (_pendingReattachResync) {
-          setState(() => _loading = false);
-          return;
-        }
-        if (_messages.isNotEmpty) {
-          setState(() => _loading = false);
-          return;
-        }
-        setState(() {
-          _messages = [];
-          _loading = false;
-        });
+        if (_pendingReattachResync || _messages.isNotEmpty) return;
+        setState(() => _messages = []);
         _scheduleInitialEndAlignment();
         return;
       }
-      setState(() {
-        _error = errStr;
-        _loading = false;
-      });
+      setState(() => _error = errStr);
+    } finally {
+      _finishHistoryLoading(read);
     }
   }
 
-  Future<List<Map<String, dynamic>>> _getRecentMessages(String sessionId) =>
-      _client.getMessages(
-        sessionId,
-        limit: ChatHistoryWindow.pageSize,
-        latest: true,
-      );
+  Future<List<Map<String, dynamic>>> _getRecentMessages(
+    _ChatHistoryRead read,
+  ) => _client.getMessages(
+    read.sessionId,
+    limit: ChatHistoryWindow.pageSize,
+    latest: true,
+  );
 
   void _acceptRecentMessages(List<Map<String, dynamic>> recent) {
     _historyWindow.acceptRecent(
@@ -1815,15 +2160,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         recent.length == ChatHistoryWindow.pageSize,
       ),
     );
+    _historyWindowRevision++;
     _extractToolMessages(_historyWindow.rows);
   }
 
   Future<void> _loadOlderMessages() async {
     if (_loadingOlder || !_historyWindow.hasOlder) return;
     final scrollGeneration = _automaticScrollGeneration;
-    final responseGeneration = _responseGeneration;
     final offset = _historyWindow.olderOffset;
-    final sessionId = _storedSessionKey;
+    final read = _beginHistoryRead(_storedSessionKey, older: true);
+    _olderHistoryRead = read;
     final oldExtent = _scrollController.hasClients
         ? _scrollController.position.maxScrollExtent
         : 0.0;
@@ -1833,27 +2179,32 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     setState(() => _loadingOlder = true);
     try {
       final older = await _client.getMessages(
-        sessionId,
+        read.sessionId,
         limit: ChatHistoryWindow.pageSize,
         offset: offset,
         latest: true,
       );
-      if (!mounted ||
-          sessionId != _storedSessionKey ||
-          responseGeneration != _responseGeneration ||
+      if (!_canApplyHistoryRead(read) ||
+          read.windowRevision != _historyWindowRevision ||
+          offset != _historyWindow.olderOffset ||
           _sending ||
           _streaming) {
         return;
       }
       _historyWindow.acceptOlder(older);
+      final acceptedRevision = ++_historyWindowRevision;
       _extractToolMessages(_historyWindow.rows, replacePresentation: false);
       setState(() => _messages = _historyWindow.rows);
       final normalSnapshot = _normalChat?.snapshot;
-      if (normalSnapshot?.turnId != null) {
-        _applyNormalSnapshot(normalSnapshot!, hydrateHistory: false);
+      if (normalSnapshot != null) {
+        _applyNormalSnapshot(normalSnapshot, hydrateHistory: false);
       }
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!_canApplyAutomaticScroll(scrollGeneration) ||
+        if (!_canApplyHistoryRead(read) ||
+            acceptedRevision != _historyWindowRevision ||
+            _sending ||
+            _streaming ||
+            !_canApplyAutomaticScroll(scrollGeneration) ||
             !_scrollController.hasClients) {
           return;
         }
@@ -1868,7 +2219,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     } catch (_) {
       // Leave the control available for a retry without hiding loaded rows.
     } finally {
-      if (mounted) setState(() => _loadingOlder = false);
+      if (mounted && identical(_olderHistoryRead, read)) {
+        _olderHistoryRead = null;
+        setState(() => _loadingOlder = false);
+      }
     }
   }
 
@@ -1894,12 +2248,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     _deferredHistoryRefreshPending = false;
     _deferredHistoryRefreshing = true;
-    final responseGeneration = _responseGeneration;
+    final read = _beginHistoryRead(_storedSessionKey);
+    _deferredHistoryRead = read;
     var retryAfterSettlement = false;
     try {
-      final messages = await _getRecentMessages(_storedSessionKey);
-      if (!mounted) return;
-      if (responseGeneration != _responseGeneration ||
+      final messages = await _getRecentMessages(read);
+      if (!_historyReadAttached(read)) return;
+      if (read.responseGeneration != _responseGeneration ||
           _sending ||
           _streaming ||
           _stopResponseInFlight ||
@@ -1908,25 +2263,32 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         retryAfterSettlement = true;
         return;
       }
+      if (!_acceptHistoryRead(read, messages)) return;
       _acceptRecentMessages(messages);
-      _normalChat?.observeHistory(messages);
       setState(() {
         _messages = _historyWindow.rows;
         _error = null;
       });
       final normalSnapshot = _normalChat?.snapshot;
-      if (normalSnapshot?.turnId != null) {
-        _applyNormalSnapshot(normalSnapshot!, hydrateHistory: false);
+      if (normalSnapshot != null) {
+        _applyNormalSnapshot(normalSnapshot, hydrateHistory: false);
       }
       _scheduleInitialEndAlignment();
     } catch (_) {
-      // Keep the refresh pending. A later terminal/rollback transition can
-      // retry without turning background hydration into a composer blocker.
-      _deferredHistoryRefreshPending = true;
+      // A stale failure cannot resurrect pending work after a newer success.
+      if (_historyReadAttached(read) &&
+          read.observation >= _historyReadAccepted &&
+          !(read.authority?.isSuperseded ?? false)) {
+        _deferredHistoryRefreshPending = true;
+        retryAfterSettlement = read.responseGeneration != _responseGeneration;
+      }
     } finally {
-      _deferredHistoryRefreshing = false;
+      if (identical(_deferredHistoryRead, read)) {
+        _deferredHistoryRead = null;
+        _deferredHistoryRefreshing = false;
+      }
       if (retryAfterSettlement &&
-          mounted &&
+          _historyReadAttached(read) &&
           !_sending &&
           !_streaming &&
           !_stopResponseInFlight &&
@@ -2114,17 +2476,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     List<Map<String, dynamic>> messages, {
     bool replacePresentation = true,
   }) {
-    // Held canonical rows must not leak back into presentation as task/tool
-    // cards while their prose is withheld beside an uncorrelated live reply.
-    messages =
-        _normalChat?.snapshot.historyForPresentation(messages) ?? messages;
-    // Hydration and optimistic presentation change authority together. Every
-    // latest-history path calls this before installing the durable window.
-    // Older paging cannot authoritatively replace the live tail's chronology.
-    final liveRuns = replacePresentation
-        ? const <ChatTimelineRun>[]
-        : _timeline.runs;
-    if (replacePresentation) _timeline = _timeline.clear();
+    final normal = _normalChat != null;
+    final liveRuns = !normal && !replacePresentation
+        ? _timeline.runs
+        : const <ChatTimelineRun>[];
+    if (!normal && replacePresentation) _timeline = _timeline.clear();
     for (final recovered in recoverDelegatedTasks(messages)) {
       // Real child references can reconnect a persisted row to live activity;
       // neither task goal nor task index is sufficient identity evidence.
@@ -2140,8 +2496,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _openTaskController?.updateTask(_subagentActivities[index]);
       }
     }
+    // Canonical task recovery may be older than an independently observed
+    // child tip. Reapply that single owner's current metadata after hydration;
+    // never clone its controller or let parent saved rows reset the viewer.
+    if (normal) {
+      for (final update
+          in _normalSnapshot?.subagents ?? const <GatewaySubagentActivity>[]) {
+        _mergeSubagentActivity(update);
+      }
+    }
     final observedByToolId = {
-      for (final activity in _toolActivities)
+      for (final activity in [
+        ..._toolActivities,
+        if (normal) ...?_normalSnapshot?.tools,
+      ])
         if (activity.toolId != null) activity.toolId!: activity,
     };
     _toolActivities.clear();
@@ -2456,7 +2824,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void _showAttachmentError(String message) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: Colors.orange),
+      hermesStatusSnackBar(
+        context,
+        message: message,
+        status: HermesStatus.failed,
+      ),
     );
   }
 
@@ -2879,7 +3251,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   /// Send message via SSE streaming (Gateway API Server).
   Future<void> _sendMessage({bool speakResponse = false}) async {
-    if (_voiceComposer.listening || _preparingSend) return;
+    if (_voiceComposer.listening || _preparingSend || _archiving) return;
     final text = _textController.text.trim();
     final attachments = List<AttachmentDraft>.from(_attachmentDrafts);
     if (text.isEmpty && attachments.isEmpty) return;
@@ -3045,24 +3417,32 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             }
             assistant['content'] = current + token;
             _timeline = _timeline.appendText(assistant, token);
+            _retainReceiptPresentation();
           }
         });
         _scheduleStreamingFollow();
       },
       onToolProgress: (progress) {
         if (!mounted || responseGeneration != _responseGeneration) return;
-        _upsertToolProgress(progress);
+        _upsertToolProgress(
+          progress,
+          eventType: progress['status'] == 'running'
+              ? 'tool.start'
+              : 'tool.update',
+        );
       },
       onDone: () async {
         if (!mounted || responseGeneration != _responseGeneration) return;
-        // Refresh messages to get the final server-side state
+        // Refresh messages to get the final server-side state. The token is
+        // retained across both HTTP and attachment cleanup, including failure.
+        final read = _beginHistoryRead(widget.session.id);
         try {
-          final messages = await _getRecentMessages(widget.session.id);
-          if (!mounted || responseGeneration != _responseGeneration) return;
+          final messages = await _getRecentMessages(read);
+          if (!_canApplyHistoryRead(read)) return;
           if (pendingImage != null) {
             await _attachmentDraftService.removeCachedFile(pendingImage);
           }
-          if (!mounted || responseGeneration != _responseGeneration) return;
+          if (!_acceptHistoryRead(read, messages)) return;
           _acceptRecentMessages(messages);
           setState(() {
             _messages = _historyWindow.rows;
@@ -3089,7 +3469,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             }
           }
         } catch (_) {
-          if (!mounted || responseGeneration != _responseGeneration) return;
+          if (!_canApplyHistoryRead(read)) return;
           _scrollCoordinator.cancelStreaming();
           setState(() {
             if (_messages.isNotEmpty && _messages.last['role'] == 'assistant') {
@@ -3103,6 +3483,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           // The SSE response completed, so the server accepted the prompt.
           // A follow-up history read failing must not resurrect it as a draft.
           _deferHistoryRefresh();
+        } finally {
+          // Completing this REST operation is independent of the freshness of
+          // its history GET. If a newer success superseded that GET, release
+          // only the still-owned stream latch, without touching its transcript,
+          // error, status or scroll. Never strand Send behind a discarded read.
+          if (_historyReadAttached(read) &&
+              responseGeneration == _responseGeneration &&
+              _activeResponseTransport == _ResponseTransport.rest) {
+            setState(() {
+              _streaming = false;
+              _sending = false;
+              _activeResponseTransport = _ResponseTransport.none;
+            });
+          }
         }
       },
       onError: (error) {
@@ -3221,7 +3615,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             knownStoredSessionId: knownStored,
             rawDraftText: text,
             canRestoreDraft: _composerRevision == _clearedComposerRevision,
-            draftHandle: _composerDraft,
+            draftHandle: _draftWriter.draftHandle,
           );
         },
       );
@@ -3425,6 +3819,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         final current = assistant['_gateway_reasoning']?.toString() ?? '';
         assistant['_gateway_reasoning'] = reasoning.applyTo(current);
         _timeline = _timeline.reasoning(assistant, reasoning);
+        _retainReceiptPresentation();
         assistant['_gateway_reasoning_verbose'] = reasoning.verbose;
         assistant['_gateway_reasoning_replaces'] =
             assistant['_gateway_reasoning_replaces'] == true ||
@@ -3481,6 +3876,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         if (current.isEmpty) _registerMaterializedAssistantMessage();
         assistant['content'] = '$current$token';
         _timeline = _timeline.appendText(assistant, token);
+        _retainReceiptPresentation();
       });
       _scheduleStreamingFollow();
       return;
@@ -3502,6 +3898,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         }
         assistant['content'] = transition.sealedText;
         _timeline = _timeline.textSnapshot(assistant, transition.sealedText);
+        _retainReceiptPresentation();
         if (transition.startsNewMessage) {
           assistant['_gateway_interim'] = true;
           assistant['_gateway_pending_response'] = false;
@@ -3538,6 +3935,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               completeText,
               preservePosition: !identical(assistant, pending),
             );
+            _retainReceiptPresentation();
           }
         }
       });
@@ -3608,6 +4006,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         replaceReasoning: pending['_gateway_reasoning_replaces'] == true,
       );
       _messages.removeAt(pendingIndex);
+      _retainReceiptPresentation();
       candidate.remove('_gateway_interim');
       return candidate;
     }
@@ -3754,30 +4153,44 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _respondToGatewayApproval(
     String choice, {
     String? requestId,
+    bool Function()? isCurrent,
   }) async {
+    final normal = _normalSession;
+    final recovery = _turnApplicationSession;
+    final gateway = _desktopGateway;
+    final sessionId = widget.session.id;
+    final localSessionId = _normalLocalSessionKey;
+    void check() {
+      if (isCurrent != null && !isCurrent()) {
+        throw StateError('Approval authority was revoked.');
+      }
+    }
+
+    check();
     if (requestId != null &&
-        await _normalSession?.tryRespondToApproval(
-              sessionId: widget.session.id,
+        await normal?.tryRespondToApproval(
+              sessionId: sessionId,
               requestId: requestId,
               choice: choice,
             ) ==
             true) {
       return;
     }
+    check();
     final handled =
-        await _turnApplicationSession?.tryRespondToApproval(
-          sessionId: widget.session.id,
+        await recovery?.tryRespondToApproval(
+          sessionId: sessionId,
           choice: choice,
           requestId: requestId,
         ) ??
         false;
     if (handled) return;
-    final gateway = _desktopGateway;
+    check();
     if (gateway == null) {
       throw StateError('The Desktop gateway session is no longer connected');
     }
     await gateway.respondToApproval(
-      sessionId: _normalLocalSessionKey,
+      sessionId: localSessionId,
       choice: choice,
       serverRequestId: requestId,
     );
@@ -3788,10 +4201,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// answer: a cold start (no route-local session yet) or a throw keeps the
   /// tap pending for a later retry instead of losing it.
   void _consumePendingNotificationApproval() {
+    prunePendingNotificationApprovals();
     final mine = [
       for (final approval in pendingNotificationApprovals.value)
         if (approval.connectionId == widget.connection.id &&
-            approval.sessionId == widget.session.id)
+            approval.sessionId == widget.session.id &&
+            approval.authority?.isCurrentFor(widget.connection) == true)
           approval,
     ];
     for (final approval in mine) {
@@ -3801,28 +4216,35 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   /// Approvals whose answer is in flight, so a notifier change cannot
   /// dispatch the same request twice.
-  final Set<String> _answeringPendingApprovals = {};
-
   Future<void> _answerPendingNotificationApproval(
     PendingNotificationApproval approval,
   ) async {
-    final key =
-        '${approval.connectionId}|${approval.sessionId}|${approval.requestId}';
-    if (_answeringPendingApprovals.contains(key)) return;
-    _answeringPendingApprovals.add(key);
+    if (!claimNotificationApproval(approval)) return;
+    final account = _historyAccountKey;
+    final sessionId = widget.session.id;
+    bool current() =>
+        mounted &&
+        account == _historyAccountKey &&
+        sessionId == widget.session.id &&
+        approval.authority?.isCurrentFor(widget.connection) == true &&
+        pendingNotificationApprovals.value.any(
+          (item) => identical(item, approval),
+        );
     try {
+      if (!await approval.authority!.validate() || !current()) return;
       // The normal approval path: route-local turn session first, then the
       // desktop gateway. A throw means the route-local gateway is not up
       // yet (cold start/reconnect) — keep the entry and retry later.
       await _respondToGatewayApproval(
         approval.choice,
         requestId: approval.requestId,
+        isCurrent: current,
       );
       removePendingNotificationApproval(approval);
     } catch (_) {
       // Unresolved, not answered: keep the entry for a later retry.
     } finally {
-      _answeringPendingApprovals.remove(key);
+      releaseNotificationApproval(approval);
     }
   }
 
@@ -4060,9 +4482,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         } catch (error) {
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(context.l10n.could_not_deny_the_command(error)),
-              backgroundColor: Colors.orange,
+            hermesStatusSnackBar(
+              context,
+              message: context.l10n.could_not_deny_the_command(error),
+              status: HermesStatus.failed,
             ),
           );
         }
@@ -4388,9 +4811,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         } catch (_) {
           if (!mounted) return;
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(context.l10n.could_not_skip_the_hermes_question),
-              backgroundColor: Colors.orange,
+            hermesStatusSnackBar(
+              context,
+              message: context.l10n.could_not_skip_the_hermes_question,
+              status: HermesStatus.failed,
             ),
           );
         }
@@ -4512,11 +4936,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            context.l10n.response_closed_locally_gateway_stop_failed(error),
+        hermesStatusSnackBar(
+          context,
+          message: context.l10n.response_closed_locally_gateway_stop_failed(
+            error,
           ),
-          backgroundColor: Colors.orange,
+          status: HermesStatus.failed,
           duration: const Duration(seconds: 6),
         ),
       );
@@ -4526,49 +4951,29 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  String get _composerDraftForPersistence {
-    final pending = _pendingComposerPrompt;
-    return pending != null && _composerRevision == _clearedComposerRevision
-        ? pending
-        : _textController.text;
-  }
-
   /// Clear the visible draft immediately but retain the unsent prompt through
   /// cancellable setup. Leaving during an upload must not silently lose it.
   void _clearComposerForSend(String text) {
-    _pendingComposerPrompt = text;
-    _textController.clear();
+    _setRestoredComposer('');
     _clearedComposerRevision = _composerRevision;
-    unawaited(_composerDraft.save(text));
+    _draftWriter.edit(text);
+    unawaited(_draftWriter.save(text));
   }
 
   /// Preparation finished: hand off the prompt without touching newer typing.
   void _commitComposerForSend() {
-    _pendingComposerPrompt = null;
-    unawaited(_composerDraft.save(_textController.text));
+    unawaited(_draftWriter.save(_textController.text));
   }
 
   /// Restore only the send's untouched draft. A newer edit (including typing
   /// and then deleting) belongs to the user, not this failed submission.
   void _restoreComposerAfterRejectedSend(String text) {
-    _pendingComposerPrompt = null;
     if (text.trim().isEmpty) return;
+    if (!_draftWriter.isCurrent) return;
     if (_composerRevision == _clearedComposerRevision) {
-      // Replaying a rejected submission is not a user edit. Keep this route's
-      // existing write authority so a newer canonical route's draft or clear
-      // cannot be overwritten through the controller listener.
-      final wasRestoring = _restoringComposerDraft;
-      _restoringComposerDraft = true;
-      try {
-        _textController.value = TextEditingValue(
-          text: text,
-          selection: TextSelection.collapsed(offset: text.length),
-        );
-      } finally {
-        _restoringComposerDraft = wasRestoring;
-      }
+      _setRestoredComposer(text);
     }
-    unawaited(_composerDraft.save(_textController.text));
+    unawaited(_draftWriter.save(_textController.text));
   }
 
   void _handleSendError(Object e, {bool removePendingUserMessage = false}) {
@@ -4588,9 +4993,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(context.l10n.send_failed(e)),
-          backgroundColor: Colors.orange,
+        hermesStatusSnackBar(
+          context,
+          message: context.l10n.send_failed(e),
+          status: HermesStatus.failed,
           duration: const Duration(seconds: 6),
         ),
       );
@@ -4606,30 +5012,30 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       progress,
       observedAt: DateTime.now(),
     );
-    if (update == null) return;
+    if (update == null || _timeline.excludesTool(update)) return;
     setState(() {
-      var idx = update.toolId == null
-          ? -1
-          : _toolActivities.indexWhere(
-              (activity) => activity.toolId == update.toolId,
-            );
-      // A name is not a call identity. Without a wire ID/correlated reference
-      // we cannot safely assign this receipt to another same-name call.
+      final idx = toolActivityUpdateIndex(_toolActivities, update, eventType);
       if (idx >= 0) {
         final previous = _toolActivities[idx];
         _toolActivities[idx] = previous.merge(update);
-        if (previous.toolId == null && update.toolId != null) {
-          _toolActivityPins.alias(previous.identity, 'tool:${update.toolId}');
-        }
       } else {
         _toolActivities.add(update);
       }
+      final activity = idx >= 0 ? _toolActivities[idx] : update;
+      final toolId = activity.toolId;
+      if (toolId != null) {
+        _presentation.aliasTool(activity.identity, 'tool:$toolId');
+      }
       final assistant = _lastAssistantMessage();
       if (assistant != null) {
-        _timeline = _timeline.tool(
-          assistant,
-          idx >= 0 ? _toolActivities[idx] : update,
+        _timeline = _timeline.tool(assistant, activity);
+        // A late completion of an evicted tool is not a new receipt/card.
+        _toolActivities.removeWhere(
+          (a) =>
+              a.identity == update.identity &&
+              !_timeline.runs.any((r) => r.activity?.identity == a.identity),
         );
+        _retainReceiptPresentation();
       }
       _gatewayTurnStatus = GatewayTurnStatus(
         kind: 'tool',
@@ -4640,6 +5046,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
 
     _scheduleStreamingFollow();
+  }
+
+  /// Retention belongs to receipt ingestion, before any ListView projection.
+  /// Do not change canonical/request accumulators to trim this view-only tail.
+  void _retainReceiptPresentation() {
+    _timeline = _timeline.retainScopes(
+      _messages.map((row) => row['_normal_projection_id'] ?? row),
+    );
+    _toolActivities.removeWhere(_timeline.excludesTool);
   }
 
   bool get _transcriptLoadBlocksComposer =>
@@ -4687,6 +5102,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           ),
         ),
         actions: [
+          if (_archiving)
+            const Padding(
+              padding: EdgeInsets.only(right: 8),
+              child: Center(
+                child: SizedBox.square(
+                  key: ValueKey('chat-archive-progress'),
+                  dimension: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            ),
           if (_streaming)
             Padding(
               padding: EdgeInsets.only(right: 8),
@@ -4705,12 +5131,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           else
             PopupMenuButton<String>(
               tooltip: context.l10n.chat_actions,
+              onOpened: () => unawaited(_refreshArchiveState()),
               onSelected: (action) {
                 if (action == 'refresh' && !_pendingReattachResync) {
                   _fetchMessages();
                 }
                 if (action == 'export') _exportConversation();
                 if (action == 'rename') unawaited(_renameSession());
+                if (action == 'archive') unawaited(_setSessionArchived(true));
+                if (action == 'unarchive') {
+                  unawaited(_setSessionArchived(false));
+                }
               },
               itemBuilder: (_) => [
                 PopupMenuItem(
@@ -4719,6 +5150,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   child: ListTile(
                     leading: Icon(Icons.edit_outlined),
                     title: Text(context.l10n.rename),
+                  ),
+                ),
+                PopupMenuItem(
+                  value: _sessionArchived ? 'unarchive' : 'archive',
+                  enabled: _canArchive,
+                  child: ListTile(
+                    leading: Icon(
+                      _sessionArchived
+                          ? Icons.unarchive_outlined
+                          : Icons.archive_outlined,
+                    ),
+                    title: Text(
+                      _sessionArchived
+                          ? context.l10n.unarchive_chat
+                          : context.l10n.archive_chat,
+                    ),
                   ),
                 ),
                 PopupMenuItem(
@@ -4807,12 +5254,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildGatewayNotification(GatewayNotification notification) {
-    final scheme = Theme.of(context).colorScheme;
+    final tokens = HermesTokens.of(context);
     final color = switch (notification.level) {
-      GatewayNotificationLevel.success => Colors.green,
-      GatewayNotificationLevel.warning => Colors.orange,
-      GatewayNotificationLevel.error => scheme.error,
-      GatewayNotificationLevel.info => scheme.primary,
+      GatewayNotificationLevel.success => tokens.success,
+      GatewayNotificationLevel.warning => tokens.warning,
+      GatewayNotificationLevel.error => tokens.danger,
+      GatewayNotificationLevel.info => tokens.running,
     };
     return MaterialBanner(
       backgroundColor: color.withValues(alpha: 0.12),
@@ -4831,6 +5278,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildInputBar({required double availableHeight}) {
+    final tokens = HermesTokens.of(context);
     const minimumControlsHeight = 56.0;
     final composerMaxHeight = availableHeight <= minimumControlsHeight
         ? availableHeight
@@ -4846,7 +5294,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       decoration: BoxDecoration(
         color: Theme.of(context).colorScheme.surface,
         boxShadow: [
-          BoxShadow(blurRadius: 4, color: Colors.black.withValues(alpha: 0.1)),
+          BoxShadow(
+            blurRadius: 4,
+            color: Theme.of(context).colorScheme.shadow.withValues(alpha: 0.1),
+          ),
         ],
       ),
       child: SafeArea(
@@ -4871,22 +5322,24 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                           vertical: 8,
                         ),
                         decoration: BoxDecoration(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .secondaryContainer
-                              .withValues(alpha: 0.55),
+                          color: tokens.accentContainer,
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: Row(
                           children: [
                             if (_normalPhase ==
                                 NormalGatewayTurnPhase.reconciledUnknown)
-                              const Icon(Icons.info_outline, size: 14)
+                              Icon(
+                                Icons.info_outline,
+                                size: 14,
+                                color: tokens.onAccentContainer,
+                              )
                             else
-                              const SizedBox.square(
+                              SizedBox.square(
                                 dimension: 14,
                                 child: CircularProgressIndicator(
                                   strokeWidth: 1.8,
+                                  color: tokens.onAccentContainer,
                                 ),
                               ),
                             const SizedBox(width: 10),
@@ -4895,7 +5348,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                 _gatewayTurnStatus!.text,
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.bodySmall,
+                                style: Theme.of(context).textTheme.bodySmall
+                                    ?.copyWith(color: tokens.onAccentContainer),
                               ),
                             ),
                           ],
@@ -5112,6 +5566,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   enabled:
                       _streaming ||
                       (!_transcriptLoadBlocksComposer &&
+                          !_archiving &&
                           !_sending &&
                           !_pendingReattachResync &&
                           !_voiceComposer.listening),
@@ -5120,12 +5575,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     dimension: 48,
                     child: DecoratedBox(
                       decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.primaryContainer,
+                        color: tokens.accentContainer,
                         shape: BoxShape.circle,
                       ),
                       child: _streaming
                           ? IconButton(
                               icon: const Icon(Icons.stop_rounded, size: 20),
+                              style: IconButton.styleFrom(
+                                foregroundColor: tokens.onAccentContainer,
+                              ),
                               onPressed: _stopResponse,
                               tooltip: context.l10n.stop_response,
                               constraints: const BoxConstraints.tightFor(
@@ -5135,8 +5593,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                             )
                           : IconButton(
                               icon: const Icon(Icons.send, size: 20),
+                              style: IconButton.styleFrom(
+                                foregroundColor: tokens.onAccentContainer,
+                              ),
                               onPressed:
                                   _transcriptLoadBlocksComposer ||
+                                      _archiving ||
                                       _sending ||
                                       _pendingReattachResync ||
                                       _voiceComposer.listening
@@ -5159,19 +5621,214 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
+  List<ChatDisplaySection> _normalDisplaySections() =>
+      buildNormalChatDisplaySections(
+        canonicalRows: _messages,
+        receivedRows: _normalSnapshot?.displayRows ?? const [],
+        canonicalTools: _toolActivities,
+        receivedTools: _normalSnapshot?.tools ?? const [],
+        receivedTimeline: _normalSnapshot?.timeline ?? const ChatTimeline(),
+        receivedOutcomes: _normalSnapshot?.receivedOutcomes ?? const [],
+        subagentActivities: _subagentActivities,
+        notices: _gatewayNotices,
+        verbose: _verboseMode,
+      );
+
+  Widget _buildSourceHeading(ChatDisplaySource source) {
+    final received = source == ChatDisplaySource.received;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Semantics(
+            header: true,
+            child: Text(
+              received
+                  ? context.l10n.received_output_heading
+                  : context.l10n.saved_history_heading,
+              style: Theme.of(context).textTheme.titleSmall,
+            ),
+          ),
+          if (received) ...[
+            const SizedBox(height: 4),
+            Text(context.l10n.received_output_explanation),
+            const SizedBox(height: 4),
+            Text(
+              context.l10n.received_output_lifetime,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  String _receivedOutcomeLabel(ReceivedLifecycleOutcome outcome) =>
+      switch (outcome) {
+        ReceivedLifecycleOutcome.completed => context.l10n.turn_completed,
+        ReceivedLifecycleOutcome.failed => context.l10n.turn_failed,
+        ReceivedLifecycleOutcome.unknown =>
+          context.l10n.received_outcome_unknown,
+      };
+
+  Widget _buildReceivedCell(
+    dynamic item,
+    Widget child,
+    ReceivedScopeOutcome? fact,
+  ) {
+    final localPrompt = item is Map<String, dynamic> && item['role'] == 'user';
+    final provenance = localPrompt
+        ? context.l10n.local_prompt_context
+        : context.l10n.received_output_badge;
+    final label = fact == null
+        ? provenance
+        : '${_receivedOutcomeLabel(fact.outcome)} · $provenance';
+    // Separate semantics node: do not merge away ExpansionTile/actions, or put
+    // changing streamed content into a live-region announcement.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 6, 16, 0),
+          child: Semantics(
+            container: true,
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.labelSmall,
+            ),
+          ),
+        ),
+        child,
+      ],
+    );
+  }
+
+  Widget _buildDisplayItem(dynamic item, {ChatDisplaySource? source}) {
+    if (item is ChatToolActivityGroup) {
+      return GatewayActivityCard(
+        key: ValueKey<String>('tool-activity-${item.id}'),
+        activities: item.activities,
+        verbose: _verboseMode,
+        pinnedExpansion: _toolActivityPins[item.id],
+        onPinChanged: (expanded) {
+          _toolActivityPins.pin(item.id, expanded);
+          final toolId = item.activities.first.toolId;
+          if (toolId != null && toolId.isNotEmpty) {
+            _toolActivityPins.alias(item.id, 'tool:$toolId');
+          }
+        },
+      );
+    }
+    if (item is List<GatewaySubagentActivity>) {
+      return GatewaySubagentCard(
+        activities: item,
+        onOpenTask: (task) => unawaited(_openDelegatedTask(task)),
+      );
+    }
+    if (item is ChatReasoningItem) {
+      // A same-State account/config replacement is a new preference scope.
+      // Keep the public inner run key while dropping only that card's old
+      // controller-local manual choice when its visit token changes.
+      return KeyedSubtree(
+        key: ValueKey((_reasoningExpansionPins, item.id)),
+        child: GatewayReasoningCard(
+          key: ValueKey<String>('reasoning-${item.id}'),
+          id: item.id,
+          pinnedExpansion: item.id == null
+              ? null
+              : _reasoningExpansionPins[item.id!],
+          onPinChanged: (expanded) {
+            if (item.id != null) {
+              _reasoningExpansionPins.pin(item.id!, expanded);
+            }
+          },
+          text: item.text,
+          initiallyExpanded: item.initiallyExpanded,
+        ),
+      );
+    }
+    if (item is GatewayNotice) {
+      return GatewayNoticeCard(notice: item);
+    }
+
+    final msg = item as Map<String, dynamic>;
+    final report = BackgroundReport.fromMessage(msg);
+    if (report != null) {
+      final identity = (source, chatDisplayItemIdentity(msg));
+      return BackgroundReportCard(
+        key: ValueKey((_backgroundReportExpansions, identity)),
+        report: report,
+        initiallyExpanded: _backgroundReportExpansions[identity] ?? false,
+        onExpansionChanged: (expanded) {
+          _backgroundReportExpansions.remove(identity);
+          _backgroundReportExpansions[identity] = expanded;
+          if (_backgroundReportExpansions.length >
+              ToolActivityGroupPins.maxPins) {
+            _backgroundReportExpansions.remove(
+              _backgroundReportExpansions.keys.first,
+            );
+          }
+        },
+      );
+    }
+    final role = (msg['role'] as String?) ?? 'assistant';
+    final content =
+        (msg['_display_content'] as String?) ??
+        stripToolResultText(messageContentToText(msg['content']));
+    final isUser = role == 'user';
+
+    return MessageBubble(
+      key: msg['_timeline_id'] == null
+          ? null
+          : ValueKey<String>(msg['_timeline_id'] as String),
+      content: content,
+      isUser: isUser,
+      verbose: _verboseMode,
+      density: _chatDensity,
+      metadata: msg,
+      mediaReferencesFinal: msg['_gateway_pending_response'] != true,
+      mediaFilesClient: isUser
+          ? null
+          : () =>
+                widget.testMediaFilesClient?.call(_storedSessionKey) ??
+                RemoteFilesClient.fromConnection(
+                  widget.connection,
+                  sessionId: _storedSessionKey,
+                ),
+      onReadAloud: isUser
+          ? null
+          : () => _readAssistantText(content, announce: true),
+      onEdit: isUser ? () => _editAndResend(content) : null,
+      onRetry: isUser
+          ? null
+          : () => _retryPrompt(msg['_retry_prompt']?.toString() ?? ''),
+    );
+  }
+
   Widget _buildBody() {
-    if (_loading && _messages.isEmpty) {
+    final hasReceived =
+        _normalSnapshot?.displayRows.isNotEmpty == true ||
+        _normalSnapshot?.timeline.runs.isNotEmpty == true ||
+        _normalSnapshot?.tools.isNotEmpty == true;
+    if (_loading && _messages.isEmpty && !hasReceived) {
       return const Center(child: CircularProgressIndicator());
     }
 
-    if (_error != null && _messages.isEmpty) {
+    if (_error != null && _messages.isEmpty && !hasReceived) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.all(32),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.warning_amber, size: 48, color: Colors.orange),
+              Icon(
+                Icons.warning_amber,
+                size: 48,
+                color: HermesTokens.of(context).warning,
+              ),
               const SizedBox(height: 16),
               Text(
                 context.l10n.failed_to_load_messages,
@@ -5194,14 +5851,48 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       );
     }
 
-    final displayMessages = buildChatDisplayItems(
-      messages: _messages,
-      toolActivities: _toolActivities,
-      subagentActivities: _subagentActivities,
-      notices: _gatewayNotices,
-      verbose: _verboseMode,
-      timeline: _timeline,
-    );
+    final normal = _normalChat != null;
+    final sections = normal
+        ? _normalDisplaySections()
+        : const <ChatDisplaySection>[];
+    final displayMessages = normal
+        ? [for (final section in sections) ...section.items]
+        : buildChatDisplayItems(
+            messages: _messages,
+            toolActivities: _toolActivities,
+            subagentActivities: _subagentActivities,
+            notices: _gatewayNotices,
+            verbose: _verboseMode,
+            timeline: _timeline,
+          );
+    final cells = <({ChatDisplaySource? source, dynamic item, Key key})>[
+      if (normal)
+        for (final section in sections) ...[
+          if (section.source != ChatDisplaySource.auxiliary)
+            (
+              source: section.source,
+              item: null,
+              key: ValueKey((section.source, 'heading')),
+            ),
+          for (final item in section.items)
+            (
+              source: section.source,
+              item: item,
+              key: ValueKey((section.source, chatDisplayItemIdentity(item))),
+            ),
+        ]
+      else
+        for (var i = 0; i < displayMessages.length; i++)
+          (source: null, item: displayMessages[i], key: ValueKey(i)),
+    ];
+    final receivedOutcomes = <Object, ReceivedScopeOutcome>{
+      for (final section in sections)
+        if (section.source == ChatDisplaySource.received) ...section.outcomes,
+    };
+    final cellIndices = <Key, int>{
+      for (var i = 0; i < cells.length; i++)
+        cells[i].key: i + (_historyWindow.hasOlder ? 1 : 0),
+    };
 
     // The stored row is the durable anchor once available. Carry a pin made
     // while this group was still streaming across the tool-id → row-id handoff.
@@ -5224,7 +5915,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         child: ListView.builder(
           controller: _scrollController,
           padding: EdgeInsets.only(bottom: _chatDensity.listEndPadding),
-          itemCount: displayMessages.length + (_historyWindow.hasOlder ? 1 : 0),
+          itemCount: cells.length + (_historyWindow.hasOlder ? 1 : 0),
+          findChildIndexCallback: normal ? (key) => cellIndices[key] : null,
           itemBuilder: (context, index) {
             if (_historyWindow.hasOlder && index == 0) {
               return Center(
@@ -5239,80 +5931,24 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ),
               );
             }
-            final item =
-                displayMessages[index - (_historyWindow.hasOlder ? 1 : 0)];
-
-            if (item is ChatToolActivityGroup) {
-              return GatewayActivityCard(
-                key: ValueKey<String>('tool-activity-${item.id}'),
-                activities: item.activities,
-                verbose: _verboseMode,
-                pinnedExpansion: _toolActivityPins[item.id],
-                onPinChanged: (expanded) {
-                  _toolActivityPins.pin(item.id, expanded);
-                  final toolId = item.activities.first.toolId;
-                  if (toolId != null && toolId.isNotEmpty) {
-                    _toolActivityPins.alias(item.id, 'tool:$toolId');
-                  }
-                },
+            final cell = cells[index - (_historyWindow.hasOlder ? 1 : 0)];
+            if (cell.item == null) {
+              return KeyedSubtree(
+                key: cell.key,
+                child: _buildSourceHeading(cell.source!),
               );
             }
-            if (item is List<GatewaySubagentActivity>) {
-              return GatewaySubagentCard(
-                activities: item,
-                onOpenTask: (task) => unawaited(_openDelegatedTask(task)),
-              );
-            }
-            if (item is ChatReasoningItem) {
-              return GatewayReasoningCard(
-                key: ValueKey<String>('reasoning-${item.id}'),
-                id: item.id,
-                pinnedExpansion: _reasoningExpansionPins[item.id],
-                onPinChanged: (expanded) {
-                  if (item.id != null) {
-                    _reasoningExpansionPins[item.id!] = expanded;
-                  }
-                },
-                text: item.text,
-                initiallyExpanded: item.initiallyExpanded,
-              );
-            }
-            if (item is GatewayNotice) {
-              return GatewayNoticeCard(notice: item);
-            }
-
-            final msg = item as Map<String, dynamic>;
-            final role = (msg['role'] as String?) ?? 'assistant';
-            final content =
-                (msg['_display_content'] as String?) ??
-                stripToolResultText(messageContentToText(msg['content']));
-            final isUser = role == 'user';
-
-            return MessageBubble(
-              key: msg['_timeline_id'] == null
-                  ? null
-                  : ValueKey<String>(msg['_timeline_id'] as String),
-              content: content,
-              isUser: isUser,
-              verbose: _verboseMode,
-              density: _chatDensity,
-              metadata: msg,
-              mediaReferencesFinal: msg['_gateway_pending_response'] != true,
-              mediaFilesClient: isUser
-                  ? null
-                  : () =>
-                        widget.testMediaFilesClient?.call(_storedSessionKey) ??
-                        RemoteFilesClient.fromConnection(
-                          widget.connection,
-                          sessionId: _storedSessionKey,
-                        ),
-              onReadAloud: isUser
-                  ? null
-                  : () => _readAssistantText(content, announce: true),
-              onEdit: isUser ? () => _editAndResend(content) : null,
-              onRetry: isUser
-                  ? null
-                  : () => _retryPrompt(msg['_retry_prompt']?.toString() ?? ''),
+            final child = _buildDisplayItem(cell.item, source: cell.source);
+            if (cell.source == null) return child;
+            return KeyedSubtree(
+              key: cell.key,
+              child: cell.source == ChatDisplaySource.received
+                  ? _buildReceivedCell(
+                      cell.item,
+                      child,
+                      receivedOutcomes[chatDisplayItemIdentity(cell.item)],
+                    )
+                  : child,
             );
           },
         ),
@@ -5413,9 +6049,7 @@ class MessageBubble extends StatelessWidget {
       context: context,
       builder: (dialogContext) {
         // The dialog renders on the dialog surface, not on a bubble: use the
-        // prose colours with the dialog's own onSurface. The user-bubble
-        // foreground is hardcoded for the gold bubble and would be unreadable
-        // on the dark dialog surface in dark mode.
+        // prose colours with the dialog's own onSurface, not onAccent.
         final dialogTheme = Theme.of(dialogContext);
         return AlertDialog(
           title: Text(context.l10n.select_text),
@@ -5425,6 +6059,7 @@ class MessageBubble extends StatelessWidget {
               selectable: true,
               styleSheet: _messageStyleSheet(
                 dialogTheme,
+                HermesTokens.of(dialogContext),
                 isUser: false,
                 assistantTextColor: dialogTheme.colorScheme.onSurface,
               ),
@@ -5442,67 +6077,47 @@ class MessageBubble extends StatelessWidget {
   }
 
   MarkdownStyleSheet _messageStyleSheet(
-    ThemeData theme, {
+    ThemeData theme,
+    HermesTokens tokens, {
     required bool isUser,
     required Color assistantTextColor,
   }) {
+    final foreground = isUser ? tokens.onAccent : assistantTextColor;
+    final body = theme.textTheme.bodyMedium?.copyWith(color: foreground);
+    final rule = isUser ? tokens.onAccent : tokens.border;
     return MarkdownStyleSheet(
-      p: (isUser
-          ? theme.textTheme.bodyMedium?.copyWith(
-              color: hermesUserMessageForeground,
-            )
-          : theme.textTheme.bodyMedium?.copyWith(color: assistantTextColor)),
-      code: TextStyle(
-        backgroundColor: (isUser ? Colors.white : Colors.black).withValues(
-          alpha: 0.12,
-        ),
-        fontFamily: 'monospace',
-        color: isUser ? hermesUserMessageForeground : null,
+      p: body,
+      code: tokens.typography.mono.copyWith(
+        backgroundColor: tokens.accentContainer,
+        color: tokens.onAccentContainer,
       ),
       a: TextStyle(
-        color: isUser ? hermesUserMessageForeground : theme.colorScheme.primary,
+        color: isUser ? tokens.onAccent : tokens.accent,
+        decoration: TextDecoration.underline,
+        decorationColor: isUser ? tokens.onAccent : tokens.accent,
       ),
-      h1: isUser
-          ? theme.textTheme.headlineSmall?.copyWith(
-              color: hermesUserMessageForeground,
-            )
-          : theme.textTheme.headlineSmall,
-      h2: isUser
-          ? theme.textTheme.titleLarge?.copyWith(
-              color: hermesUserMessageForeground,
-            )
-          : theme.textTheme.titleLarge,
-      h3: isUser
-          ? theme.textTheme.titleMedium?.copyWith(
-              color: hermesUserMessageForeground,
-            )
-          : theme.textTheme.titleMedium,
-      blockquote: TextStyle(
-        color: isUser ? hermesUserMessageForeground : Colors.grey,
-        fontStyle: FontStyle.italic,
-      ),
+      h1: theme.textTheme.headlineSmall?.copyWith(color: foreground),
+      h2: theme.textTheme.titleLarge?.copyWith(color: foreground),
+      h3: theme.textTheme.titleMedium?.copyWith(color: foreground),
+      h4: theme.textTheme.titleSmall?.copyWith(color: foreground),
+      h5: body?.copyWith(fontWeight: FontWeight.bold),
+      h6: body?.copyWith(fontWeight: FontWeight.bold),
+      blockquote: body?.copyWith(fontStyle: FontStyle.italic),
       blockquoteDecoration: BoxDecoration(
-        border: Border(
-          left: BorderSide(
-            color: isUser
-                ? hermesUserMessageForeground.withValues(alpha: 0.65)
-                : theme.colorScheme.primary,
-            width: 3,
-          ),
-        ),
+        border: Border(left: BorderSide(color: rule, width: 3)),
       ),
-      em: isUser
-          ? theme.textTheme.bodyMedium?.copyWith(
-              fontStyle: FontStyle.italic,
-              color: hermesUserMessageForeground,
-            )
-          : theme.textTheme.bodyMedium?.copyWith(fontStyle: FontStyle.italic),
-      strong: isUser
-          ? theme.textTheme.bodyMedium?.copyWith(
-              fontWeight: FontWeight.bold,
-              color: hermesUserMessageForeground,
-            )
-          : theme.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold),
+      em: body?.copyWith(fontStyle: FontStyle.italic),
+      strong: body?.copyWith(fontWeight: FontWeight.bold),
+      del: body?.copyWith(decoration: TextDecoration.lineThrough),
+      listBullet: body,
+      checkbox: body,
+      tableHead: body?.copyWith(fontWeight: FontWeight.bold),
+      tableBody: body,
+      tableBorder: TableBorder.all(color: rule),
+      horizontalRuleDecoration: BoxDecoration(
+        border: Border(top: BorderSide(color: rule)),
+      ),
+      codeblockDecoration: BoxDecoration(color: tokens.accentContainer),
     );
   }
 
@@ -5514,11 +6129,13 @@ class MessageBubble extends StatelessWidget {
   /// markdown links so they never fragment a list item or table row.
   List<Widget> _renderContent(
     ThemeData theme,
+    HermesTokens tokens,
     bool isUser,
     Color assistantTextColor,
   ) {
     final styleSheet = _messageStyleSheet(
       theme,
+      tokens,
       isUser: isUser,
       assistantTextColor: assistantTextColor,
     );
@@ -5706,14 +6323,10 @@ class MessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
-
-    // Bubble colors
-    const userBubbleColor = hermesUserMessageBubbleBackground;
-    final assistantBubbleColor = isDark
-        ? const Color(0xFF2A2A2A)
-        : const Color(0xFFEAEAEA);
-    final assistantTextColor = isDark ? Colors.white : Colors.black87;
+    final tokens = HermesTokens.of(context);
+    final userBubbleColor = tokens.accent;
+    final assistantBubbleColor = tokens.raised;
+    final assistantTextColor = tokens.onSurface;
 
     // Collect extra metadata for verbose mode
     final List<String> metaLines = [];
@@ -5759,9 +6372,7 @@ class MessageBubble extends StatelessWidget {
                 child: Text(
                   isUser ? 'You' : 'Hermes',
                   style: theme.textTheme.labelSmall?.copyWith(
-                    color: isUser
-                        ? hermesUserMessageForeground.withValues(alpha: 0.75)
-                        : theme.colorScheme.onSurfaceVariant,
+                    color: isUser ? tokens.onAccent : tokens.muted,
                     fontWeight: FontWeight.w700,
                     letterSpacing: 0.4,
                   ),
@@ -5773,9 +6384,7 @@ class MessageBubble extends StatelessWidget {
                 margin: const EdgeInsets.only(bottom: 8),
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: (isUser ? Colors.white : Colors.black).withValues(
-                    alpha: 0.1,
-                  ),
+                  color: isUser ? tokens.accentContainer : tokens.surface,
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Column(
@@ -5789,10 +6398,8 @@ class MessageBubble extends StatelessWidget {
                             fontSize: 11,
                             fontFamily: 'monospace',
                             color: isUser
-                                ? hermesUserMessageForeground
-                                : (isDark
-                                      ? Colors.grey[400]
-                                      : Colors.grey[600]),
+                                ? tokens.onAccentContainer
+                                : tokens.onSurface,
                           ),
                         ),
                       )
@@ -5805,7 +6412,7 @@ class MessageBubble extends StatelessWidget {
             // language, copy, and wrap controls. User bubbles never parse
             // MEDIA: — the contract is assistant-side delivery, and quoted
             // tags in a prompt must stay verbatim.
-            ..._renderContent(theme, isUser, assistantTextColor),
+            ..._renderContent(theme, tokens, isUser, assistantTextColor),
             SizedBox(height: density.bodyBottomGap),
           ],
         ),

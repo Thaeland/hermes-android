@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import '../models/gateway_insight.dart';
 import 'connection_manager.dart';
 import 'desktop_gateway_client.dart';
+import 'tls_client_factory.dart';
 
 enum TaskHistoryProblem {
   invalidReference,
@@ -88,7 +89,12 @@ class DashboardTaskHistory implements TaskHistorySource {
         proxied: connection.dashboardProxied,
         username: connection.dashboardUsername,
         password: connection.dashboardPassword,
-        httpClient: _TaskHistoryHttpClient(httpClient ?? http.Client()),
+        httpClient: _TaskHistoryHttpClient(
+          httpClient ??
+              const TlsClientFactory().createRestClient(
+                connection.clientCertificate,
+              ),
+        ),
       ),
       profile: connection.gatewayProfile,
       authAvailable:

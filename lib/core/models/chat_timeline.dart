@@ -12,6 +12,7 @@ class ChatTimelineRun {
     this.text = '',
     this.verbose = false,
     this.activity,
+    this.presentationId,
   });
 
   final String id;
@@ -20,6 +21,12 @@ class ChatTimelineRun {
   final String text;
   final bool verbose;
   final GatewayToolActivity? activity;
+  final String? presentationId;
+
+  // Capture the first scope, not its current preview/completion owner. A scope
+  // transfer must not change the key of an already manually pinned card.
+  String get _stablePresentationId =>
+      presentationId ?? (kind == ChatTimelineKind.tool ? id : '$scope:$id');
 
   ChatTimelineRun _copy({
     Object? scope,
@@ -33,6 +40,7 @@ class ChatTimelineRun {
     text: text ?? this.text,
     verbose: verbose ?? this.verbose,
     activity: activity ?? this.activity,
+    presentationId: _stablePresentationId,
   );
 }
 
@@ -43,22 +51,150 @@ class ChatTimelineRun {
 /// first-appearance position; only adjacent *new* tools form a batch. Histories
 /// without receipt chronology should use their durable row ordering instead.
 class ChatTimeline {
-  const ChatTimeline._(this.runs, this._nextId);
-  const ChatTimeline() : runs = const [], _nextId = 0;
+  const ChatTimeline._(
+    this.runs,
+    this._nextId,
+    this.scopes,
+    this._evictedTools,
+    this._tombstonesSaturated,
+  );
+  const ChatTimeline()
+    : runs = const [],
+      _nextId = 0,
+      scopes = const {},
+      _evictedTools = const {},
+      _tombstonesSaturated = false;
+
+  static const maxRuns = 1024;
+  static const maxTextCodeUnits = 1048576;
+  // Identity-only tombstones are bounded too. Once saturated, unmatched late
+  // terminals cannot safely be distinguished from completed-only first receipts.
+  static const maxEvictedTools = 1024;
+  static final _presentations = Expando<ChatTimeline>();
 
   final List<ChatTimelineRun> runs;
   final int _nextId;
+  final Set<Object> scopes;
+  final Set<String> _evictedTools;
+  final bool _tombstonesSaturated;
+
+  int get retainedToolIdentityCount => _evictedTools.length;
 
   /// Drop optimistic references on durable hydration, without reusing card IDs.
-  ChatTimeline clear() => ChatTimeline._(const [], _nextId);
+  ChatTimeline clear() =>
+      ChatTimeline._(const [], _nextId, const {}, const {}, false);
+
+  /// Read-only, idempotent projection used from the very first render. Raw
+  /// reducer IDs and tool receipts remain untouched; independent reducers may
+  /// both start at timeline:0 without sharing a presentation pin.
+  ChatTimeline forPresentation() {
+    final existing = _presentations[this];
+    if (existing != null) return existing;
+    final projected = ChatTimeline._(
+      List.unmodifiable([
+        for (final run in runs)
+          ChatTimelineRun(
+            id: run._stablePresentationId,
+            scope: run.scope,
+            kind: run.kind,
+            text: run.text,
+            verbose: run.verbose,
+            activity: run.activity,
+            presentationId: run._stablePresentationId,
+          ),
+      ]),
+      _nextId,
+      scopes,
+      _evictedTools,
+      _tombstonesSaturated,
+    );
+    _presentations[this] = projected;
+    _presentations[projected] = projected;
+    return projected;
+  }
+
+  /// Compose independent settled scopes without replaying their receipts into
+  /// the current reducer. Projection keys are already stable before import;
+  /// tool identities, eviction ledgers and combined budgets remain intact.
+  ChatTimeline precededBy(Iterable<ChatTimeline> earlier) {
+    final timelines = earlier.toList();
+    if (timelines.isEmpty) return forPresentation();
+    final tombstones = <String>{};
+    var saturated = false;
+    for (final timeline in [...timelines, this]) {
+      tombstones.addAll(timeline._evictedTools);
+      saturated |= timeline._tombstonesSaturated;
+    }
+    if (tombstones.length > maxEvictedTools) saturated = true;
+    final composed = <(Object, String), ChatTimelineRun>{};
+    for (final timeline in [...timelines, this]) {
+      for (final run in timeline.forPresentation().runs) {
+        composed[(run.scope, run.id)] = run;
+      }
+    }
+    return ChatTimeline._(
+      const [],
+      _nextId,
+      Set.unmodifiable({
+        for (final timeline in [...timelines, this]) ...timeline.scopes,
+      }),
+      Set.unmodifiable(tombstones.take(maxEvictedTools)),
+      saturated,
+    )._with(composed.values.toList());
+  }
 
   /// Keep only retained presentation anchors. This is a bounded live view, not
   /// a transcript: durable history is always the authority after hydration.
   ChatTimeline retainScopes(Iterable<Object> scopes) {
     final retained = scopes.toSet();
-    var next = runs.where((run) => retained.contains(run.scope)).toList();
-    if (next.length > 1024) next = next.sublist(next.length - 1024);
-    var budget = 1048576;
+    final (tombstones, saturated) = _rememberEvictions(
+      runs.where((run) => !retained.contains(run.scope)),
+    );
+    return ChatTimeline._(
+      List.unmodifiable(runs.where((run) => retained.contains(run.scope))),
+      _nextId,
+      Set.unmodifiable(this.scopes.intersection(retained)),
+      // Dropping a scope anchor is not durable hydration. Its late tool
+      // completion still must not become a new run under the current scope.
+      tombstones,
+      saturated,
+    );
+  }
+
+  bool excludesTool(GatewayToolActivity activity) =>
+      _evictedTools.contains(activity.identity) ||
+      activity.toolId != null &&
+          _evictedTools.contains('tool:${activity.toolId}');
+
+  (Set<String>, bool) _rememberEvictions(Iterable<ChatTimelineRun> removed) {
+    final tombstones = {..._evictedTools};
+    var saturated = _tombstonesSaturated;
+    for (final run in removed) {
+      if (run.kind != ChatTimelineKind.tool) continue;
+      final activity = run.activity!;
+      for (final identity in {
+        activity.identity,
+        if (activity.toolId != null) 'tool:${activity.toolId}',
+      }) {
+        if (tombstones.contains(identity)) continue;
+        if (tombstones.length < maxEvictedTools) {
+          tombstones.add(identity);
+        } else {
+          saturated = true;
+        }
+      }
+    }
+    return (Set.unmodifiable(tombstones), saturated);
+  }
+
+  ChatTimeline _with(List<ChatTimelineRun> next, {bool inserted = false}) {
+    final ownedScopes = {...scopes, ...next.map((r) => r.scope)};
+    final excess = next.length > maxRuns ? next.length - maxRuns : 0;
+    final (tombstones, saturated) = _rememberEvictions(next.take(excess));
+    if (next.length > maxRuns) {
+      next = next.sublist(next.length - maxRuns);
+    }
+    var budget = maxTextCodeUnits;
     final bounded = <ChatTimelineRun>[];
     for (final run in next.reversed) {
       if (run.kind == ChatTimelineKind.tool) {
@@ -71,14 +207,17 @@ class ChatTimeline {
         bounded.add(run._copy(text: text));
       }
     }
-    return _with(bounded.reversed.toList());
+    return ChatTimeline._(
+      List.unmodifiable(bounded.reversed),
+      _nextId + (inserted ? 1 : 0),
+      Set.unmodifiable(ownedScopes),
+      tombstones,
+      saturated,
+    );
   }
 
   Iterable<ChatTimelineRun> forScope(Object scope) =>
       runs.where((run) => run.scope == scope);
-
-  ChatTimeline _with(List<ChatTimelineRun> next, {bool inserted = false}) =>
-      ChatTimeline._(List.unmodifiable(next), _nextId + (inserted ? 1 : 0));
 
   ChatTimeline appendText(Object scope, String token) {
     if (token.isEmpty) return this;
@@ -188,6 +327,9 @@ class ChatTimeline {
       );
       return _with(next);
     }
+    if (excludesTool(update) || (_tombstonesSaturated && update.isTerminal)) {
+      return this;
+    }
     next.add(
       ChatTimelineRun(
         id: update.identity,
@@ -268,6 +410,13 @@ class ChatTimeline {
             .toList(),
       );
     }
+    next = ChatTimeline._(
+      next.runs,
+      next._nextId,
+      Set.unmodifiable({...next.scopes.where((scope) => scope != from), to}),
+      next._evictedTools,
+      next._tombstonesSaturated,
+    );
     return next._with([
       for (final run in next.runs)
         if (run.scope == from) run._copy(scope: to) else run,

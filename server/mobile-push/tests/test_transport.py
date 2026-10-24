@@ -112,6 +112,7 @@ def test_pinned_connect_does_not_resolve_twice_and_keeps_sni(monkeypatch):
 
     class TLS:
         check_hostname = True
+        # Python 3.11 HTTPSConnection validates this SSLContext attribute.
         verify_mode = ssl.CERT_REQUIRED
 
         def wrap_socket(self, sock, server_hostname):

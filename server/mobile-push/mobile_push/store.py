@@ -12,17 +12,18 @@ import time
 import uuid
 from pathlib import Path
 
-from .config import Policy, Rejected
+from .config import Policy, Rejected, identifier
+from .scope import SessionScope
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS registrations (
  installation TEXT PRIMARY KEY, provider TEXT NOT NULL, user_id TEXT NOT NULL,
  generation INTEGER NOT NULL, status TEXT NOT NULL, nonce TEXT NOT NULL,
  endpoint TEXT NOT NULL, keys_json TEXT NOT NULL, kinds_json TEXT NOT NULL,
- sessions_json TEXT NOT NULL, challenge_hash TEXT NOT NULL, challenge_expires INTEGER NOT NULL
+ sessions_json TEXT NOT NULL, challenge_hash TEXT NOT NULL, challenge_expires INTEGER NOT NULL,
+ registration_revision INTEGER NOT NULL DEFAULT 0,
+ session_scope TEXT NOT NULL DEFAULT 'explicit'
 );
--- Retain nonce tombstones across rotations/revocation. Never prune them with
--- expiring events: a delayed authenticated PUT must not roll back a newer grant.
 CREATE TABLE IF NOT EXISTS registration_nonces (
  installation TEXT NOT NULL, nonce_hash TEXT NOT NULL,
  PRIMARY KEY(installation,nonce_hash)
@@ -62,12 +63,37 @@ class Store:
         with self.connection() as db:
             db.execute("PRAGMA journal_mode=WAL")
             db.executescript(SCHEMA)
-            # Seed current nonces when opening an older database.
+        # Transactional, restart-safe migration: old proofs/delivery fail closed,
+        # but retain installation + revision floor so an upgraded client can renew.
+        with self.transaction() as db:
+            columns = {row["name"] for row in db.execute("PRAGMA table_info(registrations)")}
+            if "session_scope" not in columns:
+                # Existing subscriptions must never become dynamic during upgrade.
+                db.execute(
+                    "ALTER TABLE registrations ADD COLUMN session_scope TEXT NOT NULL DEFAULT 'explicit'"
+                )
+            if "registration_revision" not in columns:
+                db.execute(
+                    "ALTER TABLE registrations ADD COLUMN registration_revision "
+                    "INTEGER NOT NULL DEFAULT 0"
+                )
+            legacy = db.execute(
+                "SELECT * FROM registrations WHERE registration_revision=0 "
+                "AND status IN ('pending','active')"
+            ).fetchall()
+            for row in legacy:
+                self.revoke_in(db, row)
+                db.execute(
+                    "UPDATE registrations SET status='upgrade_required' WHERE installation=?",
+                    (row["installation"],),
+                )
             db.executemany(
                 "INSERT OR IGNORE INTO registration_nonces VALUES(?,?)",
                 [
                     (row["installation"], self.nonce_hash(row["nonce"]))
-                    for row in db.execute("SELECT installation,nonce FROM registrations")
+                    for row in db.execute(
+                        "SELECT installation,nonce FROM registrations WHERE nonce!=''"
+                    )
                 ],
             )
 
@@ -105,24 +131,13 @@ class Store:
     def nonce_hash(nonce):
         return hashlib.sha256(nonce.encode()).hexdigest()
 
-    @staticmethod
-    def registration_response(row):
-        return {
-            "generation": row["generation"],
-            "status": row["status"],
-            "registration_nonce": row["nonce"],
-        }
-
-    @staticmethod
-    def same_subscription(row, body):
-        return (
-            row["endpoint"] == body["endpoint"]
-            and json.loads(row["keys_json"]) == body["keys"]
-            and json.loads(row["kinds_json"]) == body["event_kinds"]
-            and json.loads(row["sessions_json"]) == body["session_ids"]
-        )
-
     def put(self, principal, installation, body, policy: Policy):
+        revision = body.get("registration_revision")
+        # Validate here too: an authenticated handler started by old code must not
+        # bypass the fence when it eventually reaches this transactional boundary.
+        if type(revision) is not int or not 1 <= revision <= 9007199254740991:
+            raise Rejected(422, "A fenced registration revision is required")
+        scope = SessionScope.from_body(body)
         now = self.now()
         challenge = secrets.token_urlsafe(32)
         with self.transaction() as db:
@@ -131,30 +146,24 @@ class Store:
             ).fetchone()
             if previous:
                 self.owner(previous, principal)
-                if previous["nonce"] == body["registration_nonce"]:
-                    if previous["status"] not in {
-                        "pending",
-                        "active",
-                    } or not self.same_subscription(previous, body):
-                        raise Rejected(409, "Registration nonce is revoked or subscription changed")
-                    if previous["status"] == "active" or previous["challenge_expires"] > now:
-                        # Recover only this exact committed operation. No challenge
-                        # disclosed and no active/outbox state changed on replay.
-                        return self.registration_response(previous)
-                    # Expired pending proof: reissue encrypted proof below. Keep
-                    # generation stable for a client that already persisted it.
-                elif db.execute(
-                    "SELECT 1 FROM registration_nonces WHERE installation=? AND nonce_hash=?",
-                    (installation, self.nonce_hash(body["registration_nonce"])),
-                ).fetchone():
-                    raise Rejected(409, "Registration nonce was superseded")
+                if previous["status"] == "revoked":
+                    raise Rejected(409, "Installation revoked; enable with a new installation ID")
+                if revision <= previous["registration_revision"]:
+                    raise Rejected(409, "Registration revision superseded")
+                if (
+                    previous["nonce"] == body["registration_nonce"]
+                    or db.execute(
+                        "SELECT 1 FROM registration_nonces WHERE installation=? AND nonce_hash=?",
+                        (installation, self.nonce_hash(body["registration_nonce"])),
+                    ).fetchone()
+                ):
+                    raise Rejected(409, "A fresh unused registration_nonce is required")
             elif (
                 db.execute("SELECT count(*) FROM registrations").fetchone()[0]
                 >= policy.max_registrations
             ):
                 raise Rejected(429, "Registration capacity reached")
-            same_nonce = previous and previous["nonce"] == body["registration_nonce"]
-            generation = previous["generation"] + (0 if same_nonce else 1) if previous else 1
+            generation = previous["generation"] + 1 if previous else 1
             db.execute("DELETE FROM outbox WHERE installation=?", (installation,))
             db.execute(
                 "UPDATE events SET cancelled=1 WHERE installation=? AND kind='challenge'",
@@ -169,12 +178,18 @@ class Store:
                 body["endpoint"],
                 json.dumps(body["keys"]),
                 json.dumps(body["event_kinds"]),
-                json.dumps(body["session_ids"]),
+                json.dumps(scope.sessions),
                 hashlib.sha256(challenge.encode()).hexdigest(),
                 now + policy.challenge_ttl,
+                revision,
+                scope.mode,
             )
             db.execute(
-                "INSERT OR REPLACE INTO registrations VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", values
+                "INSERT OR REPLACE INTO registrations "
+                "(installation,provider,user_id,generation,status,nonce,endpoint,keys_json,kinds_json,"
+                "sessions_json,challenge_hash,challenge_expires,registration_revision,session_scope) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                values,
             )
             db.execute(
                 "INSERT OR IGNORE INTO registration_nonces VALUES(?,?)",
@@ -183,7 +198,7 @@ class Store:
             event_id = self._event(
                 db,
                 principal,
-                f"challenge:{installation}:{generation}:{uuid.uuid4().hex}",
+                f"challenge:{installation}:{generation}",
                 "challenge",
                 now,
                 now + policy.challenge_ttl,
@@ -203,9 +218,10 @@ class Store:
             "generation": generation,
             "status": "pending",
             "registration_nonce": body["registration_nonce"],
+            "registration_revision": revision,
         }
 
-    def confirm(self, principal, installation, generation, challenge, policy):
+    def confirm(self, principal, installation, generation, challenge, policy, durable=None):
         with self.transaction() as db:
             row = db.execute(
                 "SELECT * FROM registrations WHERE installation=?", (installation,)
@@ -213,21 +229,19 @@ class Store:
             self.owner(row, principal)
             if (
                 row["generation"] != generation
-                or row["status"] not in {"pending", "active"}
-                or (row["status"] == "pending" and row["challenge_expires"] <= self.now())
+                or row["status"] != "pending"
+                or row["challenge_expires"] <= self.now()
                 or not secrets.compare_digest(
                     row["challenge_hash"], hashlib.sha256(challenge.encode()).hexdigest()
                 )
             ):
                 raise Rejected(409, "Challenge expired, invalid or superseded")
-            if any(not policy.allowed(principal, sid) for sid in json.loads(row["sessions_json"])):
-                raise Rejected(403, "Session scope is no longer authorised")
-            if row["status"] == "active":
-                # A lost confirmation ACK is read recovery, not reactivation.
-                # Preserve subsequent notifications and retain only the proof hash.
-                return {"generation": generation, "status": "active"}
+            if not SessionScope.from_registration(row).ready(
+                principal, policy, durable or (lambda sid: False)
+            ):
+                raise Rejected(403, "Session scope is no longer authorised or durable")
             db.execute(
-                "UPDATE registrations SET status='active' WHERE installation=?",
+                "UPDATE registrations SET status='active',challenge_hash='' WHERE installation=?",
                 (installation,),
             )
             db.execute("DELETE FROM outbox WHERE installation=?", (installation,))
@@ -246,14 +260,34 @@ class Store:
             (row["installation"],),
         )
 
-    def revoke(self, principal, installation):
+    def revoke(self, principal, installation, new_policy=None):
         with self.transaction() as db:
             row = db.execute(
                 "SELECT * FROM registrations WHERE installation=?", (installation,)
             ).fetchone()
-            self.owner(row, principal)
-            self.revoke_in(db, row)
-        return {"generation": row["generation"] + 1, "status": "revoked"}
+            if row is None:
+                policy = new_policy() if new_policy else None
+                if policy is not None and not policy.admitted(principal):
+                    raise Rejected(403, "Principal not authorised for mobile push")
+                capacity = policy.max_registrations if policy else 256
+                if db.execute("SELECT count(*) FROM registrations").fetchone()[0] >= capacity:
+                    raise Rejected(429, "Registration capacity reached")
+                # DELETE can beat the very first PUT (including its DNS lookup).
+                # Keep a terminal tombstone, not a 404 that permits late creation.
+                db.execute(
+                    "INSERT INTO registrations "
+                    "(installation,provider,user_id,generation,status,nonce,endpoint,keys_json,kinds_json,"
+                    "sessions_json,challenge_hash,challenge_expires,registration_revision) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (installation, *principal, 1, "revoked", "", "", "{}", "[]", "[]", "", 0, 0),
+                )
+                generation = 1
+            else:
+                self.owner(row, principal)
+                if row["status"] != "revoked":
+                    self.revoke_in(db, row)
+                generation = row["generation"] + int(row["status"] != "revoked")
+        return {"generation": generation, "status": "revoked"}
 
     @staticmethod
     def hint(event_id, kind, generation, nonce, expires, **extra):
@@ -310,14 +344,22 @@ class Store:
         ).fetchone()
         return row[0]
 
-    def targets(self):
-        # WAL readers remain available while the sender holds a write transaction.
+    @staticmethod
+    def _allows_event(row, event, policy):
+        principal = (row["provider"], row["user_id"])
+        return event["kind"] in json.loads(row["kinds_json"]) and SessionScope.from_registration(
+            row
+        ).allows(principal, event["session_id"], policy)
+
+    def targets(self, event, policy: Policy):
+        # Capture event-specific consent AND authority before any deferred write.
+        # WAL readers remain available while the sender holds a write transaction;
+        # these rows and the immutable policy/scope are an admission snapshot.
         with self.connection() as db:
             return {
                 row["installation"]: row["generation"]
-                for row in db.execute(
-                    "SELECT installation,generation FROM registrations WHERE status='active'"
-                )
+                for row in db.execute("SELECT * FROM registrations WHERE status='active'")
+                if self._allows_event(row, event, policy)
             }
 
     def record(self, event, policy: Policy):
@@ -355,11 +397,7 @@ class Store:
                 targets = event.get("registration_generations")
                 if targets is not None and targets.get(row["installation"]) != row["generation"]:
                     continue
-                if (
-                    not policy.allowed(principal, sid)
-                    or sid not in json.loads(row["sessions_json"])
-                    or kind not in json.loads(row["kinds_json"])
-                ):
+                if not self._allows_event(row, event, policy):
                     continue
                 event_id = self._event(
                     db,
@@ -401,8 +439,35 @@ class Store:
             (policy.max_events,),
         )
 
-    def events(self, principal, after, limit, policy, durable):
+    def events(self, principal, after, limit, policy, durable, installation=None, generation=None):
+        bound = installation is not None or generation is not None
+        if bound and (
+            not identifier(installation)
+            or type(generation) is not int
+            or not 1 <= generation <= 9223372036854775807
+        ):
+            raise Rejected(422, "Exact installation_id and positive generation required together")
+        binding = {}
+        scope = None
+        kinds = ()
         with self.connection() as db:
+            # Registration and events belong to one consistent read snapshot. A
+            # concurrent renewal must not mix a new scope with an old generation.
+            db.execute("BEGIN")
+            if bound:
+                registration = db.execute(
+                    "SELECT * FROM registrations WHERE installation=?", (installation,)
+                ).fetchone()
+                self.owner(registration, principal)
+                if registration["status"] != "active" or registration["generation"] != generation:
+                    raise Rejected(409, "Registration is not active at this generation")
+                scope = SessionScope.from_registration(registration)
+                kinds = json.loads(registration["kinds_json"])
+                binding = {
+                    "installation_id": installation,
+                    "generation": registration["generation"],
+                    "session_scope": scope.mode,
+                }
             rows = db.execute(
                 "SELECT * FROM events WHERE provider=? AND user_id=? AND cursor>? "
                 "AND expires_at>? AND cancelled=0 ORDER BY cursor LIMIT ?",
@@ -411,13 +476,22 @@ class Store:
         visible = []
         cursor = after
         for row in rows:
-            if row["kind"] != "challenge" and (
-                not policy.allowed(principal, row["session_id"]) or not durable(row["session_id"])
-            ):
+            if scope is not None:
+                permitted = (
+                    row["kind"] in kinds
+                    and scope.allows(principal, row["session_id"], policy)
+                    and durable(row["session_id"])
+                )
+            else:
+                # Preserve the legacy unbound API (including safe challenge metadata).
+                permitted = row["kind"] == "challenge" or (
+                    policy.allowed(principal, row["session_id"]) and durable(row["session_id"])
+                )
+            if not permitted:
                 cursor = row["cursor"]
                 continue
             if len(visible) == limit:
-                return {"events": visible, "next_cursor": cursor, "has_more": True}
+                return {"events": visible, "next_cursor": cursor, "has_more": True, **binding}
             cursor = row["cursor"]
             event = {
                 key: row[key] for key in ("cursor", "event_id", "kind", "created_at", "expires_at")
@@ -428,7 +502,7 @@ class Store:
             if row["installation"]:
                 event["installation_id"] = row["installation"]
             visible.append(event)
-        return {"events": visible, "next_cursor": cursor, "has_more": False}
+        return {"events": visible, "next_cursor": cursor, "has_more": False, **binding}
 
     def claim(self, policy):
         now = self.now()

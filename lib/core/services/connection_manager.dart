@@ -3,15 +3,19 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
-import 'package:http/io_client.dart' show IOClient;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
+import '../models/client_certificate.dart';
 import '../models/connection.dart';
 import '../models/session.dart';
+import 'client_certificate_service.dart';
+import 'connection_mutation_barrier.dart';
+import 'tls_client_factory.dart';
 
 // Re-export for convenience
 export '../models/connection.dart';
@@ -22,8 +26,10 @@ export '../models/session.dart';
 /// The production implementation is backed by Android Keystore through
 /// `flutter_secure_storage`; tests use a deterministic in-memory fake.
 abstract interface class CredentialStore {
+  /// Last read-back only; callers needing authority must await [read].
   String? readCached(String key);
 
+  /// Read physical storage and refresh the cache, including removal on null.
   Future<String?> read(String key);
 
   Future<void> write(String key, String value);
@@ -83,16 +89,23 @@ class _ConnectionCredentials {
   final String apiKey;
   final String? dashboardPassword;
 
+  /// Password for an encrypted PEM client key. Persisted here (the platform
+  /// secure store) rather than in the connection metadata preferences.
+  final String? clientKeyPassword;
+
   const _ConnectionCredentials({
     required this.apiKey,
     required this.dashboardPassword,
+    this.clientKeyPassword,
   });
 
-  bool get isEmpty => apiKey.isEmpty && dashboardPassword == null;
+  bool get isEmpty =>
+      apiKey.isEmpty && dashboardPassword == null && clientKeyPassword == null;
 
   String encode() => jsonEncode(<String, String>{
     if (apiKey.isNotEmpty) 'api_key': apiKey,
     'dashboard_password': ?dashboardPassword,
+    'client_key_password': ?clientKeyPassword,
   });
 
   static _ConnectionCredentials decode(String encoded) {
@@ -100,8 +113,10 @@ class _ConnectionCredentials {
       final map = jsonDecode(encoded) as Map<String, dynamic>;
       final apiKey = map['api_key'];
       final dashboardPassword = map['dashboard_password'];
+      final clientKeyPassword = map['client_key_password'];
       if (apiKey != null && apiKey is! String ||
-          dashboardPassword != null && dashboardPassword is! String) {
+          dashboardPassword != null && dashboardPassword is! String ||
+          clientKeyPassword != null && clientKeyPassword is! String) {
         throw const FormatException();
       }
       final password = (dashboardPassword as String?)?.trim();
@@ -110,6 +125,7 @@ class _ConnectionCredentials {
         dashboardPassword: password == null || password.isEmpty
             ? null
             : password,
+        clientKeyPassword: clientKeyPassword as String?,
       );
     } catch (_) {
       throw const CredentialStorageException(
@@ -120,9 +136,11 @@ class _ConnectionCredentials {
 
   static _ConnectionCredentials fromConnection(SavedConnection connection) {
     final password = connection.dashboardPassword?.trim();
+
     return _ConnectionCredentials(
       apiKey: connection.apiKey,
       dashboardPassword: password == null || password.isEmpty ? null : password,
+      clientKeyPassword: connection.clientCertificate?.privateKeyPassword,
     );
   }
 }
@@ -135,18 +153,42 @@ class ConnectionManager {
   static const Uuid _uuid = Uuid();
   static final CredentialStore _sharedCredentialStore =
       FlutterSecureCredentialStore();
+  static const _pushChannel = MethodChannel(
+    'com.hermesagent.hermes_android/mobile_push',
+  );
+  // Only finished transactions enter this outbox. An uncertain END reply must
+  // stay retryable by a replacement manager, not strand this native lease until
+  // process death. Retrying END never restores consent or releases a sibling.
+  static final _pendingPushMutationEnds = <String, Map<String, dynamic>>{};
+  // saved_connections is one physical value across managers/store wrappers.
+  // Share ownership before reading a baseline, never secrets between stores.
+  static Future<void>? _savedListTail;
 
   final SharedPreferences prefs;
   final CredentialStore _credentialStore;
+  final bool _nativePushSupported;
+  final ClientCertificateFileStore _certificateFiles;
 
-  ConnectionManager(this.prefs, {CredentialStore? credentialStore})
-    : _credentialStore = credentialStore ?? _sharedCredentialStore;
+  ConnectionManager(
+    this.prefs, {
+    CredentialStore? credentialStore,
+    ClientCertificateFileStore? certificateFiles,
+    bool? nativePushSupported,
+  }) : _credentialStore = credentialStore ?? _sharedCredentialStore,
+       _certificateFiles = certificateFiles ?? ClientCertificateService(),
+       _nativePushSupported =
+           nativePushSupported ?? (!kIsWeb && Platform.isAndroid);
 
   static Future<ConnectionManager> create(
     SharedPreferences prefs, {
     CredentialStore? credentialStore,
+    ClientCertificateFileStore? certificateFiles,
   }) async {
-    final manager = ConnectionManager(prefs, credentialStore: credentialStore);
+    final manager = ConnectionManager(
+      prefs,
+      credentialStore: credentialStore,
+      certificateFiles: certificateFiles,
+    );
     await manager.initialize();
     return manager;
   }
@@ -156,43 +198,81 @@ class ConnectionManager {
   /// Every legacy credential bundle is written and read back first. The
   /// SharedPreferences list is sanitized only after all read-backs match, so a
   /// partial secure-store failure leaves every legacy profile retryable.
-  Future<void> initialize() async {
+  Future<void> initialize() => _withSavedListTransaction([], () async {
     final maps = _readConnectionMaps();
     final connections = _connectionsFromMaps(maps);
     final hasLegacyFields = maps.any(
       (map) =>
-          map.containsKey('api_key') || map.containsKey('dashboard_password'),
+          map.containsKey('api_key') ||
+          map.containsKey('dashboard_password') ||
+          _hasLegacyCertificatePassword(map),
     );
 
-    try {
-      for (final connection in connections) {
-        final credentials = _ConnectionCredentials.fromConnection(connection);
-        if (!credentials.isEmpty) {
-          await _writeAndVerifyCredentials(connection.id, credentials);
+    Future<void> migrateAndHydrate() async {
+      try {
+        for (final connection in connections) {
+          final legacy = _ConnectionCredentials.fromConnection(connection);
+          if (!legacy.isEmpty) {
+            // An earlier release already moved API/dashboard credentials into the
+            // secure store while leaving only the PEM password in preferences.
+            // Secure values win over stale legacy fields on a migration retry.
+            final encoded = await _credentialStore.read(
+              _credentialKey(connection.id),
+            );
+            final existing = encoded == null
+                ? const _ConnectionCredentials(
+                    apiKey: '',
+                    dashboardPassword: null,
+                  )
+                : _ConnectionCredentials.decode(encoded);
+            await _writeAndVerifyCredentials(
+              connection.id,
+              _ConnectionCredentials(
+                apiKey: existing.apiKey.isEmpty
+                    ? legacy.apiKey
+                    : existing.apiKey,
+                dashboardPassword:
+                    existing.dashboardPassword ?? legacy.dashboardPassword,
+                clientKeyPassword:
+                    existing.clientKeyPassword ?? legacy.clientKeyPassword,
+              ),
+            );
+          }
         }
-      }
 
-      for (final connection in connections) {
-        final encoded = await _credentialStore.read(
-          _credentialKey(connection.id),
+        for (final connection in connections) {
+          final encoded = await _credentialStore.read(
+            _credentialKey(connection.id),
+          );
+          if (encoded != null) {
+            _ConnectionCredentials.decode(encoded);
+          }
+        }
+
+        if (hasLegacyFields) {
+          await _saveAll(connections);
+        }
+      } on CredentialStorageException {
+        rethrow;
+      } catch (_) {
+        throw const CredentialStorageException(
+          'Connection credentials could not be migrated safely.',
         );
-        if (encoded != null) {
-          _ConnectionCredentials.decode(encoded);
-        }
       }
-
-      if (hasLegacyFields) {
-        await _saveAll(connections);
-      }
-    } on CredentialStorageException {
-      rethrow;
-    } catch (_) {
-      throw const CredentialStorageException(
-        'Connection credentials could not be migrated safely.',
-      );
     }
-  }
 
+    if (hasLegacyFields) {
+      await _withConnectionMutation(
+        connections.map((c) => c.id),
+        migrateAndHydrate,
+      );
+    } else {
+      await migrateAndHydrate();
+    }
+  });
+
+  /// Synchronous UI projection. Credentials are only as fresh as this store's
+  /// last read-back; mutations/export/push must refresh before using authority.
   List<SavedConnection> getConnections() {
     return _connectionsFromMaps(
       _readConnectionMaps(),
@@ -205,27 +285,71 @@ class ConnectionManager {
   /// Config export needs this: a freshly launched app has an empty credential
   /// cache, so [getConnections] alone would hand back connections with blank
   /// API keys and silently produce a useless backup.
-  Future<List<SavedConnection>> loadConnectionsWithSecrets() async {
+  Future<List<SavedConnection>> loadConnectionsWithSecrets() =>
+      _withSavedListTransaction([], _loadConnectionsWithSecrets);
+
+  Future<List<SavedConnection>> _loadConnectionsWithSecrets() async {
     final connections = _connectionsFromMaps(_readConnectionMaps());
     final hydrated = <SavedConnection>[];
     for (final connection in connections) {
-      final encoded = await _credentialStore.read(
-        _credentialKey(connection.id),
-      );
+      final encoded = await _readEncodedCredentials(connection.id);
       if (encoded == null) {
         hydrated.add(connection);
         continue;
       }
       final credentials = _ConnectionCredentials.decode(encoded);
-      hydrated.add(
-        connection.copyWith(
-          apiKey: credentials.apiKey,
-          dashboardPassword: credentials.dashboardPassword,
-          clearDashboardPassword: credentials.dashboardPassword == null,
-        ),
-      );
+      hydrated.add(_applyCredentials(connection, credentials));
     }
     return hydrated;
+  }
+
+  Future<String?> _readEncodedCredentials(String connectionId) async {
+    try {
+      return await _credentialStore.read(_credentialKey(connectionId));
+    } catch (_) {
+      // Provider errors may contain secrets; never attach them or use the cache.
+      throw const CredentialStorageException(
+        'Connection credentials could not be read safely.',
+      );
+    }
+  }
+
+  /// Refresh this store's cache without waiting for unrelated transactions.
+  /// Push must not mistake another wrapper's cold cache for revoked consent.
+  /// Callers fence the asynchronous read with the per-ID mutation epoch.
+  Future<void> refreshConnectionCredentials(String id) async {
+    try {
+      final encoded = await _credentialStore.read(_credentialKey(id));
+      if (encoded != null) _ConnectionCredentials.decode(encoded);
+    } catch (_) {
+      throw const CredentialStorageException(
+        'Connection credentials could not be read safely.',
+      );
+    }
+  }
+
+  /// After native engine recovery, refresh metadata as well as secrets before
+  /// granting fresh push consent. A surviving isolate's owned list transaction
+  /// already protects its metadata projection; do not wait behind an unrelated
+  /// held mutation or reload over that transaction's optimistic cache.
+  Future<void> refreshMobilePushBinding(String id) {
+    if (_savedListTail != null) return refreshConnectionCredentials(id);
+    return _withSavedListTransaction(
+      [],
+      () => refreshConnectionCredentials(id),
+    );
+  }
+
+  /// Exact persisted metadata shape for native admission. Re-serializing the
+  /// model would add defaults absent in older saved lists. Never copy secrets.
+  Map<String, dynamic>? mobilePushConsentMetadata(String id) {
+    final rows = _readConnectionMaps().where((row) => row['id'] == id).toList();
+    if (rows.length != 1) return null;
+    return Map<String, dynamic>.unmodifiable(
+      Map<String, dynamic>.from(rows.single)
+        ..remove('api_key')
+        ..remove('dashboard_password'),
+    );
   }
 
   /// Writes a whole set of connections at once, preserving their ids.
@@ -237,44 +361,98 @@ class ConnectionManager {
   Future<void> importConnections(
     List<SavedConnection> incoming, {
     required bool replaceExisting,
-  }) async {
-    final current = _connectionsFromMaps(_readConnectionMaps());
-
+  }) {
     final ordered = List<SavedConnection>.of(incoming);
+    return _withSavedListTransaction(ordered.map((c) => c.id), () async {
+      final current = await _loadConnectionsWithSecrets();
+      final previousMetadata = prefs.getStringList(_key);
 
-    final List<SavedConnection> next;
-    final removed = <SavedConnection>[];
-    if (replaceExisting) {
-      final keep = ordered.map((connection) => connection.id).toSet();
-      removed.addAll(
-        current.where((connection) => !keep.contains(connection.id)),
-      );
-      next = ordered;
-    } else {
-      final incomingIds = ordered.map((connection) => connection.id).toSet();
-      next = <SavedConnection>[
-        ...ordered,
-        ...current.where((connection) => !incomingIds.contains(connection.id)),
-      ];
-    }
+      final List<SavedConnection> next;
+      final removed = <SavedConnection>[];
+      if (replaceExisting) {
+        final keep = ordered.map((connection) => connection.id).toSet();
+        removed.addAll(
+          current.where((connection) => !keep.contains(connection.id)),
+        );
+        next = ordered;
+      } else {
+        final incomingIds = ordered.map((connection) => connection.id).toSet();
+        next = <SavedConnection>[
+          ...ordered,
+          ...current.where(
+            (connection) => !incomingIds.contains(connection.id),
+          ),
+        ];
+      }
 
-    for (final connection in [...ordered, ...removed]) {
-      await _invalidateMobilePushAuthority(connection.id);
-    }
-    for (final connection in ordered) {
-      await _writeAndVerifyCredentials(
-        connection.id,
-        _ConnectionCredentials.fromConnection(connection),
+      await _withConnectionMutation(
+        [...ordered, ...removed].map((connection) => connection.id),
+        () async {
+          final previousCredentials = <String, String?>{};
+          final attemptedIds = <String>{};
+          var metadataAttempted = false;
+          // Capture every physical bundle before the first write, including absent
+          // entries. Restoring raw bundles preserves all secrets and exact bytes.
+          for (final connection in [...ordered, ...removed]) {
+            if (previousCredentials.containsKey(connection.id)) continue;
+            final encoded = await _readEncodedCredentials(connection.id);
+            if (encoded != null) _ConnectionCredentials.decode(encoded);
+            previousCredentials[connection.id] = encoded;
+          }
+          try {
+            for (final connection in ordered) {
+              attemptedIds.add(
+                connection.id,
+              ); // a failed ACK may follow a real write
+              await _writeAndVerifyCredentials(
+                connection.id,
+                _ConnectionCredentials.fromConnection(connection),
+              );
+            }
+            for (final connection in removed) {
+              attemptedIds.add(connection.id);
+              await _writeAndVerifyCredentials(
+                connection.id,
+                const _ConnectionCredentials(
+                  apiKey: '',
+                  dashboardPassword: null,
+                ),
+              );
+            }
+            metadataAttempted = true;
+            await _saveAll(next);
+          } catch (_) {
+            var restored = true;
+            for (final id in attemptedIds.toList().reversed) {
+              try {
+                await _writeAndVerifyEncodedCredentials(
+                  id,
+                  previousCredentials[id],
+                );
+              } catch (_) {
+                restored = false;
+              }
+            }
+            if (metadataAttempted) {
+              try {
+                final saved = previousMetadata == null
+                    ? await prefs.remove(_key)
+                    : await prefs.setStringList(_key, previousMetadata);
+                if (!saved) restored = false;
+              } catch (_) {
+                restored = false;
+              }
+            }
+            throw CredentialStorageException(
+              restored
+                  ? 'Connection import could not be saved safely. Previous configuration was preserved.'
+                  : 'Connection import failed and the previous configuration could not be fully restored. Retry after checking secure storage.',
+            );
+          }
+        },
       );
-    }
-    for (final connection in removed) {
-      await _writeAndVerifyCredentials(
-        connection.id,
-        const _ConnectionCredentials(apiKey: '', dashboardPassword: null),
-      );
-    }
-
-    await _saveAll(next);
+      await _deleteUnreferencedCertificates(current, next);
+    });
   }
 
   Future<void> saveConnection(
@@ -290,7 +468,8 @@ class ConnectionManager {
     String? dashboardUsername,
     String? dashboardPassword,
     String? gatewayProfile,
-  }) async {
+    ClientCertificateConfig? clientCertificate,
+  }) => _withSavedListTransaction([], () async {
     final normalized = SavedConnection.normalizeHostAndPort(host, port);
     final profile = gatewayProfile?.trim();
     final conn = SavedConnection(
@@ -308,8 +487,10 @@ class ConnectionManager {
       dashboardUsername: dashboardUsername,
       dashboardPassword: dashboardPassword,
       gatewayProfile: profile == null || profile.isEmpty ? null : profile,
+      clientCertificate: clientCertificate,
     );
-    final current = getConnections();
+    final current = await _loadConnectionsWithSecrets();
+    final previousConnections = List<SavedConnection>.of(current);
     current.insert(0, conn);
     await _commitCredentialAndMetadata(
       connectionId: conn.id,
@@ -319,8 +500,9 @@ class ConnectionManager {
       ),
       nextCredentials: _ConnectionCredentials.fromConnection(conn),
       connections: current,
+      previousConnections: previousConnections,
     );
-  }
+  });
 
   /// Updates all editable fields on an existing connection while preserving its
   /// id and list position. Empty optional strings clear their saved values.
@@ -338,14 +520,17 @@ class ConnectionManager {
     String? dashboardUsername,
     String? dashboardPassword,
     String? gatewayProfile,
-  }) async {
-    final current = getConnections();
+    ClientCertificateConfig? clientCertificate,
+    bool clearClientCertificate = false,
+  }) => _withSavedListTransaction([connId], () async {
+    final current = await _loadConnectionsWithSecrets();
     final idx = current.indexWhere((c) => c.id == connId);
     if (idx < 0) return;
 
     final previousCredentials = _ConnectionCredentials.fromConnection(
       current[idx],
     );
+    final previousConnections = List<SavedConnection>.of(current);
 
     final normalized = SavedConnection.normalizeHostAndPort(host, port);
     final gateway = gatewayPrefix?.trim();
@@ -380,14 +565,17 @@ class ConnectionManager {
       clearDashboardPassword: dashPass != null && dashPass.isEmpty,
       gatewayProfile: profile == null || profile.isEmpty ? null : profile,
       clearGatewayProfile: profile != null && profile.isEmpty,
+      clientCertificate: clientCertificate,
+      clearClientCertificate: clearClientCertificate,
     );
     await _commitCredentialAndMetadata(
       connectionId: connId,
       previousCredentials: previousCredentials,
       nextCredentials: _ConnectionCredentials.fromConnection(current[idx]),
       connections: current,
+      previousConnections: previousConnections,
     );
-  }
+  });
 
   /// Updates the dashboard port + basic-auth credentials on an existing
   /// connection. Empty strings clear the corresponding field.
@@ -399,13 +587,14 @@ class ConnectionManager {
     String? gatewayPrefix,
     String? dashboardPrefix,
     bool? dashboardProxied,
-  }) async {
-    final current = getConnections();
+  }) => _withSavedListTransaction([connId], () async {
+    final current = await _loadConnectionsWithSecrets();
     final idx = current.indexWhere((c) => c.id == connId);
     if (idx < 0) return;
     final previousCredentials = _ConnectionCredentials.fromConnection(
       current[idx],
     );
+    final previousConnections = List<SavedConnection>.of(current);
     final u = username.trim();
     final p = password.trim();
     final gateway = gatewayPrefix?.trim();
@@ -430,42 +619,113 @@ class ConnectionManager {
       previousCredentials: previousCredentials,
       nextCredentials: _ConnectionCredentials.fromConnection(current[idx]),
       connections: current,
+      previousConnections: previousConnections,
     );
-  }
+  });
 
-  Future<void> updateApiKey(String connId, String apiKey) async {
-    final current = getConnections();
-    final idx = current.indexWhere((c) => c.id == connId);
-    if (idx < 0) return;
-    final previousCredentials = _ConnectionCredentials.fromConnection(
-      current[idx],
-    );
-    current[idx] = current[idx].copyWith(apiKey: apiKey);
-    await _commitCredentialAndMetadata(
-      connectionId: connId,
-      previousCredentials: previousCredentials,
-      nextCredentials: _ConnectionCredentials.fromConnection(current[idx]),
-      connections: current,
-    );
-  }
+  Future<void> updateApiKey(String connId, String apiKey) =>
+      _withSavedListTransaction([connId], () async {
+        final current = await _loadConnectionsWithSecrets();
+        final idx = current.indexWhere((c) => c.id == connId);
+        if (idx < 0) return;
+        final previousCredentials = _ConnectionCredentials.fromConnection(
+          current[idx],
+        );
+        final previousConnections = List<SavedConnection>.of(current);
+        current[idx] = current[idx].copyWith(apiKey: apiKey);
+        await _commitCredentialAndMetadata(
+          connectionId: connId,
+          previousCredentials: previousCredentials,
+          nextCredentials: _ConnectionCredentials.fromConnection(current[idx]),
+          connections: current,
+          previousConnections: previousConnections,
+        );
+      });
 
-  Future<void> deleteConnection(String id) async {
-    final current = getConnections();
-    final index = current.indexWhere((connection) => connection.id == id);
-    if (index < 0) return;
-    final previousCredentials = _ConnectionCredentials.fromConnection(
-      current[index],
-    );
-    current.removeWhere((c) => c.id == id);
-    await _commitCredentialAndMetadata(
-      connectionId: id,
-      previousCredentials: previousCredentials,
-      nextCredentials: const _ConnectionCredentials(
-        apiKey: '',
-        dashboardPassword: null,
-      ),
-      connections: current,
-    );
+  Future<void> deleteConnection(String id) =>
+      _withSavedListTransaction([id], () async {
+        final current = await _loadConnectionsWithSecrets();
+        final index = current.indexWhere((connection) => connection.id == id);
+        if (index < 0) return;
+        final previousCredentials = _ConnectionCredentials.fromConnection(
+          current[index],
+        );
+        final previousConnections = List<SavedConnection>.of(current);
+        current.removeWhere((c) => c.id == id);
+        await _commitCredentialAndMetadata(
+          connectionId: id,
+          previousCredentials: previousCredentials,
+          nextCredentials: const _ConnectionCredentials(
+            apiKey: '',
+            dashboardPassword: null,
+          ),
+          connections: current,
+          previousConnections: previousConnections,
+        );
+      });
+
+  /// Recovery resets metadata only, including corrupt legacy metadata. Native
+  /// consent must be revoked even if its saved ID cannot be decoded anymore.
+  Future<void> resetConnections() => _withSavedListTransaction([], () async {
+    final ids = <String>{};
+    try {
+      ids.addAll(_connectionsFromMaps(_readConnectionMaps()).map((c) => c.id));
+    } on CredentialStorageException {
+      // The sealed native binding is independent of damaged list metadata.
+    }
+    if (_nativePushSupported) {
+      final state = await _pushChannel.invokeMapMethod<String, dynamic>(
+        'snapshot',
+      );
+      final bound = state?['connection'];
+      if (bound is String && bound.isNotEmpty) ids.add(bound);
+    }
+    await _withConnectionMutation(ids, () async {
+      final previous = prefs.get(_key);
+      try {
+        if (!await prefs.remove(_key)) {
+          throw const CredentialStorageException(
+            'Saved connections could not be reset safely.',
+          );
+        }
+      } catch (_) {
+        await _restoreMetadata(previous);
+        rethrow;
+      }
+    });
+  });
+
+  Future<T> _withSavedListTransaction<T>(
+    Iterable<String> pendingIds,
+    Future<T> Function() action,
+  ) {
+    // Fence queued targeted edits synchronously, including initially-off starts.
+    // Import removals are discovered only after owning the current list.
+    final lease = ConnectionMutationBarrier.begin(pendingIds);
+    final previous = _savedListTail;
+    final completed = Completer<void>();
+    final tail = completed.future;
+    _savedListTail = tail;
+    Future<T> perform() async {
+      try {
+        if (previous != null) await previous;
+        try {
+          await prefs.reload();
+        } catch (_) {
+          throw const CredentialStorageException(
+            'Saved connection metadata could not be read safely.',
+          );
+        }
+        return await action();
+      } finally {
+        lease.release();
+        // A completed Future must not retain its disposed fake-async zone.
+        if (identical(_savedListTail, tail)) _savedListTail = null;
+        completed.complete();
+      }
+    }
+
+    return perform();
   }
 
   List<Map<String, dynamic>> _readConnectionMaps() {
@@ -494,28 +754,90 @@ class ConnectionManager {
   SavedConnection _hydrateFromCachedCredentials(SavedConnection connection) {
     final encoded = _credentialStore.readCached(_credentialKey(connection.id));
     if (encoded == null) return connection;
-    final credentials = _ConnectionCredentials.decode(encoded);
+    return _applyCredentials(
+      connection,
+      _ConnectionCredentials.decode(encoded),
+    );
+  }
+
+  /// Attaches secrets held in the secure store to [connection].
+  ///
+  /// The client-key password is runtime-only for [ClientCertificateConfig]'s
+  /// serializer, so it must be re-attached on every read.
+  SavedConnection _applyCredentials(
+    SavedConnection connection,
+    _ConnectionCredentials credentials,
+  ) {
+    final certificate = connection.clientCertificate;
     return connection.copyWith(
       apiKey: credentials.apiKey,
       dashboardPassword: credentials.dashboardPassword,
       clearDashboardPassword: credentials.dashboardPassword == null,
+      clientCertificate: certificate?.copyWith(
+        privateKeyPassword: credentials.clientKeyPassword,
+        clearPrivateKeyPassword: credentials.clientKeyPassword == null,
+      ),
     );
   }
 
-  /// Revoke native push authority before editing/removing an account, including
-  /// while a registration/confirmation is still in flight. No push secret is
-  /// copied into connection metadata or backup/export payloads.
-  Future<void> _invalidateMobilePushAuthority(String connectionId) async {
-    if (kIsWeb || !Platform.isAndroid) return;
+  /// Own the full mutation, not just a one-shot invalidation while consent may
+  /// still be off. Begin synchronously before any await; release only after the
+  /// transaction/rollback and the matching native lease have settled. The
+  /// injected platform boundary lets host tests exercise the actual IPC.
+  Future<void> _withConnectionMutation(
+    Iterable<String> connections,
+    Future<void> Function() action,
+  ) async {
+    final lease = ConnectionMutationBarrier.begin(connections);
+    final args = {
+      'connections': lease.connections.toList(),
+      'mutation': _uuid.v4(),
+    };
+    final native = _nativePushSupported;
     try {
-      await const MethodChannel(
-        'com.hermesagent.hermes_android/mobile_push',
-      ).invokeMethod<void>('connectionChanged', {'connection': connectionId});
-    } catch (_) {
-      throw const CredentialStorageException(
-        'Native push consent could not be invalidated safely. Retry the connection change.',
-      );
+      if (native) {
+        try {
+          await finishPendingMobilePushChanges();
+          await _pushChannel.invokeMethod<void>('beginConnectionChange', args);
+        } catch (_) {
+          throw const CredentialStorageException(
+            'Native push consent could not be invalidated safely. Retry the connection change.',
+          );
+        }
+      }
+      await action();
+    } finally {
+      try {
+        // Idempotent even if begin's reply was lost after native revocation.
+        if (native) {
+          try {
+            await _finishMobilePushChange(args);
+          } catch (_) {
+            throw const CredentialStorageException(
+              'Native push account change could not be completed safely. Retry the connection change.',
+            );
+          }
+        }
+      } finally {
+        lease.release();
+      }
     }
+  }
+
+  /// Complete only terminal native leases whose acknowledgement was lost.
+  /// Called before fresh consent as well as before another account transaction.
+  Future<void> finishPendingMobilePushChanges() async {
+    if (!_nativePushSupported) return;
+    for (final args in _pendingPushMutationEnds.values.toList()) {
+      await _finishMobilePushChange(args);
+    }
+  }
+
+  static Future<void> _finishMobilePushChange(Map<String, dynamic> args) async {
+    final mutation = args['mutation'] as String;
+    _pendingPushMutationEnds[mutation] = args;
+    await _pushChannel.invokeMethod<void>('endConnectionChange', args);
+    _pendingPushMutationEnds.remove(mutation);
   }
 
   Future<void> _commitCredentialAndMetadata({
@@ -523,30 +845,98 @@ class ConnectionManager {
     required _ConnectionCredentials previousCredentials,
     required _ConnectionCredentials nextCredentials,
     required List<SavedConnection> connections,
+    required List<SavedConnection> previousConnections,
   }) async {
-    await _invalidateMobilePushAuthority(connectionId);
-    try {
-      await _writeAndVerifyCredentials(connectionId, nextCredentials);
-      await _saveAll(connections);
-    } catch (_) {
+    await _withConnectionMutation([connectionId], () async {
       try {
-        await _writeAndVerifyCredentials(connectionId, previousCredentials);
+        await _writeAndVerifyCredentials(connectionId, nextCredentials);
+        await _saveAll(connections);
       } catch (_) {
-        // The caller still receives a generic fail-closed error. Never attach
-        // platform errors because they may include sensitive storage details.
+        try {
+          await _writeAndVerifyCredentials(connectionId, previousCredentials);
+        } catch (_) {
+          // Never attach platform errors: they may include storage secrets.
+        }
+        throw const CredentialStorageException(
+          'Connection credentials could not be saved safely.',
+        );
       }
-      throw const CredentialStorageException(
-        'Connection credentials could not be saved safely.',
-      );
+    });
+    // Only now that the metadata is committed is an old identity provably
+    // unreferenced. A failed save above leaves every existing key file in
+    // place, preserving the still-referenced identity.
+    await _deleteUnreferencedCertificates(previousConnections, connections);
+  }
+
+  /// Reconciles released editor/import files against physical saved metadata.
+  ///
+  /// Share the list owner with account writes, including the reference read and
+  /// collection. A failed save may have committed; unknown reachability must
+  /// retain files. This best-effort cleanup never replaces the mutation error.
+  Future<void> cleanupUnreferencedCertificates() async {
+    try {
+      await _withSavedListTransaction([], () async {
+        final connections = _connectionsFromMaps(_readConnectionMaps());
+        await _certificateFiles.deleteUnreferenced(
+          _certificateDirectories(connections),
+        );
+      });
+    } catch (_) {
+      // Retry collection after a later successful physical metadata read.
     }
+  }
+
+  /// Removes certificate/key files no longer referenced by any connection.
+  ///
+  /// Runs only after a successful commit and is best-effort: storage cleanup
+  /// must never turn a saved connection into a reported failure.
+  Future<void> _deleteUnreferencedCertificates(
+    List<SavedConnection> before,
+    List<SavedConnection> after,
+  ) async {
+    final beforeDirs = _certificateDirectories(before);
+    final afterDirs = _certificateDirectories(after);
+    if (beforeDirs.length == afterDirs.length &&
+        beforeDirs.containsAll(afterDirs)) {
+      return;
+    }
+    try {
+      await _certificateFiles.deleteUnreferenced(afterDirs);
+    } catch (_) {
+      // Leftover files are harmless; the connection change already succeeded.
+    }
+  }
+
+  static Set<String> _certificateDirectories(
+    List<SavedConnection> connections,
+  ) {
+    return <String>{
+      for (final connection in connections)
+        if (connection.clientCertificate case final certificate?)
+          certificate.directoryPath,
+    };
+  }
+
+  static bool _hasLegacyCertificatePassword(Map<String, dynamic> map) {
+    final certificate = map['client_certificate'];
+    if (certificate is! Map) return false;
+    return certificate.containsKey('private_key_password');
   }
 
   Future<void> _writeAndVerifyCredentials(
     String connectionId,
     _ConnectionCredentials credentials,
+  ) => _writeAndVerifyEncodedCredentials(
+    connectionId,
+    credentials.isEmpty ? null : credentials.encode(),
+  );
+
+  Future<void> _writeAndVerifyEncodedCredentials(
+    String connectionId,
+    String? encoded,
   ) async {
     final key = _credentialKey(connectionId);
-    if (credentials.isEmpty) {
+    if (encoded == null) {
       await _credentialStore.delete(key);
       final readBack = await _credentialStore.read(key);
       if (readBack != null) {
@@ -557,7 +947,6 @@ class ConnectionManager {
       return;
     }
 
-    final encoded = credentials.encode();
     await _credentialStore.write(key, encoded);
     final readBack = await _credentialStore.read(key);
     if (readBack != encoded) {
@@ -568,6 +957,7 @@ class ConnectionManager {
   }
 
   Future<void> _saveAll(List<SavedConnection> list) async {
+    final previous = prefs.getStringList(_key);
     try {
       final saved = await prefs.setStringList(
         _key,
@@ -578,13 +968,34 @@ class ConnectionManager {
           'Connection metadata could not be saved safely.',
         );
       }
-    } on CredentialStorageException {
-      rethrow;
     } catch (_) {
+      await _restoreMetadata(previous);
       throw const CredentialStorageException(
         'Connection metadata could not be saved safely.',
       );
     }
+  }
+
+  Future<void> _restoreMetadata(Object? previous) async {
+    try {
+      switch (previous) {
+        case null:
+          await prefs.remove(_key);
+        case List<String>():
+          await prefs.setStringList(_key, previous);
+        case String():
+          await prefs.setString(_key, previous);
+        case bool():
+          await prefs.setBool(_key, previous);
+        case int():
+          await prefs.setInt(_key, previous);
+        case double():
+          await prefs.setDouble(_key, previous);
+      }
+    } catch (_) {
+      // Reload after rollback/ACK loss: optimistic metadata is not authority.
+    }
+    await prefs.reload();
   }
 
   static String _credentialKey(String connectionId) {
@@ -661,10 +1072,11 @@ class ApiClient {
     required String baseUrl,
     required String apiKey,
     String pathPrefix = '',
+    ClientCertificateConfig? clientCertificate,
     http.Client? httpClient,
   }) : _apiKey = apiKey,
        baseUrl = SavedConnection.joinBaseUrl(baseUrl, pathPrefix),
-       _http = httpClient ?? _freshClient();
+       _http = httpClient ?? _freshClient(clientCertificate);
 
   /// Builds a client that does not pool keep-alive sockets.
   ///
@@ -673,9 +1085,8 @@ class ApiClient {
   /// then hangs). Home/tablet/LAN gateways are cheap to reconnect to, so a
   /// fresh TCP connection per request is a fair price for never wedging the
   /// session list on a stale socket.
-  static http.Client _freshClient() {
-    final io = HttpClient()..idleTimeout = Duration.zero;
-    return IOClient(io);
+  static http.Client _freshClient(ClientCertificateConfig? clientCertificate) {
+    return const TlsClientFactory().createRestClient(clientCertificate);
   }
 
   Map<String, String> get _headers => {
@@ -724,17 +1135,62 @@ class ApiClient {
     return page.sessions;
   }
 
-  /// Fetches one session by exact id, paging through the list until it is
-  /// found: a notification may name a session older than the first page.
-  Future<Session?> getSessionById(String sessionId) async {
+  /// Resolves an id or compression root to the visible canonical session.
+  /// A notification or persisted Activity row may predate the current tip.
+  /// [canContinue] fences each page, not just the final result. Notification
+  /// navigation uses it to revoke captured credentials/consent while a request
+  /// is suspended; other callers retain the original paging behaviour.
+  /// [isCurrent] rechecks synchronous lifetime/configuration authority after
+  /// every await, including the asynchronous continuation fence itself.
+  Future<Session?> getSessionById(
+    String sessionId, {
+    Future<bool> Function()? canContinue,
+    bool Function()? isCurrent,
+  }) async {
+    const pageSize = 50;
     var offset = 0;
+    var pinBound = 0;
+    var zeroNewPages = 0;
+    final seen = <String>{};
+    Session? exact;
     while (true) {
-      final result = await getSessionsPage(limit: 50, offset: offset);
+      if (canContinue != null && !await canContinue()) return null;
+      if (isCurrent != null && !isCurrent()) return null;
+      final result = await getSessionsPage(limit: pageSize, offset: offset);
+      if (isCurrent != null && !isCurrent()) return null;
+      if (canContinue != null && !await canContinue()) return null;
+      if (isCurrent != null && !isCurrent()) return null;
+      final continuations =
+          result.sessions
+              .where(
+                (session) =>
+                    session.lineageRootId == sessionId &&
+                    session.id != sessionId,
+              )
+              .toList()
+            ..sort((a, b) => b.lastActive.compareTo(a.lastActive));
+      if (continuations.isNotEmpty) return continuations.first;
+      var newRows = 0;
       for (final session in result.sessions) {
-        if (session.id == sessionId) return session;
+        if (seen.add(session.id)) newRows++;
+        if (session.id == sessionId) {
+          exact = session;
+          if (session.lineageRootId != null &&
+              session.lineageRootId != sessionId) {
+            return session;
+          }
+        }
       }
-      if (!result.hasMore || result.sessions.isEmpty) return null;
-      offset += result.sessions.length;
+      // A pin can back-fill an obsolete root before its current tip's window.
+      // Keep it as fallback, not proof that the continuation does not exist.
+      if (!result.hasMore && result.sessions.length < pageSize) return exact;
+      final pins = result.sessions.where((session) => session.pinned).length;
+      if (pins > pinBound) pinBound = pins;
+      zeroNewPages = newRows == 0 ? zeroNewPages + 1 : 0;
+      if (zeroNewPages >= (pinBound == 0 ? 1 : pinBound ~/ pageSize + 1)) {
+        return exact;
+      }
+      offset += pageSize;
     }
   }
 
@@ -780,6 +1236,43 @@ class ApiClient {
       throw const FormatException('Gateway returned no saved session title');
     }
     return saved['title'] as String;
+  }
+
+  /// Persists a server-owned archive flag and verifies the exact target.
+  /// Neither a sparse/mismatched PATCH response nor a failed read-back is
+  /// reported as success; callers keep their current rows and offer retry.
+  Future<bool> setSessionArchived({
+    required String sessionId,
+    required bool archived,
+  }) async {
+    if (sessionId.trim().isEmpty) {
+      throw ArgumentError.value(sessionId, 'sessionId', 'must not be blank');
+    }
+    final encodedId = Uri.encodeComponent(sessionId);
+    final response = await _http
+        .patch(
+          Uri.parse('$baseUrl/api/sessions/$encodedId'),
+          headers: _headers,
+          body: jsonEncode({'archived': archived}),
+        )
+        .timeout(requestTimeout);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('HTTP ${response.statusCode}: ${response.body}');
+    }
+    final data = jsonDecode(response.body);
+    final saved = data is Map ? data['session'] : null;
+    if (saved is! Map ||
+        saved['id'] != sessionId ||
+        saved['archived'] != archived) {
+      throw const FormatException(
+        'Gateway returned no confirmed archive state',
+      );
+    }
+    final confirmed = await getSession(sessionId);
+    if (confirmed['id'] != sessionId || confirmed['archived'] != archived) {
+      throw const FormatException('Gateway archive read-back did not match');
+    }
+    return archived;
   }
 
   // ── Messages ─────────────────────────────────────────────────────────
@@ -1339,6 +1832,14 @@ class DashboardHttpException implements Exception {
   String toString() => 'HTTP $statusCode';
 }
 
+/// A bounded native preview/download exceeded its caller's memory budget.
+class DownloadSizeLimitException implements Exception {
+  const DownloadSizeLimitException();
+
+  @override
+  String toString() => 'DownloadSizeLimitException';
+}
+
 /// Client for the Hermes Dashboard REST API.
 ///
 /// Three auth modes, picked by proxy configuration and supplied credentials:
@@ -1363,7 +1864,6 @@ class DashboardClient {
   final String? _username;
   final String? _password;
   final String? _gatewayProfile;
-  String? get gatewayProfile => _gatewayProfile;
   String? _token;
   String? _cookie;
   int _authGeneration = 0;
@@ -1374,6 +1874,9 @@ class DashboardClient {
   Future<String>? _tokenInFlight;
 
   String get baseUrl => _baseUrl;
+
+  /// Selected connection profile; generic API helpers deliberately do not add it.
+  String? get gatewayProfile => _gatewayProfile;
 
   bool get _usesPasswordAuth =>
       (_username?.isNotEmpty ?? false) && (_password?.isNotEmpty ?? false);
@@ -1387,6 +1890,8 @@ class DashboardClient {
     String? username,
     String? password,
     String? gatewayProfile,
+    ClientCertificateConfig? clientCertificate,
+    TlsClientFactory tlsClientFactory = const TlsClientFactory(),
     http.Client? httpClient,
   }) : _proxied = proxied,
        _username = username,
@@ -1398,7 +1903,8 @@ class DashboardClient {
          '${useHttps ? 'https' : 'http'}://$host:$port',
          pathPrefix,
        ),
-       _http = httpClient ?? http.Client();
+       _http =
+           httpClient ?? tlsClientFactory.createRestClient(clientCertificate);
 
   /// Clears cached auth only when the failed request used the current auth
   /// generation. Concurrent stale 401s therefore cannot invalidate a newer
@@ -1585,24 +2091,64 @@ class DashboardClient {
     String endpoint, {
     Map<String, String>? queryParameters,
     bool retried = false,
+    int? maxBytes,
   }) async {
+    if (maxBytes != null && maxBytes <= 0) {
+      throw ArgumentError.value(maxBytes, 'maxBytes', 'must be positive');
+    }
     final authGeneration = _authGeneration;
     final headers = await _authHeaders();
     final uri = Uri.parse(
       '$_baseUrl/api/$endpoint',
     ).replace(queryParameters: queryParameters);
-    final res = await _http
-        .get(uri, headers: headers)
-        .timeout(ApiClient.requestTimeout);
+    final http.Response res;
+    if (maxBytes == null) {
+      res = await _http
+          .get(uri, headers: headers)
+          .timeout(ApiClient.requestTimeout);
+    } else {
+      final request = http.Request('GET', uri)..headers.addAll(headers);
+      final response = await _http
+          .send(request)
+          .timeout(ApiClient.requestTimeout);
+      // Apply the budget to the stream, not after buffering the whole file.
+      // Error bodies are unnecessary; discard them before re-authentication.
+      if (response.statusCode != 200) {
+        final subscription = response.stream.listen((_) {});
+        await subscription.cancel();
+        res = http.Response('', response.statusCode, headers: response.headers);
+      } else {
+        if ((response.contentLength ?? 0) > maxBytes) {
+          final subscription = response.stream.listen((_) {});
+          await subscription.cancel();
+          throw const DownloadSizeLimitException();
+        }
+        final bytes = BytesBuilder(copy: false);
+        await for (final chunk in response.stream.timeout(
+          ApiClient.requestTimeout,
+        )) {
+          if (bytes.length + chunk.length > maxBytes) {
+            throw const DownloadSizeLimitException();
+          }
+          bytes.add(chunk);
+        }
+        res = http.Response.bytes(
+          bytes.takeBytes(),
+          response.statusCode,
+          headers: response.headers,
+        );
+      }
+    }
     if (res.statusCode == 401 && !retried) {
       _resetAuth(ifGeneration: authGeneration);
       return apiGetBytes(
         endpoint,
         queryParameters: queryParameters,
         retried: true,
+        maxBytes: maxBytes,
       );
     }
-    if (res.statusCode != 200) throw Exception('HTTP ${res.statusCode}');
+    if (res.statusCode != 200) throw DashboardHttpException(res.statusCode);
     return res;
   }
 
@@ -1659,16 +2205,24 @@ class DashboardClient {
   /// semantics as the live list can repeat rows across pages, and an
   /// inflated `all.length >= total` would stop before every offset
   /// window has been read, truncating the archive. Rows are deduplicated
-  /// by session id so repeats never surface twice. [maxPages] is the
-  /// explicit safety cap: if it is reached while the list was not
-  /// exhausted the read throws rather than silently returning a partial
-  /// archive — callers degrade honestly on the error instead of showing
-  /// a truncated list as complete.
+  /// by session id so repeats never surface twice. [maxPages] is an optional
+  /// safety cap. A progressive browser can omit it, retain successful pages,
+  /// and cancel when its owner is disposed without truncating old history.
   Future<List<Session>> getArchivedSessions({
     int pageSize = 100,
-    int maxPages = 20,
+    int? maxPages = 200,
+    int? firstPageSize,
     String? gatewayProfile,
+    void Function(List<Session>)? onProgress,
+    bool Function()? shouldContinue,
+    bool Function()? isCancelled,
   }) async {
+    if (pageSize < 1 ||
+        pageSize > 100 ||
+        (maxPages != null && maxPages < 1) ||
+        (firstPageSize != null && (firstPageSize < 1 || firstPageSize > 100))) {
+      throw ArgumentError('Invalid archived session paging limits');
+    }
     final all = <Session>[];
     final seenIds = <String>{};
     var offset = 0;
@@ -1678,19 +2232,26 @@ class DashboardClient {
     // (see the loop comment): max pins on any page bounds the pin set, and
     // k consecutive zero-new windows consume k*pageSize disjoint pins.
     var pinBound = 0;
-    var zeroNewPages = 0;
-    for (var page = 0; page < maxPages; page++) {
+    var zeroNewWindowRows = 0;
+    for (var page = 0; maxPages == null || page < maxPages; page++) {
+      if (shouldContinue?.call() == false || (isCancelled?.call() ?? false)) {
+        throw StateError('Archived session read cancelled');
+      }
+      final limit = page == 0 ? (firstPageSize ?? pageSize) : pageSize;
       final data = await apiGet(
         'sessions',
         queryParameters: {
           'archived': 'only',
           'order': 'recent',
-          'limit': '$pageSize',
+          'limit': '$limit',
           'offset': '$offset',
           if (gatewayProfile != null && gatewayProfile.isNotEmpty)
             'profile': gatewayProfile,
         },
       );
+      if (isCancelled?.call() ?? false) {
+        throw StateError('Archived session scan cancelled');
+      }
       // The dashboard router reports the filtered row count alongside the
       // page (`total = session_count(same scope)`), so the LIMIT/OFFSET
       // windows together cover exactly `total` rows — pins inside the
@@ -1712,7 +2273,11 @@ class DashboardClient {
           newRows++;
         }
       }
-      offset += pageSize;
+      if (shouldContinue?.call() == false || (isCancelled?.call() ?? false)) {
+        throw StateError('Archived session read cancelled');
+      }
+      if (newRows > 0) onProgress?.call(List.unmodifiable(all));
+      offset += limit;
       if (total != null) {
         if (offset >= total) {
           exhausted = true;
@@ -1727,14 +2292,13 @@ class DashboardClient {
       final pinsOnPage = rows.where((row) => row.pinned).length;
       if (pinsOnPage > pinBound) pinBound = pinsOnPage;
       if (rows.isEmpty || newRows == 0) {
-        zeroNewPages++;
-        final required = pinBound == 0 ? 1 : pinBound ~/ pageSize + 1;
-        if (zeroNewPages >= required) {
+        zeroNewWindowRows += limit;
+        if (zeroNewWindowRows > pinBound) {
           exhausted = true;
           break;
         }
       } else {
-        zeroNewPages = 0;
+        zeroNewWindowRows = 0;
       }
     }
     if (!exhausted) {

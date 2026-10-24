@@ -1,4 +1,4 @@
-# Encrypted UnifiedPush server companion
+# Encrypted mobile-push server companion
 
 `server/mobile-push` is a distributable, opt-in Hermes plugin named **mobile-push**.
 It is shipped with this Android repository but must be installed separately on the
@@ -15,6 +15,12 @@ operator's session database for writing or registers a real push endpoint.
   The integration suite was exercised against source revision `d923a5eb`: the real
   `PluginManager` loads the same physical source in two profile homes, preserves
   worker context, disposes each owner independently and reloads unchanged source.
+- Dashboard mounts must run Hermes' async `_plugin_route_secret_scope` dependency
+  and expose `agent.secret_scope.current_secret_scope_home()`. That host-stamped
+  home, resolved after profile-name validation, is the sole request resource scope.
+  An unscoped mount returns **503** before advertising capabilities or accessing a
+  store; older hosts lacking this seam cannot load this API. A home override or
+  process `HERMES_HOME` alone is not evidence of a vetted request scope.
 - A running Hermes dashboard/API backend that sets a **verified**
   `request.state.session.provider` and `.user_id`. A legacy/shared dashboard token,
   gateway JSON-RPC token, arbitrary bearer token or client identity header is **not**
@@ -30,9 +36,12 @@ operator's session database for writing or registers a real push endpoint.
 - Lifecycle hooks must load in every process that executes the subscribed turns.
   The dashboard API alone does not run turns or start the sender. Separate dashboard
   and gateway processes must use the same profile home and local SQLite files.
-- Android must explicitly opt in, have a compatible UnifiedPush distributor, provide
+- Android must explicitly opt in, use the built-in Google-backed or an external
+  compatible UnifiedPush distributor, provide
   genuine Web Push `p256dh`/`auth` keys and decrypt RFC8291 `aes128gcm` messages. An
-  endpoint URL alone is not an encrypted subscription. This is not an FCM service.
+  endpoint URL alone is not an encrypted subscription. The built-in distributor
+  uses standard VAPID Web Push against Google FCM without a Firebase-admin sender,
+  Firebase project or separate Google credentials on this server.
 - Outbound HTTPS/DNS and a valid trusted certificate at the push service. The mobile
   device also needs authenticated access to this API for confirmation/reconciliation.
   Local/LAN services need the exact operator exception described below. Production
@@ -98,10 +107,23 @@ Use principal values from the **trusted authentication provider**, not values
 claimed by a client. Session IDs must be exact durable `sessions.id` values in this
 profile's `state.db`; the plugin checks that database read-only. Missing grants deny
 access. `"*"` is not accepted in `session_ids`. Only an explicit operator
-`"owner_all_sessions": true` grants that principal owner-wide eligibility; clients
-must still submit a non-empty explicit list of durable session IDs. There is no
-automatic parent/child lineage, runtime-alias or sibling-profile inheritance.
-A new/rotated durable identity requires an updated operator grant and registration.
+`"owner_all_sessions": true` grants that principal owner-wide eligibility.
+Automatic clients enrol with `session_scope: "authorized"` and no `session_ids`:
+the live policy then covers current and future durable sessions without typing IDs
+on the phone. Restricted grants remain restricted, including after ACL changes.
+Legacy explicit subscriptions retain their fixed list and are never widened by
+migration. There is no automatic parent/child lineage, runtime-alias or
+sibling-profile inheritance. Under a restricted grant, a new durable identity
+still needs an operator ACL update; owner-wide authorised subscriptions include it
+automatically. An authorised subscription can be created before the first chat.
+
+For a personal-server owner, the principal entry can instead be:
+
+```json
+{"provider":"actual-verified-provider","user_id":"actual-verified-user-id","owner_all_sessions":true}
+```
+
+This is an explicit operator decision, not a permission the Android app grants itself.
 
 After review, set this file's `enabled` to true and explicitly enable `mobile-push`
 in the same profile's `plugins.enabled` (for example `hermes --profile default plugins
@@ -111,16 +133,25 @@ refuses automatic backend Python import from an untrusted project directory.
 `dashboard/manifest.json` declares `api: plugin_api.py`; its router is mounted at
 `/api/plugins/mobile-push`. The tiny hidden dashboard bundle intentionally adds no UI.
 
-Each API operation uses the home selected by Hermes' vetted request-local
-`?profile=<name>` dependency, including capabilities, registration, confirmation,
-revocation and events. Stores are keyed by that home; the API never derives a path
-from client headers or chooses a principal from the profile parameter. Omitting
-`profile` selects the dashboard's launch profile. Each lifecycle runtime separately
-captures its own immutable home and must be enabled in the selected turn process;
-selecting a profile in the API does not install hooks or start a worker for it.
-ACLs, endpoint exceptions, key path and enabled policy are re-read on operations
-and before sends; update this JSON by an atomic private-file replacement. Enabling
-after a disabled startup requires a lifecycle-process restart to acquire hooks/worker. Disabling the
+The lifecycle runtime captures its profile home immutably at registration. The
+dashboard router is mounted **once**, but resolves an immutable Profile for **each
+verified request**, from the host's vetted secret-scope home (including the launch
+profile). It never derives paths from the raw query, changes process environment,
+or keeps a shared mutable "current profile". Capabilities, durable-session reads,
+registration/confirmation, events and DELETE all use that request's policy and
+`plugin-data/mobile-push/outbox.sqlite3`. There is no router-wide store/worker cache;
+database connections are bounded and closed after each operation. DELETE remains
+available for owned revocations after push is disabled, only in the vetted home.
+
+Android explicitly forwards the saved connection's `gatewayProfile` as `profile`
+on **every** push request, including capabilities, confirmation, revoke, event
+paging and bounded authentication retries. The generic DashboardClient helpers do
+not add it automatically. Local connection-binding/epoch checks still invalidate
+held capability and handshake responses if the selected saved profile changes.
+
+ACLs, endpoint exceptions, key path and enabled policy are re-read on operations and before sends;
+update this JSON by an atomic private-file replacement. Enabling after a disabled
+startup requires a lifecycle-process restart to acquire hooks/worker. Disabling the
 JSON policy halts sends but keeps pending bounded state until expiry. Unload stops
 this owner's worker; a forced reload acquires a new owner, never another profile's
 worker. Managed Hermes interpreter replacement may require reinstalling these Python
@@ -145,6 +176,49 @@ Unspecified, multicast and mapped/transition addresses remain refused. Tests use
 explicit `receiver.example.test` → `127.0.0.1` exception and a generated test-only CA;
 that resolver fixture/CA injection is not a production setting.
 
+## Registration fence upgrade
+
+Deploy client and server together, draining/restarting **all** dashboard and lifecycle
+processes on this source. Do not leave old code serving writes against the migrated
+SQLite database. No live upgrade/deployment is performed by these changes.
+
+The server adds `registration_revision INTEGER NOT NULL DEFAULT 0` transactionally.
+Existing active/pending rows are moved once to `upgrade_required`: generation advances,
+endpoint/keys/proof and queued deliveries are cleared, and the installation/owner and
+revision floor are retained. An upgraded client's higher revision plus fresh nonce
+can register that same installation and complete a fresh encrypted proof. Revoked
+rows stay terminal, including across migration/restart. No revision or generation is
+reset; tombstones are not pruned. Old clients' revision-less PUTs are rejected (422),
+and upgraded clients reject a capabilities response without `registration_fence:1`
+before requesting permission. Old pending proofs cannot activate after migration.
+
+The revision comparison and registration update share `BEGIN IMMEDIATE`, after
+external validation. Holding an old handler in DNS before commit, then activating a
+new revision and releasing the old handler, must leave **all** new authority/events/
+outbox unchanged. Closing the old TCP connection does not establish cancellation.
+Lost post-commit acknowledgements still use native journal/revision recovery; this
+pre-commit fence is separate from discarding stale Dart callbacks.
+
+DELETE of an as-yet-uncommitted installation creates an owned, terminal tombstone
+rather than returning 404. This also fences a first PUT whose handler commits after
+disable. Existing-owner revocation stays available after operator grants are removed;
+new tombstones require an admitted principal and available registration capacity
+(429 leaves revocation explicitly pending on Android; no successful DELETE is
+reported without a tombstone). A later re-enable/scope change uses a
+new installation, never revives the revoked ID even with a larger revision. Server
+404/410 delivery revocation likewise requires explicit disable/re-enable on Android.
+Tombstones count toward `max_registrations`; do not delete them to reclaim capacity
+while abandoned requests/credentials could still exist. Operators must provision
+capacity for consent churn; this implementation does not offer tombstone garbage
+collection or a cross-device revision-reset/recovery endpoint.
+
+The isolated fence verification completed **100 server tests** on Python 3.11.15
+against Hermes source `d923a5eb48`, including all three real-host tests and the eight
+open/abandoned-socket pre-commit interleavings. The paired client completed **62
+focused Dart push tests**, **1,721 full Flutter tests**, **28 native push JVM tests**,
+clean full static analysis and a debug APK build. These are local fixture/build
+results, not deployment or physical-distributor acceptance.
+
 ## Exact API contract (schema 1)
 
 All routes require the verified session object. Identity is only the tuple
@@ -155,7 +229,7 @@ Mutating JSON bodies are strict (extra fields denied), at most 32 KiB.
 ### `GET /api/plugins/mobile-push/capabilities`
 
 ```json
-{"schema":1,"transports":["webpush"],"vapid_public_key":"base64url-uncompressed-P256-public-key","enabled":true}
+{"schema":1,"registration_fence":1,"session_scope_modes":["explicit","authorized"],"transports":["webpush"],"vapid_public_key":"base64url-uncompressed-P256-public-key","enabled":true}
 ```
 
 Missing/disabled config or an ungranted verified principal yields `enabled:false`
@@ -164,11 +238,31 @@ Invalid private config/key yields generic 503 rather than leaking secret details
 
 ### `PUT /api/plugins/mobile-push/registrations/{installation_id}`
 
+Automatic clients send the following body. `authorized` is an explicit consent to
+the authenticated principal's current and future server-authorised durable chats;
+it does not grant access or override operator policy.
+
+```json
+{
+  "endpoint":"https://push-service.example.org/opaque-subscription-path",
+  "keys":{"p256dh":"real-base64url-65-byte-P256-public-key","auth":"real-base64url-16-byte-auth-secret"},
+  "registration_nonce":"fresh-client-base64url-random-nonce",
+  "registration_revision":1,
+  "event_kinds":["turn_done","turn_error","input","input_resolved"],
+  "session_scope":"authorized"
+}
+```
+
+Do not send `session_ids` with authorised scope, even an empty/null list. Conflicting
+fields and unknown modes are rejected. Legacy explicit clients omit `session_scope`
+(or set it to `explicit`) and retain the required non-empty list:
+
 ```json
 {
   "endpoint":"https://distributor.example.org/opaque-subscription-path",
   "keys":{"p256dh":"real-base64url-65-byte-P256-public-key","auth":"real-base64url-16-byte-auth-secret"},
   "registration_nonce":"fresh-client-base64url-random-nonce",
+  "registration_revision":1,
   "event_kinds":["turn_done","turn_error","input","input_resolved"],
   "session_ids":["exact-durable-session-id"]
 }
@@ -177,34 +271,42 @@ Invalid private config/key yields generic 503 rather than leaking secret details
 Returns HTTP 200:
 
 ```json
-{"generation":1,"status":"pending","registration_nonce":"fresh-client-base64url-random-nonce"}
+{"generation":1,"status":"pending","registration_nonce":"fresh-client-base64url-random-nonce","registration_revision":1}
 ```
 
 `installation_id` and session IDs are 1–200 ASCII characters from
 `A-Z a-z 0-9 _ . : @ -`. Use a globally unique random installation ID. The nonce is
 16–128 base64url characters; use fresh cryptographic randomness on **every** update.
-`event_kinds` has 1–4 entries from exactly the four values above; `session_ids` has
+`event_kinds` has 1–4 entries from exactly the four values above; explicit-mode `session_ids` has
 1–128 exact durable IDs; duplicate scopes are rejected. Keys are validated as a real
 P-256 point and a 16-byte auth secret, not merely plausible strings.
 
 An update, including endpoint/key/scope rotation, advances generation, requires a
-previously unused nonce, immediately returns to pending and invalidates
-all older queued deliveries/challenges. Generations are not reset after revocation.
+nonce different from the current one, immediately returns to pending and invalidates
+all older queued deliveries/challenges. `registration_revision` is a strict integer
+1–9007199254740991 and must exceed the stored high-water mark inside the authority
+write transaction (409 for equal/lower). Nonces have no ordering meaning. Revocation
+is terminal for an installation; new explicit consent must create a new random ID.
 An existing installation belonging to another principal returns 404. Operator ACL
 failure/non-durable scope is 403; malformed/unsafe subscription is 422; changed-body,
 revoked or superseded nonce replay is 409; capacity is 429. No wildcard/default
 session grant is inferred.
 
-An exact retry of the **current** nonce, endpoint, keys and ordered scope lists
-recovers the committed generation and current `pending`/`active` status, after all
-normal authentication, ACL, durable-session and endpoint checks. It does not
-activate anything or delete queued ordinary hints. An expired **pending** challenge
-is replaced by a fresh encrypted proof/event for the same generation; the old proof
-is invalidated. An unexpired proof is left unchanged. Nonce hashes are retained as
-per-installation tombstones across rotation/revocation, independently of event TTLs;
-this history grows with genuine registration updates and must not be pruned as an
-ordinary event-retention operation. Existing databases seed their current nonce on
-open; previously discarded history cannot be reconstructed.
+An exact replay of a committed PUT returns 409 because its ordinal is already
+consumed. It does not mutate authority or delete queued ordinary hints. Lost PUT
+or confirmation acknowledgements are recovered by the paired Android client's
+native write-ahead journal: it atomically advances its durable revision, rotates
+the nonce and performs a fresh encrypted handshake for the **same consented**
+endpoint/account/session scope. No permission or expanded-consent grant is inferred.
+The new generation invalidates old proofs and delivery authority; durable ordinary
+events remain available through the authenticated event feed.
+
+Nonce hashes are also retained as per-installation equality tombstones across
+rotation/revocation, independently of event TTLs. A previously consumed nonce cannot
+return even with a higher revision. They do not establish ordering: the monotonic
+revision comparison in the mutation transaction is what fences a delayed handler
+that never committed its nonce. Existing databases seed their current nonce on
+open; previously discarded nonce history cannot be reconstructed.
 
 The pending registration receives an **encrypted challenge hint** through its supplied
 endpoint/keys. Until confirmation it receives no ordinary turn/input hints. Merely
@@ -219,21 +321,20 @@ activate it.
 
 Returns `{"generation":1,"status":"active"}` only if the principal owns the current
 pending registration, generation is exact, the proof matches in constant time and
-its five-minute deadline/current ACL permit activation. An exact retry against the
-already-active same generation/proof recovers `active` even after the original
-challenge deadline: it performs no activation or queue deletion. The proof hash is
-retained until rotation/revocation for that recovery; no clear proof is returned by
-PUT, confirmation or events. Invalid, expired-pending, revoked or superseded
-confirmations return 409 (current ACL removal: 403). A late challenge can never
-reactivate a rotated/revoked generation. Challenge proof is stored hashed; the
-clear challenge is only in the private queued encrypted-push payload, cleared on
-successful send/confirmation/revocation/expiry.
+the configured challenge deadline/current ACL permit activation. Successful
+confirmation clears the proof hash. Invalid, expired, already-consumed, revoked or
+superseded confirmations return 409 (a pending proof with current ACL removal:
+403). Lost confirmation acknowledgements require the fresh fenced handshake above,
+not replay of an expired/consumed proof. No clear proof is returned by PUT,
+confirmation or events. Challenge proof is stored hashed; the clear challenge is
+only in the private queued encrypted-push payload and is cleared on successful
+send/confirmation/revocation/expiry.
 
 ### `DELETE /api/plugins/mobile-push/registrations/{installation_id}`
 
 Returns `{"generation":2,"status":"revoked"}` (the actual next generation).
 Revokes ownership's registration, clears endpoint/keys/challenge and invalidates its
-queue. Repeat deletes also advance generation. The owning verified principal may
+queue. Repeat deletes return the same terminal generation without changes. The owning verified principal may
 revoke after the operator disables push/removes its grant. Another principal gets
 404; no session gets 401. Tombstones retain ownership/generation to reject replay.
 
@@ -244,6 +345,14 @@ retry with bounded backoff. Already accepted push messages cannot be recalled, s
 Android must immediately revoke local consent and reject old generation/nonce hints.
 
 ### `GET /api/plugins/mobile-push/events?after=0&limit=100`
+
+Automatic clients must additionally send `installation_id` and its current active
+`generation`. These fields are required together. The server checks ownership,
+active generation, live ACL, durability, event kinds and stored registration scope;
+it echoes `installation_id`, integer `generation` and `session_scope` on every page.
+The client rejects any mismatched/missing echo before accepting that page. Pending,
+superseded or revoked generations cannot authorise event routing. Legacy unbound
+queries remain supported for older explicit clients, which retain their local list.
 
 ```json
 {
@@ -274,7 +383,32 @@ The authenticated events API is the routing authority; it is not an unlimited
 transcript or a proof that an old attention request still exists. After a retention
 window, missed hooks or connectivity loss, reconcile current authenticated chat state.
 
+## Consuming client/server protocol smoke test
+
+With Flutter dependencies fetched and the server test dependencies installed, run
+from the repository root:
+
+```sh
+MOBILE_PUSH_DART_SMOKE=1 python -m pytest -q -s \
+  server/mobile-push/tests/test_dart_contract_smoke.py
+```
+
+This opt-in test launches the production Dart `MobilePushApi` and `DashboardClient`
+over loopback TCP against the actual Python router/models/store/runtime. It checks
+authorised registration, future-chat events across cursor pages, generation-bound
+responses, bounded login retry, rotation and revocation. Its test subscriber decrypts
+real TLS Web Push and independently verifies VAPID. The password-cookie provider,
+fixed disposable profile and decrypted-proof handoff are fixture seams—not installed
+Hermes authentication, host profile resolution, Android connector or Google delivery.
+The test is skipped in ordinary Python runs unless explicitly enabled.
+
 ## Push payload, hooks and delivery semantics
+
+Database upgrades add a scope column defaulting to `explicit`; existing consent is
+never broadened to `authorized`. Scope changes require a new user opt-in, fresh
+installation and encrypted handshake. Endpoint renewal/recovery retains the selected
+scope. Live ACL removal and durable-session deletion suppress future sends and
+reconciliation; messages already accepted by a push service cannot be recalled.
 
 The JSON plaintext encrypted using RFC8291 `aes128gcm`, with RFC8292 VAPID auth:
 
@@ -355,20 +489,38 @@ checkout and its installed dependencies (these variables are read-only inputs):
 
 ```sh
 export HERMES_AGENT_SOURCE=/absolute/path/to/hermes-agent-source
-# Optional fallback site-packages for dependencies already in that selected environment:
-export HERMES_AGENT_SITE_PACKAGES=/absolute/path/to/hermes-environment/lib/python3.14/site-packages
+# Dependencies used by the inspected Hermes manager/loader on Python 3.11:
+uv pip install --python "$TMPDIR/mobile-push-tests/bin/python" ruamel.yaml python-dotenv rich
+# Optional fallback for dependencies already in a selected Hermes environment:
+# use the SAME Python minor version as the test interpreter, not a 3.14 site
+# directory with a 3.11 interpreter (compiled extensions are not interchangeable).
+export HERMES_AGENT_SITE_PACKAGES=/absolute/path/to/matching-hermes-environment/lib/python3.11/site-packages
 # Repeat the pytest command above with these variables set.
 ```
 
-Without a source checkout the host integration tests are explicitly skipped;
-the ordinary protocol/crypto tests still run. The host suite exercises one router
-mounted by real `_mount_one_plugin_api`, the real profile dependency/resolver,
-concurrent requests to two homes, and profile-bound lifecycle workers. A real Basic
-password-login/cookie middleware probe confirms and retries a challenge decrypted
-from an actual TLS loopback receiver. Recovery regressions cover lost PUT/confirm
-acknowledgements, server-store restart, client-persistence gaps, pending expiry,
-changed-body retries, policy removal and superseded/revoked nonce rejection.
-A Starlette TestClient/httpx deprecation warning is upstream, not a skipped test.
+No source checkout means the host integration tests are explicitly skipped;
+release/review verification requires the full suite with zero skips. The
+once-mounted real-dashboard regressions switch two disposable homes with opposite
+policies in both directions, distinct VAPID keys, colliding installation/session
+IDs, independent proofs/events/outboxes, disabled-profile revocation, policy/ACL
+reload and read-only durable-session checks. Each operation is also held across a
+concurrent request for the other home. A paired real PluginManager/worker test
+checks that each lifecycle owner's hooks, sends and teardown match the same files
+used by the once-mounted dashboard routes. Fixture authentication supplies the
+verified session; no test claims an installed provider automatically does so.
+
+The paired profile-scope revision was verified with **116 passed, zero skipped**
+on Python 3.11.15 against Hermes `d923a5eb`, including all 19 real-host tests. The
+ordinary crypto tests use an actual TLS loopback receiver. Earlier pre-profile
+baselines ran with 80 passed on both Python 3.14.7 and Python 3.11.15.
+The fenced protocol extends these with a real uvicorn/FastAPI/SQLite loopback test
+matrix: old pre-commit handler released after recovery, endpoint renewal, disable,
+or fresh consent, with both open and abandoned TCP connections. Snapshot assertions
+cover authority, events and outbox after another Store open/restart. Additional
+negative tests cover missing/coerced/equal/lower/overflow revisions, nonce ordering,
+terminal revoked IDs, and upgrade of the actual previous database schema. Test-only
+uvicorn is included in the `[test]` dependencies. A Starlette TestClient/httpx
+deprecation warning is upstream, not a skipped test.
 
 The receiver uses real pywebpush encryption, independently decrypts with the generated
 subscriber private key/auth secret, verifies the VAPID JWT signature/audience and

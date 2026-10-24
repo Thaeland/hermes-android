@@ -9,6 +9,31 @@ enum GatewayToolActivityPhase {
 /// Whether a tool time is a device-side observation or a durable result row.
 enum GatewayToolTimeSource { observed, storedResult }
 
+/// A late ID can identify the sole active anonymous call, never a new start or
+/// one of several same-name calls. Both transports use the same correlation.
+int toolActivityUpdateIndex(
+  List<GatewayToolActivity> activities,
+  GatewayToolActivity update,
+  String eventType,
+) {
+  if (update.toolId == null) return -1;
+  final known = activities.indexWhere((a) => a.toolId == update.toolId);
+  if (known >= 0) return known;
+  if (eventType == 'tool.start' ||
+      update.phase == GatewayToolActivityPhase.running) {
+    return -1;
+  }
+  final candidates = [
+    for (var i = 0; i < activities.length; i++)
+      if (!activities[i].isTerminal &&
+          activities[i].name.toLowerCase() == update.name.toLowerCase())
+        i,
+  ];
+  return candidates.length == 1 && activities[candidates.single].toolId == null
+      ? candidates.single
+      : -1;
+}
+
 /// Most recent evidenced time within a group, irrespective of row order.
 GatewayToolActivity? latestKnownToolActivity(
   Iterable<GatewayToolActivity> activities,

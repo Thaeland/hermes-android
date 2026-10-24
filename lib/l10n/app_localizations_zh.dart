@@ -9,8 +9,164 @@ class AppLocalizationsZh extends AppLocalizations {
   AppLocalizationsZh([String locale = 'zh']) : super(locale);
 
   @override
+  String get background_task_report => '后台任务';
+
+  @override
+  String get background_process_report => '后台进程';
+
+  @override
+  String get background_report_issues => '已报告问题，展开查看详情。';
+
+  @override
+  String get background_report_expand => '展开报告';
+
+  @override
+  String get background_report_collapse => '收起报告';
+
+  @override
+  String get saved_history_heading => 'Saved history';
+
+  @override
+  String get received_output_heading =>
+      'Received output — match to saved history unconfirmed';
+
+  @override
+  String get received_output_explanation =>
+      'This may also appear in saved history. The app cannot confirm a match.';
+
+  @override
+  String get local_prompt_context => 'Local prompt context';
+
+  @override
+  String get received_output_badge => 'Received · match unconfirmed';
+
+  @override
+  String get received_output_lifetime =>
+      'Received output is kept temporarily in this app session and may be shortened or removed as limits are reached. It may not be available after the app or connection is closed.';
+
+  @override
+  String get theme_palette => '颜色主题';
+
+  @override
+  String get theme_palette_gold => '金色';
+
+  @override
+  String get theme_palette_purple => '紫色';
+
+  @override
+  String get theme_palette_orange => '橙色';
+
+  @override
+  String get theme_palette_green => '绿色';
+
+  @override
+  String get theme_palette_blue => '蓝色';
+
+  @override
+  String get theme_palette_red => '红色';
+
+  @override
+  String get theme_palette_teal => '青绿色';
+
+  @override
+  String get theme_palette_pink => '粉色';
+
+  @override
+  String get theme_palette_indigo => '靛蓝色';
+
+  @override
+  String get theme_palette_cyan => '青色';
+
+  @override
+  String get assets_recent_subtitle => '查找 Hermes 在已保存的聊天中分享的文件';
+
+  @override
+  String get assets_scope_notice =>
+      '仅显示 Hermes 在已保存的回复中明确分享的已生成文件。这里只展示部分聊天历史，并非完整的文件或附件目录。引用的文件可能已不存在。';
+
+  @override
+  String get assets_download_limit =>
+      '文件仅在点按时加载。预览和下载的单个文件大小上限均为 25 MiB；更大的文件请通过仪表盘获取。';
+
+  @override
+  String get assets_search_hint => '搜索找到的文件或来源聊天';
+
+  @override
+  String get assets_all => '全部';
+
+  @override
+  String get assets_images => '图片';
+
+  @override
+  String get assets_audio => '音频';
+
+  @override
+  String get assets_video => '视频';
+
+  @override
+  String get assets_documents => '文档和其他文件';
+
+  @override
+  String get assets_empty => '在已扫描的消息中未找到资产';
+
+  @override
+  String get assets_empty_detail =>
+      '扫描更多聊天或更早的消息，以查看更早的历史。普通附件和未链接的文件不会在此建立索引。';
+
+  @override
+  String get assets_no_matches => '未找到匹配的资产';
+
+  @override
+  String get assets_load_more_chats => '扫描更多聊天';
+
+  @override
+  String get assets_load_older_messages => '扫描更早的消息';
+
+  @override
+  String get assets_load_failed => '部分历史记录无法读取。结果不完整。请检查仪表盘连接并重试。';
+
+  @override
+  String get assets_retry_failed => '重试读取失败的历史记录';
+
+  @override
+  String get assets_partial => '服务器报告历史记录不完整。请检查仪表盘后刷新。';
+
+  @override
+  String assets_scan_summary(int files, int chats) {
+    return '已扫描 $chats 个聊天，找到 $files 处文件引用';
+  }
+
+  @override
+  String assets_open_chat(String title) {
+    return '打开聊天：$title';
+  }
+
+  @override
+  String get assets_file_too_large => '此文件超出下载大小上限。请打开仪表盘进行下载。';
+
+  @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
       '一次性问题。将在 72 小时后自动归档；任何值得保留的内容都会被记住。';
+
+  @override
+  String get archive_chat => '归档聊天';
+
+  @override
+  String get unarchive_chat => '取消归档聊天';
+
+  @override
+  String get chat_archived => '聊天已归档';
+
+  @override
+  String get chat_unarchived => '聊天已取消归档';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return '无法更新聊天归档状态：$error';
+  }
+
+  @override
+  String get quick_chat_description => '一次性问题。';
 
   @override
   String get ai_full_text => 'AI + 全文';
@@ -119,7 +275,8 @@ class AppLocalizationsZh extends AppLocalizations {
   String get archived => '已归档';
 
   @override
-  String get archived_conversations_appear_here => '已归档的对话将显示在这里。';
+  String get archived_conversations_appear_here =>
+      '这里只显示已归档的对话。旧聊天仍保留在“所有聊天”中。';
 
   @override
   String get archived_quick_chats => '已归档的快速聊天';
@@ -153,9 +310,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get auto_device_default => '自动（设备默认）';
-
-  @override
-  String get auto_archives_after_72_hours => '72 小时后自动归档';
 
   @override
   String get automation => '自动化';
@@ -484,6 +638,16 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get cron => 'Cron';
+
+  @override
+  String get crons => 'Crons';
+
+  @override
+  String get cron_conversations_empty =>
+      'Conversations from scheduled jobs appear here, including older runs.';
+
+  @override
+  String get search_cron_conversations => 'Search cron conversations';
 
   @override
   String get cron_jobs => 'Cron 任务';
@@ -1847,6 +2011,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get trigger_now => '立即触发';
 
   @override
+  String get received_outcome_unknown => '本轮对话已结束 — 结果未确认';
+
+  @override
   String get turn_completed => '本轮对话已完成';
 
   @override
@@ -2485,6 +2652,45 @@ class AppLocalizationsZh extends AppLocalizations {
       '紧凑模式会去掉 You 和 Hermes 标签，并缩小气泡内边距、间距和两侧边距。';
 
   @override
+  String get client_certificate_mtls => 'Client certificate (mTLS)';
+
+  @override
+  String get client_certificate_mtls_description =>
+      'Present a certificate when an HTTPS proxy requires mutual TLS.';
+
+  @override
+  String get client_certificate_https_only =>
+      'Client certificates are only used for HTTPS connections.';
+
+  @override
+  String get choose_p12_pfx => 'Choose .p12 / .pfx';
+
+  @override
+  String get choose_certificate_pem => 'Choose certificate (PEM)';
+
+  @override
+  String get choose_private_key_pem => 'Choose private key (PEM)';
+
+  @override
+  String get certificate_password_optional => 'Certificate password (optional)';
+
+  @override
+  String get client_certificate_required =>
+      'Load a client certificate or turn off the client certificate option.';
+
+  @override
+  String client_certificate_loaded(String label) {
+    return 'Loaded: $label';
+  }
+
+  @override
+  String get remove_certificate => 'Remove certificate';
+
+  @override
+  String get certificate_import_failed =>
+      'That certificate could not be loaded.';
+
+  @override
   String get background_work => '后台运行';
 
   @override
@@ -2693,6 +2899,42 @@ class AppLocalizationsZh extends AppLocalizations {
   String task_tasks_finished(Object count) {
     return '$count delegated task(s) finished';
   }
+
+  @override
+  String get activity_status_unconfirmed => '状态未确认';
+
+  @override
+  String get activity_recently_updated => '最近更新';
+
+  @override
+  String get activity_reconnecting => '正在重新连接 — 正在检查轮次状态';
+
+  @override
+  String get activity_outcome_unknown => '无法确认本轮对话的结果。请打开聊天查看。';
+
+  @override
+  String get activity_chat_updated_detail => '网关已记录聊天活动；无法获取轮次的实时状态。';
+
+  @override
+  String get activity_updated => '已更新';
+
+  @override
+  String get activity_empty_title => '暂无近期活动';
+
+  @override
+  String get activity_empty_detail => '在此应用中启动的轮次，以及过去7天内更新的网关聊天都会显示在这里。';
+
+  @override
+  String get activity_read_error => '活动功能无法读取轮次记录或网关聊天。请检查连接后重试。';
+
+  @override
+  String get activity_chat_unavailable => '此聊天已不可用，或无法连接到网关。';
+
+  @override
+  String get activity_partial_title => '活动已部分加载';
+
+  @override
+  String get activity_partial_detail => '目前仅显示网关活动的有限范围。可能还有更多聊天，请下拉刷新。';
 }
 
 /// The translations for Chinese, using the Han script (`zh_Hans`).
@@ -2700,8 +2942,143 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   AppLocalizationsZhHans() : super('zh_Hans');
 
   @override
+  String get background_task_report => '后台任务';
+
+  @override
+  String get background_process_report => '后台进程';
+
+  @override
+  String get background_report_issues => '已报告问题，展开查看详情。';
+
+  @override
+  String get background_report_expand => '展开报告';
+
+  @override
+  String get background_report_collapse => '收起报告';
+
+  @override
+  String get theme_palette => '颜色主题';
+
+  @override
+  String get theme_palette_gold => '金色';
+
+  @override
+  String get theme_palette_purple => '紫色';
+
+  @override
+  String get theme_palette_orange => '橙色';
+
+  @override
+  String get theme_palette_green => '绿色';
+
+  @override
+  String get theme_palette_blue => '蓝色';
+
+  @override
+  String get theme_palette_red => '红色';
+
+  @override
+  String get theme_palette_teal => '青绿色';
+
+  @override
+  String get theme_palette_pink => '粉色';
+
+  @override
+  String get theme_palette_indigo => '靛蓝色';
+
+  @override
+  String get theme_palette_cyan => '青色';
+
+  @override
+  String get assets_recent_subtitle => '查找 Hermes 在已保存的聊天中分享的文件';
+
+  @override
+  String get assets_scope_notice =>
+      '仅显示 Hermes 在已保存的回复中明确分享的已生成文件。这里只展示部分聊天历史，并非完整的文件或附件目录。引用的文件可能已不存在。';
+
+  @override
+  String get assets_download_limit =>
+      '文件仅在点按时加载。预览和下载的单个文件大小上限均为 25 MiB；更大的文件请通过仪表盘获取。';
+
+  @override
+  String get assets_search_hint => '搜索找到的文件或来源聊天';
+
+  @override
+  String get assets_all => '全部';
+
+  @override
+  String get assets_images => '图片';
+
+  @override
+  String get assets_audio => '音频';
+
+  @override
+  String get assets_video => '视频';
+
+  @override
+  String get assets_documents => '文档和其他文件';
+
+  @override
+  String get assets_empty => '在已扫描的消息中未找到资产';
+
+  @override
+  String get assets_empty_detail =>
+      '扫描更多聊天或更早的消息，以查看更早的历史。普通附件和未链接的文件不会在此建立索引。';
+
+  @override
+  String get assets_no_matches => '未找到匹配的资产';
+
+  @override
+  String get assets_load_more_chats => '扫描更多聊天';
+
+  @override
+  String get assets_load_older_messages => '扫描更早的消息';
+
+  @override
+  String get assets_load_failed => '部分历史记录无法读取。结果不完整。请检查仪表盘连接并重试。';
+
+  @override
+  String get assets_retry_failed => '重试读取失败的历史记录';
+
+  @override
+  String get assets_partial => '服务器报告历史记录不完整。请检查仪表盘后刷新。';
+
+  @override
+  String assets_scan_summary(int files, int chats) {
+    return '已扫描 $chats 个聊天，找到 $files 处文件引用';
+  }
+
+  @override
+  String assets_open_chat(String title) {
+    return '打开聊天：$title';
+  }
+
+  @override
+  String get assets_file_too_large => '此文件超出下载大小上限。请打开仪表盘进行下载。';
+
+  @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
       '一次性问题。将在 72 小时后自动归档；任何值得保留的内容都会被记住。';
+
+  @override
+  String get archive_chat => '归档聊天';
+
+  @override
+  String get unarchive_chat => '取消归档聊天';
+
+  @override
+  String get chat_archived => '聊天已归档';
+
+  @override
+  String get chat_unarchived => '聊天已取消归档';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return '无法更新聊天归档状态：$error';
+  }
+
+  @override
+  String get quick_chat_description => '一次性问题。';
 
   @override
   String get ai_full_text => 'AI + 全文';
@@ -2810,7 +3187,8 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get archived => '已归档';
 
   @override
-  String get archived_conversations_appear_here => '已归档的对话将显示在这里。';
+  String get archived_conversations_appear_here =>
+      '这里只显示已归档的对话。旧聊天仍保留在“所有聊天”中。';
 
   @override
   String get archived_quick_chats => '已归档的快速聊天';
@@ -2844,9 +3222,6 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get auto_device_default => '自动（设备默认）';
-
-  @override
-  String get auto_archives_after_72_hours => '72 小时后自动归档';
 
   @override
   String get automation => '自动化';
@@ -4532,6 +4907,9 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get trigger_now => '立即触发';
 
   @override
+  String get received_outcome_unknown => '本轮对话已结束 — 结果未确认';
+
+  @override
   String get turn_completed => '本轮对话已完成';
 
   @override
@@ -5378,4 +5756,40 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String task_tasks_finished(Object count) {
     return '$count delegated task(s) finished';
   }
+
+  @override
+  String get activity_status_unconfirmed => '状态未确认';
+
+  @override
+  String get activity_recently_updated => '最近更新';
+
+  @override
+  String get activity_reconnecting => '正在重新连接 — 正在检查轮次状态';
+
+  @override
+  String get activity_outcome_unknown => '无法确认本轮对话的结果。请打开聊天查看。';
+
+  @override
+  String get activity_chat_updated_detail => '网关已记录聊天活动；无法获取轮次的实时状态。';
+
+  @override
+  String get activity_updated => '已更新';
+
+  @override
+  String get activity_empty_title => '暂无近期活动';
+
+  @override
+  String get activity_empty_detail => '在此应用中启动的轮次，以及过去7天内更新的网关聊天都会显示在这里。';
+
+  @override
+  String get activity_read_error => '活动功能无法读取轮次记录或网关聊天。请检查连接后重试。';
+
+  @override
+  String get activity_chat_unavailable => '此聊天已不可用，或无法连接到网关。';
+
+  @override
+  String get activity_partial_title => '活动已部分加载';
+
+  @override
+  String get activity_partial_detail => '目前仅显示网关活动的有限范围。可能还有更多聊天，请下拉刷新。';
 }

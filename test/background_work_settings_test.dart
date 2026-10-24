@@ -153,6 +153,16 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.text('Failed to load settings'),
+        250,
+        scrollable: find
+            .descendant(
+              of: find.byType(SettingsScreen),
+              matching: find.byType(Scrollable),
+            )
+            .first,
+      );
       expect(find.text('Failed to load settings'), findsOneWidget);
       await tester.scrollUntilVisible(
         find.text('Keep chats active in the background'),
@@ -164,9 +174,16 @@ void main() {
             )
             .first,
       );
-      await tester.pumpAndSettle();
+      // Voice availability can still be loading farther down the same list;
+      // do not wait for its unrelated indeterminate progress animation.
+      await Scrollable.ensureVisible(
+        tester.element(find.text('Keep chats active in the background')),
+        alignment: 0.5,
+      );
+      await tester.pump(const Duration(milliseconds: 300));
       await tester.tap(find.text('Keep chats active in the background'));
-      await tester.pumpAndSettle();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
       expect(backgroundWorkEnabled.value, isFalse);
       expect(prefs.getBool(BackgroundWorkPrefsStore.storageKey), isFalse);
     },

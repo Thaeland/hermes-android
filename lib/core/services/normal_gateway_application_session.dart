@@ -4,14 +4,19 @@ import 'dart:convert';
 import 'package:uuid/uuid.dart';
 
 import '../models/chat_timeline.dart';
+import '../models/received_scope_outcome.dart';
 import '../models/gateway_activity.dart';
 import '../models/gateway_insight.dart';
 import 'connection_manager.dart';
 import 'composer_draft_store.dart';
+import 'chat_presentation_state.dart';
 import 'desktop_gateway_client.dart';
 import 'normal_gateway_pending_store.dart';
+import 'operational_activity_store.dart';
 import 'notification_prefs.dart';
 import 'turn_notification_service.dart';
+import 'notification_approval_authority.dart';
+import 'connection_mutation_barrier.dart';
 import 'ws_client.dart';
 
 typedef NormalGatewayPromptSubmit =
@@ -69,10 +74,6 @@ class NormalGatewayChatSnapshot {
   final List<Map<String, dynamic>> displayRows;
   final List<Map<String, dynamic>> historyRows;
 
-  /// When history cannot be correlated with received output, present only the
-  /// base known before admission. Later canonical rows remain in historyRows,
-  /// but are not claimed to be either duplicates or independent new turns.
-  final List<Map<String, dynamic>>? presentationHistoryRows;
   final List<GatewayToolActivity> tools;
   final List<GatewaySubagentActivity> subagents;
   final List<StreamEvent> pendingInput;
@@ -83,6 +84,7 @@ class NormalGatewayChatSnapshot {
   final String? rejectedDraft;
   final DesktopConnectionState connectionState;
   final ChatTimeline timeline;
+  final List<ReceivedScopeOutcome> receivedOutcomes;
   const NormalGatewayChatSnapshot({
     required this.turnId,
     required this.storedSessionId,
@@ -91,7 +93,6 @@ class NormalGatewayChatSnapshot {
     required this.rowFloor,
     required this.displayRows,
     required this.historyRows,
-    this.presentationHistoryRows,
     required this.tools,
     required this.subagents,
     required this.pendingInput,
@@ -102,6 +103,7 @@ class NormalGatewayChatSnapshot {
     required this.rejectedDraft,
     required this.connectionState,
     this.timeline = const ChatTimeline(),
+    this.receivedOutcomes = const [],
   });
   bool get hasActiveTurn => const {
     NormalGatewayTurnPhase.preparing,
@@ -110,51 +112,44 @@ class NormalGatewayChatSnapshot {
     NormalGatewayTurnPhase.reconciling,
   }.contains(phase);
   bool get reconciling => phase == NormalGatewayTurnPhase.reconciling;
-
-  List<Map<String, dynamic>> historyForPresentation(
-    List<Map<String, dynamic>> retainedHistory,
-  ) {
-    final base = presentationHistoryRows;
-    if (base == null) return retainedHistory;
-    // Keep already paged older context too. Durable rows below the earliest
-    // known pre-admission row cannot belong to the uncorrelated live tail.
-    int? oldestKnownId;
-    for (final row in base) {
-      final id = int.tryParse(row['id']?.toString() ?? '');
-      if (id != null && (oldestKnownId == null || id < oldestKnownId)) {
-        oldestKnownId = id;
-      }
-    }
-    return [
-      if (oldestKnownId != null)
-        ...retainedHistory.where((row) {
-          final id = int.tryParse(row['id']?.toString() ?? '');
-          return id != null && id < oldestKnownId!;
-        }),
-      ...base,
-    ];
-  }
 }
 
 /// One stock client and independent history client per configuration scope.
 /// Routes only subscribe; this object owns ingress, recovery and notifications.
 class NormalGatewayApplicationSession {
+  static const activityHeartbeatInterval = Duration(seconds: 30);
+  static const activityRetryInterval = Duration(seconds: 30);
   final SavedConnection connection;
+  final Map<String, String> _approvalOrigin;
+  final Object? _accountMutation;
   final String scope;
   final DesktopGatewayClient? client;
   final ApiClient? _historyClient;
   final NormalGatewayPendingStore pendingStore;
+  final OperationalActivityStore activityStore;
+  final int Function() _activityNowEpochMs;
   final NormalGatewayPromptSubmit _submit;
+  final bool _usesClientSubmit;
   final NormalGatewayResume _resume;
   final NormalGatewayHistory _history;
   final TurnNotificationService notifications;
   final void Function()? onActivityChanged;
+  final ChatPresentationRegistry? presentation;
   final Map<String, NormalGatewayChatOwner> _aliases = {};
+  final Map<String, NormalGatewayPendingMarker> _retiringMarkers = {};
+  Timer? _retirementTimer;
+  bool _retiring = false;
+  int _retirementRetry = 0;
   late final Future<void> ready;
   bool _initialized = false;
+  int _historyObservation = 0;
+  int _childObservation = 0;
+  int _presentationObservation = 0;
   bool _closed = false;
   bool _background = false;
   bool _backgroundWorkEnabled = true;
+  Future<void>? _activityWrite;
+  final Map<String, _PendingActivityWrite> _pendingActivity = {};
   DesktopConnectionState _connectionState = DesktopConnectionState.disconnected;
 
   NormalGatewayApplicationSession({
@@ -163,16 +158,25 @@ class NormalGatewayApplicationSession {
     DesktopGatewayClient? client,
     ApiClient? historyClient,
     NormalGatewayPendingStore? pendingStore,
+    OperationalActivityStore? activityStore,
+    int Function()? activityNowEpochMs,
     NormalGatewayPromptSubmit? submit,
     NormalGatewayResume? resume,
     NormalGatewayHistory? history,
     TurnNotificationService? notifications,
     this.onActivityChanged,
+    this.presentation,
   }) : client = client,
+       _approvalOrigin = NotificationApprovalAuthority.origin(connection),
+       _accountMutation = ConnectionMutationBarrier.capture(connection.id),
        _historyClient = historyClient,
        pendingStore = pendingStore ?? NormalGatewayPendingStore(),
+       activityStore = activityStore ?? OperationalActivityStore(),
+       _activityNowEpochMs =
+           activityNowEpochMs ?? (() => DateTime.now().millisecondsSinceEpoch),
        notifications = notifications ?? TurnNotificationService.shared,
        _submit = submit ?? client!.submitPrompt,
+       _usesClientSubmit = submit == null,
        _resume = resume ?? client!.resumeSubmittedSession,
        _history =
            history ??
@@ -208,16 +212,21 @@ class NormalGatewayApplicationSession {
   factory NormalGatewayApplicationSession.fromConnection(
     SavedConnection connection, {
     required String scope,
+    ChatPresentationRegistry? presentation,
+    OperationalActivityStore? activityStore,
     void Function()? onActivityChanged,
   }) {
     return NormalGatewayApplicationSession(
       connection: connection,
       scope: scope,
+      presentation: presentation,
+      activityStore: activityStore,
       client: DesktopGatewayClient.fromConnection(connection),
       historyClient: ApiClient(
         baseUrl: connection.baseUrl,
         apiKey: connection.apiKey,
         pathPrefix: connection.gatewayPrefix ?? '',
+        clientCertificate: connection.clientCertificate,
       ),
       onActivityChanged: onActivityChanged,
     );
@@ -243,20 +252,22 @@ class NormalGatewayApplicationSession {
   NormalGatewayChatOwner chatFor(
     String localSessionId, {
     String? storedSessionId,
+    String? lineageRootId,
     required String title,
     String? workingDirectory,
   }) {
     if (_closed) {
       throw StateError('Normal gateway application session is closed.');
     }
-    final owner =
+    var owner =
         _aliases[localSessionId] ??
         _aliases[storedSessionId] ??
         NormalGatewayChatOwner._(this, localSessionId, title, workingDirectory);
     _aliases[localSessionId] = owner;
     owner.title = title;
+    owner._lineageRootId = lineageRootId ?? owner._lineageRootId;
     if (storedSessionId != null) {
-      _bind(owner, storedSessionId, localAlias: localSessionId);
+      owner = _bind(owner, storedSessionId, localAlias: localSessionId);
     }
     if (owner.storedSessionId != null) {
       client?.bindStoredSession(localSessionId, owner.storedSessionId!);
@@ -264,15 +275,19 @@ class NormalGatewayApplicationSession {
     return owner;
   }
 
-  void _bind(
+  NormalGatewayChatOwner _bind(
     NormalGatewayChatOwner owner,
     String stored, {
     String? localAlias,
   }) {
+    owner = owner._root;
+    if (_closed) return owner;
     final other = _aliases[stored];
-    if (other != null && !identical(other, owner)) {
-      throw StateError('Durable chat alias already owned.');
+    final coalescing = other != null && !identical(other, owner);
+    if (coalescing) {
+      owner = _coalesce(owner, other, stored);
     }
+    final changed = owner.storedSessionId != stored || !identical(other, owner);
     owner.storedSessionId = stored;
     _aliases[stored] = owner;
     unawaited(
@@ -295,7 +310,94 @@ class NormalGatewayApplicationSession {
       );
     }
     client?.bindStoredSession(owner.localSessionId, stored);
-    owner._notify();
+    // A canonical route may have created this owner before receipt hydration.
+    // Its immutable localSessionId is then canonical, not the receipt's alias.
+    presentation?.bind(localAlias ?? owner.localSessionId, stored);
+    // A notification route can attach to this same owner while its previous
+    // ChatScreen remains mounted. An unchanged binding is not a state change,
+    // and synchronous fan-out here would dirty that sibling during its build.
+    if (changed && !coalescing) owner._notify();
+    return owner;
+  }
+
+  NormalGatewayChatOwner _coalesce(
+    NormalGatewayChatOwner source,
+    NormalGatewayChatOwner canonical,
+    String stored,
+  ) {
+    // A published stored id can be opened before its original create reply.
+    // Preserve the ongoing operation, never combine two turn generations.
+    final sourceOnWire = source.wireEmitted && source.snapshot.hasActiveTurn;
+    final canonicalOnWire =
+        canonical.wireEmitted && canonical.snapshot.hasActiveTurn;
+    if (sourceOnWire && canonicalOnWire) {
+      throw StateError('Cannot combine independently emitted gateway turns.');
+    }
+    final winner = sourceOnWire || !canonical.snapshot.hasActiveTurn
+        ? source
+        : canonical;
+    final loser = identical(winner, source) ? canonical : source;
+    // Merge presentation first: a rejected old prompt cannot borrow a newer
+    // canonical composer's authority during its rejection callback.
+    presentation?.bind(source.localSessionId, stored);
+    final retiredListeners = loser._listeners.entries.toList(growable: false);
+    winner._adoptSettledPresentation(loser);
+    final rejection = loser._rejectForHandoff();
+    winner._adoptPreWireHistory(loser, stored);
+    winner._adoptChildObservers(loser);
+    winner._lineageRootId ??= loser._lineageRootId;
+    // Ownership transferred, not copied into a second retained body owner.
+    // External immutable snapshots may still exist; these losing buffers no
+    // longer own presentation and must not survive a later terminal close.
+    loser._display.clear();
+    loser._priorDisplay.clear();
+    loser._timeline = loser._timeline.clear();
+    loser._tools.clear();
+    loser._subagents.clear();
+    loser._observedSubagents.clear();
+    final settledIds = {
+      ...loser._settledWireTurnIds,
+      ...winner._settledWireTurnIds,
+    };
+    winner._settledWireTurnIds
+      ..clear()
+      ..addAll(settledIds);
+    while (winner._settledWireTurnIds.length > 32) {
+      winner._settledWireTurnIds.remove(winner._settledWireTurnIds.first);
+    }
+    // Empty-create proof belongs to the original admission only. In
+    // particular it cannot seed an already-active canonical unknown floor.
+    if (!identical(winner, source) || canonical.turnId != null) {
+      winner._createdEmptySessionId = null;
+    }
+    winner._listeners.addAll(loser._listeners);
+    loser._listeners.clear();
+    loser._redirect = winner;
+    for (final alias in _aliases.keys.toList()) {
+      if (identical(_aliases[alias], loser)) _aliases[alias] = winner;
+    }
+    client?.bindStoredSession(loser._localSessionId, stored);
+    // Publish the complete transition before any callback can reenter reserve
+    // or chatFor. Only the retiring route sees its immutable pre-wire rejection;
+    // every retained subscriber then observes the single winning operation.
+    final generation = winner._generation;
+    scheduleMicrotask(() {
+      if (_closed) return;
+      if (rejection != null && winner._current(generation)) {
+        final revision = winner._notificationRevision;
+        for (final entry in retiredListeners) {
+          if (!winner._current(generation) ||
+              winner._notificationRevision != revision) {
+            return;
+          }
+          if (identical(winner._listeners[entry.key], entry.value)) {
+            entry.value(rejection);
+          }
+        }
+      }
+      winner._root._notify();
+    });
+    return winner;
   }
 
   Future<void> _restore() async {
@@ -303,6 +405,17 @@ class NormalGatewayApplicationSession {
     try {
       final markers = await pendingStore.load(scope);
       if (_closed) return;
+      // Prefer an emitted receipt for display identity, but retain every
+      // unresolved WAL. A failed retirement followed by a crash cannot prove
+      // that its write-ahead receipt never reached the wire.
+      markers.sort((a, b) {
+        final emitted = (b.phase == 'emitted' ? 1 : 0).compareTo(
+          a.phase == 'emitted' ? 1 : 0,
+        );
+        if (emitted != 0) return emitted;
+        final created = b.createdAt.compareTo(a.createdAt);
+        return created != 0 ? created : a.key.compareTo(b.key);
+      });
       for (final marker in markers) {
         final chat = chatFor(
           marker.localSessionId,
@@ -331,6 +444,7 @@ class NormalGatewayApplicationSession {
     if (_closed) return;
     final changed = _connectionState != state;
     _connectionState = state;
+    if (state == DesktopConnectionState.connected) _retryRetirements();
     for (final chat in chats) {
       if (state != DesktopConnectionState.connected) {
         chat._pendingInput.clear(); // exact socket identity is no longer valid
@@ -352,6 +466,12 @@ class NormalGatewayApplicationSession {
       _backgroundWorkEnabled = backgroundWorkEnabled;
     }
     client?.setReconnectAllowed(_canRecover);
+    if (_canRecover) {
+      _retryRetirements();
+    } else {
+      _retirementTimer?.cancel();
+      _retirementTimer = null;
+    }
     for (final chat in chats) {
       if (_canRecover) {
         chat.requestRecovery();
@@ -363,6 +483,112 @@ class NormalGatewayApplicationSession {
   }
 
   bool get _canRecover => !_closed && (!_background || _backgroundWorkEnabled);
+
+  void _retirePreWireMarker(NormalGatewayPendingMarker marker) {
+    _retiringMarkers[marker.key] = marker;
+    _retryRetirements();
+  }
+
+  void _retryRetirements() {
+    if (!_canRecover || _retiring || _retiringMarkers.isEmpty) return;
+    _retirementTimer?.cancel();
+    _retirementTimer = null;
+    unawaited(_drainRetirements());
+  }
+
+  Future<void> _drainRetirements() async {
+    _retiring = true;
+    try {
+      for (final marker in _retiringMarkers.values.toList()) {
+        if (_closed) return;
+        try {
+          await pendingStore.put(marker.withPhase('settled'));
+          if (_closed) return;
+          await pendingStore.remove(marker);
+          _retiringMarkers.remove(marker.key);
+        } catch (_) {
+          // Keep cleanup ownership after failed writes and lost ACKs. Only
+          // known unsent receipts enter this queue, never uncertain wire WALs.
+        }
+      }
+    } finally {
+      _retiring = false;
+      if (_retiringMarkers.isEmpty) _retirementRetry = 0;
+      if (_canRecover && _retiringMarkers.isNotEmpty) {
+        final shift = (_retirementRetry++).clamp(0, 6);
+        _retirementTimer = Timer(
+          Duration(milliseconds: (500 * (1 << shift)).clamp(500, 30000)),
+          _retryRetirements,
+        );
+      }
+    }
+  }
+
+  void _recordActivity(OperationalActivityRecord record) {
+    if (_closed) return;
+    _pendingActivity[record.key] = _PendingActivityWrite(record);
+    // Retain repair ownership by turn, not by the chat's latest turn. Include
+    // in-flight records too: their write may fail after this batch is accepted.
+    // The store serializes both snapshots, so an old completion cannot win.
+    _writeActivity(_pendingActivity.values.toList(growable: false));
+  }
+
+  void _retryActivity() {
+    if (_closed) return;
+    final now = _activityNowEpochMs();
+    final retry = _pendingActivity.values
+        .where((pending) {
+          final notBefore = pending.retryNotBeforeEpochMs;
+          return pending.flights == 0 &&
+              (notBefore == null || now >= notBefore);
+        })
+        .toList(growable: false);
+    if (retry.isEmpty) return;
+    for (final pending in retry) {
+      // Permit one immediate repair probe, then back off independently of
+      // token delivery and failed-write completion. No timer or retry spin:
+      // later real progress can probe again, and a new accepted observation
+      // always carries older dirty turns along in its single physical write.
+      pending.retryNotBeforeEpochMs =
+          now + activityRetryInterval.inMilliseconds;
+    }
+    _writeActivity(retry);
+  }
+
+  void _writeActivity(List<_PendingActivityWrite> accepted) {
+    for (final pending in accepted) {
+      pending.flights++;
+    }
+    final records = accepted.map((pending) => pending.record).toList();
+    // Single observations retain the put contract; multi-turn repairs share
+    // a read/modify/write and failure reload instead of multiplying disk I/O.
+    final flight = records.length == 1
+        ? activityStore.put(records.single)
+        : activityStore.putAll(records);
+    final write = flight
+        .then<void>(
+          (_) {
+            for (final pending in accepted) {
+              if (identical(_pendingActivity[pending.record.key], pending)) {
+                _pendingActivity.remove(pending.record.key);
+              }
+            }
+          },
+          onError: (Object _, StackTrace _) {
+            // Optional presentation metadata must never change turn authority.
+            // Keep the exact failed observation (including its original time).
+          },
+        )
+        .whenComplete(() {
+          for (final pending in accepted) {
+            pending.flights--;
+          }
+        });
+    _activityWrite = write;
+    write.whenComplete(() {
+      if (identical(_activityWrite, write)) _activityWrite = null;
+    }).ignore();
+  }
 
   bool ownsApprovalRequest({
     required String sessionId,
@@ -383,17 +609,21 @@ class NormalGatewayApplicationSession {
     required String choice,
   }) async {
     final chat = _aliases[sessionId];
-    if (chat == null ||
+    if (_closed ||
+        chat == null ||
         !ownsApprovalRequest(sessionId: sessionId, requestId: requestId)) {
       return false;
     }
+    final pending = chat._pendingInput[requestId];
     await client!.respondToApproval(
       sessionId: chat.localSessionId,
       choice: choice,
       serverRequestId: requestId,
     );
-    chat._pendingInput.remove(requestId);
-    chat._notify();
+    if (!_closed && identical(chat._pendingInput[requestId], pending)) {
+      chat._pendingInput.remove(requestId);
+      chat._notify();
+    }
     return true;
   }
 
@@ -406,109 +636,166 @@ class NormalGatewayApplicationSession {
   Future<void> close() async {
     if (_closed) return;
     _closed = true; // synchronous fence before any resource cleanup
+    prunePendingNotificationApprovals();
+    _retirementTimer?.cancel();
+    _retirementTimer = null;
     for (final chat in chats) {
       chat._close();
     }
     client?.close();
     _historyClient?.close();
+    // Closing fences new metadata synchronously, then joins the last accepted
+    // write. Its global queue also covers every earlier write from this owner.
+    await _activityWrite;
+    _pendingActivity.clear();
   }
+
+  bool get isClosed => _closed;
+  bool get hasCurrentAccount =>
+      !_closed &&
+      ConnectionMutationBarrier.isCurrent(connection.id, _accountMutation);
+}
+
+class _PendingActivityWrite {
+  final OperationalActivityRecord record;
+  int flights = 0;
+  int? retryNotBeforeEpochMs;
+
+  _PendingActivityWrite(this.record);
 }
 
 class NormalGatewayChatOwner {
   final NormalGatewayApplicationSession _session;
-  final String localSessionId;
-  String? storedSessionId;
-  String title;
-  final String? workingDirectory;
-  String? turnId;
-  NormalGatewayTurnPhase phase = NormalGatewayTurnPhase.idle;
-  bool wireEmitted = false;
+  NormalGatewayChatOwner? _redirect;
+  NormalGatewayChatOwner get _root => _redirect?._root ?? this;
+  final String _localSessionId;
+  String get localSessionId => _root._localSessionId;
+  String? _storedSessionId;
+  String? get storedSessionId => _root._storedSessionId;
+  set storedSessionId(String? value) => _root._storedSessionId = value;
+  String _title;
+  String get title => _root._title;
+  set title(String value) => _root._title = value;
+  final String? _workingDirectory;
+  String? get workingDirectory => _root._workingDirectory;
+  String? _turnId;
+  String? get turnId => _root._turnId;
+  set turnId(String? value) => _root._turnId = value;
+  NormalGatewayTurnPhase _phase = NormalGatewayTurnPhase.idle;
+  NormalGatewayTurnPhase get phase => _root._phase;
+  set phase(NormalGatewayTurnPhase value) => _root._phase = value;
+  bool _wireEmitted = false;
+  bool get wireEmitted => _root._wireEmitted;
+  set wireEmitted(bool value) => _root._wireEmitted = value;
+  StateError? _handoffRejection;
+  String? _storedLineageRootId;
+  String? get _lineageRootId => _root._storedLineageRootId;
+  set _lineageRootId(String? value) => _root._storedLineageRootId = value;
   String? _wireTurnId;
   final Set<String> _settledWireTurnIds = {};
   int? _floor;
   int _generation = 0;
   Object? _reservation;
   NormalGatewayPendingMarker? _marker;
+  final Map<String, NormalGatewayPendingMarker> _additionalRestoredMarkers = {};
   final List<Map<String, dynamic>> _display = [];
   final List<Map<String, dynamic>> _priorDisplay = [];
+  final List<_SettledGatewayPresentation> _settledPresentation = [];
+  final List<ReceivedScopeOutcome> _receivedOutcomes = [];
+  int? _receivedObservation;
   List<Map<String, dynamic>> _history = [];
   bool _historyKnown = false;
+  int _historyObservation = 0;
   String? _createdEmptySessionId;
-  List<Map<String, dynamic>> _presentationBase = [];
   final List<GatewayToolActivity> _tools = [];
   final List<GatewaySubagentActivity> _subagents = [];
+  bool _hasTurnSubagentPresentation = false;
   // Observer identity outlives parent presentation and its canonical hydration.
-  final List<GatewaySubagentActivity> _observedSubagents = [];
+  final List<({GatewaySubagentActivity activity, int observation, int? anchor})>
+  _observedSubagents = [];
   ChatTimeline _timeline = const ChatTimeline();
   final Map<String, StreamEvent> _pendingInput = {};
   final List<StreamEvent> _inputUpdates = [];
   final List<StreamEvent> _auxiliaryEvents = [];
   final Map<Object, void Function(NormalGatewayChatSnapshot)> _listeners = {};
+  int _notificationRevision = 0;
   GatewayTurnStatus? _status;
   String? _error;
   String? _draftToRestore;
   bool _draftRestoreAllowed = false;
   ComposerDraftHandle? _draftHandle;
   Timer? _retryTimer;
+  Timer? _baselineTimer;
+  Completer<_GatewayHistoryObservation?>? _baselineRead;
   int _retry = 0;
   bool _recovering = false;
-  int? _recoveringGeneration;
+
   bool _recoveryQueued = false;
   bool _settling = false;
+  bool _submissionPending = false;
   ({bool? completed, String? error, int generation})? _terminalReceipt;
+  OperationalActivityRecord? _lastActivityRecord;
   NormalGatewayChatOwner._(
     this._session,
-    this.localSessionId,
-    this.title,
-    this.workingDirectory,
+    this._localSessionId,
+    this._title,
+    this._workingDirectory,
   );
 
   bool get _hasReceivedPresentation =>
       _timeline.runs.isNotEmpty ||
       _tools.isNotEmpty ||
-      _subagents.isNotEmpty ||
+      _hasTurnSubagentPresentation ||
       [..._priorDisplay, ..._display].any(
         (row) =>
             row['role'] == 'assistant' &&
             (row['content']?.toString().isNotEmpty ?? false),
       );
 
-  NormalGatewayChatSnapshot get snapshot => NormalGatewayChatSnapshot(
-    turnId: turnId,
-    storedSessionId: storedSessionId,
-    phase: phase,
-    wireEmitted: wireEmitted,
-    rowFloor: _floor,
-    displayRows: [..._priorDisplay, ..._display]
-        .map((row) => Map<String, dynamic>.unmodifiable(row))
-        .toList(growable: false),
-    historyRows: _history
-        .map((row) => Map<String, dynamic>.unmodifiable(row))
-        .toList(growable: false),
-    presentationHistoryRows:
-        _floor == null &&
-            (_display.isNotEmpty || _priorDisplay.isNotEmpty) &&
-            _hasReceivedPresentation
-        ? _presentationBase
+  NormalGatewayChatSnapshot get snapshot => _redirect != null
+      ? _root.snapshot
+      : NormalGatewayChatSnapshot(
+          turnId: turnId,
+          storedSessionId: storedSessionId,
+          phase: phase,
+          wireEmitted: wireEmitted,
+          rowFloor: _floor,
+          displayRows:
+              [
+                    for (final settled in _settledPresentation) ...settled.rows,
+                    ..._priorDisplay,
+                    ..._display,
+                  ]
+                  .map((row) => Map<String, dynamic>.unmodifiable(row))
+                  .toList(growable: false),
+          historyRows: _history
               .map((row) => Map<String, dynamic>.unmodifiable(row))
-              .toList(growable: false)
-        : null,
-    tools: List.unmodifiable(_tools),
-    subagents: List.unmodifiable(_subagents),
-    pendingInput: List.unmodifiable(_pendingInput.values),
-    inputUpdates: List.unmodifiable(_inputUpdates),
-    auxiliaryEvents: List.unmodifiable(_auxiliaryEvents),
-    status: _status,
-    error: _error,
-    rejectedDraft:
-        phase == NormalGatewayTurnPhase.failed &&
-            !wireEmitted &&
-            _draftRestoreAllowed
-        ? _draftToRestore
-        : null,
-    connectionState: _session._connectionState,
-    timeline: _timeline,
-  );
+              .toList(growable: false),
+          tools: List.unmodifiable([
+            for (final settled in _settledPresentation) ...settled.tools,
+            ..._tools,
+          ]),
+          subagents: List.unmodifiable(_subagents),
+          pendingInput: List.unmodifiable(_pendingInput.values),
+          inputUpdates: List.unmodifiable(_inputUpdates),
+          auxiliaryEvents: List.unmodifiable(_auxiliaryEvents),
+          status: _status,
+          error: _error,
+          rejectedDraft:
+              phase == NormalGatewayTurnPhase.failed &&
+                  !wireEmitted &&
+                  _draftRestoreAllowed
+              ? _draftToRestore
+              : null,
+          connectionState: _session._connectionState,
+          timeline: _timeline.precededBy(
+            _settledPresentation.map((settled) => settled.timeline),
+          ),
+          receivedOutcomes: List.unmodifiable([
+            for (final settled in _settledPresentation) ...settled.outcomes,
+            ..._receivedOutcomes,
+          ]),
+        );
 
   void bindStoredSession(String storedSessionId) {
     if (this.storedSessionId != storedSessionId) {
@@ -517,53 +804,356 @@ class NormalGatewayChatOwner {
   }
 
   Object subscribe(void Function(NormalGatewayChatSnapshot) listener) {
+    if (_redirect != null) return _root.subscribe(listener);
     final token = Object();
     _listeners[token] = listener;
     listener(snapshot); // reattachment is immediate, not a later stream tick
     return token;
   }
 
-  void unsubscribe(Object token) => _listeners.remove(token);
+  void unsubscribe(Object token) => _root._listeners.remove(token);
 
   /// The route retains revision authority. Any later edit, including an edit
   /// followed by clearing, permanently relinquishes this restoration receipt.
   void invalidateDraftRecovery() {
+    if (_redirect != null) return _root.invalidateDraftRecovery();
     _draftRestoreAllowed = false;
     _draftToRestore = null;
   }
 
+  /// Capture immediately BEFORE the physical offset-zero latest GET. Carry the
+  /// same token through success, failure and any multi-page/callback awaits.
+  NormalGatewayHistoryRead beginHistoryRead(String stored) =>
+      _root._captureHistoryRead(stored, ++_session._historyObservation);
+
+  /// Older paging owns a cursor, not a new latest observation. A newer accepted
+  /// success invalidates this fence; merely issuing/failing a read does not.
+  NormalGatewayHistoryRead historyReadFence(String stored) =>
+      _root._captureHistoryRead(stored, _root._historyObservation);
+
+  NormalGatewayHistoryRead _captureHistoryRead(
+    String stored,
+    int observation,
+  ) => NormalGatewayHistoryRead._(
+    this,
+    localSessionId,
+    storedSessionId,
+    stored,
+    _generation,
+    observation,
+  );
+
   /// Accept only a fresh latest batch, never a retained/older paging window.
   /// Reads during a turn cannot seed its admission baseline or replace it.
-  void observeHistory(List<Map<String, dynamic>> rows) {
-    if (_session._closed || snapshot.hasActiveTurn) return;
-    _history = rows.map((row) => Map<String, dynamic>.from(row)).toList();
-    _historyKnown = true;
-    if (_retireCompletedPresentation(rows)) _notify();
+  /// Tokenless calls remain a TRUSTED external-observation compatibility seam:
+  /// they assert freshness at ingress, not physical request-start freshness.
+  /// Production physical readers must supply their pre-I/O [read].
+  bool observeHistory(
+    List<Map<String, dynamic>> rows, {
+    NormalGatewayHistoryRead? read,
+  }) {
+    if (_redirect != null) return _root.observeHistory(rows, read: read);
+    if (_session._closed || snapshot.hasActiveTurn) return false;
+    final captured =
+        read ?? beginHistoryRead(storedSessionId ?? localSessionId);
+    if (!identical(captured._owner, this) ||
+        !_acceptHistory(_GatewayHistoryObservation(rows, captured))) {
+      return false;
+    }
+    _cleanCompletedEmptySubmission(rows);
+    _notify();
+    return captured.isCurrent;
   }
 
-  void _notify() {
-    if (_session._closed) return;
-    final state = snapshot;
-    for (final listener in _listeners.values.toList(growable: false)) {
-      listener(state);
+  Future<_GatewayHistoryObservation> _readLatestHistory(String stored) async {
+    final read = beginHistoryRead(stored);
+    final rows = await _session._history(stored);
+    return _GatewayHistoryObservation(rows, read);
+  }
+
+  bool _acceptHistory(_GatewayHistoryObservation fresh) {
+    if (!identical(fresh.read._owner, this) || !fresh.read.isCurrent) {
+      return false;
     }
-    _session.onActivityChanged?.call();
+    _history = fresh.rows.map((row) => Map<String, dynamic>.from(row)).toList();
+    _historyKnown = true;
+    _historyObservation = fresh.observation;
+    _boundSettledPresentation();
+    return true;
+  }
+
+  void _adoptSettledPresentation(NormalGatewayChatOwner other) {
+    _settledPresentation.addAll(other._settledPresentation);
+    if (other._hasReceivedPresentation) {
+      final retainedRows = [
+        ...other._priorDisplay,
+        // A submitting loser has only an unsent current scaffold. Preparing
+        // has not yet moved the previous received turn into priorDisplay.
+        if (!other.snapshot.hasActiveTurn ||
+            other.phase == NormalGatewayTurnPhase.preparing)
+          ...other._display,
+      ];
+      _settledPresentation.add(
+        _SettledGatewayPresentation(
+          observation:
+              other._receivedObservation ?? ++_session._presentationObservation,
+          rows: retainedRows.map(Map<String, dynamic>.from).toList(),
+          tools: List.of(other._tools),
+          timeline: other._timeline,
+          outcomes: List.of(other._receivedOutcomes),
+        ),
+      );
+    }
+    other._settledPresentation.clear();
+    other._receivedOutcomes.clear();
+    _settledPresentation.sort((a, b) => a.observation.compareTo(b.observation));
+    _boundSettledPresentation();
+  }
+
+  void _boundSettledPresentation() {
+    // Prefer recent presentation within the same budgets as the live owner.
+    // Eviction is not hydration and grants no history/admission authority.
+    while (_settledPresentation.isNotEmpty) {
+      final timelines = [
+        for (final settled in _settledPresentation) settled.timeline,
+        _timeline,
+      ];
+      final rows =
+          _priorDisplay.length +
+          _display.length +
+          _settledPresentation.fold<int>(0, (sum, p) => sum + p.rows.length);
+      final tools =
+          _tools.length +
+          _settledPresentation.fold<int>(0, (sum, p) => sum + p.tools.length);
+      if (rows <= 256 &&
+          tools <= 512 &&
+          timelines.fold<int>(0, (sum, t) => sum + t.runs.length) <=
+              ChatTimeline.maxRuns &&
+          timelines.fold<int>(
+                0,
+                (sum, t) =>
+                    sum + t.runs.fold<int>(0, (sum, r) => sum + r.text.length),
+              ) <=
+              ChatTimeline.maxTextCodeUnits &&
+          timelines.fold<int>(
+                0,
+                (sum, t) => sum + t.retainedToolIdentityCount,
+              ) <=
+              ChatTimeline.maxEvictedTools) {
+        break;
+      }
+      _settledPresentation.removeAt(0);
+    }
+    // Metadata shares retained anchors' lifetime, not an independent journal.
+    final retained = <Object>{
+      for (final row in [..._priorDisplay, ..._display])
+        if (row['_normal_projection_id'] != null) row['_normal_projection_id']!,
+      for (final run in _timeline.runs) run.scope,
+    };
+    for (var i = _receivedOutcomes.length - 1; i >= 0; i--) {
+      final fact = _receivedOutcomes[i];
+      final scopes = fact.scopes.where(retained.contains).toSet();
+      if (scopes.isEmpty) {
+        _receivedOutcomes.removeAt(i);
+      } else if (scopes.length != fact.scopes.length) {
+        _receivedOutcomes[i] = ReceivedScopeOutcome(
+          id: fact.id,
+          scopes: scopes,
+          outcome: fact.outcome,
+        );
+      }
+    }
+  }
+
+  void _adoptPreWireHistory(NormalGatewayChatOwner other, String stored) {
+    // A verified alias may have observed the conversation after allocation but
+    // before the delayed create reply. Only an unused, newer latest observation
+    // can replace admission context; a receipt's floor is already immutable.
+    if (wireEmitted ||
+        _marker != null ||
+        other.storedSessionId != stored ||
+        !other._historyKnown ||
+        other._historyObservation <= _historyObservation) {
+      return;
+    }
+    _history = other._history.map(Map<String, dynamic>.from).toList();
+    _historyKnown = true;
+    _historyObservation = other._historyObservation;
+    _createdEmptySessionId = null;
+    _boundSettledPresentation();
+  }
+
+  void _adoptChildObservers(NormalGatewayChatOwner other) {
+    // Observer identity is independent of parent admission/presentation. Do not
+    // copy the losing parent's turn, timeline or tools along with its children.
+    for (final child in other._observedSubagents) {
+      _mergeObservedChild(
+        child.activity,
+        observation: child.observation,
+        anchor: child.anchor,
+      );
+    }
+    final visible = [..._subagents, ...other._subagents];
+    _subagents.clear();
+    for (final child in visible) {
+      final index = _observedSubagents.indexWhere(
+        (observed) => observed.activity.matchesTask(child),
+      );
+      if (index >= 0) _mergeVisibleChild(_observedSubagents[index].activity);
+    }
+  }
+
+  GatewaySubagentActivity _mergeObservedChild(
+    GatewaySubagentActivity update, {
+    int? observation,
+    int? anchor,
+  }) {
+    final received = observation ?? ++_session._childObservation;
+    final index = _observedSubagents.indexWhere(
+      (agent) => agent.activity.matchesTask(update),
+    );
+    final previous = index < 0 ? null : _observedSubagents.removeAt(index);
+    final incomingAnchor =
+        anchor ?? (update.childSessionId == null ? null : received);
+    final firstAnchor =
+        previous?.anchor == null ||
+            incomingAnchor != null && incomingAnchor < previous!.anchor!
+        ? incomingAnchor
+        : previous!.anchor;
+    final firstChild = firstAnchor == incomingAnchor
+        ? update.childSessionId
+        : previous!.activity.childSessionId;
+    final incomingIsNewer =
+        previous == null || received >= previous.observation;
+    final merged = previous == null
+        ? update
+        : incomingIsNewer
+        ? previous.activity.merge(update, firstChildSessionId: firstChild)
+        : update.merge(previous.activity, firstChildSessionId: firstChild);
+    _observedSubagents.add((
+      activity: merged,
+      observation: incomingIsNewer ? received : previous.observation,
+      anchor: firstAnchor,
+    ));
+    // Bound by recent observation, not which alias happened to win admission.
+    _observedSubagents.sort((a, b) => a.observation.compareTo(b.observation));
+    if (_observedSubagents.length > 128) _observedSubagents.removeAt(0);
+    return merged;
+  }
+
+  void _mergeVisibleChild(GatewaySubagentActivity update) {
+    final index = _subagents.indexWhere((agent) => agent.matchesTask(update));
+    if (index < 0) {
+      _subagents.add(update);
+    } else {
+      _subagents[index] = update;
+    }
+    if (_subagents.length > 128) _subagents.removeAt(0);
+  }
+
+  void _notify({bool meaningfulActivity = false}) {
+    if (_session._closed || _redirect != null) return;
+    final generation = _generation;
+    final revision = ++_notificationRevision;
+    // Queue before notifying app-wide readers: a listener's read must join
+    // this exact transition, not observe the previous persisted state.
+    _recordActivity(meaningfulActivity: meaningfulActivity);
+    final state = snapshot;
+    for (final entry in _listeners.entries.toList(growable: false)) {
+      if (!_current(generation) || revision != _notificationRevision) return;
+      if (identical(_listeners[entry.key], entry.value)) entry.value(state);
+    }
+    if (_current(generation) && revision == _notificationRevision) {
+      _session.onActivityChanged?.call();
+    }
+  }
+
+  void _recordActivity({
+    int? updatedAtEpochMs,
+    String? restoredLocalId,
+    bool meaningfulActivity = false,
+  }) {
+    final id = turnId;
+    if (_session._closed || id == null) return;
+    // Reservation/preparation is not submitted work. In particular, opening a
+    // chat or cancelling preparation must not resurrect its preceding turn.
+    final state = switch (phase) {
+      NormalGatewayTurnPhase.idle || NormalGatewayTurnPhase.preparing => null,
+      NormalGatewayTurnPhase.submitting => OperationalActivityState.submitted,
+      NormalGatewayTurnPhase.running => OperationalActivityState.running,
+      NormalGatewayTurnPhase.reconciling =>
+        OperationalActivityState.reconciling,
+      NormalGatewayTurnPhase.reconciledUnknown =>
+        OperationalActivityState.unknown,
+      NormalGatewayTurnPhase.completed => OperationalActivityState.completed,
+      NormalGatewayTurnPhase.failed => OperationalActivityState.failed,
+    };
+    if (state == null) return;
+    final active = const {
+      OperationalActivityState.submitted,
+      OperationalActivityState.running,
+      OperationalActivityState.reconciling,
+    }.contains(state);
+    final effectiveState = active && _pendingInput.isNotEmpty
+        ? OperationalActivityState.needsInput
+        : state;
+    final previous = _lastActivityRecord;
+    final local =
+        restoredLocalId ??
+        (previous?.turnId == id ? previous!.localSessionId : localSessionId);
+    final unchanged =
+        previous != null &&
+        previous.turnId == id &&
+        previous.localSessionId == local &&
+        previous.storedSessionId == storedSessionId &&
+        previous.lineageRootId == _lineageRootId &&
+        previous.state == effectiveState;
+    final now = _session._activityNowEpochMs();
+    final heartbeat =
+        unchanged &&
+        active &&
+        meaningfulActivity &&
+        now - previous.updatedAtEpochMs >=
+            NormalGatewayApplicationSession
+                .activityHeartbeatInterval
+                .inMilliseconds;
+    if (unchanged && !heartbeat) {
+      if (meaningfulActivity) _session._retryActivity();
+      return;
+    }
+    final record = OperationalActivityRecord(
+      scope: _session.scope,
+      localSessionId: local,
+      storedSessionId: storedSessionId,
+      lineageRootId: _lineageRootId,
+      turnId: id,
+      state: effectiveState,
+      updatedAtEpochMs:
+          updatedAtEpochMs ??
+          (unchanged && !heartbeat ? previous.updatedAtEpochMs : now),
+    );
+    _lastActivityRecord = record;
+    // Activity is an optional index, never a prerequisite for submitting,
+    // settling or recovering real work. New unchanged progress observations
+    // are heartbeat-bounded; dirty retries have a separate bounded cooldown.
+    _session._recordActivity(record);
   }
 
   bool _current(int generation) =>
-      !_session._closed && generation == _generation;
+      !_session._closed && _redirect == null && generation == _generation;
+
+  bool _submissionCurrent(int generation) {
+    if (_handoffRejection != null) throw _handoffRejection!;
+    return _current(generation);
+  }
 
   /// Synchronous admission across duplicate routes and both durable/local ids.
   Object? reserve() {
+    if (_redirect != null) return _root.reserve();
     if (_session._closed || !_session._initialized || snapshot.hasActiveTurn) {
       return null;
     }
     _generation++;
-    if (_display.isEmpty && _priorDisplay.isEmpty) {
-      _presentationBase = _history
-          .map((row) => Map<String, dynamic>.from(row))
-          .toList();
-    }
     turnId = const Uuid().v4();
     _reservation = Object();
     phase = NormalGatewayTurnPhase.preparing;
@@ -576,6 +1166,7 @@ class NormalGatewayChatOwner {
   }
 
   void cancelPreparation(Object reservation) {
+    if (_redirect != null) return _root.cancelPreparation(reservation);
     if (!identical(_reservation, reservation) ||
         phase != NormalGatewayTurnPhase.preparing) {
       return;
@@ -588,6 +1179,7 @@ class NormalGatewayChatOwner {
   /// An interrupt ack is not a terminal receipt. Keep the marker active until
   /// the terminal event or an authoritative resume/history reconciliation.
   Future<bool> interrupt() async {
+    if (_redirect != null) return _root.interrupt();
     if (!snapshot.hasActiveTurn || !wireEmitted) return false;
     return await _session.client?.interruptPrompt(sessionId: localSessionId) ??
         false;
@@ -606,6 +1198,18 @@ class NormalGatewayChatOwner {
     bool canRestoreDraft = false,
     ComposerDraftHandle? draftHandle,
   }) async {
+    if (_redirect != null) {
+      return _root.submitPrepared(
+        reservation: reservation,
+        text: text,
+        localContent: localContent,
+        submit: submit,
+        knownStoredSessionId: knownStoredSessionId,
+        rawDraftText: rawDraftText,
+        canRestoreDraft: canRestoreDraft,
+        draftHandle: draftHandle,
+      );
+    }
     if (!identical(_reservation, reservation) ||
         phase != NormalGatewayTurnPhase.preparing) {
       throw StateError('Submission reservation is no longer owned.');
@@ -628,13 +1232,19 @@ class NormalGatewayChatOwner {
     _tools.clear();
     _subagents.clear();
     _pendingInput.clear();
-    _display.add({'role': 'user', 'content': localContent});
+    _display.add({
+      'role': 'user',
+      'content': localContent,
+      '_normal_projection_id': const Uuid().v4(),
+    });
     _display.add({
       'role': 'assistant',
       'content': '',
       '_normal_projection_id': const Uuid().v4(),
       '_gateway_pending_response': true,
     });
+    _receivedObservation = null;
+    _boundSettledPresentation();
     _notify();
     try {
       if (storedSessionId == null && knownStoredSessionId != null) {
@@ -645,26 +1255,35 @@ class NormalGatewayChatOwner {
           localSessionId,
           workingDirectory: workingDirectory,
         );
-        if (!_current(generation)) return;
+        if (!_submissionCurrent(generation)) return;
         final stored = _session.client!.storedSessionKeyFor(localSessionId);
         if (stored == null) {
           throw StateError('No durable session binding before submit.');
         }
         _session._bind(this, stored);
       }
-      // An explicitly empty session.create is independent known-empty authority,
-      // consumed only by its first submission to this exact durable binding.
-      // Resume/bind/404 never imply zero, and HTTP cannot delay wire emission.
+      if (!_submissionCurrent(generation)) return;
+      // Allocation-time emptiness is consumed once, unless a newer verified
+      // alias observation has superseded it. Resume/unknown/404 are never empty.
+      final createdEmpty = _createdEmptySessionId == storedSessionId;
+      _createdEmptySessionId = null;
+      if (!_historyKnown && !createdEmpty) {
+        final stored = storedSessionId!;
+        final baseline = await _readAdmissionBaseline(stored);
+        if (!_submissionCurrent(generation)) return;
+        if (stored == storedSessionId && baseline != null) {
+          _acceptHistory(baseline);
+        }
+      }
       _floor = protectUnknownPresentation
           ? null
           : _historyKnown
           ? _numericFloor(_history)
-          : _createdEmptySessionId == storedSessionId
+          : createdEmpty
           ? 0
           : null;
-      _createdEmptySessionId = null;
       _historyKnown = false;
-      if (!_current(generation)) return;
+      if (!_submissionCurrent(generation)) return;
       final now = DateTime.now().millisecondsSinceEpoch;
       _marker = NormalGatewayPendingMarker(
         scope: _session.scope,
@@ -677,8 +1296,25 @@ class NormalGatewayChatOwner {
         updatedAt: now,
       );
       await _session.pendingStore.put(_marker!);
-      if (!_current(generation)) return;
-      await (submit ?? _session._submit)(
+      if (!_submissionCurrent(generation)) return;
+      _submissionPending = true;
+      final NormalGatewayPromptSubmit submitPrompt =
+          submit ??
+          (!_session._usesClientSubmit || _session.client == null
+              ? _session._submit
+              : ({
+                  required String sessionId,
+                  required String text,
+                  required StreamCallback onEvent,
+                  required void Function() onSent,
+                }) => _session.client!.submitPrompt(
+                  sessionId: sessionId,
+                  text: text,
+                  onEvent: onEvent,
+                  onSent: onSent,
+                  maySend: () => _current(generation) && snapshot.hasActiveTurn,
+                ));
+      await submitPrompt(
         sessionId: localSessionId,
         text: text,
         // Production ingress is the global observer; the seam feeds exactly
@@ -702,16 +1338,21 @@ class NormalGatewayChatOwner {
           _notify();
         },
       );
+      if (_current(generation)) _submissionPending = false;
       if (!_current(generation) || !snapshot.hasActiveTurn || _settling) return;
       // A completed RPC future is NOT terminal evidence (including test seams).
       phase = NormalGatewayTurnPhase.reconciling;
       _notify();
       requestRecovery();
     } catch (error) {
+      if (_handoffRejection != null) throw _handoffRejection!;
+      if (_current(generation)) _submissionPending = false;
       if (!_current(generation) || !snapshot.hasActiveTurn || _settling) return;
       if (wireEmitted) {
         phase = NormalGatewayTurnPhase.reconciling;
-        _error = error.toString();
+        if (error is! JsonRpcError || error.reason != 'stream_terminal') {
+          _error = error.toString();
+        }
         _notify();
         requestRecovery();
         return;
@@ -721,7 +1362,44 @@ class NormalGatewayChatOwner {
     }
   }
 
+  Future<_GatewayHistoryObservation?> _readAdmissionBaseline(
+    String stored,
+  ) async {
+    final read = Completer<_GatewayHistoryObservation?>();
+    _baselineRead = read;
+    _baselineTimer = Timer(
+      const Duration(seconds: 2),
+      () => read.complete(null),
+    );
+    // A late response may finish after timeout, wire emission or close. It
+    // resolves only this read, never mutates the owner's baseline/history.
+    unawaited(
+      _readLatestHistory(stored).then(
+        (rows) {
+          if (!read.isCompleted) read.complete(rows);
+        },
+        onError: (Object _, StackTrace _) {
+          if (!read.isCompleted) read.complete(null);
+        },
+      ),
+    );
+    try {
+      return await read.future;
+    } finally {
+      _baselineTimer?.cancel();
+      _baselineTimer = null;
+      _baselineRead = null;
+    }
+  }
+
   void _restore(NormalGatewayPendingMarker marker) {
+    if (_marker != null) {
+      if (_marker!.key != marker.key) {
+        _additionalRestoredMarkers[marker.key] = marker;
+        _floor = null; // ambiguous receipts have no single known boundary
+      }
+      return;
+    }
     _generation++;
     turnId = marker.turnId;
     _floor = marker.rowFloor;
@@ -729,6 +1407,10 @@ class NormalGatewayChatOwner {
     // Even write_ahead may have emitted before process death. Never resend.
     wireEmitted = true;
     phase = NormalGatewayTurnPhase.reconciling;
+    _recordActivity(
+      updatedAtEpochMs: marker.updatedAt,
+      restoredLocalId: marker.localSessionId,
+    );
   }
 
   void _event(StreamEvent event) {
@@ -802,29 +1484,12 @@ class NormalGatewayChatOwner {
         event.data,
       );
       if (update != null) {
-        final observedIndex = _observedSubagents.indexWhere(
-          (agent) => agent.matchesTask(update),
-        );
-        final merged = observedIndex < 0
-            ? update
-            : _observedSubagents[observedIndex].merge(update);
-        if (observedIndex < 0) {
-          _observedSubagents.add(merged);
-        } else {
-          _observedSubagents[observedIndex] = merged;
+        if (snapshot.hasActiveTurn && wireEmitted) {
+          _hasTurnSubagentPresentation = true;
         }
-        if (_observedSubagents.length > 128) _observedSubagents.removeAt(0);
-        final index = _subagents.indexWhere(
-          (agent) => agent.matchesTask(merged),
-        );
-        if (index < 0) {
-          _subagents.add(merged);
-        } else {
-          _subagents[index] = merged;
-        }
-        if (_subagents.length > 128) _subagents.removeAt(0);
+        _mergeVisibleChild(_mergeObservedChild(update));
       }
-      _notify();
+      _notify(meaningfulActivity: update != null);
       return;
     }
     if (!snapshot.hasActiveTurn ||
@@ -834,12 +1499,20 @@ class NormalGatewayChatOwner {
       return;
     }
     final wireTurn = event.turnId;
+    final terminal = const {
+      'message.complete',
+      'turn.end',
+      'turn.error',
+      'error',
+    }.contains(event.type);
     if (wireTurn != null) {
       if (_settledWireTurnIds.contains(wireTurn) ||
           _wireTurnId != null && _wireTurnId != wireTurn) {
         return;
       }
-      _wireTurnId ??= wireTurn;
+      // A terminal cannot establish ownership: it may be A's delayed bookend
+      // arriving after B's onSent, before B has emitted any activity.
+      if (!terminal) _wireTurnId ??= wireTurn;
     }
     if (phase == NormalGatewayTurnPhase.reconciling &&
         (event.type == 'message.delta' || event.type.startsWith('tool.'))) {
@@ -860,6 +1533,13 @@ class NormalGatewayChatOwner {
       event.type,
       event.data,
     );
+    if (reasoning != null ||
+        event.type.startsWith('tool.') ||
+        event.type == 'message.delta' ||
+        event.type == 'message.interim' ||
+        event.type == 'message.complete') {
+      _receivedObservation ??= ++_session._presentationObservation;
+    }
     final assistant =
         _display.isNotEmpty && _display.last['role'] == 'assistant'
         ? _display.last
@@ -937,28 +1617,31 @@ class NormalGatewayChatOwner {
         event.data,
         observedAt: DateTime.now(),
       );
-      if (update != null) {
-        var index = update.toolId == null
-            ? -1
-            : _tools.indexWhere((tool) => tool.toolId == update.toolId);
-        if (index < 0) {
-          index = _tools.lastIndexWhere(
-            (tool) =>
-                !tool.isTerminal &&
-                (update.toolId == null || tool.toolId == null) &&
-                tool.name.toLowerCase() == update.name.toLowerCase(),
-          );
-        }
+      if (update != null && !_timeline.excludesTool(update)) {
+        final index = toolActivityUpdateIndex(_tools, update, event.type);
         if (index < 0) {
           _tools.add(update);
         } else {
           _tools[index] = _tools[index].merge(update);
         }
         final activity = index < 0 ? _tools.last : _tools[index];
+        final toolId = activity.toolId;
+        if (toolId != null) {
+          _session.presentation
+              ?.chatFor(storedSessionId ?? localSessionId)
+              .aliasTool(activity.identity, 'tool:$toolId');
+        }
         if (assistant != null) {
           _timeline = _timeline.tool(
             assistant['_normal_projection_id']!,
             activity,
+          );
+          _tools.removeWhere(
+            (tool) =>
+                tool.identity == activity.identity &&
+                !_timeline.runs.any(
+                  (run) => run.activity?.identity == tool.identity,
+                ),
           );
         }
         if (_tools.length > 512) _tools.removeAt(0);
@@ -985,20 +1668,36 @@ class NormalGatewayChatOwner {
       ].map((row) => row['_normal_projection_id']).whereType<String>(),
     );
     final failure = _failure(event.data);
-    if (event.type == 'turn.error' ||
-        event.type == 'error' ||
-        const {'turn.end', 'message.complete'}.contains(event.type) &&
-            failure != null) {
+    _tools.removeWhere(_timeline.excludesTool);
+    _boundSettledPresentation();
+    final ownedLifecycleTerminal =
+        wireTurn != null &&
+        wireTurn == _wireTurnId &&
+        _additionalRestoredMarkers.isEmpty &&
+        const {'turn.end', 'turn.error'}.contains(event.type);
+    if (ownedLifecycleTerminal &&
+        (event.type == 'turn.error' || failure != null)) {
       unawaited(
         _settle(
           false,
           failure ?? event.data['message']?.toString() ?? 'Gateway turn failed',
         ),
       );
-    } else if (event.type == 'turn.end' || event.type == 'message.complete') {
+    } else if (ownedLifecycleTerminal) {
       unawaited(_settle(true, null));
+    } else if (terminal) {
+      // Stock message.complete precedes running=false (prompt_turn.py), and
+      // stock does not promise turn.end. Neither an ID-less trailing bookend
+      // nor a message completion proves the admitted lifecycle is settled.
+      // Resume/history are the authority; never infer ownership from arrival.
+      requestRecovery();
     }
-    _notify();
+    _notify(
+      meaningfulActivity:
+          event.type.startsWith('message.') ||
+          event.type.startsWith('tool.') ||
+          reasoning != null,
+    );
   }
 
   Map<String, dynamic>? _completionAssistantMessage(
@@ -1061,6 +1760,7 @@ class NormalGatewayChatOwner {
   }
 
   void requestRecovery() {
+    if (_redirect != null) return _root.requestRecovery();
     if (!snapshot.hasActiveTurn ||
         (!wireEmitted && _terminalReceipt == null) ||
         _settling ||
@@ -1069,7 +1769,6 @@ class NormalGatewayChatOwner {
     }
     _retryTimer?.cancel();
     _retryTimer = null;
-    if (_recovering && _recoveringGeneration == _generation) return;
     _recoveryQueued = true;
     if (!_recovering) unawaited(_recover());
   }
@@ -1079,7 +1778,7 @@ class NormalGatewayChatOwner {
     _recovering = true;
     _recoveryQueued = false;
     final generation = _generation;
-    _recoveringGeneration = generation;
+
     try {
       final terminal = _terminalReceipt;
       if (terminal != null && terminal.generation == generation) {
@@ -1092,6 +1791,10 @@ class NormalGatewayChatOwner {
       }
       final stored = storedSessionId;
       if (stored == null) return; // no safe recovery without a durable identity
+      // Recovery may attach while the submit wait is pending, but that read
+      // cannot become settlement authority merely by arriving after the ACK.
+      // Generation plus this immutable observation boundary identify its epoch.
+      final submissionWasPending = _submissionPending;
       final resumed = await (_session.client == null
           ? _session._resume(
               localSessionId: localSessionId,
@@ -1101,61 +1804,78 @@ class NormalGatewayChatOwner {
               localSessionId: localSessionId,
               storedSessionId: stored,
               acceptsResult: () =>
-                  _current(generation) && snapshot.hasActiveTurn,
+                  _current(generation) &&
+                  snapshot.hasActiveTurn &&
+                  !submissionWasPending &&
+                  !_submissionPending,
             ));
       if (!_current(generation) || !snapshot.hasActiveTurn || _settling) return;
       if (!_session._canRecover) return;
+      // The submit completion queues a fresh recovery. Never inspect retained
+      // errors, idle status or history from a pre-wait observation, even if its
+      // response is delivered after this submission's wait has finished.
+      if (submissionWasPending || _submissionPending) return;
+      final status = (resumed.inflight?['status'] ?? resumed.status)
+          ?.toString()
+          .toLowerCase();
+      final running =
+          resumed.running == true ||
+          const {'running', 'queued', 'pending', 'streaming'}.contains(status);
+      final inactive =
+          resumed.running == false ||
+          const {'completed', 'complete', 'done', 'idle'}.contains(status);
       final failure = _failure({
         ...?resumed.inflight,
         'status': resumed.inflight?['status'] ?? resumed.status,
       });
-      if (failure != null) {
-        await _settle(false, failure, generation: generation);
+      if (!running && failure != null) {
+        await _settle(
+          _additionalRestoredMarkers.isEmpty ? false : null,
+          _additionalRestoredMarkers.isEmpty ? failure : null,
+          generation: generation,
+        );
         return;
       }
-      final fresh = await _session._history(stored);
+      final fresh = await _readLatestHistory(stored);
       if (!_current(generation) || !snapshot.hasActiveTurn || _settling) return;
       if (!_session._canRecover) return;
-      _history = fresh;
-      _historyKnown = true;
-      // Idle proves the remote work ended, NOT that it succeeded. Stock clears
-      // inflight on interruption and persists partial assistant prose without
-      // an outcome field. Only explicit terminal status can prove success.
-      final status = (resumed.inflight?['status'] ?? resumed.status)
-          ?.toString()
-          .toLowerCase();
-      final inactive =
-          resumed.running == false ||
-          const {'completed', 'complete', 'done', 'idle'}.contains(status);
-      final running =
-          resumed.running == true ||
-          const {'running', 'queued', 'pending', 'streaming'}.contains(status);
+      if (!_acceptHistory(fresh)) return;
+      // Idle proves work ended, never success: stock may retain partial prose
+      // after interruption. Only explicit terminal status proves an outcome.
       if (running) phase = NormalGatewayTurnPhase.running;
       final completed = const {
         'completed',
         'complete',
         'done',
       }.contains(status);
-      if (completed &&
+      if (inactive && !running && _additionalRestoredMarkers.isNotEmpty) {
+        // Authoritative idle releases all restored uncertainties, but cannot
+        // assign one recovered turn's successful outcome to every receipt.
+        await _settle(null, null, generation: generation);
+      } else if (completed &&
           !running &&
           _floor != null &&
-          fresh.any((row) => _responseRow(row, _floor!))) {
+          fresh.rows.any((row) => _responseRow(row, _floor!))) {
         await _settle(true, null, generation: generation);
       } else if (inactive && !running && !completed) {
         // Release admission without resubmitting or inventing success/failure.
         // No row/count heuristic is needed to know the server is now idle.
         await _settle(null, null, generation: generation);
       } else {
-        _notify();
+        _notify(meaningfulActivity: running);
       }
     } catch (_) {
       // A failed resume/history read is unknown, never an empty completion.
     } finally {
       _recovering = false;
-      _recoveringGeneration = null;
+
       // Old flight A must hand off to a queued generation B, even when A was
       // invalidated by terminal settlement while its read was held.
-      if (!_session._closed && _recoveryQueued && _session._canRecover) {
+      if (_redirect != null) {
+        // A retired owner's held read cannot start another recovery timer or
+        // mutate the shared winner after it unwinds.
+        _recoveryQueued = false;
+      } else if (!_session._closed && _recoveryQueued && _session._canRecover) {
         requestRecovery();
       } else if (snapshot.hasActiveTurn &&
           (wireEmitted || _terminalReceipt != null) &&
@@ -1187,12 +1907,12 @@ class NormalGatewayChatOwner {
     _retryTimer = null;
     final marker = _marker;
     try {
-      if (marker != null) {
-        await _session.pendingStore.put(marker.withPhase('settled'));
+      for (final receipt in [?marker, ..._additionalRestoredMarkers.values]) {
+        await _session.pendingStore.put(receipt.withPhase('settled'));
         if (!_current(owned)) return;
         // A durable tombstone prevents restart from resurrecting this turn if
         // the optional physical removal fails.
-        await _session.pendingStore.remove(marker).catchError((Object _) {});
+        await _session.pendingStore.remove(receipt).catchError((Object _) {});
         if (!_current(owned)) return;
       }
       if (completed == false &&
@@ -1200,13 +1920,19 @@ class NormalGatewayChatOwner {
           _listeners.isEmpty &&
           _draftRestoreAllowed &&
           _draftToRestore != null) {
+        bool canRestore() =>
+            _current(owned) &&
+            _draftRestoreAllowed &&
+            _listeners.isEmpty &&
+            _session.presentation?.isClosed != true;
         final handle = _draftHandle;
         await (handle != null
-            ? handle.save(_draftToRestore!)
+            ? _restoreDraft(handle, _draftToRestore!, canRestore)
             : ComposerDraftStore.save(
                 connectionId: _session.connection.id,
                 sessionId: localSessionId,
                 text: _draftToRestore!,
+                isCurrent: canRestore,
               ));
         if (!_current(owned)) return;
       }
@@ -1229,13 +1955,24 @@ class NormalGatewayChatOwner {
               .whereType<String>(),
         );
       }
-      final canonical =
-          completed != false &&
-          _floor != null &&
-          _history.any((row) => _responseRow(row, _floor!));
-      if (canonical) {
-        _clearTransientPresentation();
+      // Successful lifecycle settlement cannot establish an HTTP row match.
+      if (wireEmitted && turnId != null && _display.isNotEmpty) {
+        _receivedOutcomes.add(
+          ReceivedScopeOutcome(
+            id: turnId!,
+            scopes: _display
+                .map((row) => row['_normal_projection_id'])
+                .whereType<String>(),
+            outcome: completed == null
+                ? ReceivedLifecycleOutcome.unknown
+                : completed
+                ? ReceivedLifecycleOutcome.completed
+                : ReceivedLifecycleOutcome.failed,
+          ),
+        );
       }
+      _cleanCompletedEmptySubmission(_history);
+      _boundSettledPresentation();
       _error = error;
       _status = completed == null
           ? const GatewayTurnStatus(
@@ -1252,10 +1989,18 @@ class NormalGatewayChatOwner {
         row['_gateway_pending_response'] = false;
       }
       _marker = null;
+      _additionalRestoredMarkers.clear();
       _terminalReceipt = null;
       _settling = false;
       _notify();
-      if (!canonical && wireEmitted) unawaited(_refreshSettledHistory(owned));
+      // Avoid a redundant physical read when recovery already accepted a
+      // post-admission page. This is a fetch decision only, never retirement or
+      // proof of correspondence between any saved row and a received scope.
+      if (wireEmitted &&
+          !(_floor != null &&
+              _history.any((row) => _responseRow(row, _floor!)))) {
+        unawaited(_refreshSettledHistory(owned));
+      }
       if (settledWireEmitted &&
           completed != null &&
           _session._background &&
@@ -1353,6 +2098,7 @@ class NormalGatewayChatOwner {
               'sessionId': storedSessionId ?? localSessionId,
               'connectionId': _session.connection.id,
               'requestId': requestId,
+              ..._session._approvalOrigin,
             }),
           )
           .catchError((Object _) => false),
@@ -1363,45 +2109,37 @@ class NormalGatewayChatOwner {
     final stored = storedSessionId;
     if (stored == null) return;
     try {
-      final fresh = await _session._history(stored);
+      final fresh = await _readLatestHistory(stored);
       if (!_current(generation) || snapshot.hasActiveTurn) return;
-      _historyKnown = true;
-      _history = fresh;
-      _retireCompletedPresentation(fresh);
+      if (!_acceptHistory(fresh)) return;
+      _cleanCompletedEmptySubmission(fresh.rows);
       _notify();
     } catch (_) {
       /* keep the received final response */
     }
   }
 
-  bool _retireCompletedPresentation(List<Map<String, dynamic>> fresh) {
-    // Settlement's first GET can lag persistence. A later latest read may
-    // replace the projection, but only durable identity beyond the known
-    // admission floor proves freshness of a received response. A completed
-    // submission scaffold has no received response to protect; it may hand
-    // presentation to a successful latest transcript containing a full turn.
-    // Neither path correlates turns by matching prompt or response text.
+  bool _cleanCompletedEmptySubmission(List<Map<String, dynamic>> fresh) {
+    // Optional local prompt/empty-assistant scaffolds are not received output.
+    // Never erase materialized scopes, imported scopes or child observers here.
     if (phase != NormalGatewayTurnPhase.completed ||
-        (_display.isEmpty &&
-            _priorDisplay.isEmpty &&
-            _timeline.runs.isEmpty &&
-            _tools.isEmpty)) {
+        !_canCleanEmptySubmission(fresh)) {
       return false;
     }
-    final hasFreshResponse =
-        _floor != null && fresh.any((row) => _responseRow(row, _floor!));
-    if (!hasFreshResponse && !_canHandOffSubmissionScaffolds(fresh)) {
-      return false;
-    }
-    _clearTransientPresentation();
+    _display.clear();
+    _priorDisplay.clear();
     return true;
   }
 
-  bool _canHandOffSubmissionScaffolds(List<Map<String, dynamic>> fresh) {
-    if (_floor != null ||
-        _timeline.runs.isNotEmpty ||
+  bool _canCleanEmptySubmission(List<Map<String, dynamic>> fresh) {
+    // A stale page cannot clean even empty scaffolds. The floor is a read
+    // eligibility guard here, never correlation for materialized receipts.
+    if (_floor != null && !fresh.any((row) => _responseRow(row, _floor!))) {
+      return false;
+    }
+    if (_timeline.runs.isNotEmpty ||
         _tools.isNotEmpty ||
-        _subagents.isNotEmpty) {
+        _hasTurnSubagentPresentation) {
       return false;
     }
     final rows = [..._priorDisplay, ..._display];
@@ -1409,7 +2147,8 @@ class NormalGatewayChatOwner {
     for (var i = 0; i < rows.length; i += 2) {
       if (rows[i]['role'] != 'user' ||
           rows[i + 1]['role'] != 'assistant' ||
-          (rows[i + 1]['content']?.toString().isNotEmpty ?? false)) {
+          (rows[i + 1]['content']?.toString().isNotEmpty ?? false) ||
+          (rows[i + 1]['_gateway_reasoning']?.toString().isNotEmpty ?? false)) {
         return false;
       }
     }
@@ -1417,21 +2156,131 @@ class NormalGatewayChatOwner {
     return user >= 0 && fresh.skip(user + 1).any(_displayableResponseRow);
   }
 
-  void _clearTransientPresentation() {
-    _presentationBase = [];
+  NormalGatewayChatSnapshot? _rejectForHandoff() {
+    if (!snapshot.hasActiveTurn) return null;
+    assert(!wireEmitted);
+    _handoffRejection = StateError(
+      'This chat was opened through its stored identity while another turn '
+      'was admitted. The unsent prompt was not sent; retry explicitly after '
+      'that turn finishes.',
+    );
+    _generation++; // fences held ensure/history/write-ahead and submit starts
+    _reservation = null;
+    _retryTimer?.cancel();
+    _baselineTimer?.cancel();
+    final baseline = _baselineRead;
+    if (baseline != null && !baseline.isCompleted) baseline.complete(null);
+    phase = NormalGatewayTurnPhase.failed;
+    _error = _handoffRejection.toString();
     _display.clear();
-    _priorDisplay.clear();
-    _timeline = _timeline.clear();
-    _tools.clear();
-    _subagents.clear();
+
+    if (_listeners.isEmpty && _draftRestoreAllowed && _draftToRestore != null) {
+      final handle = _draftHandle;
+      if (handle != null) {
+        unawaited(
+          _restoreDraft(
+            handle,
+            _draftToRestore!,
+            () => !_session._closed && _draftRestoreAllowed,
+          ),
+        );
+      }
+    }
+    final marker = _marker;
+    if (marker != null) {
+      _session._retirePreWireMarker(marker);
+    }
+    return snapshot;
   }
 
   void _close() {
     _generation++;
     _retryTimer?.cancel();
+    _baselineTimer?.cancel();
+    final baseline = _baselineRead;
+    if (baseline != null && !baseline.isCompleted) baseline.complete(null);
     _listeners.clear();
     _pendingInput.clear();
+    _display.clear();
+    _priorDisplay.clear();
+    _settledPresentation.clear();
+    _receivedOutcomes.clear();
+    _timeline = _timeline.clear();
+    _tools.clear();
+    _subagents.clear();
+    _observedSubagents.clear();
+    _inputUpdates.clear();
+    _auxiliaryEvents.clear();
+    _hasTurnSubagentPresentation = false;
   }
+
+  Future<void> _restoreDraft(
+    ComposerDraftHandle handle,
+    String text,
+    bool Function() isCurrent,
+  ) =>
+      _session.presentation?.restoreRejectedDraft(
+        handle: handle,
+        text: text,
+        isCurrent: isCurrent,
+      ) ??
+      handle.save(text, isCurrent: isCurrent);
+}
+
+/// Session/account-scoped physical read authority. A redirect is NOT permission
+/// to lend a losing owner's in-flight read to the winner. Admission and close
+/// invalidate synchronously; only accepted success advances freshness.
+class NormalGatewayHistoryRead {
+  const NormalGatewayHistoryRead._(
+    this._owner,
+    this._local,
+    this._binding,
+    this._stored,
+    this._generation,
+    this._observation,
+  );
+  final NormalGatewayChatOwner _owner;
+  final String _local;
+  final String? _binding;
+  final String _stored;
+  final int _generation;
+  final int _observation;
+
+  bool get isAttached =>
+      !_owner._session._closed &&
+      _owner._redirect == null &&
+      _owner.localSessionId == _local &&
+      _owner.storedSessionId == _binding &&
+      (_binding ?? _local) == _stored;
+
+  bool get isSuperseded => _observation < _owner._historyObservation;
+
+  bool get isCurrent =>
+      isAttached && _owner._generation == _generation && !isSuperseded;
+}
+
+class _GatewayHistoryObservation {
+  const _GatewayHistoryObservation(this.rows, this.read);
+  final List<Map<String, dynamic>> rows;
+  final NormalGatewayHistoryRead read;
+  int get observation => read._observation;
+}
+
+/// Received historical output, not a second admission or canonical transcript.
+/// Observation order belongs to receipts, never a guessed HTTP interval.
+class _SettledGatewayPresentation {
+  const _SettledGatewayPresentation({
+    required this.observation,
+    required this.rows,
+    required this.tools,
+    required this.timeline,
+    required this.outcomes,
+  });
+  final int observation;
+  final List<Map<String, dynamic>> rows;
+  final List<GatewayToolActivity> tools;
+  final ChatTimeline timeline;
+  final List<ReceivedScopeOutcome> outcomes;
 }
 
 bool _interactive(String type) => const {

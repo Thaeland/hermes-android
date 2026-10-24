@@ -1,10 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' as io;
 
 import 'package:flutter/material.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'core/models/client_certificate.dart';
 import 'core/services/android_launch_intent_service.dart';
 import 'core/services/android_share_intent_service.dart';
+import 'core/services/client_certificate_service.dart';
 import 'core/services/composer_draft_store.dart';
 import 'core/services/config_backup.dart';
 import 'core/services/config_backup_io.dart';
@@ -15,21 +19,28 @@ import 'core/services/desktop_gateway_client.dart';
 import 'core/services/background_work_prefs.dart';
 import 'core/services/gateway_turn_application_controller.dart';
 import 'core/services/local_chat_pin_store.dart';
-import 'core/services/notification_prefs.dart';
 import 'core/services/mobile_push_service.dart';
+import 'core/services/notification_approval_authority.dart';
+import 'core/services/connection_mutation_barrier.dart';
+import 'core/services/notification_prefs.dart';
 import 'core/services/text_size_preference.dart';
+import 'core/services/theme_preference.dart';
 import 'core/services/turn_notification_service.dart';
 import 'core/screens/chat_screen.dart';
 import 'core/screens/workspace_screen.dart';
 import 'core/theme/hermes_theme.dart';
 import 'core/utils/responsive.dart';
 import 'core/widgets/config_backup_card.dart';
+import 'core/widgets/theme_palette_picker.dart';
+import 'core/widgets/hermes_system_ui.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  // Remove any private key left behind by a cancelled connection import.
+  unawaited(ClientCertificateService().cleanupStaging());
   runApp(const StartupApp());
 }
 
@@ -153,6 +164,16 @@ class _StartupRecoveryApp extends StatelessWidget {
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: preferredSupportedLocales(),
       localeListResolutionCallback: resolvePreferredLocale,
+      themeMode: ThemePreferenceStore(prefs).readMode(),
+      theme: hermesTheme(
+        Brightness.light,
+        palette: ThemePreferenceStore(prefs).readPalette(),
+      ),
+      darkTheme: hermesTheme(
+        Brightness.dark,
+        palette: ThemePreferenceStore(prefs).readPalette(),
+      ),
+      builder: (context, child) => HermesSystemUi(child: child!),
       home: Builder(
         key: _rootKey,
         builder: (context) => Scaffold(
@@ -182,7 +203,7 @@ class _StartupRecoveryApp extends StatelessWidget {
                   FilledButton.icon(
                     onPressed: () async {
                       try {
-                        await prefs.remove('saved_connections');
+                        await ConnectionManager(prefs).resetConnections();
                         final retry = await createConnectionManager(prefs);
                         onRecovered(retry);
                       } catch (retryError) {
@@ -226,17 +247,25 @@ class HermesApp extends StatefulWidget {
   final ConnectionManager connManager;
   final AndroidShareIntentService? shareIntents;
   final AndroidLaunchIntentService? launchIntents;
+  // Optional boundaries keep root tests on the real owner and dispatchers.
+  final GatewayTurnApplicationController? turnApplicationController;
+  final TurnNotificationService? notifications;
   final MobilePushService? mobilePush;
+  final Future<void> Function()? loadBackgroundPolicy;
+  final ApiClient Function(SavedConnection)? notificationClientFactory;
 
   @visibleForTesting
   final Future<Session?> Function(SavedConnection, String)?
   testNotificationSessionLookup;
-
   const HermesApp({
     required this.connManager,
     this.shareIntents,
     this.launchIntents,
+    this.turnApplicationController,
+    this.notifications,
     this.mobilePush,
+    this.loadBackgroundPolicy,
+    this.notificationClientFactory,
     this.testNotificationSessionLookup,
     super.key,
   });
@@ -245,27 +274,18 @@ class HermesApp extends StatefulWidget {
   State<HermesApp> createState() => HermesAppState();
 
   static ThemeMode getThemeMode(SharedPreferences prefs) {
-    final stored = prefs.getString('theme_mode') ?? 'system';
-    switch (stored) {
-      case 'dark':
-        return ThemeMode.dark;
-      case 'light':
-        return ThemeMode.light;
-      default:
-        return ThemeMode.system;
-    }
+    return ThemePreferenceStore(prefs).readMode();
   }
 
   static Future<void> setThemeMode(
     SharedPreferences prefs,
     ThemeMode mode,
   ) async {
-    final value = mode == ThemeMode.dark
-        ? 'dark'
-        : mode == ThemeMode.light
-        ? 'light'
-        : 'system';
-    await prefs.setString('theme_mode', value);
+    await ThemePreferenceStore(prefs).saveMode(mode);
+  }
+
+  static HermesPalette getThemePalette(SharedPreferences prefs) {
+    return ThemePreferenceStore(prefs).readPalette();
   }
 
   static TextSizePreference getTextSizePreference(SharedPreferences prefs) {
@@ -273,8 +293,70 @@ class HermesApp extends StatefulWidget {
   }
 }
 
+/// Root-owned user intent survives suspension, unlike a consumed native tap.
+/// Its captured account and push authority are revalidated on every retry.
+class _NotificationNavigationIntent {
+  final SavedConnection connection;
+  final String? sessionId;
+  final MobilePushRoute? pushRoute;
+  final int generation;
+  final Object? mutationEpoch;
+
+  _NotificationNavigationIntent(
+    this.connection,
+    this.sessionId,
+    MobilePushRoute? pushRoute,
+    this.generation,
+  ) : mutationEpoch = ConnectionMutationBarrier.capture(connection.id),
+      pushRoute = pushRoute == null
+          ? null
+          : MobilePushRoute(
+              pushRoute.connection,
+              pushRoute.sessionId,
+              pushRoute.eventId,
+              Map<String, dynamic>.unmodifiable(pushRoute.authority),
+            );
+
+  bool canCoalesceAuthority(MobilePushRoute? incomingPush) {
+    // Ordinary taps share account authority. Push proofs can differ in event,
+    // consent revision or expiry; target equality cannot establish equivalence.
+    return pushRoute == null && incomingPush == null;
+  }
+}
+
 class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
   late final GatewayTurnApplicationController _turnApplicationController;
+  late final TurnNotificationService _notifications;
+  late final MobilePushService _mobilePush;
+  late final void Function(NotificationResponse) _notificationHandler;
+  bool? _confirmedBackgroundPolicy;
+  bool get _backgroundPolicyReady => _confirmedBackgroundPolicy != null;
+  bool _rootFrameReady = false;
+  bool _pushRouting = false;
+  bool _pushDirty = false;
+  String? _pushHintsSignature;
+  int _notificationGeneration = 0;
+  String? _routingIdentity;
+  _NotificationNavigationIntent? _routingIntent;
+  final _notificationChatRoutes =
+      <
+        ({
+          SavedConnection connection,
+          String sessionId,
+          bool openedAsStoredSession,
+          Route<void> route,
+        })
+      >[];
+  _NotificationNavigationIntent? _pendingNavigation;
+  void Function()? _pendingNormalResponse;
+  final _pendingApprovalResponses =
+      <
+        ({
+          NotificationRoute route,
+          SavedConnection connection,
+          NotificationApprovalAuthority authority,
+        })
+      >[];
 
   /// Android foreground keep-alive: while the app is backgrounded with an
   /// unresolved chat turn, a foreground service holds the process so
@@ -289,9 +371,6 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
   String? _ongoingSignature;
   final Set<String> _ongoingChats = {};
   Future<void> _ongoingWrites = Future<void>.value();
-  late final MobilePushService _mobilePush =
-      widget.mobilePush ?? MobilePushService.shared;
-  bool _routingMobilePush = false;
 
   /// Pushes from the app root (notification taps) need a navigator below the
   /// MaterialApp this state builds.
@@ -301,45 +380,117 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _turnApplicationController = GatewayTurnApplicationController();
+    _turnApplicationController =
+        widget.turnApplicationController ?? GatewayTurnApplicationController();
+    _notifications = widget.notifications ?? TurnNotificationService.shared;
+    _mobilePush = widget.mobilePush ?? MobilePushService.shared;
+    _notificationHandler = _handleNotificationResponse;
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    _background = lifecycle != null && lifecycle != AppLifecycleState.resumed;
+    // Unknown policy is disabled, including when mounted already paused. Set
+    // this before Home creates/restores any normal owner or activity callback.
+    _keepAlive.onPolicyChanged(false);
+    _turnApplicationController.setLifecycle(
+      background: _background,
+      backgroundWorkEnabled: false,
+    );
+    _keepAlive.onAppLifecycleState(
+      lifecycle ?? AppLifecycleState.resumed,
+      hasActiveTurn: _turnApplicationController.hasActiveTurn,
+    );
     // The keep-alive follows the work: a turn settling (or starting) while
     // backgrounded must end (or earn) the foreground service immediately,
     // not wait for the next resume.
     _keepAliveTurnActivityToken = _turnApplicationController
         .addTurnActivityListener(_onTurnActivityChanged);
     backgroundWorkEnabled.addListener(_onBackgroundWorkPolicyChanged);
-    unawaited(BackgroundWorkPrefsStore.load());
-    _restoreNormalSessions();
-    unawaited(NotificationPrefsStore.load());
-    notificationResponseHandler = _handleNotificationResponse;
+    BackgroundWorkPrefsStore.pendingChoice.addListener(
+      _onBackgroundWorkPolicyChanged,
+    );
+    BackgroundWorkPrefsStore.confirmedChanges.addListener(
+      _onBackgroundWorkPolicyConfirmed,
+    );
+    notificationPrefs.addListener(_syncOngoingChats);
     _mobilePush.addListener(_onMobilePushChanged);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) unawaited(_initialiseMobilePushService());
-    });
+    notificationResponseHandler = _notificationHandler;
+    ConnectionMutationBarrier.addListener(_pruneApprovalActions);
     // A notification that launched a terminated app carries its tap/action in
     // the platform's launch details; route it once the first frame is up.
     WidgetsBinding.instance.addPostFrameCallback((_) async {
-      final initial = await TurnNotificationService.shared
-          .takeInitialNotificationResponse();
-      if (initial != null && mounted) _handleNotificationResponse(initial);
+      if (!mounted) return;
+      final initialGeneration = _notificationGeneration;
+      _rootFrameReady = true;
+      unawaited(_loadBackgroundPolicy());
+      unawaited(NotificationPrefsStore.load());
+      _restoreNormalSessions();
+      // The singleton is process-owned, not disposed with a replaceable root.
+      unawaited(
+        _mobilePush.initialize(widget.connManager).catchError((Object _) {}),
+      );
+      _onMobilePushChanged();
+      _resumeNormalNotificationResponses();
+      unawaited(_initializeForegroundNotifications());
+      final initial = await _notifications.takeInitialNotificationResponse();
+      if (initial != null &&
+          mounted &&
+          initialGeneration == _notificationGeneration) {
+        _notificationHandler(initial);
+      }
     });
+  }
+
+  Future<void> _loadBackgroundPolicy() async {
+    try {
+      await (widget.loadBackgroundPolicy?.call() ??
+          BackgroundWorkPrefsStore.load());
+      if (!mounted || _closingTurnOwner) return;
+      _confirmedBackgroundPolicy = BackgroundWorkPrefsStore.confirmedEnabled;
+      _onBackgroundWorkPolicyChanged();
+    } catch (_) {
+      // Failure leaves protection disabled, not at a speculative default.
+    }
+  }
+
+  bool get _protectBackgroundWork =>
+      _confirmedBackgroundPolicy == true &&
+      !BackgroundWorkPrefsStore.pendingChoice.value &&
+      backgroundWorkEnabled.value;
+
+  Future<void> _initializeForegroundNotifications() async {
+    await _notifications.ensureInitialized(refreshPermission: false);
+    if (!mounted || _closingTurnOwner || _background) return;
+    await _notifications.ensureInitialized(
+      requestPermission: true,
+      refreshPermission: false,
+    );
+    if (!mounted || _closingTurnOwner || _background) return;
+    await _notifications.refreshAuthorization();
+    if (!mounted || _closingTurnOwner) return;
+    _ongoingSignature = null;
+    _syncOngoingChats();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      // Refresh OS authorisation passively after returning from Settings.
-      unawaited(TurnNotificationService.shared.ensureInitialized());
       _background = false;
       _restoreNormalSessions();
-    } else if (state == AppLifecycleState.paused ||
+      if (_rootFrameReady) {
+        if (!_backgroundPolicyReady) unawaited(_loadBackgroundPolicy());
+        unawaited(_initializeForegroundNotifications());
+        _resumeNotificationNavigation();
+        _onMobilePushChanged();
+        _resumeNormalNotificationResponses();
+      }
+    } else if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden ||
         state == AppLifecycleState.detached) {
       _background = true;
     }
     _turnApplicationController.setLifecycle(
       background: _background,
-      backgroundWorkEnabled: backgroundWorkEnabled.value,
+      backgroundWorkEnabled: _protectBackgroundWork,
     );
     _syncOngoingChats();
     _keepAlive.onAppLifecycleState(
@@ -348,47 +499,31 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
     );
   }
 
-  Future<void> _initialiseMobilePushService() async {
-    try {
-      await _mobilePush.initialize(widget.connManager);
-      if (mounted && !_closingTurnOwner) _onMobilePushChanged();
-    } catch (_) {
-      // Optional transport failure must not block startup or other intents.
-    }
+  void _pruneApprovalActions() {
+    _pendingApprovalResponses.removeWhere(
+      (entry) => !entry.authority.isCurrent,
+    );
+    prunePendingNotificationApprovals();
   }
 
-  void _onMobilePushChanged() {
-    if (!mounted ||
-        _closingTurnOwner ||
-        _routingMobilePush ||
-        !_mobilePush.hasPendingTap) {
-      return;
-    }
-    unawaited(_routeMobilePush());
-  }
-
-  Future<void> _routeMobilePush() async {
-    _routingMobilePush = true;
-    try {
-      while (mounted && !_closingTurnOwner && _mobilePush.hasPendingTap) {
-        final route = await _mobilePush.takePendingNotificationRoute();
-        if (!mounted || _closingTurnOwner) return;
-        if (route == null || !await _mobilePush.isRouteCurrent(route)) continue;
-        if (!mounted || _closingTurnOwner) return;
-        await _openNotificationSession(
-          route.connection,
-          route.sessionId,
-          pushRoute: route,
-        );
-      }
-    } catch (_) {
-      // Invalid/revoked taps never gain action authority or submit a prompt.
-    } finally {
-      _routingMobilePush = false;
+  void _resumeNormalNotificationResponses() {
+    final pending = _pendingNormalResponse;
+    _pendingNormalResponse = null;
+    final approvals = List.of(_pendingApprovalResponses);
+    _pendingApprovalResponses.clear();
+    pending?.call();
+    for (final entry in approvals) {
+      _dispatchNotificationResponse(
+        entry.route,
+        entry.connection,
+        entry.authority,
+      );
     }
   }
 
   void _restoreNormalSessions() {
+    _pruneApprovalActions();
+    _pruneNotificationChatRoutes();
     final connections = widget.connManager.getConnections();
     for (final connection in connections) {
       if (DesktopGatewayClient.endpointDigestFor(connection) == null) continue;
@@ -410,8 +545,15 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
     _syncOngoingChats();
   }
 
+  void _onBackgroundWorkPolicyConfirmed() {
+    if (!mounted || _closingTurnOwner) return;
+    _confirmedBackgroundPolicy = BackgroundWorkPrefsStore.confirmedEnabled;
+    _onBackgroundWorkPolicyChanged();
+  }
+
   void _onBackgroundWorkPolicyChanged() {
-    final enabled = backgroundWorkEnabled.value;
+    if (_closingTurnOwner) return;
+    final enabled = _protectBackgroundWork;
     _keepAlive.onPolicyChanged(enabled);
     _turnApplicationController.setLifecycle(
       background: _background,
@@ -430,7 +572,8 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
       );
     final signature = jsonEncode([
       _background,
-      backgroundWorkEnabled.value,
+      _protectBackgroundWork,
+      notificationPrefs.value.toJson(),
       for (final activity in activities)
         [
           activity.connectionId,
@@ -446,42 +589,67 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
     _ongoingWrites = _ongoingWrites
         .then((_) async {
           if (_closingTurnOwner) return;
-          final service = TurnNotificationService.shared;
+          final service = _notifications;
           final current = _turnApplicationController.activeChatActivities
               .toList();
-          if (!_background || !backgroundWorkEnabled.value) {
-            await service.cancelAllOngoingChats();
-            _ongoingChats.clear();
-            return;
-          }
           final desired = <String>{};
-          for (final activity in current) {
+          var failed = false;
+          for (final activity in current.where(
+            (_) =>
+                _background &&
+                _protectBackgroundWork &&
+                notificationPrefs.value.enabled,
+          )) {
+            if (_closingTurnOwner) break;
             final key = jsonEncode([
               activity.connectionId,
               activity.localSessionId,
             ]);
             desired.add(key);
-            await service.showOngoingChat(
-              connectionId: activity.connectionId,
-              localSessionId: activity.localSessionId,
-              storedSessionId: activity.storedSessionId,
-              title: activity.title,
-              turnId: activity.turnId,
-              status: activity.status,
-            );
+            // A platform call can post successfully and still fail its reply.
+            // Own targeted cleanup before the await, not after the whole batch.
+            _ongoingChats.add(key);
+            try {
+              await service.showOngoingChat(
+                connectionId: activity.connectionId,
+                localSessionId: activity.localSessionId,
+                storedSessionId: activity.storedSessionId,
+                title: activity.title,
+                turnId: activity.turnId,
+                status: activity.status,
+              );
+            } catch (_) {
+              failed = true;
+            }
           }
           for (final stale in _ongoingChats.difference(desired)) {
-            final identity = jsonDecode(stale) as List;
-            await service.cancelOngoingChat(
-              connectionId: identity[0] as String,
-              localSessionId: identity[1] as String,
-            );
+            if (!await _cancelTrackedOngoingChat(stale)) failed = true;
           }
-          _ongoingChats
-            ..clear()
-            ..addAll(desired);
+          // Retry on a later reconciliation, even if its desired state is the
+          // same. Never spin immediately on a failing platform implementation.
+          if (failed && _ongoingSignature == signature) {
+            _ongoingSignature = null;
+          }
         })
-        .catchError((Object _) {});
+        .catchError((Object _) {
+          if (_ongoingSignature == signature) _ongoingSignature = null;
+        });
+  }
+
+  Future<bool> _cancelTrackedOngoingChat(String key) async {
+    try {
+      final identity = jsonDecode(key) as List;
+      await _notifications.cancelOngoingChat(
+        connectionId: identity[0] as String,
+        localSessionId: identity[1] as String,
+      );
+      _ongoingChats.remove(key);
+      return true;
+    } catch (_) {
+      // Keep both root ownership and the service's durable numeric index for
+      // retry. One failed cancellation must not abandon its siblings.
+      return false;
+    }
   }
 
   /// The connection a notification response should act on: the last one the
@@ -497,6 +665,82 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
     return preferred ?? (connections.length == 1 ? connections.single : null);
   }
 
+  void _onMobilePushChanged() {
+    if (!_rootFrameReady || !mounted || _closingTurnOwner) return;
+    // Hints only reconcile an already-owned turn. They never submit a prompt,
+    // answer an input request or create/navigate to an arbitrary session.
+    final signature = jsonEncode([
+      _mobilePush.connectionId,
+      _mobilePush.events,
+    ]);
+    if (_pushHintsSignature != signature) {
+      _pushHintsSignature = signature;
+      final connection = _connectionById(_mobilePush.connectionId);
+      if (connection != null && _mobilePush.active) {
+        final normal = _turnApplicationController.normalSessionFor(connection);
+        unawaited(
+          normal.ready
+              .then<void>((_) {
+                if (!mounted ||
+                    _closingTurnOwner ||
+                    _pushHintsSignature != signature ||
+                    !_mobilePush.active ||
+                    !_connectionIsCurrent(connection)) {
+                  return;
+                }
+                for (final event in _mobilePush.events) {
+                  final id = event['session_id'];
+                  if (id is String) normal.findChat(id)?.requestRecovery();
+                }
+              })
+              .catchError((Object _) {}),
+        );
+      }
+    }
+    if (_background) return; // Retain taps until foreground navigation is safe.
+    if (_pushRouting && _mobilePush.hasPendingTap) ++_notificationGeneration;
+    _pushDirty = true;
+    if (_pushRouting) return;
+    unawaited(_drainPushRoutes());
+  }
+
+  Future<void> _drainPushRoutes() async {
+    _pushRouting = true;
+    try {
+      while (_pushDirty && mounted && !_closingTurnOwner && !_background) {
+        _pushDirty = false;
+        final generation = _notificationGeneration;
+        final route = await _mobilePush.takePendingNotificationRoute();
+        if (!mounted || _closingTurnOwner) return;
+        if (generation != _notificationGeneration) continue;
+        if (route == null) continue;
+        // Transfer the consumed tap into root intent before checking lifecycle.
+        // The navigation worker validates consent, including after resume.
+        await _openNotificationSession(
+          route.connection,
+          route.sessionId,
+          pushRoute: route,
+        );
+      }
+    } catch (_) {
+      // Optional native push failure must not break normal notification taps.
+    } finally {
+      _pushRouting = false;
+      if (_pushDirty && mounted && !_closingTurnOwner && !_background) {
+        _onMobilePushChanged();
+      }
+    }
+  }
+
+  bool _connectionIsCurrent(SavedConnection connection) {
+    final current = _connectionById(connection.id);
+    // getConnections hydrates fresh objects. Bind the complete saved account,
+    // including credentials/profile, rather than testing object identity.
+    return current != null &&
+        MobilePushService.binding(current) ==
+            MobilePushService.binding(connection);
+  }
+
   /// Routes a notification tap (or one of its action buttons) into the app.
   ///
   /// Approval actions answer through the turn controller when it owns the
@@ -504,68 +748,129 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
   /// every response lands the user on the session the notification was about.
   void _handleNotificationResponse(NotificationResponse response) {
     if (!mounted || _closingTurnOwner) return;
+    _pruneApprovalActions();
     final route = NotificationRoute.fromResponse(response);
-    // An explicit connection id must resolve: falling back to another backend
-    // could answer an approval against the wrong gateway. Only legacy
-    // payloads without an id use the last-opened connection.
     final hasExplicitConnection =
         route.connectionId != null && route.connectionId!.isNotEmpty;
     final connection = hasExplicitConnection
         ? _connectionById(route.connectionId)
         : _notificationConnection();
     if (connection == null) return;
+    final manager = widget.connManager;
 
+    // Capture at physical ingress, before either lifecycle deferral or I/O.
+    // Legacy actions retain navigation, never automatic answer authority.
+    final normal = route.approvalChoice == null
+        ? null
+        : _turnApplicationController.normalSessionFor(connection);
+    final authority = normal == null
+        ? null
+        : NotificationApprovalAuthority.capture(
+            connection: connection,
+            accountBinding: route.approvalAccount,
+            originMutation: route.approvalMutation,
+            owner: normal,
+            ownerIsCurrent: () =>
+                mounted &&
+                !_closingTurnOwner &&
+                identical(widget.connManager, manager) &&
+                !normal.isClosed &&
+                _connectionIsCurrent(connection),
+            refresh: () async {
+              await manager.prefs.reload();
+              await manager.refreshConnectionCredentials(connection.id);
+              return _connectionIsCurrent(connection);
+            },
+          );
+    void consume() =>
+        _dispatchNotificationResponse(route, connection, authority);
+    if (_background || !_rootFrameReady) {
+      if (authority != null) {
+        final duplicate = _pendingApprovalResponses.any(
+          (entry) =>
+              entry.route.sessionId == route.sessionId &&
+              entry.route.requestId == route.requestId &&
+              entry.authority.sameCapture(authority),
+        );
+        if (!duplicate) {
+          _pendingApprovalResponses.add((
+            route: route,
+            connection: connection,
+            authority: authority,
+          ));
+        }
+      } else {
+        _pendingNormalResponse = consume;
+      }
+    } else {
+      consume();
+    }
+  }
+
+  void _dispatchNotificationResponse(
+    NotificationRoute route,
+    SavedConnection connection,
+    NotificationApprovalAuthority? authority,
+  ) {
+    if (!mounted || _closingTurnOwner) return;
     final choice = route.approvalChoice;
     final sessionId = route.sessionId;
     final requestId = route.requestId;
-    if (choice != null && sessionId != null && requestId != null) {
+    if (choice != null &&
+        sessionId != null &&
+        requestId != null &&
+        authority?.isCurrent == true) {
       final approval = PendingNotificationApproval(
-        // Saved connection ids remain distinct even when two profiles point
-        // at the same endpoint with different credentials or gateway profiles.
         connectionId: connection.id,
         sessionId: sessionId,
         requestId: requestId,
         choice: choice,
+        authority: authority,
       );
-      try {
+      if (claimNotificationApproval(approval)) {
+        // Capture both dispatch owners before the first await. Never borrow a
+        // replacement owner if an old answer returns false or throws later.
         unawaited(
           (() async {
-                final normal = _turnApplicationController.normalSessionFor(
-                  connection,
-                );
-                if (await normal.tryRespondToApproval(
-                  sessionId: sessionId,
-                  choice: choice,
-                  requestId: requestId,
-                )) {
-                  return true;
-                }
-                return _turnApplicationController
-                    .sessionFor(connection)
-                    .tryRespondToApproval(
-                      sessionId: sessionId,
-                      choice: choice,
-                      requestId: requestId,
-                    );
-              })()
-              .then((answered) {
-                // The request belongs to an open chat's route-local gateway:
-                // leave it pending so that screen answers it normally.
-                if (!answered) addPendingNotificationApproval(approval);
-              })
-              .catchError((_) {
-                // A throw is unresolved, not answered: keep the tap pending
-                // so the owning chat can still answer it.
-                addPendingNotificationApproval(approval);
-              }),
+            var retry = false;
+            try {
+              final normal = _turnApplicationController.normalSessionFor(
+                connection,
+              );
+              final recovery = _turnApplicationController.sessionFor(
+                connection,
+              );
+              if (!await authority!.validate()) return;
+              if (await normal.tryRespondToApproval(
+                sessionId: sessionId,
+                choice: choice,
+                requestId: requestId,
+              )) {
+                return;
+              }
+              if (!authority.isCurrent) return;
+              if (await recovery.tryRespondToApproval(
+                sessionId: sessionId,
+                choice: choice,
+                requestId: requestId,
+              )) {
+                return;
+              }
+              retry = true;
+            } catch (_) {
+              // addPending also fences revoked completions and pending mutations.
+              retry = true;
+            } finally {
+              releaseNotificationApproval(approval);
+              if (retry) addPendingNotificationApproval(approval);
+            }
+          })(),
         );
-      } catch (_) {
-        // A closed controller cannot answer; the owning chat still can.
-        addPendingNotificationApproval(approval);
       }
     }
-
-    unawaited(_openNotificationSession(connection, sessionId));
+    unawaited(
+      _openNotificationSession(connection, sessionId).catchError((Object _) {}),
+    );
   }
 
   /// The connection a payload names, or null when it no longer exists.
@@ -577,6 +882,57 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
         .firstOrNull;
   }
 
+  void _pruneNotificationChatRoutes() {
+    final navigator = _navigatorKey.currentState;
+    _notificationChatRoutes.removeWhere(
+      (entry) =>
+          !entry.route.isActive ||
+          entry.route.navigator != navigator ||
+          !_connectionIsCurrent(entry.connection),
+    );
+  }
+
+  String _notificationChatIdentity(SavedConnection connection, String? id) {
+    final normal = _turnApplicationController.normalSessionFor(connection);
+    final owner = normal.findChat(id ?? '');
+    return jsonEncode([
+      MobilePushService.binding(connection),
+      owner?.storedSessionId ?? owner?.localSessionId ?? id,
+    ]);
+  }
+
+  bool _focusNotificationChat(SavedConnection connection, String? sessionId) {
+    _pruneNotificationChatRoutes();
+    final identity = _notificationChatIdentity(connection, sessionId);
+    // Resolve both sides now: a verified handoff can change the winning owner's
+    // local ID, and a later lineage binding can change its durable ID as well.
+    final matches = _notificationChatRoutes.where(
+      (entry) =>
+          _notificationChatIdentity(entry.connection, entry.sessionId) ==
+          identity,
+    );
+    // If independent pre-binding routes converge, prefer the original durable
+    // route over a local draft route, even after its durable ID moves again.
+    // Within each kind retain registration order, independent of the tapped alias.
+    final route =
+        (matches.where((entry) => entry.openedAsStoredSession).firstOrNull ??
+                matches.firstOrNull)
+            ?.route;
+    final navigator = _navigatorKey.currentState;
+    if (route == null || navigator == null || !navigator.mounted) return false;
+    // isActive includes covered routes. Pop back to the canonical route rather
+    // than constructing another ChatScreen or leaving an unrelated page above it.
+    if (!route.isCurrent) navigator.popUntil((candidate) => candidate == route);
+    return true;
+  }
+
+  void _resumeNotificationNavigation() {
+    final intent = _pendingNavigation;
+    if (intent != null && _routingIntent == null) {
+      unawaited(_runNotificationNavigation(intent).catchError((Object _) {}));
+    }
+  }
+
   /// Opens the chat a notification was about; falls back to the workspace when
   /// the session cannot be fetched (deleted, or outside the recent list).
   Future<void> _openNotificationSession(
@@ -584,94 +940,230 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
     String? sessionId, {
     MobilePushRoute? pushRoute,
   }) async {
-    if (!mounted || _closingTurnOwner) return;
-    Session? session;
-    Session? retainedSession;
-    if (sessionId != null && sessionId.isNotEmpty) {
-      final normal = _turnApplicationController.normalSessionFor(connection);
-      await normal.ready.catchError((Object _) {});
-      if (!mounted || _closingTurnOwner) return;
-      if (pushRoute != null && !await _mobilePush.isRouteCurrent(pushRoute)) {
-        return;
-      }
-      if (!mounted || _closingTurnOwner) return;
-      final owner = normal.findChat(sessionId);
-      sessionId = owner?.storedSessionId ?? sessionId;
-      if (owner != null) {
-        retainedSession = Session(
-          id: owner.localSessionId,
-          title: owner.title,
-          model: '',
-          source: 'mobile',
-          messageCount: 0,
-          isActive: owner.snapshot.hasActiveTurn,
-          preview: '',
-          startedAt: 0,
-          isLocalDraft: owner.storedSessionId == null,
-        );
-      }
-      ApiClient? client;
-      try {
-        client = ApiClient(
-          baseUrl: connection.baseUrl,
-          apiKey: connection.apiKey,
-          pathPrefix: connection.gatewayPrefix ?? '',
-        );
-        session =
-            (widget.testNotificationSessionLookup == null
-                ? await client.getSessionById(sessionId)
-                : await widget.testNotificationSessionLookup!(
-                    connection,
-                    sessionId,
-                  )) ??
-            retainedSession;
-      } catch (_) {
-        session = retainedSession;
-      } finally {
-        client?.close();
-      }
-    }
-    if (pushRoute != null) {
-      if (!await _mobilePush.isRouteCurrent(pushRoute)) return;
-      // Reject prefix resolution or a local alias without durable identity proof.
-      if (session?.id != pushRoute.sessionId) session = null;
-    }
-    final currentConnection = _connectionById(connection.id);
     if (!mounted ||
         _closingTurnOwner ||
-        currentConnection == null ||
-        MobilePushService.binding(currentConnection) !=
-            MobilePushService.binding(connection)) {
+        ConnectionMutationBarrier.isPending(connection.id) ||
+        !_connectionIsCurrent(connection)) {
       return;
     }
-    widget.connManager.prefs.setString(
-      HomeScreenState._lastConnectionKey,
-      connection.id,
+    final identity = _notificationChatIdentity(connection, sessionId);
+    final activeIntent = _routingIntent;
+    if (_routingIdentity == identity &&
+        activeIntent != null &&
+        activeIntent.generation == _notificationGeneration &&
+        activeIntent.canCoalesceAuthority(pushRoute)) {
+      return;
+    }
+    if (pushRoute == null &&
+        !_background &&
+        _focusNotificationChat(connection, sessionId)) {
+      // Tapping the already-open chat is still a newer routing intent: an
+      // older, different pending lookup must not steal focus afterwards.
+      ++_notificationGeneration;
+      _pendingNavigation = null;
+      return;
+    }
+    final generation = ++_notificationGeneration;
+    final intent = _NotificationNavigationIntent(
+      connection,
+      sessionId,
+      pushRoute,
+      generation,
     );
-    if (session == null) {
-      _navigatorKey.currentState?.push(
-        MaterialPageRoute(
-          builder: (_) => WorkspaceScreen(
-            connection: connection,
-            turnApplicationController: _turnApplicationController,
-          ),
-        ),
-      );
+    _pendingNavigation = intent;
+    await _runNotificationNavigation(intent);
+  }
+
+  Future<void> _runNotificationNavigation(
+    _NotificationNavigationIntent intent,
+  ) async {
+    final connection = intent.connection;
+    if (!mounted ||
+        _closingTurnOwner ||
+        intent.generation != _notificationGeneration ||
+        !ConnectionMutationBarrier.isCurrent(
+          connection.id,
+          intent.mutationEpoch,
+        ) ||
+        !_connectionIsCurrent(connection)) {
+      if (identical(_pendingNavigation, intent)) _pendingNavigation = null;
       return;
     }
-    _navigatorKey.currentState?.push(
-      MaterialPageRoute(
+    var sessionId = intent.sessionId;
+    final pushRoute = intent.pushRoute;
+    final generation = intent.generation;
+    final normal = _turnApplicationController.normalSessionFor(connection);
+    _routingIdentity = _notificationChatIdentity(connection, sessionId);
+    _routingIntent = intent;
+    var deferred = false;
+    bool currentSync() {
+      if (!mounted ||
+          _closingTurnOwner ||
+          generation != _notificationGeneration ||
+          !ConnectionMutationBarrier.isCurrent(
+            connection.id,
+            intent.mutationEpoch,
+          ) ||
+          !_connectionIsCurrent(connection)) {
+        return false;
+      }
+      if (_background) {
+        deferred = true;
+        return false;
+      }
+      return true;
+    }
+
+    Future<bool> current() async {
+      if (!currentSync()) return false;
+      if (pushRoute != null) {
+        final valid = await _mobilePush.isRouteCurrent(pushRoute);
+        if (!currentSync() || !valid) return false;
+      }
+      // Validation itself awaits native authority; recheck the saved account
+      // and latest tap generation after it, not just before it.
+      return currentSync();
+    }
+
+    try {
+      Session? session;
+      Session? retainedSession;
+      if (!await current() || !currentSync()) return;
+      if (_focusNotificationChat(connection, sessionId)) return;
+      if (sessionId != null && sessionId.isNotEmpty) {
+        await normal.ready.catchError((Object _) {});
+        if (!await current() || !currentSync()) return;
+        final owner = normal.findChat(sessionId);
+        _routingIdentity = _notificationChatIdentity(connection, sessionId);
+        if (_focusNotificationChat(connection, sessionId)) return;
+        sessionId = owner?.storedSessionId ?? sessionId;
+        if (owner != null) {
+          retainedSession = Session(
+            id: owner.localSessionId,
+            title: owner.title,
+            model: '',
+            source: 'mobile',
+            messageCount: 0,
+            isActive: owner.snapshot.hasActiveTurn,
+            preview: '',
+            startedAt: 0,
+            isLocalDraft: owner.storedSessionId == null,
+          );
+        }
+        ApiClient? client;
+        try {
+          client =
+              widget.notificationClientFactory?.call(connection) ??
+              ApiClient(
+                baseUrl: connection.baseUrl,
+                apiKey: connection.apiKey,
+                pathPrefix: connection.gatewayPrefix ?? '',
+                clientCertificate: connection.clientCertificate,
+              );
+          session = widget.testNotificationSessionLookup != null
+              ? await widget.testNotificationSessionLookup!(
+                  connection,
+                  sessionId,
+                )
+              : await client.getSessionById(
+                  sessionId,
+                  canContinue: current,
+                  isCurrent: currentSync,
+                );
+          if (!await current() || !currentSync()) return;
+          if (session != null &&
+              session.id != sessionId &&
+              session.lineageRootId != sessionId) {
+            return;
+          }
+          session ??= pushRoute == null ? retainedSession : null;
+        } catch (_) {
+          if (!await current() || !currentSync()) return;
+          session = pushRoute == null ? retainedSession : null;
+        } finally {
+          client?.close();
+        }
+      }
+      if (!await current() || !currentSync()) return;
+      // Push has no legacy workspace/draft fallback: only the authenticated
+      // existing session named by the reconciled event is eligible.
+      if (pushRoute != null && session == null) return;
+      // Binding may have converged while the authenticated detail read awaited.
+      if (session != null && _focusNotificationChat(connection, session.id)) {
+        return;
+      }
+      widget.connManager.prefs.setString(
+        HomeScreenState._lastConnectionKey,
+        connection.id,
+      );
+      if (session == null) {
+        _navigatorKey.currentState?.push(
+          MaterialPageRoute(
+            builder: (_) => WorkspaceScreen(
+              connection: connection,
+              turnApplicationController: _turnApplicationController,
+            ),
+          ),
+        );
+        return;
+      }
+      final route = MaterialPageRoute<void>(
         builder: (_) => ChatScreen(
           connection: connection,
           session: session!,
           turnApplicationController: _turnApplicationController,
         ),
-      ),
-    );
+      );
+      final navigator = _navigatorKey.currentState;
+      if (navigator == null || !navigator.mounted) return;
+      _notificationChatRoutes.add((
+        connection: connection,
+        sessionId: session.id,
+        openedAsStoredSession: !session.isLocalDraft,
+        route: route,
+      ));
+      unawaited(
+        navigator.push(route).whenComplete(() {
+          _notificationChatRoutes.removeWhere((entry) => entry.route == route);
+        }),
+      );
+    } finally {
+      if (!deferred && identical(_pendingNavigation, intent)) {
+        _pendingNavigation = null;
+      }
+      if (identical(_routingIntent, intent)) {
+        _routingIdentity = null;
+        _routingIntent = null;
+      }
+      if (deferred && mounted && !_closingTurnOwner && !_background) {
+        _resumeNotificationNavigation();
+      }
+    }
   }
 
   Future<void> setTextSizePreference(TextSizePreference preference) async {
     await TextSizePreferenceStore(widget.connManager.prefs).save(preference);
+    if (mounted) setState(() {});
+  }
+
+  Future<void> setThemePalette(HermesPalette palette) async {
+    try {
+      await ThemePreferenceStore(widget.connManager.prefs).savePalette(palette);
+    } finally {
+      refreshAppearancePreferences();
+    }
+  }
+
+  Future<void> setThemeMode(ThemeMode mode) async {
+    try {
+      await ThemePreferenceStore(widget.connManager.prefs).saveMode(mode);
+    } finally {
+      refreshAppearancePreferences();
+    }
+  }
+
+  /// Re-read preferences after a backup import without replacing the Navigator.
+  void refreshAppearancePreferences() {
     if (mounted) setState(() {});
   }
 
@@ -684,18 +1176,26 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
       supportedLocales: preferredSupportedLocales(),
       localeListResolutionCallback: resolvePreferredLocale,
       themeMode: HermesApp.getThemeMode(widget.connManager.prefs),
-      theme: hermesTheme(Brightness.light),
-      darkTheme: hermesTheme(Brightness.dark),
+      theme: hermesTheme(
+        Brightness.light,
+        palette: HermesApp.getThemePalette(widget.connManager.prefs),
+      ),
+      darkTheme: hermesTheme(
+        Brightness.dark,
+        palette: HermesApp.getThemePalette(widget.connManager.prefs),
+      ),
       builder: (context, child) {
         final systemMediaQuery = MediaQuery.of(context);
         final preference = HermesApp.getTextSizePreference(
           widget.connManager.prefs,
         );
-        return MediaQuery(
-          data: systemMediaQuery.copyWith(
-            textScaler: preference.applyTo(systemMediaQuery.textScaler),
+        return HermesSystemUi(
+          child: MediaQuery(
+            data: systemMediaQuery.copyWith(
+              textScaler: preference.applyTo(systemMediaQuery.textScaler),
+            ),
+            child: child!,
           ),
-          child: child!,
         );
       },
       home: HomeScreen(
@@ -712,8 +1212,26 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     final token = _keepAliveTurnActivityToken;
     _closingTurnOwner = true;
+    _pendingNormalResponse = null;
+    _pendingApprovalResponses.clear();
+    ConnectionMutationBarrier.removeListener(_pruneApprovalActions);
+    prunePendingNotificationApprovals();
+    _pendingNavigation = null;
+    _notificationChatRoutes.clear();
+    ++_notificationGeneration;
     _mobilePush.removeListener(_onMobilePushChanged);
+    // Do not dispose MobilePushService.shared: a root remount must still work.
+    notificationPrefs.removeListener(_syncOngoingChats);
+    if (identical(notificationResponseHandler, _notificationHandler)) {
+      notificationResponseHandler = null;
+    }
     backgroundWorkEnabled.removeListener(_onBackgroundWorkPolicyChanged);
+    BackgroundWorkPrefsStore.pendingChoice.removeListener(
+      _onBackgroundWorkPolicyChanged,
+    );
+    BackgroundWorkPrefsStore.confirmedChanges.removeListener(
+      _onBackgroundWorkPolicyConfirmed,
+    );
     if (token != null) {
       _turnApplicationController.removeTurnActivityListener(token);
       _keepAliveTurnActivityToken = null;
@@ -725,7 +1243,9 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
     unawaited(
       _ongoingWrites
           .then<void>((_) async {
-            await TurnNotificationService.shared.cancelAllOngoingChats();
+            for (final key in _ongoingChats.toList()) {
+              await _cancelTrackedOngoingChat(key);
+            }
           })
           .catchError((Object _) {}),
     );
@@ -740,14 +1260,13 @@ class HermesHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = HermesTokens.of(context);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(20, 48, 20, 20),
-      decoration: const BoxDecoration(
-        color: Colors.black,
-        border: Border(
-          bottom: BorderSide(color: Color(0xFFD4AF37), width: 0.5),
-        ),
+      decoration: BoxDecoration(
+        color: tokens.surface,
+        border: Border(bottom: BorderSide(color: tokens.accent, width: 0.5)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -759,7 +1278,7 @@ class HermesHeader extends StatelessWidget {
               fontFamily: 'Cinzel',
               fontSize: 28,
               fontWeight: FontWeight.w700,
-              color: const Color(0xFFD4AF37),
+              color: tokens.accent,
               letterSpacing: 6,
             ),
           ),
@@ -769,7 +1288,7 @@ class HermesHeader extends StatelessWidget {
               subtitle!,
               style: TextStyle(
                 fontSize: 13,
-                color: Colors.grey[600],
+                color: tokens.muted,
                 letterSpacing: 1,
               ),
             ),
@@ -863,6 +1382,9 @@ class HomeScreenState extends State<HomeScreen> {
       final result = await importer(contents, choice.passphrase, choice.mode);
       if (!mounted) return;
       _refresh();
+      context
+          .findAncestorStateOfType<HermesAppState>()
+          ?.refreshAppearancePreferences();
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(result.summary)));
@@ -870,6 +1392,34 @@ class HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       _showRestoreError(error);
     }
+  }
+
+  void _showAppearance() {
+    final app = context.findAncestorStateOfType<HermesAppState>();
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (sheetContext) => SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              sheetContext.l10n.appearance,
+              style: Theme.of(sheetContext).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 16),
+            ThemeAppearanceSettings(
+              preferences: widget.connManager.prefs,
+              onChanged: app?.refreshAppearancePreferences,
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _showRestoreError(Object error) {
@@ -995,6 +1545,8 @@ class HomeScreenState extends State<HomeScreen> {
       context: context,
       builder: (_) => _AddDialog(
         initialConnection: existing,
+        onCertificateFilesReleased:
+            widget.connManager.cleanupUnreferencedCertificates,
         onSave:
             (
               label,
@@ -1009,6 +1561,8 @@ class HomeScreenState extends State<HomeScreen> {
               dashboardUsername,
               dashboardPassword,
               gatewayProfile,
+              clientCertificate,
+              clearClientCertificate = false,
             }) async {
               if (existing == null) {
                 await widget.connManager.saveConnection(
@@ -1024,6 +1578,7 @@ class HomeScreenState extends State<HomeScreen> {
                   dashboardUsername: dashboardUsername,
                   dashboardPassword: dashboardPassword,
                   gatewayProfile: gatewayProfile,
+                  clientCertificate: clientCertificate,
                 );
               } else {
                 await widget.connManager.updateConnection(
@@ -1040,6 +1595,8 @@ class HomeScreenState extends State<HomeScreen> {
                   dashboardUsername: dashboardUsername,
                   dashboardPassword: dashboardPassword,
                   gatewayProfile: gatewayProfile,
+                  clientCertificate: clientCertificate,
+                  clearClientCertificate: clearClientCertificate,
                 );
               }
               _refresh();
@@ -1067,25 +1624,27 @@ class HomeScreenState extends State<HomeScreen> {
                   padding: const EdgeInsets.all(10),
                   margin: const EdgeInsets.only(bottom: 12),
                   decoration: BoxDecoration(
-                    color: Colors.red.withValues(alpha: 0.1),
+                    color: Theme.of(context).colorScheme.errorContainer,
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: Colors.red.withValues(alpha: 0.3),
+                      color: Theme.of(context).colorScheme.error,
                     ),
                   ),
                   child: Row(
                     children: [
-                      const Icon(
+                      Icon(
                         Icons.error_outline,
-                        color: Colors.red,
+                        color: Theme.of(context).colorScheme.onErrorContainer,
                         size: 18,
                       ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           error!,
-                          style: const TextStyle(
-                            color: Colors.red,
+                          style: TextStyle(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onErrorContainer,
                             fontSize: 13,
                           ),
                         ),
@@ -1127,6 +1686,7 @@ class HomeScreenState extends State<HomeScreen> {
                           baseUrl: baseUrl,
                           apiKey: key,
                           pathPrefix: conn.gatewayPrefix ?? '',
+                          clientCertificate: conn.clientCertificate,
                         );
                         final result = await client.checkHealth();
                         client.close();
@@ -1163,12 +1723,12 @@ class HomeScreenState extends State<HomeScreen> {
                       }
                     },
               child: validating
-                  ? const SizedBox(
+                  ? SizedBox(
                       width: 18,
                       height: 18,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        color: Colors.white,
+                        color: HermesTokens.of(context).onSurface,
                       ),
                     )
                   : Text(context.l10n.save),
@@ -1210,7 +1770,10 @@ class HomeScreenState extends State<HomeScreen> {
                     context
                         .l10n
                         .used_for_hosted_path_prefixes_and_for_the_settings_memory,
-                    style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                    style: TextStyle(
+                      color: HermesTokens.of(context).muted,
+                      fontSize: 12,
+                    ),
                   ),
                 ),
                 if (error != null)
@@ -1219,25 +1782,27 @@ class HomeScreenState extends State<HomeScreen> {
                     padding: const EdgeInsets.all(10),
                     margin: const EdgeInsets.only(bottom: 12),
                     decoration: BoxDecoration(
-                      color: Colors.red.withValues(alpha: 0.1),
+                      color: Theme.of(context).colorScheme.errorContainer,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
-                        color: Colors.red.withValues(alpha: 0.3),
+                        color: Theme.of(context).colorScheme.error,
                       ),
                     ),
                     child: Row(
                       children: [
-                        const Icon(
+                        Icon(
                           Icons.error_outline,
-                          color: Colors.red,
+                          color: Theme.of(context).colorScheme.onErrorContainer,
                           size: 18,
                         ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             error!,
-                            style: const TextStyle(
-                              color: Colors.red,
+                            style: TextStyle(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onErrorContainer,
                               fontSize: 13,
                             ),
                           ),
@@ -1341,6 +1906,7 @@ class HomeScreenState extends State<HomeScreen> {
                           baseUrl: conn.baseUrl,
                           apiKey: conn.apiKey,
                           pathPrefix: gatewayPrefix,
+                          clientCertificate: conn.clientCertificate,
                         );
                         final result = await apiClient.checkHealth();
                         apiClient.close();
@@ -1364,6 +1930,7 @@ class HomeScreenState extends State<HomeScreen> {
                         proxied: proxied,
                         username: user.isEmpty ? null : user,
                         password: pass.isEmpty ? null : pass,
+                        clientCertificate: conn.clientCertificate,
                       );
                       try {
                         await client.getModelInfo();
@@ -1403,12 +1970,12 @@ class HomeScreenState extends State<HomeScreen> {
                       }
                     },
               child: validating
-                  ? const SizedBox(
+                  ? SizedBox(
                       width: 18,
                       height: 18,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        color: Colors.white,
+                        color: HermesTokens.of(context).onSurface,
                       ),
                     )
                   : Text(context.l10n.save),
@@ -1429,14 +1996,14 @@ class HomeScreenState extends State<HomeScreen> {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: ListTile(
-        leading: const Icon(Icons.router, color: Color(0xFFD4AF37)),
+        leading: Icon(Icons.router, color: HermesTokens.of(context).accent),
         title: Text(conn.label),
         subtitle: Text(
           context.l10n.connection_address_key(
             '${conn.host}:${conn.port}${conn.gatewayPrefix != null && conn.gatewayPrefix!.isNotEmpty ? conn.gatewayPrefix! : ''}',
             conn.apiKey.isNotEmpty ? "\u2713" : "\u2717",
           ),
-          style: TextStyle(color: Colors.grey[600]),
+          style: TextStyle(color: HermesTokens.of(context).muted),
         ),
         trailing: PopupMenuButton<String>(
           onSelected: (v) async {
@@ -1486,7 +2053,7 @@ class HomeScreenState extends State<HomeScreen> {
               value: 'delete',
               child: Text(
                 context.l10n.delete,
-                style: TextStyle(color: Colors.red),
+                style: TextStyle(color: HermesTokens.of(context).danger),
               ),
             ),
           ],
@@ -1511,6 +2078,12 @@ class HomeScreenState extends State<HomeScreen> {
         ),
         centerTitle: true,
         actions: [
+          IconButton(
+            key: const Key('home_appearance_button'),
+            tooltip: context.l10n.appearance,
+            onPressed: _showAppearance,
+            icon: const Icon(Icons.palette_outlined),
+          ),
           if (_connections.isNotEmpty)
             IconButton(
               key: const Key('home_restore_config_menu'),
@@ -1525,7 +2098,11 @@ class HomeScreenState extends State<HomeScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.cloud_outlined, size: 64, color: Colors.grey[800]),
+                  Icon(
+                    Icons.cloud_outlined,
+                    size: 64,
+                    color: HermesTokens.of(context).muted,
+                  ),
                   const SizedBox(height: 16),
                   Text(
                     context.l10n.no_connections,
@@ -1536,9 +2113,9 @@ class HomeScreenState extends State<HomeScreen> {
                     context
                         .l10n
                         .tap_to_add_a_remote_hermes_gateway_api_server_port,
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodyMedium?.copyWith(color: Colors.grey[600]),
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: HermesTokens.of(context).muted,
+                    ),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 20),
@@ -1576,7 +2153,7 @@ class HomeScreenState extends State<HomeScreen> {
       floatingActionButton: FloatingActionButton(
         tooltip: context.l10n.add_connection,
         onPressed: _showAddDialog,
-        child: const Icon(Icons.add, color: Colors.black),
+        child: const Icon(Icons.add),
       ),
     );
   }
@@ -1584,6 +2161,7 @@ class HomeScreenState extends State<HomeScreen> {
 
 class _AddDialog extends StatefulWidget {
   final SavedConnection? initialConnection;
+  final Future<void> Function() onCertificateFilesReleased;
   final Future<void> Function(
     String label,
     String host,
@@ -1597,9 +2175,15 @@ class _AddDialog extends StatefulWidget {
     String? dashboardUsername,
     String? dashboardPassword,
     String? gatewayProfile,
+    ClientCertificateConfig? clientCertificate,
+    bool clearClientCertificate,
   })
   onSave;
-  const _AddDialog({required this.onSave, this.initialConnection});
+  const _AddDialog({
+    required this.onSave,
+    required this.onCertificateFilesReleased,
+    this.initialConnection,
+  });
 
   @override
   State<_AddDialog> createState() => _AddDialogState();
@@ -1617,10 +2201,25 @@ class _AddDialogState extends State<_AddDialog> {
   late final TextEditingController _dashPass;
   late final TextEditingController _desktopGatewayUrl;
   late final TextEditingController _gatewayProfile;
+  late final TextEditingController _certificatePassword;
+  late final ClientCertificateService _certificateService;
+  final _certificateFileLease = ClientCertificateFileLease();
+  Future<void>? _certificateCleanup;
   late bool _showDashboard;
   late bool _dashboardProxied;
+  late bool _useClientCertificate;
+  ClientCertificateConfig? _clientCertificate;
+  List<int>? _pemCertificateBytes;
+  String? _pemCertificateName;
+  List<int>? _pemPrivateKeyBytes;
+  String? _pemPrivateKeyName;
+  bool _importingCertificate = false;
   bool _validating = false;
   String? _error;
+
+  /// Whether the current imported identity was committed by a successful save.
+  /// Anything still staged when the dialog closes is discarded.
+  bool _certificateSaved = false;
 
   bool get _isEditing => widget.initialConnection != null;
 
@@ -1654,6 +2253,17 @@ class _AddDialogState extends State<_AddDialog> {
       text: conn?.desktopGatewayUrl ?? '',
     );
     _gatewayProfile = TextEditingController(text: conn?.gatewayProfile ?? '');
+    _certificateService = ClientCertificateService();
+    _certificatePassword = TextEditingController();
+    _clientCertificate = conn?.clientCertificate;
+    if (_clientCertificate case final certificate?) {
+      // Validation can finish on an already-loaded TLS context after another
+      // manager rotates this account. Keep the selected files until Save and
+      // its rollback/native cleanup settle, not just the validation request.
+      _certificateFileLease.retainIdentity(certificate);
+    }
+    _useClientCertificate = conn?.clientCertificate != null;
+    _host.addListener(_onHostChanged);
     _dashboardProxied = conn?.dashboardProxied ?? false;
     _showDashboard =
         conn?.gatewayPrefix?.isNotEmpty == true ||
@@ -1666,7 +2276,198 @@ class _AddDialogState extends State<_AddDialog> {
         conn?.desktopGatewayUrl?.isNotEmpty == true;
   }
 
-  Future<void> _validateAndSave() async {
+  void _onHostChanged() {
+    if (!mounted) return;
+    setState(() {});
+  }
+
+  bool get _isHttpsInput {
+    final normalized = SavedConnection.normalizeHostAndPort(
+      _host.text.trim(),
+      int.tryParse(_port.text.trim()),
+    );
+    return normalized.useHttps;
+  }
+
+  Future<List<int>?> _fileBytes(PlatformFile file) async {
+    final bytes = file.bytes;
+    if (bytes != null) return bytes;
+    final path = file.path;
+    if (path == null) return null;
+    return io.File(path).readAsBytes();
+  }
+
+  Future<void> _pickPkcs12() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['p12', 'pfx'],
+        allowMultiple: false,
+        withData: true,
+      );
+      final file = result?.files.firstOrNull;
+      if (file == null) return;
+      final bytes = await _fileBytes(file);
+      if (bytes == null) {
+        if (!mounted) return;
+        setState(() => _error = context.l10n.certificate_import_failed);
+        return;
+      }
+      await _runCertificateImport(
+        () => _certificateService.importPkcs12(
+          bytes: bytes,
+          password: _certificatePassword.text,
+          label: file.name,
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _error = context.l10n.certificate_import_failed);
+    }
+  }
+
+  Future<void> _pickPemCertificate() async {
+    final file = await _pickPemFile();
+    if (file == null) return;
+    final bytes = await _fileBytes(file);
+    if (bytes == null) {
+      if (!mounted) return;
+      setState(() => _error = context.l10n.certificate_import_failed);
+      return;
+    }
+    _pemCertificateBytes = bytes;
+    _pemCertificateName = file.name;
+    await _importPemPairIfReady();
+  }
+
+  Future<void> _pickPemPrivateKey() async {
+    final file = await _pickPemFile();
+    if (file == null) return;
+    final bytes = await _fileBytes(file);
+    if (bytes == null) {
+      if (!mounted) return;
+      setState(() => _error = context.l10n.certificate_import_failed);
+      return;
+    }
+    _pemPrivateKeyBytes = bytes;
+    _pemPrivateKeyName = file.name;
+    await _importPemPairIfReady();
+  }
+
+  Future<PlatformFile?> _pickPemFile() async {
+    try {
+      final result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: const ['pem', 'crt', 'cer', 'key'],
+        allowMultiple: false,
+        withData: true,
+      );
+      return result?.files.firstOrNull;
+    } catch (_) {
+      if (!mounted) return null;
+      setState(() => _error = context.l10n.certificate_import_failed);
+      return null;
+    }
+  }
+
+  Future<void> _importPemPairIfReady() async {
+    final certificateBytes = _pemCertificateBytes;
+    final privateKeyBytes = _pemPrivateKeyBytes;
+    if (certificateBytes == null || privateKeyBytes == null) {
+      if (mounted) setState(() {});
+      return;
+    }
+    final label =
+        _pemCertificateName ??
+        _pemPrivateKeyName ??
+        (widget.initialConnection?.label ?? 'Client certificate');
+    await _runCertificateImport(
+      () => _certificateService.importPemPair(
+        certificateBytes: certificateBytes,
+        privateKeyBytes: privateKeyBytes,
+        password: _certificatePassword.text,
+        label: label,
+      ),
+    );
+  }
+
+  Future<void> _runCertificateImport(
+    Future<ClientCertificateConfig> Function() import,
+  ) => _certificateFileLease.run(() => _importCertificate(import));
+
+  Future<void> _importCertificate(
+    Future<ClientCertificateConfig> Function() import,
+  ) async {
+    _scheduleCertificateCleanup();
+    setState(() {
+      _importingCertificate = true;
+      _error = null;
+    });
+    try {
+      final config = await import();
+      if (!mounted) {
+        // The dialog closed while parsing: never leave the imported key behind.
+        await _certificateService.discard(config);
+        return;
+      }
+      // Replacing an earlier staged pick must not leave that key on disk.
+      final previous = _clientCertificate;
+      if (previous != null) {
+        await _certificateService.discard(previous);
+        _certificateFileLease.releaseIdentity(previous);
+      }
+      if (!mounted) {
+        await _certificateService.discard(config);
+        return;
+      }
+      setState(() {
+        _clientCertificate = config;
+        _useClientCertificate = true;
+        _certificateSaved = false;
+        _pemCertificateBytes = null;
+        _pemCertificateName = null;
+        _pemPrivateKeyBytes = null;
+        _pemPrivateKeyName = null;
+        _importingCertificate = false;
+      });
+    } on ClientCertificateImportException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message;
+        _importingCertificate = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _error = context.l10n.certificate_import_failed;
+        _importingCertificate = false;
+      });
+    }
+  }
+
+  void _removeClientCertificate() {
+    final previous = _clientCertificate;
+    if (previous != null && !_certificateSaved) {
+      // A staged import that was never saved is simply abandoned.
+      unawaited(_certificateService.discard(previous));
+      _certificateFileLease.releaseIdentity(previous);
+    }
+    setState(() {
+      _clientCertificate = null;
+      _useClientCertificate = false;
+      _certificateSaved = false;
+      _pemCertificateBytes = null;
+      _pemCertificateName = null;
+      _pemPrivateKeyBytes = null;
+      _pemPrivateKeyName = null;
+    });
+  }
+
+  Future<void> _validateAndSave() =>
+      _certificateFileLease.run(_validateAndSaveOwned);
+
+  Future<void> _validateAndSaveOwned() async {
+    _scheduleCertificateCleanup();
     final label = _label.text.trim();
     final host = _host.text.trim();
     final port = int.tryParse(_port.text.trim());
@@ -1677,6 +2478,12 @@ class _AddDialogState extends State<_AddDialog> {
     // A blank Port field means "not supplied": normalizeHostAndPort then infers
     // 8642 for HTTP and 443 for HTTPS.
     if (label.isEmpty || host.isEmpty || (port != null && port <= 0)) return;
+    if (_importingCertificate) return;
+    final clientCertificate = _useClientCertificate ? _clientCertificate : null;
+    if (_useClientCertificate && clientCertificate == null) {
+      setState(() => _error = context.l10n.client_certificate_required);
+      return;
+    }
 
     setState(() {
       _validating = true;
@@ -1697,6 +2504,7 @@ class _AddDialogState extends State<_AddDialog> {
         baseUrl: baseUrl,
         apiKey: apiKey,
         pathPrefix: gatewayPrefix,
+        clientCertificate: clientCertificate,
       );
       final result = await client.checkHealth();
       client.close();
@@ -1752,6 +2560,7 @@ class _AddDialogState extends State<_AddDialog> {
           proxied: _dashboardProxied,
           username: dashUser.isEmpty ? null : dashUser,
           password: dashPass.isEmpty ? null : dashPass,
+          clientCertificate: clientCertificate,
         );
         try {
           await dashClient.getModelInfo();
@@ -1771,6 +2580,17 @@ class _AddDialogState extends State<_AddDialog> {
         if (!mounted) return;
       }
 
+      // Keep the validated identity leased across queueing, commit, rollback
+      // and native cleanup. A thrown save does not prove physical rollback.
+      var savedCertificate = clientCertificate;
+      if (savedCertificate != null &&
+          await _certificateService.isStaged(savedCertificate)) {
+        savedCertificate = await _certificateService.commit(savedCertificate);
+        // Retain the new paths for retry and disposal even if save reports an
+        // uncertain commit. The old staging directory no longer exists.
+        _clientCertificate = savedCertificate;
+      }
+
       await widget.onSave(
         label,
         host,
@@ -1784,7 +2604,10 @@ class _AddDialogState extends State<_AddDialog> {
         dashboardUsername: dashUser.isEmpty ? null : dashUser,
         dashboardPassword: dashPass.isEmpty ? null : dashPass,
         gatewayProfile: gatewayProfile.isEmpty ? null : gatewayProfile,
+        clientCertificate: savedCertificate,
+        clearClientCertificate: savedCertificate == null,
       );
+      _certificateSaved = true;
       if (mounted) Navigator.pop(context);
     } on CredentialStorageException {
       if (!mounted) return;
@@ -1822,22 +2645,27 @@ class _AddDialogState extends State<_AddDialog> {
                 padding: const EdgeInsets.all(10),
                 margin: const EdgeInsets.only(bottom: 12),
                 decoration: BoxDecoration(
-                  color: Colors.red.withValues(alpha: 0.1),
+                  color: Theme.of(context).colorScheme.errorContainer,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+                  border: Border.all(
+                    color: Theme.of(context).colorScheme.error,
+                  ),
                 ),
                 child: Row(
                   children: [
-                    const Icon(
+                    Icon(
                       Icons.error_outline,
-                      color: Colors.red,
+                      color: Theme.of(context).colorScheme.onErrorContainer,
                       size: 18,
                     ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         _error!,
-                        style: const TextStyle(color: Colors.red, fontSize: 13),
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onErrorContainer,
+                          fontSize: 13,
+                        ),
                       ),
                     ),
                   ],
@@ -1890,12 +2718,15 @@ class _AddDialogState extends State<_AddDialog> {
                     Icon(
                       _showDashboard ? Icons.expand_less : Icons.expand_more,
                       size: 20,
-                      color: Colors.grey[500],
+                      color: HermesTokens.of(context).muted,
                     ),
                     const SizedBox(width: 4),
                     Text(
                       context.l10n.custom_proxy_and_dashboard_details,
-                      style: TextStyle(color: Colors.grey[500], fontSize: 13),
+                      style: TextStyle(
+                        color: HermesTokens.of(context).muted,
+                        fontSize: 13,
+                      ),
                     ),
                   ],
                 ),
@@ -1936,7 +2767,10 @@ class _AddDialogState extends State<_AddDialog> {
                   context
                       .l10n
                       .optional_for_the_memory_cron_skills_settings_tabs_leave_blank,
-                  style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                  style: TextStyle(
+                    color: HermesTokens.of(context).muted,
+                    fontSize: 12,
+                  ),
                 ),
               ),
               TextField(
@@ -1990,6 +2824,157 @@ class _AddDialogState extends State<_AddDialog> {
                 autocorrect: false,
               ),
             ],
+            if (_isHttpsInput || _useClientCertificate) ...[
+              const Divider(height: 24),
+              SwitchListTile(
+                key: const Key('connection_client_certificate_toggle'),
+                contentPadding: EdgeInsets.zero,
+                value: _useClientCertificate,
+                title: Text(context.l10n.client_certificate_mtls),
+                subtitle: Text(
+                  _isHttpsInput
+                      ? context.l10n.client_certificate_mtls_description
+                      : context.l10n.client_certificate_https_only,
+                ),
+                onChanged: _validating || _importingCertificate
+                    ? null
+                    : (value) {
+                        final previous = _clientCertificate;
+                        if (!value && previous != null && !_certificateSaved) {
+                          unawaited(_certificateService.discard(previous));
+                          _certificateFileLease.releaseIdentity(previous);
+                        }
+                        setState(() {
+                          _useClientCertificate = value;
+                          if (!value) {
+                            _certificateSaved = false;
+                            _clientCertificate = null;
+                            _pemCertificateBytes = null;
+                            _pemCertificateName = null;
+                            _pemPrivateKeyBytes = null;
+                            _pemPrivateKeyName = null;
+                          }
+                        });
+                      },
+              ),
+              if (_useClientCertificate) ...[
+                if (_clientCertificate case final certificate?) ...[
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.primary.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.verified_user_outlined, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            context.l10n.client_certificate_loaded(
+                              certificate.label,
+                            ),
+                            style: const TextStyle(fontSize: 13),
+                          ),
+                        ),
+                        TextButton(
+                          key: const Key(
+                            'connection_client_certificate_remove',
+                          ),
+                          onPressed: _validating || _importingCertificate
+                              ? null
+                              : _removeClientCertificate,
+                          child: Text(context.l10n.remove_certificate),
+                        ),
+                      ],
+                    ),
+                  ),
+                ] else ...[
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton.icon(
+                      key: const Key('connection_client_certificate_pick_p12'),
+                      onPressed: _validating || _importingCertificate
+                          ? null
+                          : _pickPkcs12,
+                      icon: const Icon(Icons.upload_file, size: 18),
+                      label: Text(context.l10n.choose_p12_pfx),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton(
+                          key: const Key(
+                            'connection_client_certificate_pick_cert_pem',
+                          ),
+                          onPressed: _validating || _importingCertificate
+                              ? null
+                              : _pickPemCertificate,
+                          child: Text(
+                            context.l10n.choose_certificate_pem,
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: OutlinedButton(
+                          key: const Key(
+                            'connection_client_certificate_pick_key_pem',
+                          ),
+                          onPressed: _validating || _importingCertificate
+                              ? null
+                              : _pickPemPrivateKey,
+                          child: Text(
+                            context.l10n.choose_private_key_pem,
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (_pemCertificateName != null ||
+                      _pemPrivateKeyName != null) ...[
+                    const SizedBox(height: 6),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        [
+                          ?_pemCertificateName,
+                          ?_pemPrivateKeyName,
+                        ].join('  ·  '),
+                        style: TextStyle(
+                          color: HermesTokens.of(context).muted,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 8),
+                  TextField(
+                    key: const Key('connection_client_certificate_password'),
+                    controller: _certificatePassword,
+                    decoration: InputDecoration(
+                      labelText: context.l10n.certificate_password_optional,
+                    ),
+                    obscureText: true,
+                    enabled: !_validating && !_importingCertificate,
+                  ),
+                ],
+                if (_importingCertificate) ...[
+                  const SizedBox(height: 8),
+                  const LinearProgressIndicator(minHeight: 2),
+                ],
+              ],
+            ],
           ],
         ),
       ),
@@ -1999,14 +2984,16 @@ class _AddDialogState extends State<_AddDialog> {
           child: Text(context.l10n.cancel),
         ),
         FilledButton(
-          onPressed: _validating ? null : _validateAndSave,
+          onPressed: _validating || _importingCertificate
+              ? null
+              : _validateAndSave,
           child: _validating
-              ? const SizedBox(
+              ? SizedBox(
                   width: 18,
                   height: 18,
                   child: CircularProgressIndicator(
                     strokeWidth: 2,
-                    color: Colors.white,
+                    color: HermesTokens.of(context).onSurface,
                   ),
                 )
               : Text(
@@ -2017,8 +3004,28 @@ class _AddDialogState extends State<_AddDialog> {
     );
   }
 
+  void _scheduleCertificateCleanup() {
+    // Register once with the asynchronous file owner. Disposal only closes it;
+    // cleanup runs after admitted work, independently of the route's lifetime.
+    _certificateCleanup ??= _certificateFileLease.whenClosed.then(
+      (_) => _releaseCertificateFiles(),
+    );
+  }
+
+  Future<void> _releaseCertificateFiles() async {
+    try {
+      final certificate = _clientCertificate;
+      if (certificate != null) await _certificateService.discard(certificate);
+    } catch (_) {
+      // Best-effort; the shared physical reference check below is authoritative.
+    }
+    await widget.onCertificateFilesReleased();
+  }
+
   @override
   void dispose() {
+    unawaited(_certificateFileLease.close());
+    _host.removeListener(_onHostChanged);
     _label.dispose();
     _host.dispose();
     _port.dispose();
@@ -2030,6 +3037,7 @@ class _AddDialogState extends State<_AddDialog> {
     _dashPass.dispose();
     _desktopGatewayUrl.dispose();
     _gatewayProfile.dispose();
+    _certificatePassword.dispose();
     super.dispose();
   }
 }

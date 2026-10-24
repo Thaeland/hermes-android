@@ -1,3 +1,7 @@
+// UNRECONCILED POLICY (second adaptation layer; original case IDs retained).
+// Raw: p2a-unreconciled-_flkt2h9/raw/base.tar::test/normal_gateway_unknown_floor_lifecycle_test.dart
+// Base 4a53e32 blob 883a7ca67cf2a1fac29f291086b79ecc79acad43; SHA256 dbb855e7206154c03e5748b1981f4eb26cb7c71f1b9b829f9623e64f60b1c688.
+// See docs/unreconciled-output/ORACLE_MIGRATION.md; unchanged safety remains binding.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -13,6 +17,8 @@ import 'package:hermes_android/l10n/app_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/fake_voice_composer_adapter.dart';
+import 'support/unreconciled_policy.dart';
+import 'package:hermes_android/core/utils/chat_display_items.dart';
 
 void main() {
   for (final mode in [
@@ -92,6 +98,7 @@ void main() {
       if (mode == 'resume-held-history') {
         expect(gateway.initialHistory.isCompleted, isFalse);
       }
+      gateway.event('turn.start', {});
       gateway.event('message.delta', {'text': 'First answer'});
       await _until(
         tester,
@@ -99,6 +106,7 @@ void main() {
       );
       gateway.persisted = true;
       gateway.event('message.complete', {'text': 'First answer'});
+      gateway.event('turn.end', {'status': 'completed'});
       await _until(
         tester,
         () =>
@@ -112,29 +120,29 @@ void main() {
         await tester.pump();
       }
       void exactlyOnce() {
-        final bubbles = tester.widgetList<MessageBubble>(
-          find.byType(MessageBubble),
-        );
-        expect(
-          bubbles.where((b) => b.isUser && b.content == 'First prompt'),
-          hasLength(1),
-        );
-        expect(
-          bubbles.where((b) => !b.isUser && b.content == 'First answer'),
-          hasLength(1),
-        );
+        for (final source in [
+          ChatDisplaySource.canonical,
+          ChatDisplaySource.received,
+        ]) {
+          final bubbles = tester.widgetList<MessageBubble>(
+            inChatSource(find.byType(MessageBubble), source),
+          );
+          expect(
+            bubbles.where((b) => b.isUser && b.content == 'First prompt'),
+            hasLength(1),
+          );
+          expect(
+            bubbles.where((b) => !b.isUser && b.content == 'First answer'),
+            hasLength(1),
+          );
+        }
       }
 
       exactlyOnce();
       expect(owner.snapshot.historyRows, _canonical);
-      expect(
-        owner.snapshot.displayRows,
-        gateway.provesEmpty ? isEmpty : hasLength(2),
-      );
-      if (!gateway.provesEmpty) {
-        expect(owner.snapshot.presentationHistoryRows, isEmpty);
-        expect(owner.snapshot.timeline.runs, isNotEmpty);
-      }
+      expect(owner.snapshot.displayRows, hasLength(2));
+      expect(owner.snapshot.historyRows, _canonical);
+      expect(owner.snapshot.timeline.runs, isNotEmpty);
       // A replacement actual route must keep the same conservative view.
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
@@ -227,7 +235,7 @@ class _Gateway {
         if (first && mode == 'resume-held-history') await initialHistory.future;
         if (_closed) return;
         request.response.headers.contentType = ContentType.json;
-        if (!persisted && mode == 'resume-unavailable-history') {
+        if (!persisted && !provesEmpty && (created || existing)) {
           request.response.statusCode = 503;
           request.response.write('{"error":"history unavailable"}');
         } else if (!created && !existing) {
@@ -311,6 +319,7 @@ class _Gateway {
       'method': 'event',
       'params': {
         'type': type,
+        'turn_id': 'owned-first',
         'session_id': 'runtime-first',
         'payload': payload,
       },

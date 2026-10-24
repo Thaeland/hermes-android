@@ -114,11 +114,299 @@ abstract class AppLocalizations {
     Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
   ];
 
+  /// No description provided for @background_task_report.
+  ///
+  /// In en, this message translates to:
+  /// **'Background task'**
+  String get background_task_report;
+
+  /// No description provided for @background_process_report.
+  ///
+  /// In en, this message translates to:
+  /// **'Background process'**
+  String get background_process_report;
+
+  /// No description provided for @background_report_issues.
+  ///
+  /// In en, this message translates to:
+  /// **'Issues reported — expand for details.'**
+  String get background_report_issues;
+
+  /// No description provided for @background_report_expand.
+  ///
+  /// In en, this message translates to:
+  /// **'Expand report'**
+  String get background_report_expand;
+
+  /// No description provided for @background_report_collapse.
+  ///
+  /// In en, this message translates to:
+  /// **'Collapse report'**
+  String get background_report_collapse;
+
+  /// No description provided for @saved_history_heading.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved history'**
+  String get saved_history_heading;
+
+  /// No description provided for @received_output_heading.
+  ///
+  /// In en, this message translates to:
+  /// **'Received output — match to saved history unconfirmed'**
+  String get received_output_heading;
+
+  /// No description provided for @received_output_explanation.
+  ///
+  /// In en, this message translates to:
+  /// **'This may also appear in saved history. The app cannot confirm a match.'**
+  String get received_output_explanation;
+
+  /// No description provided for @local_prompt_context.
+  ///
+  /// In en, this message translates to:
+  /// **'Local prompt context'**
+  String get local_prompt_context;
+
+  /// No description provided for @received_output_badge.
+  ///
+  /// In en, this message translates to:
+  /// **'Received · match unconfirmed'**
+  String get received_output_badge;
+
+  /// No description provided for @received_output_lifetime.
+  ///
+  /// In en, this message translates to:
+  /// **'Received output is kept temporarily in this app session and may be shortened or removed as limits are reached. It may not be available after the app or connection is closed.'**
+  String get received_output_lifetime;
+
+  /// No description provided for @theme_palette.
+  ///
+  /// In en, this message translates to:
+  /// **'Colour theme'**
+  String get theme_palette;
+
+  /// No description provided for @theme_palette_gold.
+  ///
+  /// In en, this message translates to:
+  /// **'Gold'**
+  String get theme_palette_gold;
+
+  /// No description provided for @theme_palette_purple.
+  ///
+  /// In en, this message translates to:
+  /// **'Purple'**
+  String get theme_palette_purple;
+
+  /// No description provided for @theme_palette_orange.
+  ///
+  /// In en, this message translates to:
+  /// **'Orange'**
+  String get theme_palette_orange;
+
+  /// No description provided for @theme_palette_green.
+  ///
+  /// In en, this message translates to:
+  /// **'Green'**
+  String get theme_palette_green;
+
+  /// No description provided for @theme_palette_blue.
+  ///
+  /// In en, this message translates to:
+  /// **'Blue'**
+  String get theme_palette_blue;
+
+  /// No description provided for @theme_palette_red.
+  ///
+  /// In en, this message translates to:
+  /// **'Red'**
+  String get theme_palette_red;
+
+  /// No description provided for @theme_palette_teal.
+  ///
+  /// In en, this message translates to:
+  /// **'Teal'**
+  String get theme_palette_teal;
+
+  /// No description provided for @theme_palette_pink.
+  ///
+  /// In en, this message translates to:
+  /// **'Pink'**
+  String get theme_palette_pink;
+
+  /// No description provided for @theme_palette_indigo.
+  ///
+  /// In en, this message translates to:
+  /// **'Indigo'**
+  String get theme_palette_indigo;
+
+  /// No description provided for @theme_palette_cyan.
+  ///
+  /// In en, this message translates to:
+  /// **'Cyan'**
+  String get theme_palette_cyan;
+
+  /// No description provided for @assets_recent_subtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Find files shared by Hermes in saved chats'**
+  String get assets_recent_subtitle;
+
+  /// No description provided for @assets_scope_notice.
+  ///
+  /// In en, this message translates to:
+  /// **'Generated files explicitly shared by Hermes in saved replies. This is a partial view of chat history, not a complete file or attachment catalogue. Referenced files may no longer exist.'**
+  String get assets_scope_notice;
+
+  /// No description provided for @assets_download_limit.
+  ///
+  /// In en, this message translates to:
+  /// **'Files are loaded only when tapped. Previews and downloads are limited to 25 MiB each; use the dashboard for larger files.'**
+  String get assets_download_limit;
+
+  /// No description provided for @assets_search_hint.
+  ///
+  /// In en, this message translates to:
+  /// **'Search found files or source chats'**
+  String get assets_search_hint;
+
+  /// No description provided for @assets_all.
+  ///
+  /// In en, this message translates to:
+  /// **'All'**
+  String get assets_all;
+
+  /// No description provided for @assets_images.
+  ///
+  /// In en, this message translates to:
+  /// **'Images'**
+  String get assets_images;
+
+  /// No description provided for @assets_audio.
+  ///
+  /// In en, this message translates to:
+  /// **'Audio'**
+  String get assets_audio;
+
+  /// No description provided for @assets_video.
+  ///
+  /// In en, this message translates to:
+  /// **'Video'**
+  String get assets_video;
+
+  /// No description provided for @assets_documents.
+  ///
+  /// In en, this message translates to:
+  /// **'Documents and other files'**
+  String get assets_documents;
+
+  /// No description provided for @assets_empty.
+  ///
+  /// In en, this message translates to:
+  /// **'No assets found in scanned messages'**
+  String get assets_empty;
+
+  /// No description provided for @assets_empty_detail.
+  ///
+  /// In en, this message translates to:
+  /// **'Scan more chats or older messages to look further back. Ordinary attachments and unlinked files are not indexed here.'**
+  String get assets_empty_detail;
+
+  /// No description provided for @assets_no_matches.
+  ///
+  /// In en, this message translates to:
+  /// **'No matching assets'**
+  String get assets_no_matches;
+
+  /// No description provided for @assets_load_more_chats.
+  ///
+  /// In en, this message translates to:
+  /// **'Scan more chats'**
+  String get assets_load_more_chats;
+
+  /// No description provided for @assets_load_older_messages.
+  ///
+  /// In en, this message translates to:
+  /// **'Scan older messages'**
+  String get assets_load_older_messages;
+
+  /// No description provided for @assets_load_failed.
+  ///
+  /// In en, this message translates to:
+  /// **'Some history could not be read. Results are incomplete. Check the dashboard connection and retry.'**
+  String get assets_load_failed;
+
+  /// No description provided for @assets_retry_failed.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry failed history reads'**
+  String get assets_retry_failed;
+
+  /// No description provided for @assets_partial.
+  ///
+  /// In en, this message translates to:
+  /// **'The server reported incomplete history. Refresh after checking the dashboard.'**
+  String get assets_partial;
+
+  /// No description provided for @assets_scan_summary.
+  ///
+  /// In en, this message translates to:
+  /// **'{files} file references found across {chats} scanned chats'**
+  String assets_scan_summary(int files, int chats);
+
+  /// No description provided for @assets_open_chat.
+  ///
+  /// In en, this message translates to:
+  /// **'Open chat: {title}'**
+  String assets_open_chat(String title);
+
+  /// No description provided for @assets_file_too_large.
+  ///
+  /// In en, this message translates to:
+  /// **'This file exceeds the download limit. Open the dashboard to download it.'**
+  String get assets_file_too_large;
+
   /// No description provided for @a_one_off_question_archives_itself_after_72_hours_anything.
   ///
   /// In en, this message translates to:
   /// **'A one-off question. Archives itself after 72 hours; anything worth keeping is still remembered.'**
   String get a_one_off_question_archives_itself_after_72_hours_anything;
+
+  /// No description provided for @archive_chat.
+  ///
+  /// In en, this message translates to:
+  /// **'Archive chat'**
+  String get archive_chat;
+
+  /// No description provided for @unarchive_chat.
+  ///
+  /// In en, this message translates to:
+  /// **'Unarchive chat'**
+  String get unarchive_chat;
+
+  /// No description provided for @chat_archived.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat archived'**
+  String get chat_archived;
+
+  /// No description provided for @chat_unarchived.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat unarchived'**
+  String get chat_unarchived;
+
+  /// No description provided for @could_not_update_chat_archive.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not update chat archive: {error}'**
+  String could_not_update_chat_archive(Object error);
+
+  /// No description provided for @quick_chat_description.
+  ///
+  /// In en, this message translates to:
+  /// **'A one-off question.'**
+  String get quick_chat_description;
 
   /// No description provided for @ai_full_text.
   ///
@@ -315,7 +603,7 @@ abstract class AppLocalizations {
   /// No description provided for @archived_conversations_appear_here.
   ///
   /// In en, this message translates to:
-  /// **'Archived conversations appear here.'**
+  /// **'Only archived conversations appear here. Older chats remain in All chats.'**
   String get archived_conversations_appear_here;
 
   /// No description provided for @archived_quick_chats.
@@ -377,12 +665,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Auto (device default)'**
   String get auto_device_default;
-
-  /// No description provided for @auto_archives_after_72_hours.
-  ///
-  /// In en, this message translates to:
-  /// **'Auto-archives after 72 hours'**
-  String get auto_archives_after_72_hours;
 
   /// No description provided for @automation.
   ///
@@ -932,6 +1214,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Cron'**
   String get cron;
+
+  /// No description provided for @crons.
+  ///
+  /// In en, this message translates to:
+  /// **'Crons'**
+  String get crons;
+
+  /// No description provided for @cron_conversations_empty.
+  ///
+  /// In en, this message translates to:
+  /// **'Conversations from scheduled jobs appear here, including older runs.'**
+  String get cron_conversations_empty;
+
+  /// No description provided for @search_cron_conversations.
+  ///
+  /// In en, this message translates to:
+  /// **'Search cron conversations'**
+  String get search_cron_conversations;
 
   /// No description provided for @cron_jobs.
   ///
@@ -3328,6 +3628,12 @@ abstract class AppLocalizations {
   /// **'Trigger now'**
   String get trigger_now;
 
+  /// No description provided for @received_outcome_unknown.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn ended — outcome unconfirmed'**
+  String get received_outcome_unknown;
+
   /// No description provided for @turn_completed.
   ///
   /// In en, this message translates to:
@@ -4342,6 +4648,72 @@ abstract class AppLocalizations {
   String
   get compact_removes_the_you_and_hermes_labels_and_trims_bubble_padding_spacing_and_side_margins;
 
+  /// No description provided for @client_certificate_mtls.
+  ///
+  /// In en, this message translates to:
+  /// **'Client certificate (mTLS)'**
+  String get client_certificate_mtls;
+
+  /// No description provided for @client_certificate_mtls_description.
+  ///
+  /// In en, this message translates to:
+  /// **'Present a certificate when an HTTPS proxy requires mutual TLS.'**
+  String get client_certificate_mtls_description;
+
+  /// No description provided for @client_certificate_https_only.
+  ///
+  /// In en, this message translates to:
+  /// **'Client certificates are only used for HTTPS connections.'**
+  String get client_certificate_https_only;
+
+  /// No description provided for @choose_p12_pfx.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose .p12 / .pfx'**
+  String get choose_p12_pfx;
+
+  /// No description provided for @choose_certificate_pem.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose certificate (PEM)'**
+  String get choose_certificate_pem;
+
+  /// No description provided for @choose_private_key_pem.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose private key (PEM)'**
+  String get choose_private_key_pem;
+
+  /// No description provided for @certificate_password_optional.
+  ///
+  /// In en, this message translates to:
+  /// **'Certificate password (optional)'**
+  String get certificate_password_optional;
+
+  /// No description provided for @client_certificate_required.
+  ///
+  /// In en, this message translates to:
+  /// **'Load a client certificate or turn off the client certificate option.'**
+  String get client_certificate_required;
+
+  /// No description provided for @client_certificate_loaded.
+  ///
+  /// In en, this message translates to:
+  /// **'Loaded: {label}'**
+  String client_certificate_loaded(String label);
+
+  /// No description provided for @remove_certificate.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove certificate'**
+  String get remove_certificate;
+
+  /// No description provided for @certificate_import_failed.
+  ///
+  /// In en, this message translates to:
+  /// **'That certificate could not be loaded.'**
+  String get certificate_import_failed;
+
   /// No description provided for @background_work.
   ///
   /// In en, this message translates to:
@@ -4683,6 +5055,78 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{count} delegated task(s) finished'**
   String task_tasks_finished(Object count);
+
+  /// No description provided for @activity_status_unconfirmed.
+  ///
+  /// In en, this message translates to:
+  /// **'Status unconfirmed'**
+  String get activity_status_unconfirmed;
+
+  /// No description provided for @activity_recently_updated.
+  ///
+  /// In en, this message translates to:
+  /// **'Recently updated'**
+  String get activity_recently_updated;
+
+  /// No description provided for @activity_reconnecting.
+  ///
+  /// In en, this message translates to:
+  /// **'Reconnecting — checking the turn status'**
+  String get activity_reconnecting;
+
+  /// No description provided for @activity_outcome_unknown.
+  ///
+  /// In en, this message translates to:
+  /// **'The turn’s outcome could not be confirmed. Open the chat to check.'**
+  String get activity_outcome_unknown;
+
+  /// No description provided for @activity_chat_updated_detail.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat activity recorded by the gateway; live turn status is unavailable.'**
+  String get activity_chat_updated_detail;
+
+  /// No description provided for @activity_updated.
+  ///
+  /// In en, this message translates to:
+  /// **'Updated'**
+  String get activity_updated;
+
+  /// No description provided for @activity_empty_title.
+  ///
+  /// In en, this message translates to:
+  /// **'No recent activity'**
+  String get activity_empty_title;
+
+  /// No description provided for @activity_empty_detail.
+  ///
+  /// In en, this message translates to:
+  /// **'Turns started in this app and gateway chats updated in the last 7 days appear here.'**
+  String get activity_empty_detail;
+
+  /// No description provided for @activity_read_error.
+  ///
+  /// In en, this message translates to:
+  /// **'Activity could not read its turn records or gateway chats. Check the connection and try again.'**
+  String get activity_read_error;
+
+  /// No description provided for @activity_chat_unavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'This chat is no longer available, or the gateway could not be reached.'**
+  String get activity_chat_unavailable;
+
+  /// No description provided for @activity_partial_title.
+  ///
+  /// In en, this message translates to:
+  /// **'Activity partially loaded'**
+  String get activity_partial_title;
+
+  /// No description provided for @activity_partial_detail.
+  ///
+  /// In en, this message translates to:
+  /// **'Showing a limited window of gateway activity. More chats may exist; pull to refresh.'**
+  String get activity_partial_detail;
 }
 
 class _AppLocalizationsDelegate

@@ -9,8 +9,169 @@ class AppLocalizationsEn extends AppLocalizations {
   AppLocalizationsEn([String locale = 'en']) : super(locale);
 
   @override
+  String get background_task_report => 'Background task';
+
+  @override
+  String get background_process_report => 'Background process';
+
+  @override
+  String get background_report_issues =>
+      'Issues reported — expand for details.';
+
+  @override
+  String get background_report_expand => 'Expand report';
+
+  @override
+  String get background_report_collapse => 'Collapse report';
+
+  @override
+  String get saved_history_heading => 'Saved history';
+
+  @override
+  String get received_output_heading =>
+      'Received output — match to saved history unconfirmed';
+
+  @override
+  String get received_output_explanation =>
+      'This may also appear in saved history. The app cannot confirm a match.';
+
+  @override
+  String get local_prompt_context => 'Local prompt context';
+
+  @override
+  String get received_output_badge => 'Received · match unconfirmed';
+
+  @override
+  String get received_output_lifetime =>
+      'Received output is kept temporarily in this app session and may be shortened or removed as limits are reached. It may not be available after the app or connection is closed.';
+
+  @override
+  String get theme_palette => 'Colour theme';
+
+  @override
+  String get theme_palette_gold => 'Gold';
+
+  @override
+  String get theme_palette_purple => 'Purple';
+
+  @override
+  String get theme_palette_orange => 'Orange';
+
+  @override
+  String get theme_palette_green => 'Green';
+
+  @override
+  String get theme_palette_blue => 'Blue';
+
+  @override
+  String get theme_palette_red => 'Red';
+
+  @override
+  String get theme_palette_teal => 'Teal';
+
+  @override
+  String get theme_palette_pink => 'Pink';
+
+  @override
+  String get theme_palette_indigo => 'Indigo';
+
+  @override
+  String get theme_palette_cyan => 'Cyan';
+
+  @override
+  String get assets_recent_subtitle =>
+      'Find files shared by Hermes in saved chats';
+
+  @override
+  String get assets_scope_notice =>
+      'Generated files explicitly shared by Hermes in saved replies. This is a partial view of chat history, not a complete file or attachment catalogue. Referenced files may no longer exist.';
+
+  @override
+  String get assets_download_limit =>
+      'Files are loaded only when tapped. Previews and downloads are limited to 25 MiB each; use the dashboard for larger files.';
+
+  @override
+  String get assets_search_hint => 'Search found files or source chats';
+
+  @override
+  String get assets_all => 'All';
+
+  @override
+  String get assets_images => 'Images';
+
+  @override
+  String get assets_audio => 'Audio';
+
+  @override
+  String get assets_video => 'Video';
+
+  @override
+  String get assets_documents => 'Documents and other files';
+
+  @override
+  String get assets_empty => 'No assets found in scanned messages';
+
+  @override
+  String get assets_empty_detail =>
+      'Scan more chats or older messages to look further back. Ordinary attachments and unlinked files are not indexed here.';
+
+  @override
+  String get assets_no_matches => 'No matching assets';
+
+  @override
+  String get assets_load_more_chats => 'Scan more chats';
+
+  @override
+  String get assets_load_older_messages => 'Scan older messages';
+
+  @override
+  String get assets_load_failed =>
+      'Some history could not be read. Results are incomplete. Check the dashboard connection and retry.';
+
+  @override
+  String get assets_retry_failed => 'Retry failed history reads';
+
+  @override
+  String get assets_partial =>
+      'The server reported incomplete history. Refresh after checking the dashboard.';
+
+  @override
+  String assets_scan_summary(int files, int chats) {
+    return '$files file references found across $chats scanned chats';
+  }
+
+  @override
+  String assets_open_chat(String title) {
+    return 'Open chat: $title';
+  }
+
+  @override
+  String get assets_file_too_large =>
+      'This file exceeds the download limit. Open the dashboard to download it.';
+
+  @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
       'A one-off question. Archives itself after 72 hours; anything worth keeping is still remembered.';
+
+  @override
+  String get archive_chat => 'Archive chat';
+
+  @override
+  String get unarchive_chat => 'Unarchive chat';
+
+  @override
+  String get chat_archived => 'Chat archived';
+
+  @override
+  String get chat_unarchived => 'Chat unarchived';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return 'Could not update chat archive: $error';
+  }
+
+  @override
+  String get quick_chat_description => 'A one-off question.';
 
   @override
   String get ai_full_text => 'AI + full-text';
@@ -121,7 +282,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get archived_conversations_appear_here =>
-      'Archived conversations appear here.';
+      'Only archived conversations appear here. Older chats remain in All chats.';
 
   @override
   String get archived_quick_chats => 'Archived quick chats';
@@ -156,9 +317,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get auto_device_default => 'Auto (device default)';
-
-  @override
-  String get auto_archives_after_72_hours => 'Auto-archives after 72 hours';
 
   @override
   String get automation => 'Automation';
@@ -498,6 +656,16 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get cron => 'Cron';
+
+  @override
+  String get crons => 'Crons';
+
+  @override
+  String get cron_conversations_empty =>
+      'Conversations from scheduled jobs appear here, including older runs.';
+
+  @override
+  String get search_cron_conversations => 'Search cron conversations';
 
   @override
   String get cron_jobs => 'Cron Jobs';
@@ -1903,6 +2071,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get trigger_now => 'Trigger now';
 
   @override
+  String get received_outcome_unknown => 'Turn ended — outcome unconfirmed';
+
+  @override
   String get turn_completed => 'Turn completed';
 
   @override
@@ -2555,6 +2726,45 @@ class AppLocalizationsEn extends AppLocalizations {
       'Compact removes the You and Hermes labels and trims bubble padding, spacing, and side margins.';
 
   @override
+  String get client_certificate_mtls => 'Client certificate (mTLS)';
+
+  @override
+  String get client_certificate_mtls_description =>
+      'Present a certificate when an HTTPS proxy requires mutual TLS.';
+
+  @override
+  String get client_certificate_https_only =>
+      'Client certificates are only used for HTTPS connections.';
+
+  @override
+  String get choose_p12_pfx => 'Choose .p12 / .pfx';
+
+  @override
+  String get choose_certificate_pem => 'Choose certificate (PEM)';
+
+  @override
+  String get choose_private_key_pem => 'Choose private key (PEM)';
+
+  @override
+  String get certificate_password_optional => 'Certificate password (optional)';
+
+  @override
+  String get client_certificate_required =>
+      'Load a client certificate or turn off the client certificate option.';
+
+  @override
+  String client_certificate_loaded(String label) {
+    return 'Loaded: $label';
+  }
+
+  @override
+  String get remove_certificate => 'Remove certificate';
+
+  @override
+  String get certificate_import_failed =>
+      'That certificate could not be loaded.';
+
+  @override
   String get background_work => 'Background work';
 
   @override
@@ -2768,4 +2978,46 @@ class AppLocalizationsEn extends AppLocalizations {
   String task_tasks_finished(Object count) {
     return '$count delegated task(s) finished';
   }
+
+  @override
+  String get activity_status_unconfirmed => 'Status unconfirmed';
+
+  @override
+  String get activity_recently_updated => 'Recently updated';
+
+  @override
+  String get activity_reconnecting => 'Reconnecting — checking the turn status';
+
+  @override
+  String get activity_outcome_unknown =>
+      'The turn’s outcome could not be confirmed. Open the chat to check.';
+
+  @override
+  String get activity_chat_updated_detail =>
+      'Chat activity recorded by the gateway; live turn status is unavailable.';
+
+  @override
+  String get activity_updated => 'Updated';
+
+  @override
+  String get activity_empty_title => 'No recent activity';
+
+  @override
+  String get activity_empty_detail =>
+      'Turns started in this app and gateway chats updated in the last 7 days appear here.';
+
+  @override
+  String get activity_read_error =>
+      'Activity could not read its turn records or gateway chats. Check the connection and try again.';
+
+  @override
+  String get activity_chat_unavailable =>
+      'This chat is no longer available, or the gateway could not be reached.';
+
+  @override
+  String get activity_partial_title => 'Activity partially loaded';
+
+  @override
+  String get activity_partial_detail =>
+      'Showing a limited window of gateway activity. More chats may exist; pull to refresh.';
 }

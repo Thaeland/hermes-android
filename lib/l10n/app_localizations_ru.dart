@@ -9,8 +9,171 @@ class AppLocalizationsRu extends AppLocalizations {
   AppLocalizationsRu([String locale = 'ru']) : super(locale);
 
   @override
+  String get background_task_report => 'Фоновая задача';
+
+  @override
+  String get background_process_report => 'Фоновый процесс';
+
+  @override
+  String get background_report_issues =>
+      'Обнаружены проблемы — разверните для подробностей.';
+
+  @override
+  String get background_report_expand => 'Развернуть отчёт';
+
+  @override
+  String get background_report_collapse => 'Свернуть отчёт';
+
+  @override
+  String get saved_history_heading => 'Saved history';
+
+  @override
+  String get received_output_heading =>
+      'Received output — match to saved history unconfirmed';
+
+  @override
+  String get received_output_explanation =>
+      'This may also appear in saved history. The app cannot confirm a match.';
+
+  @override
+  String get local_prompt_context => 'Local prompt context';
+
+  @override
+  String get received_output_badge => 'Received · match unconfirmed';
+
+  @override
+  String get received_output_lifetime =>
+      'Received output is kept temporarily in this app session and may be shortened or removed as limits are reached. It may not be available after the app or connection is closed.';
+
+  @override
+  String get theme_palette => 'Цветовая тема';
+
+  @override
+  String get theme_palette_gold => 'Золотой';
+
+  @override
+  String get theme_palette_purple => 'Фиолетовый';
+
+  @override
+  String get theme_palette_orange => 'Оранжевый';
+
+  @override
+  String get theme_palette_green => 'Зелёный';
+
+  @override
+  String get theme_palette_blue => 'Синий';
+
+  @override
+  String get theme_palette_red => 'Красный';
+
+  @override
+  String get theme_palette_teal => 'Бирюзовый';
+
+  @override
+  String get theme_palette_pink => 'Розовый';
+
+  @override
+  String get theme_palette_indigo => 'Индиго';
+
+  @override
+  String get theme_palette_cyan => 'Циан';
+
+  @override
+  String get assets_recent_subtitle =>
+      'Находите файлы, которыми Hermes поделился в сохранённых чатах';
+
+  @override
+  String get assets_scope_notice =>
+      'Созданные файлы, которыми Hermes явно поделился в сохранённых ответах. Здесь показана лишь часть истории чатов, а не полный каталог файлов или вложений. Файлы по найденным ссылкам могут больше не существовать.';
+
+  @override
+  String get assets_download_limit =>
+      'Файлы загружаются только по нажатию. Для предпросмотра и скачивания действует ограничение в 25 MiB на файл; для файлов большего размера используйте панель управления.';
+
+  @override
+  String get assets_search_hint =>
+      'Поиск среди найденных файлов или исходных чатов';
+
+  @override
+  String get assets_all => 'Все';
+
+  @override
+  String get assets_images => 'Изображения';
+
+  @override
+  String get assets_audio => 'Аудио';
+
+  @override
+  String get assets_video => 'Видео';
+
+  @override
+  String get assets_documents => 'Документы и другие файлы';
+
+  @override
+  String get assets_empty => 'В проверенных сообщениях ресурсы не найдены';
+
+  @override
+  String get assets_empty_detail =>
+      'Проверьте другие чаты или более старые сообщения, чтобы просмотреть более раннюю историю. Обычные вложения и файлы без ссылок здесь не индексируются.';
+
+  @override
+  String get assets_no_matches => 'Нет подходящих ресурсов';
+
+  @override
+  String get assets_load_more_chats => 'Проверить другие чаты';
+
+  @override
+  String get assets_load_older_messages => 'Проверить более старые сообщения';
+
+  @override
+  String get assets_load_failed =>
+      'Не удалось прочитать часть истории. Результаты неполные. Проверьте подключение к панели управления и повторите попытку.';
+
+  @override
+  String get assets_retry_failed =>
+      'Повторить неудачные попытки чтения истории';
+
+  @override
+  String get assets_partial =>
+      'Сервер сообщил о неполной истории. Проверьте панель управления, затем обновите данные.';
+
+  @override
+  String assets_scan_summary(int files, int chats) {
+    return 'Найдено ссылок на файлы: $files · Проверено чатов: $chats';
+  }
+
+  @override
+  String assets_open_chat(String title) {
+    return 'Открыть чат: $title';
+  }
+
+  @override
+  String get assets_file_too_large =>
+      'Размер этого файла превышает лимит скачивания. Откройте панель управления, чтобы скачать его.';
+
+  @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
       'Разовый вопрос. Автоматически архивируется через 72 часа; всё, что стоит сохранить, останется в памяти.';
+
+  @override
+  String get archive_chat => 'Архивировать чат';
+
+  @override
+  String get unarchive_chat => 'Разархивировать чат';
+
+  @override
+  String get chat_archived => 'Чат архивирован';
+
+  @override
+  String get chat_unarchived => 'Чат разархивирован';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return 'Не удалось изменить статус архивации чата: $error';
+  }
+
+  @override
+  String get quick_chat_description => 'Разовый вопрос.';
 
   @override
   String get ai_full_text => 'ИИ + полный текст';
@@ -122,7 +285,7 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get archived_conversations_appear_here =>
-      'Архивированные диалоги появятся здесь.';
+      'Здесь отображаются только архивированные диалоги. Старые чаты остаются в разделе «Все чаты».';
 
   @override
   String get archived_quick_chats => 'Архивированные быстрые чаты';
@@ -157,9 +320,6 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get auto_device_default => 'Автоматически (по умолчанию устройства)';
-
-  @override
-  String get auto_archives_after_72_hours => 'Автоархивация через 72 часа';
 
   @override
   String get automation => 'Автоматизация';
@@ -499,6 +659,16 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get cron => 'Cron';
+
+  @override
+  String get crons => 'Crons';
+
+  @override
+  String get cron_conversations_empty =>
+      'Conversations from scheduled jobs appear here, including older runs.';
+
+  @override
+  String get search_cron_conversations => 'Search cron conversations';
 
   @override
   String get cron_jobs => 'Задачи Cron';
@@ -1913,6 +2083,10 @@ class AppLocalizationsRu extends AppLocalizations {
   String get trigger_now => 'Запустить сейчас';
 
   @override
+  String get received_outcome_unknown =>
+      'Ход завершён — результат не подтверждён';
+
+  @override
   String get turn_completed => 'Ход завершён';
 
   @override
@@ -2577,6 +2751,45 @@ class AppLocalizationsRu extends AppLocalizations {
       'Компактный режим убирает подписи You и Hermes и уменьшает внутренние отступы, промежутки и боковые поля пузырей.';
 
   @override
+  String get client_certificate_mtls => 'Client certificate (mTLS)';
+
+  @override
+  String get client_certificate_mtls_description =>
+      'Present a certificate when an HTTPS proxy requires mutual TLS.';
+
+  @override
+  String get client_certificate_https_only =>
+      'Client certificates are only used for HTTPS connections.';
+
+  @override
+  String get choose_p12_pfx => 'Choose .p12 / .pfx';
+
+  @override
+  String get choose_certificate_pem => 'Choose certificate (PEM)';
+
+  @override
+  String get choose_private_key_pem => 'Choose private key (PEM)';
+
+  @override
+  String get certificate_password_optional => 'Certificate password (optional)';
+
+  @override
+  String get client_certificate_required =>
+      'Load a client certificate or turn off the client certificate option.';
+
+  @override
+  String client_certificate_loaded(String label) {
+    return 'Loaded: $label';
+  }
+
+  @override
+  String get remove_certificate => 'Remove certificate';
+
+  @override
+  String get certificate_import_failed =>
+      'That certificate could not be loaded.';
+
+  @override
   String get background_work => 'Фоновая работа';
 
   @override
@@ -2790,4 +3003,46 @@ class AppLocalizationsRu extends AppLocalizations {
   String task_tasks_finished(Object count) {
     return '$count delegated task(s) finished';
   }
+
+  @override
+  String get activity_status_unconfirmed => 'Статус не подтверждён';
+
+  @override
+  String get activity_recently_updated => 'Недавно обновлено';
+
+  @override
+  String get activity_reconnecting => 'Переподключение — проверка статуса хода';
+
+  @override
+  String get activity_outcome_unknown =>
+      'Не удалось подтвердить результат хода. Откройте чат для проверки.';
+
+  @override
+  String get activity_chat_updated_detail =>
+      'Активность чата записана шлюзом; текущий статус хода недоступен.';
+
+  @override
+  String get activity_updated => 'Обновлено';
+
+  @override
+  String get activity_empty_title => 'Нет недавней активности';
+
+  @override
+  String get activity_empty_detail =>
+      'Здесь отображаются ходы, начатые в этом приложении, и чаты шлюза, обновлённые за последние 7 дней.';
+
+  @override
+  String get activity_read_error =>
+      'Раздел «Активность» не смог прочитать записи ходов или чаты шлюза. Проверьте подключение и повторите попытку.';
+
+  @override
+  String get activity_chat_unavailable =>
+      'Этот чат больше недоступен или не удалось связаться со шлюзом.';
+
+  @override
+  String get activity_partial_title => 'Активность загружена частично';
+
+  @override
+  String get activity_partial_detail =>
+      'Показана ограниченная часть активности шлюза. Могут существовать другие чаты; потяните вниз для обновления.';
 }

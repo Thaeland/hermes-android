@@ -244,13 +244,17 @@ class GatewaySubagentActivity {
         }).isNotEmpty;
   }
 
-  GatewaySubagentActivity merge(GatewaySubagentActivity next) {
+  GatewaySubagentActivity merge(
+    GatewaySubagentActivity next, {
+    String? firstChildSessionId,
+  }) {
     return GatewaySubagentActivity(
       id: id,
       goal: next.goal.isEmpty ? goal : next.goal,
       phase: isComplete ? phase : next.phase,
       status: isComplete ? status : next.status ?? status,
-      childSessionId: childSessionId ?? next.childSessionId,
+      childSessionId:
+          firstChildSessionId ?? childSessionId ?? next.childSessionId,
       latestChildSessionId:
           next.latestChildSessionId ??
           next.childSessionId ??

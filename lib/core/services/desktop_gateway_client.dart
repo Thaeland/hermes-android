@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import 'package:uuid/uuid.dart';
 
+import '../models/client_certificate.dart';
 import 'capability_registry.dart';
 import 'connection_manager.dart';
 import 'gateway_turn_coordinator.dart';
@@ -40,6 +41,7 @@ class DesktopGatewayClient {
   /// Hermes profile the gateway socket should run chats under, or null to
   /// let the server use its own. See [SavedConnection.gatewayProfile].
   final String? _gatewayProfile;
+  final ClientCertificateConfig? _clientCertificate;
   WsClient? _ws;
   Future<WsClient>? _socketInFlight;
   Timer? _reconnectTimer;
@@ -98,6 +100,7 @@ class DesktopGatewayClient {
     required this._baseUrl,
     required this._dashboard,
     this._gatewayProfile,
+    this._clientCertificate,
   });
   // No global client registry: the keep-alive policy is driven by
   // unresolved turns (see ConnectionKeepAliveService), not by
@@ -187,8 +190,10 @@ class DesktopGatewayClient {
         proxied: connection.dashboardProxied,
         username: connection.dashboardUsername,
         password: connection.dashboardPassword,
+        clientCertificate: connection.clientCertificate,
       ),
       gatewayProfile: connection.gatewayProfile,
+      clientCertificate: connection.clientCertificate,
     );
   }
 
@@ -293,7 +298,12 @@ class DesktopGatewayClient {
     _capabilities.reset();
     final ticket = await _dashboard.mintWebSocketTicket();
     if (_closed) throw StateError('DesktopGatewayClient is closed.');
-    final client = WsClient(_baseUrl, ticket: ticket, profile: _gatewayProfile);
+    final client = WsClient(
+      _baseUrl,
+      ticket: ticket,
+      profile: _gatewayProfile,
+      clientCertificate: _clientCertificate,
+    );
     _installAsyncEventBridge(client);
     final inheritedConnectionListener = client.onConnectionChanged;
     client.onConnectionChanged = (connected) {
@@ -442,6 +452,8 @@ class DesktopGatewayClient {
     String mobileSessionId,
     _DesktopGatewayBinding binding,
   ) {
+    final previousRuntime = _gatewaySessionIds[mobileSessionId];
+    final previousStored = _storedSessionIds[mobileSessionId];
     final bindingChanged =
         _gatewaySessionIds[mobileSessionId] != binding.runtimeSessionId ||
         _storedSessionIds[mobileSessionId] != binding.storedSessionId;
@@ -454,8 +466,25 @@ class DesktopGatewayClient {
       binding.creationDelivered = true;
       _sessionCreatedListener?.call(mobileSessionId, binding.storedSessionId);
     }
-    if (bindingChanged) {
-      _sessionBoundListener?.call(mobileSessionId, binding.storedSessionId);
+    try {
+      if (bindingChanged) {
+        _sessionBoundListener?.call(mobileSessionId, binding.storedSessionId);
+      }
+    } catch (_) {
+      // An explicitly rejected binding must not leave the transport ahead of
+      // its application owner. Normal verified alias collisions converge in
+      // that owner; incompatible identities/independent wire turns fail closed.
+      if (previousRuntime == null) {
+        _gatewaySessionIds.remove(mobileSessionId);
+      } else {
+        _gatewaySessionIds[mobileSessionId] = previousRuntime;
+      }
+      if (previousStored == null) {
+        _storedSessionIds.remove(mobileSessionId);
+      } else {
+        _storedSessionIds[mobileSessionId] = previousStored;
+      }
+      rethrow;
     }
     final resumed = binding.resumed;
     if (resumed != null && resumed.openRequests.isNotEmpty) {
@@ -677,6 +706,7 @@ class DesktopGatewayClient {
                 _baseUrl,
                 ticket: ticket,
                 profile: _gatewayProfile,
+                clientCertificate: _clientCertificate,
               );
               _installAsyncEventBridge(client);
               return client;
@@ -726,11 +756,16 @@ class DesktopGatewayClient {
     required String text,
     required StreamCallback onEvent,
     required void Function() onSent,
+    bool Function()? maySend,
   }) async {
     var emitted = false;
-    await _callSessionScoped(
-      sessionId,
-      (gateway) => gateway.client.submitPrompt(
+    await _callSessionScoped(sessionId, (gateway) {
+      // Admission can converge while _connect is suspended. Nothing awaits
+      // between this fence and the socket sink write.
+      if (maySend?.call() == false) {
+        throw StateError('Prompt admission is no longer owned.');
+      }
+      return gateway.client.submitPrompt(
         text,
         sessionId: gateway.sessionId,
         onEvent: onEvent,
@@ -739,9 +774,8 @@ class DesktopGatewayClient {
           _resumeOnlySessions.add(sessionId);
           onSent();
         },
-      ),
-      mayRetry: () => !emitted,
-    );
+      );
+    }, mayRetry: () => !emitted);
   }
 
   /// Receives durable session-scoped events plus terminal turn frames.

@@ -1,4 +1,10 @@
+// UNRECONCILED POLICY (second adaptation layer; original case IDs retained).
+// Raw: p2a-unreconciled-_flkt2h9/raw/base.tar::test/chat_history_scroll_test.dart
+// Base 4a53e32 blob 96c3d8ad1b9544e7a460e9cf87d09b7372398341; SHA256 c95bedb2b6edb44b14298bc408629209bf68efcce9c442127ecc736623ae8981.
+// See docs/unreconciled-output/ORACLE_MIGRATION.md; unchanged safety remains binding.
 import 'dart:async';
+import 'support/unreconciled_policy.dart';
+import 'package:hermes_android/core/utils/chat_display_items.dart';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -392,10 +398,19 @@ void main() {
           'A',
           't1',
           'B',
+          'Continue',
+          'A',
+          't1',
+          'B',
         ]);
         expect(
           tester
-              .widget<GatewayActivityCard>(find.byType(GatewayActivityCard))
+              .widget<GatewayActivityCard>(
+                inChatSource(
+                  find.byType(GatewayActivityCard),
+                  ChatDisplaySource.canonical,
+                ),
+              )
               .activities
               .single
               .isTerminal,
@@ -910,6 +925,8 @@ void main() {
     testWidgets(
       'Remote previewed or reused completion appears once per turn, not once per chat',
       (tester) async {
+        await tester.binding.setSurfaceSize(const Size(1000, 1600));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
         final remote = _ControlledRemotePrompt();
         await _pumpChat(
           tester,

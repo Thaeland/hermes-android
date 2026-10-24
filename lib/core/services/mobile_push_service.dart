@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 import 'connection_manager.dart';
+import 'connection_mutation_barrier.dart';
 import 'mobile_push_api.dart';
 import 'notification_prefs.dart';
 
@@ -51,12 +52,16 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
   bool _dirty = false;
   bool _closed = false;
   int _epoch = 0;
+  String? _enablingConnection;
+  bool get enabling => _enablingConnection != null;
+  String get pendingConnectionId => _enablingConnection ?? '';
   String status = 'Off';
   String? error;
   List<Map<String, dynamic>> events = [];
   String get connectionId => _state['connection'] as String? ?? '';
   bool get enabled => _state['enabled'] == true;
   bool get active => enabled && _state['active'] == true;
+  String get sessionScope => _state['session_scope'] as String? ?? 'explicit';
   List<String> get sessionIds =>
       List<String>.from(_state['sessions'] as List? ?? []);
   bool get hasPendingTap => _tap != null;
@@ -71,6 +76,7 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
     username: c.dashboardUsername,
     password: c.dashboardPassword,
     gatewayProfile: c.gatewayProfile,
+    clientCertificate: c.clientCertificate,
   );
   static String binding(SavedConnection c) => sha256
       .convert(
@@ -79,12 +85,25 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
             ...c.toMap(),
             'api_key': c.apiKey,
             'dashboard_password': c.dashboardPassword,
+            if (c.clientCertificate != null)
+              'client_key_password': c.clientCertificate!.privateKeyPassword,
           }),
         ),
       )
       .toString();
   SavedConnection? _connection(String id) =>
       _manager?.getConnections().where((c) => c.id == id).firstOrNull;
+
+  Future<bool> _refreshCredentialCache(String id) async {
+    final manager = _manager;
+    final mutation = ConnectionMutationBarrier.capture(id);
+    if (!ConnectionMutationBarrier.isCurrent(id, mutation)) return false;
+    await manager?.refreshConnectionCredentials(id);
+    return !_closed &&
+        identical(manager, _manager) &&
+        ConnectionMutationBarrier.isCurrent(id, mutation);
+  }
+
   Future<Map<String, dynamic>> _call(
     String method, [
     Map<String, dynamic>? args,
@@ -154,38 +173,85 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
     );
   }
 
+  Future<List<Map<String, dynamic>>> transportOptions() async {
+    if (!supported) return [];
+    final options =
+        await _channel.invokeListMethod<dynamic>('transportOptions') ?? [];
+    return options
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .toList();
+  }
+
+  /// Explicit consent to the server's continuously authorized sessions. Never
+  /// broadens persisted legacy allowlists or enrolls on startup.
+  Future<void> enableAutomatic(
+    SavedConnection connection, {
+    String? distributor,
+  }) => _enable(connection, distributor ?? 'automatic', const [], 'authorized');
+
   Future<void> enable(
     SavedConnection connection,
     String distributor,
     List<String> sessions,
   ) async {
-    final ids = sessions
-        .map((s) => s.trim())
-        .where((s) => s.isNotEmpty)
-        .toSet()
-        .toList();
-    if (!supported ||
-        _manager == null ||
-        ids.isEmpty ||
-        ids.length > 256 ||
-        ids.any((s) => s.length > 256)) {
-      throw StateError(
-        'Choose durable session IDs and an Android distributor first.',
-      );
+    final List<String> ids;
+    try {
+      ids = MobilePushApi.validateSessionIds(sessions);
+    } on StateError catch (e) {
+      // The settings surface reads this safe, local validation message rather
+      // than exposing platform/server exception bodies that may contain secrets.
+      error = e.message;
+      if (!_closed) notifyListeners();
+      rethrow;
+    }
+    return _enable(connection, distributor, ids, 'explicit');
+  }
+
+  Future<void> _enable(
+    SavedConnection connection,
+    String distributor,
+    List<String> ids,
+    String scope,
+  ) async {
+    if (!supported || _manager == null) {
+      throw StateError('Choose a saved connection on Android first.');
     }
     final epoch = ++_epoch;
+    final mutationEpoch = ConnectionMutationBarrier.capture(connection.id);
     final fingerprint = binding(connection);
     bool current() =>
         !_closed &&
         epoch == _epoch &&
+        ConnectionMutationBarrier.isCurrent(connection.id, mutationEpoch) &&
         _connection(connection.id) != null &&
         binding(_connection(connection.id)!) == fingerprint;
+    // A new opt-in started during an edit must not queue old consent to run
+    // after that edit, even if the saved metadata still looks unchanged.
+    if (_closed ||
+        !ConnectionMutationBarrier.isCurrent(connection.id, mutationEpoch)) {
+      return;
+    }
+    _enablingConnection = connection.id;
     final client = _clientFactory(connection);
     error = null;
     status = 'Checking server authorization';
     notifyListeners();
     try {
-      final caps = await MobilePushApi(client).capabilities();
+      if (!await _refreshCredentialCache(connection.id) || !current()) return;
+      await _manager!.finishPendingMobilePushChanges();
+      if (!current()) return;
+      final ticket = await _call('connectionFence', {
+        'connection': connection.id,
+      });
+      // A replacement engine may hydrate before abandoned native writes drain.
+      // This ticket is unavailable until the engine-owned drain completes. Now
+      // refresh metadata/secrets without waiting behind an unrelated live list
+      // owner. A subsequent BEGIN still invalidates this exact enable ticket.
+      await _manager!.refreshMobilePushBinding(connection.id);
+      if (!current()) return;
+      final caps = await MobilePushApi(
+        client,
+      ).capabilities(authorized: scope == 'authorized');
       if (!current()) return;
       final permission =
           await _channel.invokeMethod<bool>('permission') == true;
@@ -197,10 +263,15 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
       }
       final prefs = notificationPrefs.value;
       final state = await _call('enable', {
+        'connection_fence': ticket['connection_fence'],
         'connection': connection.id,
+        'connection_metadata': _manager!.mobilePushConsentMetadata(
+          connection.id,
+        ),
         'binding': fingerprint,
         'distributor': distributor,
         'sessions': ids,
+        'session_scope': scope,
         'vapid': caps['vapid_public_key'],
         'master': prefs.enabled,
         'kinds': [
@@ -233,6 +304,10 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
       rethrow;
     } finally {
       client.close();
+      if (epoch == _epoch) {
+        _enablingConnection = null;
+        if (!_closed) notifyListeners();
+      }
     }
     if (current()) await refresh();
   }
@@ -241,9 +316,11 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
   /// hints and notifications are revoked before attempting authenticated DELETE.
   Future<void> disable() async {
     ++_epoch;
+    _enablingConnection = null;
     _tap = null;
     events = [];
     status = 'Off';
+    error = null;
     notifyListeners();
     if (!supported || _closed) return;
     try {
@@ -259,10 +336,20 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
 
   Future<void> retry() async {
     if (!supported || _closed) return;
-    if (enabled && (_state['endpoint'] == null || _state['error'] != null)) {
-      await _call('retryDistributor');
+    final epoch = _epoch;
+    try {
+      if (enabled && (_state['endpoint'] == null || _state['error'] != null)) {
+        await _call('retryDistributor');
+      }
+      await refresh();
+    } catch (e) {
+      if (!_closed && epoch == _epoch) {
+        error = _message(e);
+        status = 'Error';
+        notifyListeners();
+      }
+      rethrow;
     }
-    await refresh();
   }
 
   /// Single flight with a dirty tail: a challenge arriving during PUT is not
@@ -283,10 +370,32 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> _drain() async {
     while (_dirty && !_closed) {
       _dirty = false;
+      final epoch = _epoch;
       try {
         await _refresh();
       } catch (e) {
-        if (!_closed) {
+        // An uncertain handshake is journalled natively. Do not let callbacks
+        // queued by its challenge cause a tight rotate/PUT/fail loop. A later
+        // foreground/manual refresh recovers it; a newer consent epoch still
+        // gets its queued pass (e.g. disable while the old request failed).
+        if (epoch != _epoch) continue;
+        if (_dirty && !_closed) {
+          try {
+            final live = await _call('snapshot');
+            // Do hand off to a newer native authority (endpoint renewal or
+            // revocation), rather than suppressing its queued foreground pass.
+            if (epoch != _epoch ||
+                live['nonce'] != _state['nonce'] ||
+                live['revision'] != _state['revision'] ||
+                live['enabled'] != _state['enabled']) {
+              continue;
+            }
+          } catch (_) {
+            /* Keep the durable intent for a later explicit retry. */
+          }
+        }
+        _dirty = false;
+        if (!_closed && epoch == _epoch) {
           error = _message(e);
           status = 'Error';
           notifyListeners();
@@ -299,13 +408,29 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
     if (_closed || epoch != _epoch) return false;
     final live = await _call('snapshot');
     if (_closed || epoch != _epoch) return false;
+    if (!await _refreshCredentialCache(
+          expected['connection'] as String? ?? '',
+        ) ||
+        _closed ||
+        epoch != _epoch) {
+      return false;
+    }
+    if (live['enabled'] != true) return false;
+    try {
+      MobilePushApi.sessionScope(live);
+    } on FormatException {
+      return false;
+    }
     final c = _connection(expected['connection'] as String? ?? '');
     return c != null &&
+        !ConnectionMutationBarrier.isPending(c.id) &&
         binding(c) == expected['binding'] &&
         live['enabled'] == true &&
         live['installation'] == expected['installation'] &&
         live['nonce'] == expected['nonce'] &&
         live['generation'] == expected['generation'] &&
+        (live['session_scope'] ?? 'explicit') ==
+            (expected['session_scope'] ?? 'explicit') &&
         live['revision'] == expected['revision'];
   }
 
@@ -318,8 +443,16 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
     // different origin/profile. Such records remain visibly pending.
     for (final raw in snapshot['revocations'] as List? ?? []) {
       final item = Map<String, dynamic>.from(raw as Map);
+      if (!await _refreshCredentialCache(item['connection'] as String)) {
+        continue;
+      }
+      if (_closed || epoch != _epoch) return;
       final c = _connection(item['connection'] as String);
-      if (c == null || binding(c) != item['binding']) continue;
+      if (c == null ||
+          ConnectionMutationBarrier.isPending(c.id) ||
+          binding(c) != item['binding']) {
+        continue;
+      }
       final client = _clientFactory(c);
       try {
         await MobilePushApi(client).revoke(item['installation'] as String);
@@ -342,7 +475,13 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
       notifyListeners();
       return;
     }
+    if (!await _refreshCredentialCache(connectionId)) return;
+    if (_closed || epoch != _epoch) return;
     final connection = _connection(connectionId);
+    if (connection != null &&
+        ConnectionMutationBarrier.isPending(connection.id)) {
+      return;
+    }
     if (connection == null || binding(connection) != snapshot['binding']) {
       // A removed/edited account cannot retain authority from a former login.
       ++_epoch;
@@ -356,44 +495,49 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
     final api = MobilePushApi(client);
     var state = snapshot;
     try {
+      MobilePushApi.sessionScope(state);
       if (state['error'] != null) throw StateError(state['error'] as String);
       if (state['endpoint'] == null) {
         status = 'Pending distributor endpoint';
         notifyListeners();
         return;
       }
-      var serverActive = false;
-      if (state['active'] != true) {
-        // Repeat the exact authenticated operation to recover a lost PUT ACK,
-        // or refresh an expired pending proof without changing consent/nonce.
-        // Even an active PUT response is NOT native activation authority.
+      if (state['active'] != true && _needsRegistrationRecovery(state)) {
+        if (!await _current(state, epoch)) return;
+        // Atomic native rotation retains ONLY already-consented account/scope
+        // and endpoint keys. It invalidates old proofs/taps before any new PUT.
+        state = await _call('recoverRegistration', state);
+        if (!await _current(state, epoch)) return;
+        _state = state;
+        _tap = null;
+        events = [];
+      }
+      if (state['generation'] == 0) {
         status = 'Registering';
         notifyListeners();
+        if (!await _current(state, epoch)) return;
+        // The durable native revision travels in this PUT. The server compares
+        // it inside its write transaction, not at request/DNS admission, so a
+        // superseded pre-commit handler cannot replace a recovered authority.
+        // Write-ahead intent must survive process death after server commit but
+        // before the response/generation can reach native encrypted storage.
+        state = await _call('beginRegistration', state);
+        if (!await _current(state, epoch)) return;
         final response = await api.register(state);
         if (!await _current(state, epoch)) return;
         final generation = response['generation'];
         if (generation is! int ||
             generation <= 0 ||
-            !const ['pending', 'active'].contains(response['status']) ||
+            response['status'] != 'pending' ||
             response['registration_nonce'] != state['nonce'] ||
-            (state['generation'] != 0 && state['generation'] != generation)) {
+            response['registration_revision'] != state['revision']) {
           throw const FormatException('Invalid registration response.');
         }
-        serverActive = response['status'] == 'active';
-        if (state['generation'] == 0) {
-          state = await _call('generation', {
-            ...state,
-            'generation': generation,
-          });
-          if (!await _current(state, epoch)) return;
-          _state = state;
-        }
+        state = await _call('generation', {...state, 'generation': generation});
+        if (!await _current(state, epoch)) return;
+        _state = state;
       }
       if (state['active'] != true) {
-        // A retained proof may outlive its push TTL after confirmation committed
-        // but its ACK was lost. Only an authenticated active PUT permits trying
-        // that proof again; confirm must still verify the exact generation/hash.
-        // Expired pending proofs can never grant new authority.
         final live = await _call('snapshot');
         if (!await _current(state, epoch)) return;
         final challenges = live['challenges'] as List? ?? [];
@@ -402,11 +546,12 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
           if (hint['generation'] != state['generation'] ||
               hint['registration_nonce'] != state['nonce'] ||
               hint['expires_at'] is! int ||
-              (!serverActive &&
-                  (hint['expires_at'] as int) <=
-                      DateTime.now().millisecondsSinceEpoch ~/ 1000)) {
+              (hint['expires_at'] as int) <=
+                  DateTime.now().millisecondsSinceEpoch ~/ 1000) {
             continue;
           }
+          state = await _call('beginConfirmation', state);
+          if (!await _current(state, epoch)) return;
           final response = await api.confirm(
             state['installation'] as String,
             state['generation'] as int,
@@ -414,6 +559,7 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
           );
           if (!await _current(state, epoch)) return;
           if (response['status'] != 'active' ||
+              response['generation'] is! int ||
               response['generation'] != state['generation']) {
             throw const FormatException('Server did not confirm activation.');
           }
@@ -428,7 +574,16 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
           : 'Pending encrypted challenge (open Hermes to confirm)';
       error = null;
       if (state['active'] == true) {
-        final reconciled = await _events(api, state, epoch);
+        // Discard old routable data before fetching; a bad later page must not
+        // leave a previous authenticated reconciliation usable for stale taps.
+        events = [];
+        final List<Map<String, dynamic>> reconciled;
+        try {
+          reconciled = await _events(api, state, epoch);
+        } catch (_) {
+          _tap = null;
+          rethrow;
+        }
         if (!await _current(state, epoch)) return;
         events = reconciled;
         final rawTap = await _channel.invokeMapMethod<String, dynamic>(
@@ -441,6 +596,33 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
     } finally {
       client.close();
     }
+  }
+
+  bool _needsRegistrationRecovery(Map<String, dynamic> state) {
+    if (state['registration_attempt'] == true ||
+        state['confirmation_attempt'] == true) {
+      return true;
+    }
+    if (state['generation'] == 0) return false;
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    var hasLiveProof = false;
+    for (final raw in state['challenges'] as List? ?? []) {
+      final hint = Map<String, dynamic>.from(raw as Map);
+      if (hint['generation'] != state['generation'] ||
+          hint['registration_nonce'] != state['nonce'] ||
+          hint['expires_at'] is! int) {
+        continue;
+      }
+      if ((hint['expires_at'] as int) <= now) return true;
+      hasLiveProof = true;
+    }
+    // A proof may never arrive (or native may discard an already-expired one).
+    // The local wait ceiling is durable, not a timer reset by every app launch.
+    final until = state['pending_until'];
+    if (until is int) return until <= now;
+    // Migrate pre-journal pending registrations without discarding a usable
+    // encrypted proof. No proof and no deadline otherwise means infinite Pending.
+    return !hasLiveProof;
   }
 
   Future<List<Map<String, dynamic>>> _events(
@@ -456,7 +638,7 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
       if (!visited.add(cursor)) {
         throw const FormatException('Event cursor did not advance.');
       }
-      final response = await api.events(cursor);
+      final response = await api.events(cursor, state: state);
       if (!await _current(state, epoch)) return [];
       if (response['events'] is! List || response['has_more'] is! bool) {
         throw const FormatException('Invalid events response.');
@@ -464,9 +646,10 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
       for (final raw in response['events'] as List) {
         if (raw is! Map) continue;
         final event = Map<String, dynamic>.from(raw);
-        if (event['event_id'] is! String ||
-            event['session_id'] is! String ||
-            !(state['sessions'] as List).contains(event['session_id']) ||
+        if (!MobilePushApi.validIdentifier(event['event_id'], maxLength: 256) ||
+            !MobilePushApi.validIdentifier(event['session_id']) ||
+            (MobilePushApi.sessionScope(state) == 'explicit' &&
+                !(state['sessions'] as List).contains(event['session_id'])) ||
             !const [
               'turn_done',
               'turn_error',
@@ -527,6 +710,7 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
           'nonce',
           'generation',
           'revision',
+          'session_scope',
         ])
           key: state[key],
         'route_kind': event['kind'],
@@ -557,6 +741,25 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   static String _message(Object error) {
+    if (error is StateError &&
+        error.message ==
+            'Allow Android notifications before enabling mobile push.') {
+      return 'Allow Android notifications in system settings, then retry.';
+    }
+    if (error is FormatException) {
+      return 'The server mobile-push plugin is unavailable, outdated, or returned an invalid subscription response. Ask the operator to update it, then retry.';
+    }
+    if (error is PlatformException) {
+      if (error.code == 'push_transport_unavailable') {
+        return 'No push transport is available. Built-in delivery needs working Google Play Services; alternatively install a UnifiedPush distributor and retry.';
+      }
+      if (error.code == 'push_transport_choice') {
+        return 'Several UnifiedPush distributors are available. Choose one in Advanced transport, then retry.';
+      }
+      if (error.code == 'push_transport_missing') {
+        return 'The selected UnifiedPush distributor is unavailable. Restore it or choose another in Advanced transport.';
+      }
+    }
     if (error is DashboardHttpException) {
       if (error.statusCode == 404) {
         return 'Optional mobile-push server plugin is not installed.';

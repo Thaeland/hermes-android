@@ -9,8 +9,171 @@ class AppLocalizationsPt extends AppLocalizations {
   AppLocalizationsPt([String locale = 'pt']) : super(locale);
 
   @override
+  String get background_task_report => 'Tarefa em segundo plano';
+
+  @override
+  String get background_process_report => 'Processo em segundo plano';
+
+  @override
+  String get background_report_issues =>
+      'Foram comunicados problemas — expanda para ver os detalhes.';
+
+  @override
+  String get background_report_expand => 'Expandir relatório';
+
+  @override
+  String get background_report_collapse => 'Recolher relatório';
+
+  @override
+  String get saved_history_heading => 'Saved history';
+
+  @override
+  String get received_output_heading =>
+      'Received output — match to saved history unconfirmed';
+
+  @override
+  String get received_output_explanation =>
+      'This may also appear in saved history. The app cannot confirm a match.';
+
+  @override
+  String get local_prompt_context => 'Local prompt context';
+
+  @override
+  String get received_output_badge => 'Received · match unconfirmed';
+
+  @override
+  String get received_output_lifetime =>
+      'Received output is kept temporarily in this app session and may be shortened or removed as limits are reached. It may not be available after the app or connection is closed.';
+
+  @override
+  String get theme_palette => 'Tema de cor';
+
+  @override
+  String get theme_palette_gold => 'Dourado';
+
+  @override
+  String get theme_palette_purple => 'Roxo';
+
+  @override
+  String get theme_palette_orange => 'Laranja';
+
+  @override
+  String get theme_palette_green => 'Verde';
+
+  @override
+  String get theme_palette_blue => 'Azul';
+
+  @override
+  String get theme_palette_red => 'Vermelho';
+
+  @override
+  String get theme_palette_teal => 'Verde-petróleo';
+
+  @override
+  String get theme_palette_pink => 'Rosa';
+
+  @override
+  String get theme_palette_indigo => 'Índigo';
+
+  @override
+  String get theme_palette_cyan => 'Ciano';
+
+  @override
+  String get assets_recent_subtitle =>
+      'Encontre arquivos compartilhados pelo Hermes em chats salvos';
+
+  @override
+  String get assets_scope_notice =>
+      'Arquivos gerados e compartilhados explicitamente pelo Hermes em respostas salvas. Esta é uma visão parcial do histórico de chats, não um catálogo completo de arquivos ou anexos. Os arquivos referenciados podem não existir mais.';
+
+  @override
+  String get assets_download_limit =>
+      'Os arquivos só são carregados ao tocar neles. Pré-visualizações e downloads têm limite de 25 MiB por arquivo; use o painel para arquivos maiores.';
+
+  @override
+  String get assets_search_hint =>
+      'Buscar nos arquivos encontrados ou nos chats de origem';
+
+  @override
+  String get assets_all => 'Todos';
+
+  @override
+  String get assets_images => 'Imagens';
+
+  @override
+  String get assets_audio => 'Áudio';
+
+  @override
+  String get assets_video => 'Vídeo';
+
+  @override
+  String get assets_documents => 'Documentos e outros arquivos';
+
+  @override
+  String get assets_empty =>
+      'Nenhum recurso encontrado nas mensagens examinadas';
+
+  @override
+  String get assets_empty_detail =>
+      'Examine mais chats ou mensagens mais antigas para consultar um período anterior. Anexos comuns e arquivos sem links não são indexados aqui.';
+
+  @override
+  String get assets_no_matches => 'Nenhum recurso correspondente';
+
+  @override
+  String get assets_load_more_chats => 'Examinar mais chats';
+
+  @override
+  String get assets_load_older_messages => 'Examinar mensagens mais antigas';
+
+  @override
+  String get assets_load_failed =>
+      'Algumas partes do histórico não puderam ser lidas. Os resultados estão incompletos. Verifique a conexão com o painel e tente novamente.';
+
+  @override
+  String get assets_retry_failed => 'Tentar novamente as leituras que falharam';
+
+  @override
+  String get assets_partial =>
+      'O servidor informou que o histórico está incompleto. Verifique o painel e atualize em seguida.';
+
+  @override
+  String assets_scan_summary(int files, int chats) {
+    return 'Referências a arquivos encontradas: $files · Chats examinados: $chats';
+  }
+
+  @override
+  String assets_open_chat(String title) {
+    return 'Abrir chat: $title';
+  }
+
+  @override
+  String get assets_file_too_large =>
+      'Este arquivo excede o limite de download. Abra o painel para baixá-lo.';
+
+  @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
       'Uma pergunta pontual. É arquivada automaticamente após 72 horas; o que valer a pena guardar continua na memória.';
+
+  @override
+  String get archive_chat => 'Arquivar chat';
+
+  @override
+  String get unarchive_chat => 'Desarquivar chat';
+
+  @override
+  String get chat_archived => 'Chat arquivado';
+
+  @override
+  String get chat_unarchived => 'Chat desarquivado';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return 'Não foi possível alterar o arquivo do chat: $error';
+  }
+
+  @override
+  String get quick_chat_description => 'Uma pergunta pontual.';
 
   @override
   String get ai_full_text => 'IA + texto completo';
@@ -122,7 +285,7 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get archived_conversations_appear_here =>
-      'Conversas arquivadas aparecem aqui.';
+      'Só as conversas arquivadas aparecem aqui. Os chats antigos continuam em Todos os chats.';
 
   @override
   String get archived_quick_chats => 'Chats rápidos arquivados';
@@ -158,10 +321,6 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get auto_device_default => 'Automático (padrão do dispositivo)';
-
-  @override
-  String get auto_archives_after_72_hours =>
-      'Arquiva automaticamente após 72 horas';
 
   @override
   String get automation => 'Automação';
@@ -506,6 +665,16 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get cron => 'Cron';
+
+  @override
+  String get crons => 'Crons';
+
+  @override
+  String get cron_conversations_empty =>
+      'Conversations from scheduled jobs appear here, including older runs.';
+
+  @override
+  String get search_cron_conversations => 'Search cron conversations';
 
   @override
   String get cron_jobs => 'Tarefas Cron';
@@ -1919,6 +2088,10 @@ class AppLocalizationsPt extends AppLocalizations {
   String get trigger_now => 'Acionar agora';
 
   @override
+  String get received_outcome_unknown =>
+      'Turno encerrado — resultado não confirmado';
+
+  @override
   String get turn_completed => 'Turno concluído';
 
   @override
@@ -2573,6 +2746,45 @@ class AppLocalizationsPt extends AppLocalizations {
       'O modo compacto remove os rótulos You e Hermes e reduz as margens internas, o espaçamento e as margens laterais dos balões.';
 
   @override
+  String get client_certificate_mtls => 'Client certificate (mTLS)';
+
+  @override
+  String get client_certificate_mtls_description =>
+      'Present a certificate when an HTTPS proxy requires mutual TLS.';
+
+  @override
+  String get client_certificate_https_only =>
+      'Client certificates are only used for HTTPS connections.';
+
+  @override
+  String get choose_p12_pfx => 'Choose .p12 / .pfx';
+
+  @override
+  String get choose_certificate_pem => 'Choose certificate (PEM)';
+
+  @override
+  String get choose_private_key_pem => 'Choose private key (PEM)';
+
+  @override
+  String get certificate_password_optional => 'Certificate password (optional)';
+
+  @override
+  String get client_certificate_required =>
+      'Load a client certificate or turn off the client certificate option.';
+
+  @override
+  String client_certificate_loaded(String label) {
+    return 'Loaded: $label';
+  }
+
+  @override
+  String get remove_certificate => 'Remove certificate';
+
+  @override
+  String get certificate_import_failed =>
+      'That certificate could not be loaded.';
+
+  @override
   String get background_work => 'Trabalho em segundo plano';
 
   @override
@@ -2787,6 +2999,49 @@ class AppLocalizationsPt extends AppLocalizations {
   String task_tasks_finished(Object count) {
     return '$count delegated task(s) finished';
   }
+
+  @override
+  String get activity_status_unconfirmed => 'Estado não confirmado';
+
+  @override
+  String get activity_recently_updated => 'Atualizado recentemente';
+
+  @override
+  String get activity_reconnecting =>
+      'A restabelecer ligação — a verificar o estado do turno';
+
+  @override
+  String get activity_outcome_unknown =>
+      'Não foi possível confirmar o resultado do turno. Abra o chat para verificar.';
+
+  @override
+  String get activity_chat_updated_detail =>
+      'Atividade do chat registada pelo Gateway; o estado do turno em tempo real não está disponível.';
+
+  @override
+  String get activity_updated => 'Atualizado';
+
+  @override
+  String get activity_empty_title => 'Sem atividade recente';
+
+  @override
+  String get activity_empty_detail =>
+      'Aqui aparecem os turnos iniciados nesta app e os chats do Gateway atualizados nos últimos 7 dias.';
+
+  @override
+  String get activity_read_error =>
+      'A Atividade não conseguiu ler os registos dos turnos ou os chats do Gateway. Verifique a ligação e tente novamente.';
+
+  @override
+  String get activity_chat_unavailable =>
+      'Este chat já não está disponível ou não foi possível contactar o Gateway.';
+
+  @override
+  String get activity_partial_title => 'Atividade parcialmente carregada';
+
+  @override
+  String get activity_partial_detail =>
+      'É apresentado um intervalo limitado da atividade do gateway. Podem existir mais conversas; puxe para atualizar.';
 }
 
 /// The translations for Portuguese, as used in Brazil (`pt_BR`).
@@ -2794,8 +3049,150 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   AppLocalizationsPtBr() : super('pt_BR');
 
   @override
+  String get background_task_report => 'Tarefa em segundo plano';
+
+  @override
+  String get background_process_report => 'Processo em segundo plano';
+
+  @override
+  String get background_report_issues =>
+      'Problemas relatados — expanda para ver os detalhes.';
+
+  @override
+  String get background_report_expand => 'Expandir relatório';
+
+  @override
+  String get background_report_collapse => 'Recolher relatório';
+
+  @override
+  String get theme_palette => 'Tema de cor';
+
+  @override
+  String get theme_palette_gold => 'Dourado';
+
+  @override
+  String get theme_palette_purple => 'Roxo';
+
+  @override
+  String get theme_palette_orange => 'Laranja';
+
+  @override
+  String get theme_palette_green => 'Verde';
+
+  @override
+  String get theme_palette_blue => 'Azul';
+
+  @override
+  String get theme_palette_red => 'Vermelho';
+
+  @override
+  String get theme_palette_teal => 'Verde-petróleo';
+
+  @override
+  String get theme_palette_pink => 'Rosa';
+
+  @override
+  String get theme_palette_indigo => 'Índigo';
+
+  @override
+  String get theme_palette_cyan => 'Ciano';
+
+  @override
+  String get assets_recent_subtitle =>
+      'Encontre arquivos compartilhados pelo Hermes em chats salvos';
+
+  @override
+  String get assets_scope_notice =>
+      'Arquivos gerados e compartilhados explicitamente pelo Hermes em respostas salvas. Esta é uma visão parcial do histórico de chats, não um catálogo completo de arquivos ou anexos. Os arquivos referenciados podem não existir mais.';
+
+  @override
+  String get assets_download_limit =>
+      'Os arquivos só são carregados ao tocar neles. Pré-visualizações e downloads têm limite de 25 MiB por arquivo; use o painel para arquivos maiores.';
+
+  @override
+  String get assets_search_hint =>
+      'Buscar nos arquivos encontrados ou nos chats de origem';
+
+  @override
+  String get assets_all => 'Todos';
+
+  @override
+  String get assets_images => 'Imagens';
+
+  @override
+  String get assets_audio => 'Áudio';
+
+  @override
+  String get assets_video => 'Vídeo';
+
+  @override
+  String get assets_documents => 'Documentos e outros arquivos';
+
+  @override
+  String get assets_empty =>
+      'Nenhum recurso encontrado nas mensagens examinadas';
+
+  @override
+  String get assets_empty_detail =>
+      'Examine mais chats ou mensagens mais antigas para consultar um período anterior. Anexos comuns e arquivos sem links não são indexados aqui.';
+
+  @override
+  String get assets_no_matches => 'Nenhum recurso correspondente';
+
+  @override
+  String get assets_load_more_chats => 'Examinar mais chats';
+
+  @override
+  String get assets_load_older_messages => 'Examinar mensagens mais antigas';
+
+  @override
+  String get assets_load_failed =>
+      'Algumas partes do histórico não puderam ser lidas. Os resultados estão incompletos. Verifique a conexão com o painel e tente novamente.';
+
+  @override
+  String get assets_retry_failed => 'Tentar novamente as leituras que falharam';
+
+  @override
+  String get assets_partial =>
+      'O servidor informou que o histórico está incompleto. Verifique o painel e atualize em seguida.';
+
+  @override
+  String assets_scan_summary(int files, int chats) {
+    return 'Referências a arquivos encontradas: $files · Chats examinados: $chats';
+  }
+
+  @override
+  String assets_open_chat(String title) {
+    return 'Abrir chat: $title';
+  }
+
+  @override
+  String get assets_file_too_large =>
+      'Este arquivo excede o limite de download. Abra o painel para baixá-lo.';
+
+  @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
       'Uma pergunta pontual. É arquivada automaticamente após 72 horas; o que valer a pena guardar continua na memória.';
+
+  @override
+  String get archive_chat => 'Arquivar chat';
+
+  @override
+  String get unarchive_chat => 'Desarquivar chat';
+
+  @override
+  String get chat_archived => 'Chat arquivado';
+
+  @override
+  String get chat_unarchived => 'Chat desarquivado';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return 'Não foi possível alterar o arquivo do chat: $error';
+  }
+
+  @override
+  String get quick_chat_description => 'Uma pergunta pontual.';
 
   @override
   String get ai_full_text => 'IA + texto completo';
@@ -2907,7 +3304,7 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get archived_conversations_appear_here =>
-      'Conversas arquivadas aparecem aqui.';
+      'Só as conversas arquivadas aparecem aqui. Os chats antigos continuam em Todos os chats.';
 
   @override
   String get archived_quick_chats => 'Chats rápidos arquivados';
@@ -2943,10 +3340,6 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get auto_device_default => 'Automático (padrão do dispositivo)';
-
-  @override
-  String get auto_archives_after_72_hours =>
-      'Arquiva automaticamente após 72 horas';
 
   @override
   String get automation => 'Automação';
@@ -4698,6 +5091,10 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String get trigger_now => 'Acionar agora';
 
   @override
+  String get received_outcome_unknown =>
+      'Turno encerrado — resultado não confirmado';
+
+  @override
   String get turn_completed => 'Turno concluído';
 
   @override
@@ -5567,4 +5964,47 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String task_tasks_finished(Object count) {
     return '$count delegated task(s) finished';
   }
+
+  @override
+  String get activity_status_unconfirmed => 'Status não confirmado';
+
+  @override
+  String get activity_recently_updated => 'Atualizado recentemente';
+
+  @override
+  String get activity_reconnecting =>
+      'Reconectando — verificando o status do turno';
+
+  @override
+  String get activity_outcome_unknown =>
+      'Não foi possível confirmar o resultado do turno. Abra o chat para verificar.';
+
+  @override
+  String get activity_chat_updated_detail =>
+      'Atividade do chat registrada pelo Gateway; o status do turno em tempo real não está disponível.';
+
+  @override
+  String get activity_updated => 'Atualizado';
+
+  @override
+  String get activity_empty_title => 'Nenhuma atividade recente';
+
+  @override
+  String get activity_empty_detail =>
+      'Aqui aparecem os turnos iniciados neste app e os chats do Gateway atualizados nos últimos 7 dias.';
+
+  @override
+  String get activity_read_error =>
+      'A Atividade não conseguiu ler os registros dos turnos ou os chats do Gateway. Verifique a conexão e tente novamente.';
+
+  @override
+  String get activity_chat_unavailable =>
+      'Este chat não está mais disponível ou não foi possível acessar o Gateway.';
+
+  @override
+  String get activity_partial_title => 'Atividade parcialmente carregada';
+
+  @override
+  String get activity_partial_detail =>
+      'Um intervalo limitado da atividade do gateway é exibido. Pode haver mais conversas; puxe para atualizar.';
 }

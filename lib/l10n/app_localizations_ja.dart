@@ -9,8 +9,167 @@ class AppLocalizationsJa extends AppLocalizations {
   AppLocalizationsJa([String locale = 'ja']) : super(locale);
 
   @override
+  String get background_task_report => 'バックグラウンドタスク';
+
+  @override
+  String get background_process_report => 'バックグラウンドプロセス';
+
+  @override
+  String get background_report_issues => '問題が報告されています。展開して詳細を確認してください。';
+
+  @override
+  String get background_report_expand => 'レポートを展開';
+
+  @override
+  String get background_report_collapse => 'レポートを折りたたむ';
+
+  @override
+  String get saved_history_heading => 'Saved history';
+
+  @override
+  String get received_output_heading =>
+      'Received output — match to saved history unconfirmed';
+
+  @override
+  String get received_output_explanation =>
+      'This may also appear in saved history. The app cannot confirm a match.';
+
+  @override
+  String get local_prompt_context => 'Local prompt context';
+
+  @override
+  String get received_output_badge => 'Received · match unconfirmed';
+
+  @override
+  String get received_output_lifetime =>
+      'Received output is kept temporarily in this app session and may be shortened or removed as limits are reached. It may not be available after the app or connection is closed.';
+
+  @override
+  String get theme_palette => 'カラーテーマ';
+
+  @override
+  String get theme_palette_gold => '金色';
+
+  @override
+  String get theme_palette_purple => '紫';
+
+  @override
+  String get theme_palette_orange => 'オレンジ';
+
+  @override
+  String get theme_palette_green => '緑';
+
+  @override
+  String get theme_palette_blue => '青';
+
+  @override
+  String get theme_palette_red => '赤';
+
+  @override
+  String get theme_palette_teal => '青緑';
+
+  @override
+  String get theme_palette_pink => 'ピンク';
+
+  @override
+  String get theme_palette_indigo => '藍色';
+
+  @override
+  String get theme_palette_cyan => 'シアン';
+
+  @override
+  String get assets_recent_subtitle => '保存済みのチャットで Hermes が共有したファイルを探す';
+
+  @override
+  String get assets_scope_notice =>
+      '保存済みの返信で Hermes が明示的に共有した生成ファイルを表示します。チャット履歴の一部のみを対象としており、すべてのファイルや添付ファイルを網羅するものではありません。参照先のファイルはすでに存在しない場合があります。';
+
+  @override
+  String get assets_download_limit =>
+      'ファイルはタップしたときにのみ読み込まれます。プレビューとダウンロードの上限は、それぞれ 1 ファイルあたり 25 MiB です。これより大きなファイルはダッシュボードをご利用ください。';
+
+  @override
+  String get assets_search_hint => '見つかったファイルや共有元のチャットを検索';
+
+  @override
+  String get assets_all => 'すべて';
+
+  @override
+  String get assets_images => '画像';
+
+  @override
+  String get assets_audio => '音声';
+
+  @override
+  String get assets_video => '動画';
+
+  @override
+  String get assets_documents => 'ドキュメントとその他のファイル';
+
+  @override
+  String get assets_empty => '調べたメッセージにアセットは見つかりませんでした';
+
+  @override
+  String get assets_empty_detail =>
+      'さらにチャットや古いメッセージを調べると、より前の履歴を確認できます。通常の添付ファイルやリンクのないファイルは、ここではインデックス化されません。';
+
+  @override
+  String get assets_no_matches => '一致するアセットはありません';
+
+  @override
+  String get assets_load_more_chats => 'さらにチャットを調べる';
+
+  @override
+  String get assets_load_older_messages => '古いメッセージを調べる';
+
+  @override
+  String get assets_load_failed =>
+      '履歴の一部を読み込めませんでした。結果は不完全です。ダッシュボード接続を確認して、もう一度お試しください。';
+
+  @override
+  String get assets_retry_failed => '読み込めなかった履歴を再読み込み';
+
+  @override
+  String get assets_partial =>
+      'サーバーから履歴が不完全であると報告されました。ダッシュボードを確認してから更新してください。';
+
+  @override
+  String assets_scan_summary(int files, int chats) {
+    return '調べたチャット $chats 件からファイル参照 $files 件を検出';
+  }
+
+  @override
+  String assets_open_chat(String title) {
+    return 'チャットを開く: $title';
+  }
+
+  @override
+  String get assets_file_too_large =>
+      'このファイルはダウンロードの上限を超えています。ダッシュボードを開いてダウンロードしてください。';
+
+  @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
       '単発の質問用。72時間後に自動アーカイブされますが、残す価値のある内容は記憶されます。';
+
+  @override
+  String get archive_chat => 'チャットをアーカイブ';
+
+  @override
+  String get unarchive_chat => 'チャットのアーカイブを解除';
+
+  @override
+  String get chat_archived => 'チャットをアーカイブしました';
+
+  @override
+  String get chat_unarchived => 'チャットのアーカイブを解除しました';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return 'チャットのアーカイブ状態を更新できませんでした: $error';
+  }
+
+  @override
+  String get quick_chat_description => '単発の質問用。';
 
   @override
   String get ai_full_text => 'AI + 全文';
@@ -119,7 +278,8 @@ class AppLocalizationsJa extends AppLocalizations {
   String get archived => 'アーカイブ済み';
 
   @override
-  String get archived_conversations_appear_here => 'アーカイブした会話がここに表示されます。';
+  String get archived_conversations_appear_here =>
+      'アーカイブした会話のみがここに表示されます。古いチャットは「すべてのチャット」に残ります。';
 
   @override
   String get archived_quick_chats => 'アーカイブ済みクイックチャット';
@@ -153,9 +313,6 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get auto_device_default => '自動（端末のデフォルト）';
-
-  @override
-  String get auto_archives_after_72_hours => '72時間後に自動アーカイブ';
 
   @override
   String get automation => '自動化';
@@ -487,6 +644,16 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get cron => 'Cron';
+
+  @override
+  String get crons => 'Crons';
+
+  @override
+  String get cron_conversations_empty =>
+      'Conversations from scheduled jobs appear here, including older runs.';
+
+  @override
+  String get search_cron_conversations => 'Search cron conversations';
 
   @override
   String get cron_jobs => 'Cronジョブ';
@@ -1863,6 +2030,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get trigger_now => '今すぐ実行';
 
   @override
+  String get received_outcome_unknown => 'ターン終了 — 結果未確認';
+
+  @override
   String get turn_completed => 'ターン完了';
 
   @override
@@ -2506,6 +2676,45 @@ class AppLocalizationsJa extends AppLocalizations {
       'コンパクトでは「You」「Hermes」のラベルを外し、吹き出しの余白・間隔・左右のマージンを詰めます。';
 
   @override
+  String get client_certificate_mtls => 'Client certificate (mTLS)';
+
+  @override
+  String get client_certificate_mtls_description =>
+      'Present a certificate when an HTTPS proxy requires mutual TLS.';
+
+  @override
+  String get client_certificate_https_only =>
+      'Client certificates are only used for HTTPS connections.';
+
+  @override
+  String get choose_p12_pfx => 'Choose .p12 / .pfx';
+
+  @override
+  String get choose_certificate_pem => 'Choose certificate (PEM)';
+
+  @override
+  String get choose_private_key_pem => 'Choose private key (PEM)';
+
+  @override
+  String get certificate_password_optional => 'Certificate password (optional)';
+
+  @override
+  String get client_certificate_required =>
+      'Load a client certificate or turn off the client certificate option.';
+
+  @override
+  String client_certificate_loaded(String label) {
+    return 'Loaded: $label';
+  }
+
+  @override
+  String get remove_certificate => 'Remove certificate';
+
+  @override
+  String get certificate_import_failed =>
+      'That certificate could not be loaded.';
+
+  @override
   String get background_work => 'バックグラウンド動作';
 
   @override
@@ -2715,4 +2924,45 @@ class AppLocalizationsJa extends AppLocalizations {
   String task_tasks_finished(Object count) {
     return '$count delegated task(s) finished';
   }
+
+  @override
+  String get activity_status_unconfirmed => '状態未確認';
+
+  @override
+  String get activity_recently_updated => '最近更新';
+
+  @override
+  String get activity_reconnecting => '再接続中 — ターンの状態を確認しています';
+
+  @override
+  String get activity_outcome_unknown => 'ターンの結果を確認できませんでした。チャットを開いて確認してください。';
+
+  @override
+  String get activity_chat_updated_detail =>
+      'ゲートウェイが記録したチャットのアクティビティです。ターンの現在の状態は確認できません。';
+
+  @override
+  String get activity_updated => '更新済み';
+
+  @override
+  String get activity_empty_title => '最近のアクティビティはありません';
+
+  @override
+  String get activity_empty_detail =>
+      'このアプリで開始したターンと、過去7日間に更新されたゲートウェイのチャットがここに表示されます。';
+
+  @override
+  String get activity_read_error =>
+      'アクティビティでターンの記録またはゲートウェイのチャットを読み取れませんでした。接続を確認して、もう一度お試しください。';
+
+  @override
+  String get activity_chat_unavailable =>
+      'このチャットは利用できなくなったか、ゲートウェイに接続できませんでした。';
+
+  @override
+  String get activity_partial_title => 'アクティビティは一部のみ読み込まれています';
+
+  @override
+  String get activity_partial_detail =>
+      'ゲートウェイのアクティビティを限られた範囲で表示しています。他にもチャットがある可能性があります。下に引いて更新してください。';
 }

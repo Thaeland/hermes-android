@@ -34,6 +34,16 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    await tester.scrollUntilVisible(
+      find.text('Failed to load settings'),
+      250,
+      scrollable: find
+          .descendant(
+            of: find.byType(SettingsScreen),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
     expect(find.text('Failed to load settings'), findsOneWidget);
     await tester.scrollUntilVisible(
       find.text('Check for updates on launch'),
@@ -79,8 +89,43 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    await tester.scrollUntilVisible(
+      find.text('Failed to load settings'),
+      250,
+      scrollable: find
+          .descendant(
+            of: find.byType(SettingsScreen),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
     expect(find.text('Failed to load settings'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Appearance'),
+      -250,
+      scrollable: find
+          .descendant(
+            of: find.byType(SettingsScreen),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
     expect(find.text('Appearance'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Chat density'),
+      250,
+      scrollable: find
+          .descendant(
+            of: find.byType(SettingsScreen),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await Scrollable.ensureVisible(
+      tester.element(find.text('Chat density')),
+      alignment: 0.5,
+    );
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Chat density'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Compact'));
