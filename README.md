@@ -80,6 +80,20 @@ received output remain independent sources, labelled in Verbose mode, with
 possible repetition across them. See [Chat presentation](docs/chat-presentation.md)
 and the [neutral integration and verification](docs/reviews/main-81d-neutral-integration.md).
 
+### Message times (unreleased)
+
+User messages and completed Hermes replies show a local-time footer in both
+quiet and Verbose Mode, including compact density. The device's locale and
+12/24-hour preference control formatting; the tooltip includes the full date
+and whether the time was recorded by the server, observed sending, or first
+received on this device. Recorded server time takes precedence. Live times are
+captured once, not on rebuild, refresh or reopen. Saved history without a valid
+recorded time stays untimed; recovery replay never fabricates a receipt time.
+Device observations follow the existing presentation lifetime, not a new
+persistent receipt log. After process restart, only server-recorded history
+times are available. This does not change quiet-mode completion requirements,
+saved/received ownership, or RC2's phone-acceptance and publication gates.
+
 ## Navigation changes in the 3.0 candidate
 
 The bottom bar is **Chats → Crons → Projects → Activity → More**. Chats is the

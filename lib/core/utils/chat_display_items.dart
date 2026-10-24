@@ -473,6 +473,11 @@ List<dynamic> buildChatDisplayItems({
       continue;
     }
     final runs = anchoredRuns[scope] ?? const <ChatTimelineRun>[];
+    final lastTextRun = runs
+        .where(
+          (run) => run.kind == ChatTimelineKind.text && run.text.isNotEmpty,
+        )
+        .lastOrNull;
     if (role == 'assistant' && liveScopes.contains(scope)) {
       for (final run in runs) {
         if (run.kind == ChatTimelineKind.tool) {
@@ -500,6 +505,7 @@ List<dynamic> buildChatDisplayItems({
             ...scopeRows[run.scope]!,
             'role': role,
             '_timeline_id': run.id,
+            '_message_time_continuation': run.id != lastTextRun?.id,
             if (conversationOnly) '_quiet_projection_scope': run.scope,
             '_display_content': run.text,
             '_retry_prompt': ?lastUserPrompt,

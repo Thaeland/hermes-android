@@ -1485,6 +1485,14 @@ void main() {
             } else {
               expect(state.failure, isNull);
               expect(state.eventPayloadBytes, 34);
+              expect(state.liveMessageId, 'live-message-2');
+              expect(
+                state.liveReceivedAt,
+                DateTime.fromMillisecondsSinceEpoch(
+                  _baseMs + 1000,
+                  isUtc: true,
+                ),
+              );
             }
           } finally {
             await coordinator.close();

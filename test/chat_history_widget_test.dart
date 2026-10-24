@@ -139,6 +139,64 @@ void main() {
   setUp(mockChatImageRecovery);
   setUp(() => SharedPreferences.setMockInitialValues({'verbose_mode': true}));
 
+  for (final verbose in [false, true]) {
+    testWidgets('persisted times survive refresh and reopen verbose=$verbose', (
+      tester,
+    ) async {
+      SharedPreferences.setMockInitialValues({'verbose_mode': verbose});
+      await tester.binding.setSurfaceSize(const Size(800, 1800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final client = _HistoryHttpClient([
+        {
+          'id': 1,
+          'role': 'user',
+          'content': 'Recorded question',
+          'timestamp': 1718456700,
+        },
+        {
+          'id': 2,
+          'role': 'assistant',
+          'content': 'Recorded reply',
+          'timestamp': 1718456760.125,
+          'completed': true,
+        },
+        {'id': 3, 'role': 'user', 'content': 'No recorded time'},
+        {
+          'id': 4,
+          'role': 'assistant',
+          'content': 'Invalid recorded time',
+          'timestamp': 'not a time',
+          'completed': true,
+        },
+      ]);
+      await tester.pumpWidget(
+        _chat(client, key: const ValueKey('timed-first')),
+      );
+      await pumpChatUpdates(tester);
+      final footers = find.byKey(const Key('message-timestamp'));
+      expect(footers, findsNWidgets(2));
+      final labels = tester
+          .widgetList<Text>(footers)
+          .map((w) => w.data)
+          .toList();
+      await tester.pump(const Duration(hours: 3));
+      final reads = client.requests.length;
+      await tester.tap(find.byTooltip('Chat actions'));
+      await pumpChatUpdates(tester);
+      await tester.tap(find.text('Refresh'));
+      await pumpChatUpdates(tester);
+      expect(client.requests.length, greaterThan(reads));
+      expect(tester.widgetList<Text>(footers).map((w) => w.data), labels);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpWidget(
+        _chat(client, key: const ValueKey('timed-reopen')),
+      );
+      await pumpChatUpdates(tester);
+      expect(footers, findsNWidgets(2));
+      expect(tester.widgetList<Text>(footers).map((w) => w.data), labels);
+    });
+  }
+
   testWidgets('tool-heavy reopen restores earlier bubbles; sliding refresh '
       'retains them and adds the completed reply', (tester) async {
     final client = _HistoryHttpClient(_toolHeavyRows(124));

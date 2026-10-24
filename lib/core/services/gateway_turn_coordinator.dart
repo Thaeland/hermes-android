@@ -977,8 +977,12 @@ class GatewayTurnCoordinator {
     _usedSockets[client] = true;
     final inheritedStreamListener = client.onStreamEvent;
     client.onStreamEvent = (event) {
+      final receivedAt = clock();
       inheritedStreamListener?.call(event);
-      _observeSocketAction(client, () => _handleLiveEvent(client, event));
+      _observeSocketAction(
+        client,
+        () => _handleLiveEvent(client, event, receivedAt),
+      );
     };
     final inheritedConnectionListener = client.onConnectionChanged;
     client.onConnectionChanged = (connected) {
@@ -1252,7 +1256,11 @@ class GatewayTurnCoordinator {
     }
   }
 
-  Future<void> _handleLiveEvent(WsClient source, StreamEvent event) async {
+  Future<void> _handleLiveEvent(
+    WsClient source,
+    StreamEvent event,
+    DateTime receivedAt,
+  ) async {
     final runtime = _runtimeBinding;
     if (!identical(_client, source) ||
         runtime == null ||
@@ -1291,7 +1299,13 @@ class GatewayTurnCoordinator {
       return;
     }
     try {
+      final previousSeq = state.lastSeq;
       state = _applyBoundedEvent(state, parsed, runtime.capability);
+      if (state.lastSeq > previousSeq &&
+          !state.isFailClosed &&
+          parsed.type.startsWith('message.')) {
+        state = state.observeLiveMessage(parsed.messageId, receivedAt);
+      }
       _remember(state);
       await _persistAndNotify(state);
       _requireHealthy(state);

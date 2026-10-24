@@ -144,6 +144,24 @@ abstract class AppLocalizations {
   /// **'Collapse report'**
   String get background_report_collapse;
 
+  /// No description provided for @message_time_recorded.
+  ///
+  /// In en, this message translates to:
+  /// **'Recorded by server: {time} (local time)'**
+  String message_time_recorded(String time);
+
+  /// No description provided for @message_time_sent.
+  ///
+  /// In en, this message translates to:
+  /// **'Send observed on this device: {time} (local time)'**
+  String message_time_sent(String time);
+
+  /// No description provided for @message_time_received.
+  ///
+  /// In en, this message translates to:
+  /// **'First received on this device: {time} (local time)'**
+  String message_time_received(String time);
+
   /// No description provided for @stop_and_send.
   ///
   /// In en, this message translates to:

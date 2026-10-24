@@ -24,6 +24,21 @@ class AppLocalizationsKo extends AppLocalizations {
   String get background_report_collapse => '보고서 접기';
 
   @override
+  String message_time_recorded(String time) {
+    return 'Recorded by server: $time (local time)';
+  }
+
+  @override
+  String message_time_sent(String time) {
+    return 'Send observed on this device: $time (local time)';
+  }
+
+  @override
+  String message_time_received(String time) {
+    return 'First received on this device: $time (local time)';
+  }
+
+  @override
   String get stop_and_send => '중지 후 보내기';
 
   @override

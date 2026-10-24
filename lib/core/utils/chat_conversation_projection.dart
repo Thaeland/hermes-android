@@ -43,6 +43,15 @@ bool _hasFinalResponseEvidence(Map<String, dynamic> row, bool received) {
       const {'stop', 'end_turn'}.contains(row['finish_reason']);
 }
 
+/// Timestamp footers follow the same positive completion evidence as quiet chat.
+bool isCompletedChatResponse(Map<String, dynamic> row) =>
+    row['_gateway_pending_response'] != true &&
+    row['_gateway_interim'] != true &&
+    row['interim'] != true &&
+    row['is_interim'] != true &&
+    row['_chat_response_complete'] != false &&
+    _hasFinalResponseEvidence(row, false);
+
 /// Quiet chat is a conversation, not a trace. Do not change ingress or the raw
 /// request history when hiding details. Canonical and received sources are
 /// projected independently; no body/text matching associates the two sources.

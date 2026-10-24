@@ -56,6 +56,7 @@ import '../models/projects_tree_overview.dart';
 import '../services/tool_activity_group_pins.dart';
 import '../utils/chat_display_items.dart';
 import '../utils/chat_conversation_projection.dart';
+import '../models/chat_message_time.dart';
 import '../utils/rest_chat_reply_retention.dart';
 import '../utils/android_prompt_context.dart';
 import '../utils/chat_history_scroll.dart';
@@ -2480,6 +2481,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (projection.finalMessageRef != null) {
         message['_gateway_final_message_ref'] = projection.finalMessageRef;
       }
+      // Only the application owner may supply a live receipt. Replayed events,
+      // snapshots and route rebuilds deliberately do not manufacture one.
+      if (projection.receivedAt != null) {
+        ChatMessageTime.observe(
+          message,
+          source: ChatMessageTimeSource.received,
+          at: projection.receivedAt,
+        );
+      }
       if (shouldCreateMessage) _messages.add(message);
 
       if (projection.isActive) {
@@ -3573,6 +3583,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         'role': 'user',
         'content': localContent,
         AndroidPromptContext.localUserTextKey: true,
+        ChatMessageTime.observedAtKey: DateTime.now().millisecondsSinceEpoch,
+        ChatMessageTime.sourceKey: 'sent',
         AndroidPromptContext.wireContentKey: GatewayChatClient.buildUserContent(
           message: text,
           imageDataUrl: imageDataUrl,
@@ -3613,6 +3625,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               _registerMaterializedAssistantMessage();
             }
             assistant['content'] = current + token;
+            if (token.isNotEmpty) {
+              ChatMessageTime.observe(
+                assistant,
+                source: ChatMessageTimeSource.received,
+              );
+            }
             _timeline = _timeline.appendText(assistant, token);
             _retainReceiptPresentation();
           }
@@ -3634,6 +3652,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         final assistant = _lastAssistantMessage();
         setState(() {
           assistant?['_chat_response_complete'] = true;
+          if (assistant != null) {
+            ChatMessageTime.observe(
+              assistant,
+              source: ChatMessageTimeSource.received,
+            );
+          }
           assistant?['_gateway_pending_response'] = false;
           replyRetention.complete(_messages);
           _restReplyRetention = replyRetention;
@@ -3962,6 +3986,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         'role': 'user',
         'content': localContent,
         AndroidPromptContext.localUserTextKey: true,
+        ChatMessageTime.observedAtKey: DateTime.now().millisecondsSinceEpoch,
+        ChatMessageTime.sourceKey: 'sent',
       });
       _messages.add({
         'role': 'assistant',
@@ -6741,6 +6767,21 @@ class MessageBubble extends StatelessWidget {
     final userBubbleColor = tokens.accent;
     final assistantBubbleColor = tokens.raised;
     final assistantTextColor = tokens.onSurface;
+    final messageTime =
+        (isUser || isCompletedChatResponse(metadata)) &&
+            metadata['_message_time_continuation'] != true
+        ? ChatMessageTime.fromRow(metadata)
+        : null;
+    final localTime = messageTime?.at.toLocal();
+    final clockTime = localTime == null
+        ? null
+        : MaterialLocalizations.of(context).formatTimeOfDay(
+            TimeOfDay.fromDateTime(localTime),
+            alwaysUse24HourFormat: MediaQuery.alwaysUse24HourFormatOf(context),
+          );
+    final fullTime = localTime == null
+        ? null
+        : '${MaterialLocalizations.of(context).formatFullDate(localTime)} · $clockTime';
 
     // Collect extra metadata for verbose mode
     final List<String> metaLines = [];
@@ -6838,6 +6879,27 @@ class MessageBubble extends StatelessWidget {
             // MEDIA: — the contract is assistant-side delivery, and quoted
             // tags in a prompt must stay verbatim.
             ..._renderContent(context, tokens, isUser, assistantTextColor),
+            if (messageTime != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Tooltip(
+                  message: switch (messageTime.source) {
+                    ChatMessageTimeSource.recorded =>
+                      context.l10n.message_time_recorded(fullTime!),
+                    ChatMessageTimeSource.sent =>
+                      context.l10n.message_time_sent(fullTime!),
+                    ChatMessageTimeSource.received =>
+                      context.l10n.message_time_received(fullTime!),
+                  },
+                  child: Text(
+                    clockTime!,
+                    key: const Key('message-timestamp'),
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: isUser ? tokens.onAccent : tokens.muted,
+                    ),
+                  ),
+                ),
+              ),
             SizedBox(height: density.bodyBottomGap),
           ],
         ),
