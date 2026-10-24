@@ -1,3 +1,6 @@
+import '../utils/generated_media.dart';
+import '../utils/media_tags.dart';
+
 enum GatewayToolActivityPhase {
   running,
   generating,
@@ -67,6 +70,11 @@ class GatewayToolActivity {
   final double? durationSeconds;
   final String? emoji;
 
+  /// Validated producer deliveries, not arbitrary tool/debug output. These
+  /// references are projected independently of the verbose activity card.
+  final List<MediaTagRef> deliveredFiles;
+  final bool _deliveryFailed;
+
   /// Only set when a live start event was actually observed. A persisted tool
   /// result never establishes when the call started.
   final DateTime? startedAt;
@@ -81,10 +89,18 @@ class GatewayToolActivity {
     this.detail,
     this.durationSeconds,
     this.emoji,
+    List<MediaTagRef> deliveredFiles = const [],
+    bool deliveryFailed = false,
     this.startedAt,
     this.lastActivityAt,
     this.lastActivityTimeSource,
-  }) : identity =
+  }) : deliveredFiles =
+           phase == GatewayToolActivityPhase.failed || deliveryFailed
+           ? const []
+           : List.unmodifiable(deliveredFiles),
+       _deliveryFailed =
+           deliveryFailed || phase == GatewayToolActivityPhase.failed,
+       identity =
            identity ??
            (toolId != null && toolId.trim().isNotEmpty
                ? 'tool:$toolId'
@@ -95,6 +111,10 @@ class GatewayToolActivity {
       phase == GatewayToolActivityPhase.failed;
 
   bool get isFailed => phase == GatewayToolActivityPhase.failed;
+
+  /// Retains a definitive delivery failure even if a later compact snapshot
+  /// omits its result, without changing existing lifecycle-phase semantics.
+  bool get hasFailedDelivery => _deliveryFailed;
 
   String get displayName {
     final words = name.replaceAll(RegExp(r'[_-]+'), ' ').trim();
@@ -143,6 +163,12 @@ class GatewayToolActivity {
     );
 
     final phase = _phaseFor(eventType, data['status']?.toString(), error);
+    final generated = eventType == 'tool.complete'
+        ? generatedMediaFromToolResult(
+            _firstText(data, const ['name', 'tool']) ?? '',
+            data['result'],
+          )
+        : const GeneratedMediaResult();
     final detail = switch (phase) {
       GatewayToolActivityPhase.failed => error,
       GatewayToolActivityPhase.completed => _normalizeText(
@@ -170,6 +196,11 @@ class GatewayToolActivity {
       detail: detail,
       durationSeconds: durationSeconds,
       emoji: _normalizeText(_firstText(data, const ['emoji']), 8),
+      deliveredFiles: generated.deliveredFiles,
+      deliveryFailed:
+          generated.isFailure ||
+          data['status'] == 'failed' ||
+          data['status'] == 'error',
       startedAt:
           eventType == 'tool.start' && phase == GatewayToolActivityPhase.running
           ? observedAt
@@ -201,14 +232,18 @@ class GatewayToolActivity {
     required String name,
     String? toolId,
     required dynamic timestamp,
+    Object? result,
     DateTime? observedStart,
     DateTime? observedLastActivity,
   }) {
     final resultTime = storedResultTime(timestamp);
+    final generated = generatedMediaFromToolResult(name, result);
     return GatewayToolActivity(
       name: name,
       toolId: toolId,
       phase: GatewayToolActivityPhase.completed,
+      deliveredFiles: generated.deliveredFiles,
+      deliveryFailed: generated.isFailure,
       startedAt: observedStart,
       lastActivityAt: resultTime ?? observedLastActivity,
       lastActivityTimeSource: resultTime != null
@@ -228,6 +263,12 @@ class GatewayToolActivity {
       detail: update.detail ?? detail,
       durationSeconds: update.durationSeconds ?? durationSeconds,
       emoji: update.emoji ?? emoji,
+      deliveredFiles: update.deliveredFiles.isNotEmpty
+          ? update.deliveredFiles
+          : deliveredFiles,
+      // Missing compact-resume results preserve known deliveries. Definitive
+      // failures are sticky for deliveries without changing lifecycle phases.
+      deliveryFailed: _deliveryFailed || update._deliveryFailed,
       startedAt: startedAt ?? update.startedAt,
       lastActivityAt: update.lastActivityAt ?? lastActivityAt,
       lastActivityTimeSource:

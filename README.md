@@ -94,9 +94,12 @@ rows and offers Retry rather than claiming the archive is empty.
   without interrupting it. Legacy REST uses an explicitly labelled **Stop and
   send** action instead. See [Sending while Hermes is working](docs/sending-while-working.md).
 - **More → Assets** browses generated files explicitly shared in saved Hermes
-  replies. Search found filenames or source chats, filter by file type, preview
-  images and download/share files. History scans are incremental and downloads
-  are lazy, with a 25 MiB per-file limit. This is not a complete attachment or
+  replies, plus recognised successful image-generation results. The same file
+  cards appear in the chat timeline, including filesystem Markdown links.
+  Tap to preview images, PDF pages or text; use **Download** to choose a save
+  destination, or **Share** to send a file to another app. Other binary formats
+  show file information and remain downloadable. History scans are incremental
+  and downloads are lazy, with a 25 MiB per-file limit. This is not a complete attachment or
   filesystem catalogue. See [Browsing chat assets](docs/chat-assets.md).
 
 ## Remote Gateway edition highlights

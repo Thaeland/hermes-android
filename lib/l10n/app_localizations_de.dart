@@ -40,6 +40,77 @@ class AppLocalizationsDe extends AppLocalizations {
       'Die Zustellung konnte nicht bestätigt werden. Dein Entwurf bleibt erhalten. Prüfe den Chat, bevor du es erneut versuchst.';
 
   @override
+  String get attachment_tap_to_preview => 'Zum Anzeigen tippen';
+
+  @override
+  String get attachment_save => 'Speichern';
+
+  @override
+  String get attachment_share => 'Teilen';
+
+  @override
+  String get attachment_saved => 'Datei gespeichert';
+
+  @override
+  String get attachment_save_cancelled => 'Speichern abgebrochen';
+
+  @override
+  String get attachment_save_failed =>
+      'Diese Datei konnte nicht gespeichert werden. Bitte erneut versuchen.';
+
+  @override
+  String get attachment_share_failed =>
+      'Diese Datei konnte nicht geteilt werden. Bitte erneut versuchen.';
+
+  @override
+  String get attachment_download_failed =>
+      'Diese Datei konnte nicht geladen werden. Verbindung prüfen und erneut versuchen.';
+
+  @override
+  String get attachment_no_inline_preview =>
+      'Für diesen Dateityp ist keine Vorschau verfügbar. Die Originaldatei speichern oder teilen, um sie in einer anderen App zu öffnen.';
+
+  @override
+  String get attachment_image_failed =>
+      'Dieses Bild konnte nicht dekodiert werden. Die Originaldatei kann weiterhin gespeichert oder geteilt werden.';
+
+  @override
+  String get attachment_text_truncated =>
+      'Vorschau gekürzt. Die Datei speichern oder teilen, um sie vollständig zu lesen.';
+
+  @override
+  String get attachment_text_unavailable =>
+      'Diese Datei konnte nicht als Text angezeigt werden. Die Originaldatei speichern oder teilen.';
+
+  @override
+  String get attachment_pdf_failed =>
+      'Für diese PDF-Datei konnte keine Vorschau erstellt werden. Die Originaldatei speichern oder teilen.';
+
+  @override
+  String get attachment_pdf_unavailable =>
+      'PDF-Vorschauen sind unter Android verfügbar. Diese Datei kann weiterhin gespeichert oder geteilt werden.';
+
+  @override
+  String attachment_pdf_page(int page, int total) {
+    return 'Seite $page von $total';
+  }
+
+  @override
+  String get attachment_previous_page => 'Vorherige Seite';
+
+  @override
+  String get attachment_next_page => 'Nächste Seite';
+
+  @override
+  String get attachment_loading => 'Vorschau wird geladen…';
+
+  @override
+  String get attachment_close => 'Vorschau schließen';
+
+  @override
+  String get attachment_retry => 'Erneut versuchen';
+
+  @override
   String get saved_history_heading => 'Saved history';
 
   @override

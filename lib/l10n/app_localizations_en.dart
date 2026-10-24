@@ -40,6 +40,77 @@ class AppLocalizationsEn extends AppLocalizations {
       'Message delivery could not be confirmed. Your draft was kept. Check the chat before retrying.';
 
   @override
+  String get attachment_tap_to_preview => 'Tap to preview';
+
+  @override
+  String get attachment_save => 'Save';
+
+  @override
+  String get attachment_share => 'Share';
+
+  @override
+  String get attachment_saved => 'File saved';
+
+  @override
+  String get attachment_save_cancelled => 'Save cancelled';
+
+  @override
+  String get attachment_save_failed =>
+      'Could not save this file. Please try again.';
+
+  @override
+  String get attachment_share_failed =>
+      'Could not share this file. Please try again.';
+
+  @override
+  String get attachment_download_failed =>
+      'Could not load this file. Check the connection and try again.';
+
+  @override
+  String get attachment_no_inline_preview =>
+      'No inline preview is available for this file type. Save or share the original file to open it in another app.';
+
+  @override
+  String get attachment_image_failed =>
+      'This image could not be decoded. You can still save or share the original file.';
+
+  @override
+  String get attachment_text_truncated =>
+      'Preview shortened. Save or share the file to read all of it.';
+
+  @override
+  String get attachment_text_unavailable =>
+      'This file could not be displayed as text. Save or share the original file.';
+
+  @override
+  String get attachment_pdf_failed =>
+      'This PDF could not be previewed. Save or share the original file.';
+
+  @override
+  String get attachment_pdf_unavailable =>
+      'PDF previews are available on Android. You can still save or share this file.';
+
+  @override
+  String attachment_pdf_page(int page, int total) {
+    return 'Page $page of $total';
+  }
+
+  @override
+  String get attachment_previous_page => 'Previous page';
+
+  @override
+  String get attachment_next_page => 'Next page';
+
+  @override
+  String get attachment_loading => 'Loading preview…';
+
+  @override
+  String get attachment_close => 'Close preview';
+
+  @override
+  String get attachment_retry => 'Retry';
+
+  @override
   String get saved_history_heading => 'Saved history';
 
   @override

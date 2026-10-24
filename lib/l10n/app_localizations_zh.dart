@@ -38,6 +38,69 @@ class AppLocalizationsZh extends AppLocalizations {
       '无法确认消息是否送达。草稿已保留。请先检查聊天记录，再重试。';
 
   @override
+  String get attachment_tap_to_preview => '点按以预览';
+
+  @override
+  String get attachment_save => '保存';
+
+  @override
+  String get attachment_share => '分享';
+
+  @override
+  String get attachment_saved => '文件已保存';
+
+  @override
+  String get attachment_save_cancelled => '已取消保存';
+
+  @override
+  String get attachment_save_failed => '无法保存此文件，请重试。';
+
+  @override
+  String get attachment_share_failed => '无法分享此文件，请重试。';
+
+  @override
+  String get attachment_download_failed => '无法加载此文件，请检查连接后重试。';
+
+  @override
+  String get attachment_no_inline_preview =>
+      '此文件类型不支持内嵌预览。请保存或分享原始文件，以便在其他应用中打开。';
+
+  @override
+  String get attachment_image_failed => '无法解码此图片。您仍可保存或分享原始文件。';
+
+  @override
+  String get attachment_text_truncated => '预览内容已截短。请保存或分享文件以阅读完整内容。';
+
+  @override
+  String get attachment_text_unavailable => '无法将此文件显示为文本。请保存或分享原始文件。';
+
+  @override
+  String get attachment_pdf_failed => '无法预览此 PDF。请保存或分享原始文件。';
+
+  @override
+  String get attachment_pdf_unavailable => 'PDF 预览仅在 Android 上可用。您仍可保存或分享此文件。';
+
+  @override
+  String attachment_pdf_page(int page, int total) {
+    return '第 $page 页，共 $total 页';
+  }
+
+  @override
+  String get attachment_previous_page => '上一页';
+
+  @override
+  String get attachment_next_page => '下一页';
+
+  @override
+  String get attachment_loading => '正在加载预览…';
+
+  @override
+  String get attachment_close => '关闭预览';
+
+  @override
+  String get attachment_retry => '重试';
+
+  @override
   String get saved_history_heading => 'Saved history';
 
   @override
@@ -2994,6 +3057,69 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   @override
   String get running_message_delivery_unknown =>
       '无法确认消息是否送达。草稿已保留。请先检查聊天记录，再重试。';
+
+  @override
+  String get attachment_tap_to_preview => '点按以预览';
+
+  @override
+  String get attachment_save => '保存';
+
+  @override
+  String get attachment_share => '分享';
+
+  @override
+  String get attachment_saved => '文件已保存';
+
+  @override
+  String get attachment_save_cancelled => '已取消保存';
+
+  @override
+  String get attachment_save_failed => '无法保存此文件，请重试。';
+
+  @override
+  String get attachment_share_failed => '无法分享此文件，请重试。';
+
+  @override
+  String get attachment_download_failed => '无法加载此文件，请检查连接后重试。';
+
+  @override
+  String get attachment_no_inline_preview =>
+      '此文件类型不支持内嵌预览。请保存或分享原始文件，以便在其他应用中打开。';
+
+  @override
+  String get attachment_image_failed => '无法解码此图片。您仍可保存或分享原始文件。';
+
+  @override
+  String get attachment_text_truncated => '预览内容已截短。请保存或分享文件以阅读完整内容。';
+
+  @override
+  String get attachment_text_unavailable => '无法将此文件显示为文本。请保存或分享原始文件。';
+
+  @override
+  String get attachment_pdf_failed => '无法预览此 PDF。请保存或分享原始文件。';
+
+  @override
+  String get attachment_pdf_unavailable => 'PDF 预览仅在 Android 上可用。您仍可保存或分享此文件。';
+
+  @override
+  String attachment_pdf_page(int page, int total) {
+    return '第 $page 页，共 $total 页';
+  }
+
+  @override
+  String get attachment_previous_page => '上一页';
+
+  @override
+  String get attachment_next_page => '下一页';
+
+  @override
+  String get attachment_loading => '正在加载预览…';
+
+  @override
+  String get attachment_close => '关闭预览';
+
+  @override
+  String get attachment_retry => '重试';
 
   @override
   String get theme_palette => '颜色主题';

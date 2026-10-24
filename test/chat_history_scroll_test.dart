@@ -23,6 +23,7 @@ import 'package:hermes_android/core/services/ws_client.dart';
 import 'package:hermes_android/core/services/normal_gateway_application_session.dart';
 import 'package:hermes_android/core/services/gateway_turn_application_controller.dart';
 import 'package:hermes_android/core/utils/chat_history_scroll.dart';
+import 'package:hermes_android/core/utils/android_prompt_context.dart';
 import 'package:hermes_android/core/widgets/chat_end_affordance.dart';
 import 'package:hermes_android/core/widgets/gateway_insight_card.dart';
 import 'package:hermes_android/core/widgets/gateway_activity_card.dart';
@@ -49,11 +50,16 @@ void main() {
       expect(requestMessages, [
         {'role': 'user', 'content': 'oldest question'},
         {'role': 'assistant', 'content': 'middle answer'},
-        {'role': 'user', 'content': 'current question'},
+        {
+          'role': 'user',
+          'content': AndroidPromptContext.forModel('current question'),
+        },
       ]);
       expect(
         requestMessages.where(
-          (message) => message['content'] == 'current question',
+          (message) =>
+              message['content'] ==
+              AndroidPromptContext.forModel('current question'),
         ),
         hasLength(1),
       );
@@ -1014,7 +1020,10 @@ void main() {
       expect(request['messages'], [
         {'role': 'user', 'content': 'oldest question'},
         {'role': 'assistant', 'content': 'middle answer'},
-        {'role': 'user', 'content': 'current question'},
+        {
+          'role': 'user',
+          'content': AndroidPromptContext.forModel('current question'),
+        },
       ]);
 
       client.finish([

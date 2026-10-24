@@ -40,6 +40,77 @@ class AppLocalizationsPt extends AppLocalizations {
       'Não foi possível confirmar a entrega. O rascunho foi guardado. Verifique a conversa antes de tentar novamente.';
 
   @override
+  String get attachment_tap_to_preview => 'Toque para pré-visualizar';
+
+  @override
+  String get attachment_save => 'Guardar';
+
+  @override
+  String get attachment_share => 'Partilhar';
+
+  @override
+  String get attachment_saved => 'Ficheiro guardado';
+
+  @override
+  String get attachment_save_cancelled => 'Gravação cancelada';
+
+  @override
+  String get attachment_save_failed =>
+      'Não foi possível guardar este ficheiro. Tente novamente.';
+
+  @override
+  String get attachment_share_failed =>
+      'Não foi possível partilhar este ficheiro. Tente novamente.';
+
+  @override
+  String get attachment_download_failed =>
+      'Não foi possível carregar este ficheiro. Verifique a ligação e tente novamente.';
+
+  @override
+  String get attachment_no_inline_preview =>
+      'Não existe pré-visualização para este tipo de ficheiro. Guarde ou partilhe o ficheiro original para o abrir noutra aplicação.';
+
+  @override
+  String get attachment_image_failed =>
+      'Não foi possível descodificar esta imagem. Pode guardar ou partilhar o ficheiro original.';
+
+  @override
+  String get attachment_text_truncated =>
+      'Pré-visualização abreviada. Guarde ou partilhe o ficheiro para o ler na íntegra.';
+
+  @override
+  String get attachment_text_unavailable =>
+      'Não foi possível apresentar este ficheiro como texto. Guarde ou partilhe o ficheiro original.';
+
+  @override
+  String get attachment_pdf_failed =>
+      'Não foi possível pré-visualizar este PDF. Guarde ou partilhe o ficheiro original.';
+
+  @override
+  String get attachment_pdf_unavailable =>
+      'A pré-visualização de PDF está disponível no Android. Pode guardar ou partilhar este ficheiro.';
+
+  @override
+  String attachment_pdf_page(int page, int total) {
+    return 'Página $page de $total';
+  }
+
+  @override
+  String get attachment_previous_page => 'Página anterior';
+
+  @override
+  String get attachment_next_page => 'Página seguinte';
+
+  @override
+  String get attachment_loading => 'A carregar pré-visualização…';
+
+  @override
+  String get attachment_close => 'Fechar pré-visualização';
+
+  @override
+  String get attachment_retry => 'Tentar novamente';
+
+  @override
   String get saved_history_heading => 'Saved history';
 
   @override
@@ -3104,6 +3175,77 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   @override
   String get running_message_delivery_unknown =>
       'Não foi possível confirmar a entrega. Seu rascunho foi mantido. Confira a conversa antes de tentar novamente.';
+
+  @override
+  String get attachment_tap_to_preview => 'Toque para visualizar';
+
+  @override
+  String get attachment_save => 'Salvar';
+
+  @override
+  String get attachment_share => 'Compartilhar';
+
+  @override
+  String get attachment_saved => 'Arquivo salvo';
+
+  @override
+  String get attachment_save_cancelled => 'Salvamento cancelado';
+
+  @override
+  String get attachment_save_failed =>
+      'Não foi possível salvar este arquivo. Tente novamente.';
+
+  @override
+  String get attachment_share_failed =>
+      'Não foi possível compartilhar este arquivo. Tente novamente.';
+
+  @override
+  String get attachment_download_failed =>
+      'Não foi possível carregar este arquivo. Verifique a conexão e tente novamente.';
+
+  @override
+  String get attachment_no_inline_preview =>
+      'Não há prévia disponível para este tipo de arquivo. Salve ou compartilhe o arquivo original para abri-lo em outro aplicativo.';
+
+  @override
+  String get attachment_image_failed =>
+      'Não foi possível decodificar esta imagem. Você ainda pode salvar ou compartilhar o arquivo original.';
+
+  @override
+  String get attachment_text_truncated =>
+      'Prévia abreviada. Salve ou compartilhe o arquivo para ler todo o conteúdo.';
+
+  @override
+  String get attachment_text_unavailable =>
+      'Não foi possível exibir este arquivo como texto. Salve ou compartilhe o arquivo original.';
+
+  @override
+  String get attachment_pdf_failed =>
+      'Não foi possível visualizar este PDF. Salve ou compartilhe o arquivo original.';
+
+  @override
+  String get attachment_pdf_unavailable =>
+      'A prévia de PDF está disponível no Android. Você ainda pode salvar ou compartilhar este arquivo.';
+
+  @override
+  String attachment_pdf_page(int page, int total) {
+    return 'Página $page de $total';
+  }
+
+  @override
+  String get attachment_previous_page => 'Página anterior';
+
+  @override
+  String get attachment_next_page => 'Próxima página';
+
+  @override
+  String get attachment_loading => 'Carregando prévia…';
+
+  @override
+  String get attachment_close => 'Fechar prévia';
+
+  @override
+  String get attachment_retry => 'Tentar novamente';
 
   @override
   String get theme_palette => 'Tema de cor';

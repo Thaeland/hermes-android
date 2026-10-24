@@ -40,6 +40,77 @@ class AppLocalizationsEs extends AppLocalizations {
       'No se pudo confirmar la entrega. Se conservó tu borrador. Revisa el chat antes de volver a intentarlo.';
 
   @override
+  String get attachment_tap_to_preview => 'Toca para ver la vista previa';
+
+  @override
+  String get attachment_save => 'Guardar';
+
+  @override
+  String get attachment_share => 'Compartir';
+
+  @override
+  String get attachment_saved => 'Archivo guardado';
+
+  @override
+  String get attachment_save_cancelled => 'Guardado cancelado';
+
+  @override
+  String get attachment_save_failed =>
+      'No se pudo guardar este archivo. Inténtalo de nuevo.';
+
+  @override
+  String get attachment_share_failed =>
+      'No se pudo compartir este archivo. Inténtalo de nuevo.';
+
+  @override
+  String get attachment_download_failed =>
+      'No se pudo cargar este archivo. Comprueba la conexión e inténtalo de nuevo.';
+
+  @override
+  String get attachment_no_inline_preview =>
+      'No hay vista previa para este tipo de archivo. Guarda o comparte el archivo original para abrirlo en otra aplicación.';
+
+  @override
+  String get attachment_image_failed =>
+      'No se pudo decodificar esta imagen. Aún puedes guardar o compartir el archivo original.';
+
+  @override
+  String get attachment_text_truncated =>
+      'Vista previa recortada. Guarda o comparte el archivo para leerlo completo.';
+
+  @override
+  String get attachment_text_unavailable =>
+      'No se pudo mostrar este archivo como texto. Guarda o comparte el archivo original.';
+
+  @override
+  String get attachment_pdf_failed =>
+      'No se pudo mostrar la vista previa de este PDF. Guarda o comparte el archivo original.';
+
+  @override
+  String get attachment_pdf_unavailable =>
+      'Las vistas previas de PDF están disponibles en Android. Aún puedes guardar o compartir este archivo.';
+
+  @override
+  String attachment_pdf_page(int page, int total) {
+    return 'Página $page de $total';
+  }
+
+  @override
+  String get attachment_previous_page => 'Página anterior';
+
+  @override
+  String get attachment_next_page => 'Página siguiente';
+
+  @override
+  String get attachment_loading => 'Cargando vista previa…';
+
+  @override
+  String get attachment_close => 'Cerrar vista previa';
+
+  @override
+  String get attachment_retry => 'Reintentar';
+
+  @override
   String get saved_history_heading => 'Saved history';
 
   @override

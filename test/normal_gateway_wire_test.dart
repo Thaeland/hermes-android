@@ -303,7 +303,7 @@ void main() {
         gateway.requests.singleWhere(
           (r) => r['method'] == 'session.create',
         )['params'],
-        {'cwd': '/project'},
+        {'source': 'desktop', 'cwd': '/project'},
       );
       expect(await session.pendingStore.load(session.scope), isEmpty);
       gateway.releaseHistory!.complete();
@@ -359,6 +359,13 @@ void main() {
       );
       flight.ignore();
       await gateway.submitted.future;
+      expect(
+        gateway.requests
+            .where((request) => request['method'] == 'session.resume')
+            .map((request) => request['params']['source']),
+        everyElement('desktop'),
+        reason: 'Android must not inherit the server launch surface (TUI).',
+      );
       gateway.event('message.delta', {'text': 'Exactly once. '});
       await _until(
         () => chat.snapshot.displayRows.last['content'] == 'Exactly once. ',

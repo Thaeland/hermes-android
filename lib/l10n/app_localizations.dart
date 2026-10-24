@@ -168,6 +168,126 @@ abstract class AppLocalizations {
   /// **'Message delivery could not be confirmed. Your draft was kept. Check the chat before retrying.'**
   String get running_message_delivery_unknown;
 
+  /// No description provided for @attachment_tap_to_preview.
+  ///
+  /// In en, this message translates to:
+  /// **'Tap to preview'**
+  String get attachment_tap_to_preview;
+
+  /// No description provided for @attachment_save.
+  ///
+  /// In en, this message translates to:
+  /// **'Save'**
+  String get attachment_save;
+
+  /// No description provided for @attachment_share.
+  ///
+  /// In en, this message translates to:
+  /// **'Share'**
+  String get attachment_share;
+
+  /// No description provided for @attachment_saved.
+  ///
+  /// In en, this message translates to:
+  /// **'File saved'**
+  String get attachment_saved;
+
+  /// No description provided for @attachment_save_cancelled.
+  ///
+  /// In en, this message translates to:
+  /// **'Save cancelled'**
+  String get attachment_save_cancelled;
+
+  /// No description provided for @attachment_save_failed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not save this file. Please try again.'**
+  String get attachment_save_failed;
+
+  /// No description provided for @attachment_share_failed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not share this file. Please try again.'**
+  String get attachment_share_failed;
+
+  /// No description provided for @attachment_download_failed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not load this file. Check the connection and try again.'**
+  String get attachment_download_failed;
+
+  /// No description provided for @attachment_no_inline_preview.
+  ///
+  /// In en, this message translates to:
+  /// **'No inline preview is available for this file type. Save or share the original file to open it in another app.'**
+  String get attachment_no_inline_preview;
+
+  /// No description provided for @attachment_image_failed.
+  ///
+  /// In en, this message translates to:
+  /// **'This image could not be decoded. You can still save or share the original file.'**
+  String get attachment_image_failed;
+
+  /// No description provided for @attachment_text_truncated.
+  ///
+  /// In en, this message translates to:
+  /// **'Preview shortened. Save or share the file to read all of it.'**
+  String get attachment_text_truncated;
+
+  /// No description provided for @attachment_text_unavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'This file could not be displayed as text. Save or share the original file.'**
+  String get attachment_text_unavailable;
+
+  /// No description provided for @attachment_pdf_failed.
+  ///
+  /// In en, this message translates to:
+  /// **'This PDF could not be previewed. Save or share the original file.'**
+  String get attachment_pdf_failed;
+
+  /// No description provided for @attachment_pdf_unavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'PDF previews are available on Android. You can still save or share this file.'**
+  String get attachment_pdf_unavailable;
+
+  /// No description provided for @attachment_pdf_page.
+  ///
+  /// In en, this message translates to:
+  /// **'Page {page} of {total}'**
+  String attachment_pdf_page(int page, int total);
+
+  /// No description provided for @attachment_previous_page.
+  ///
+  /// In en, this message translates to:
+  /// **'Previous page'**
+  String get attachment_previous_page;
+
+  /// No description provided for @attachment_next_page.
+  ///
+  /// In en, this message translates to:
+  /// **'Next page'**
+  String get attachment_next_page;
+
+  /// No description provided for @attachment_loading.
+  ///
+  /// In en, this message translates to:
+  /// **'Loading preview…'**
+  String get attachment_loading;
+
+  /// No description provided for @attachment_close.
+  ///
+  /// In en, this message translates to:
+  /// **'Close preview'**
+  String get attachment_close;
+
+  /// No description provided for @attachment_retry.
+  ///
+  /// In en, this message translates to:
+  /// **'Retry'**
+  String get attachment_retry;
+
   /// No description provided for @saved_history_heading.
   ///
   /// In en, this message translates to:

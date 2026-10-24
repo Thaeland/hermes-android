@@ -40,6 +40,77 @@ class AppLocalizationsFr extends AppLocalizations {
       'L’envoi n’a pas pu être confirmé. Votre brouillon est conservé. Vérifiez la conversation avant de réessayer.';
 
   @override
+  String get attachment_tap_to_preview => 'Appuyer pour afficher un aperçu';
+
+  @override
+  String get attachment_save => 'Enregistrer';
+
+  @override
+  String get attachment_share => 'Partager';
+
+  @override
+  String get attachment_saved => 'Fichier enregistré';
+
+  @override
+  String get attachment_save_cancelled => 'Enregistrement annulé';
+
+  @override
+  String get attachment_save_failed =>
+      'Impossible d’enregistrer ce fichier. Veuillez réessayer.';
+
+  @override
+  String get attachment_share_failed =>
+      'Impossible de partager ce fichier. Veuillez réessayer.';
+
+  @override
+  String get attachment_download_failed =>
+      'Impossible de charger ce fichier. Vérifiez la connexion et réessayez.';
+
+  @override
+  String get attachment_no_inline_preview =>
+      'Aucun aperçu n’est disponible pour ce type de fichier. Enregistrez ou partagez le fichier original pour l’ouvrir dans une autre application.';
+
+  @override
+  String get attachment_image_failed =>
+      'Impossible de décoder cette image. Vous pouvez toujours enregistrer ou partager le fichier original.';
+
+  @override
+  String get attachment_text_truncated =>
+      'Aperçu raccourci. Enregistrez ou partagez le fichier pour le lire en entier.';
+
+  @override
+  String get attachment_text_unavailable =>
+      'Impossible d’afficher ce fichier sous forme de texte. Enregistrez ou partagez le fichier original.';
+
+  @override
+  String get attachment_pdf_failed =>
+      'Impossible d’afficher un aperçu de ce PDF. Enregistrez ou partagez le fichier original.';
+
+  @override
+  String get attachment_pdf_unavailable =>
+      'Les aperçus PDF sont disponibles sur Android. Vous pouvez toujours enregistrer ou partager ce fichier.';
+
+  @override
+  String attachment_pdf_page(int page, int total) {
+    return 'Page $page sur $total';
+  }
+
+  @override
+  String get attachment_previous_page => 'Page précédente';
+
+  @override
+  String get attachment_next_page => 'Page suivante';
+
+  @override
+  String get attachment_loading => 'Chargement de l’aperçu…';
+
+  @override
+  String get attachment_close => 'Fermer l’aperçu';
+
+  @override
+  String get attachment_retry => 'Réessayer';
+
+  @override
   String get saved_history_heading => 'Saved history';
 
   @override

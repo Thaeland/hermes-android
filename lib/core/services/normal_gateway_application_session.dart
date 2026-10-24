@@ -8,6 +8,7 @@ import '../models/received_scope_outcome.dart';
 import '../models/gateway_activity.dart';
 import '../models/gateway_insight.dart';
 import '../utils/chat_conversation_projection.dart';
+import '../utils/android_prompt_context.dart';
 import 'connection_manager.dart';
 import 'composer_draft_store.dart';
 import 'chat_presentation_state.dart';
@@ -1317,6 +1318,7 @@ class NormalGatewayChatOwner {
     _display.add({
       'role': 'user',
       'content': localContent,
+      AndroidPromptContext.localUserTextKey: true,
       '_normal_projection_id': const Uuid().v4(),
     });
     _display.add({

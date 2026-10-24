@@ -9,6 +9,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
 import 'package:hermes_android/core/services/desktop_gateway_client.dart';
 import 'package:hermes_android/core/services/ws_client.dart';
+import 'package:hermes_android/core/utils/android_prompt_context.dart';
 
 /// Case-insensitive request header lookup — package:http normalises header
 /// names when sending, so tests should not assume a particular casing.
@@ -233,7 +234,8 @@ Future<void> _expectFailClosedPromptDisconnect(
     expect(requests, hasLength(1));
     expect(requests.single['params'], {
       'session_id': 'disconnect-session',
-      'text': 'Synthetic disconnect prompt',
+      'text': AndroidPromptContext.forModel('Synthetic disconnect prompt'),
+      'title_preview': 'Synthetic disconnect prompt',
     });
     expect(
       events.where((event) => event.type == 'message.delta'),
@@ -761,7 +763,10 @@ void main() {
       expect(messages, [
         {'role': 'user', 'content': 'old question'},
         {'role': 'assistant', 'content': 'old answer'},
-        {'role': 'user', 'content': 'new question'},
+        {
+          'role': 'user',
+          'content': AndroidPromptContext.forModel('new question'),
+        },
       ]);
     });
 
@@ -778,10 +783,16 @@ void main() {
         );
 
         expect(
-          messages.where((m) => m['content'] == 'new question'),
+          messages.where(
+            (m) =>
+                m['content'] == AndroidPromptContext.forModel('new question'),
+          ),
           hasLength(1),
         );
-        expect(messages.last, {'role': 'user', 'content': 'new question'});
+        expect(messages.last, {
+          'role': 'user',
+          'content': AndroidPromptContext.forModel('new question'),
+        });
       },
     );
 
@@ -797,7 +808,10 @@ void main() {
         {
           'role': 'user',
           'content': [
-            {'type': 'text', 'text': 'What is in this image?'},
+            {
+              'type': 'text',
+              'text': AndroidPromptContext.forModel('What is in this image?'),
+            },
             {
               'type': 'image_url',
               'image_url': {'url': dataUrl},
@@ -827,7 +841,7 @@ void main() {
       expect(messages.first, previousImageMessage);
       expect(messages.last, {
         'role': 'user',
-        'content': 'Describe it further.',
+        'content': AndroidPromptContext.forModel('Describe it further.'),
       });
     });
 
@@ -2183,6 +2197,7 @@ void main() {
           }
           expect(frames.first['params'], {
             'session_id': 'abc',
+            'source': 'desktop',
             'omit_messages': true,
             'defer_history': true,
             'inline_images': false,
@@ -3020,6 +3035,7 @@ void main() {
         expect(request['method'], 'session.resume');
         expect(request['params'], {
           'session_id': 'stored-123',
+          'source': 'desktop',
           'omit_messages': true,
           'defer_history': true,
           'inline_images': false,
@@ -3066,7 +3082,10 @@ void main() {
           expect(created.storedSessionId, 'stored-created');
           final request = await requestSeen.future;
           expect(request['method'], 'session.create');
-          expect(request['params'], {'cwd': '/srv/projects/hermes-android'});
+          expect(request['params'], {
+            'source': 'desktop',
+            'cwd': '/srv/projects/hermes-android',
+          });
           expect(request['params'], isNot(contains('session_id')));
         } finally {
           client.close();
@@ -3216,6 +3235,7 @@ void main() {
           reason: 'reconnect session.create with the remembered cwd',
         );
         expect(createCalls[1]['params'], {
+          'source': 'desktop',
           'cwd': '/srv/projects/hermes-android',
         });
         expect(createCalls[1]['params'], isNot(contains('session_id')));
@@ -3302,17 +3322,20 @@ void main() {
               .toList();
           expect(createCalls, hasLength(1));
           expect(createCalls.single['params'], {
+            'source': 'desktop',
             'cwd': '/srv/projects/hermes-android',
           });
           expect(resumeCalls, hasLength(2));
           expect(resumeCalls.first['params'], {
             'session_id': 'mobile-project',
+            'source': 'desktop',
             'omit_messages': true,
             'defer_history': true,
             'inline_images': false,
           });
           expect(resumeCalls.last['params'], {
             'session_id': 'stored-project',
+            'source': 'desktop',
             'omit_messages': true,
             'defer_history': true,
             'inline_images': false,
