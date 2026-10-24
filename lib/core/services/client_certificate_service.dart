@@ -20,7 +20,7 @@ class ClientCertificateImportException implements Exception {
   String toString() => message;
 }
 
-/// Owns newly materialized files until an editor/import and its saves settle.
+/// Owns selected or newly materialized files until an editor/import settles.
 ///
 /// Only directory paths are shared across service instances. Registration occurs
 /// before filesystem creation/rename, so a collector cannot observe an unleased
@@ -66,6 +66,13 @@ class ClientCertificateFileLease {
     if (_directories.add(path)) {
       _references[path] = (_references[path] ?? 0) + 1;
     }
+  }
+
+  /// Pins an existing selection synchronously, before validation can suspend.
+  /// Repeated retention by this owner does not accumulate references.
+  void retainIdentity(ClientCertificateConfig config) {
+    if (_closed) throw StateError('Certificate file owner is closed.');
+    _retain(config.directoryPath);
   }
 
   /// Drops a replaced pick without retaining every abandoned path for the
