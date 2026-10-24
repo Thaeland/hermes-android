@@ -5,7 +5,105 @@ import 'package:hermes_android/core/models/background_report.dart';
 import 'package:hermes_android/core/models/chat_timeline.dart';
 import 'package:hermes_android/core/utils/chat_display_items.dart';
 
+import 'support/preserved_task_list_fixture.dart';
+
 void main() {
+  final snapshots = preservedTaskListFixtures();
+  for (final entry in snapshots.entries) {
+    test('legacy todo snapshot ${entry.key} uses a task card losslessly', () {
+      final row = entry.value;
+      final before = jsonEncode(row);
+      final report = BackgroundReport.fromMessage(row)!;
+      expect(report.kind, BackgroundReportKind.task);
+      expect(report.body, row['content']);
+      expect(report.summary, isNull);
+      expect(report.hasIssues, isFalse);
+      final sections = buildNormalChatDisplaySections(
+        canonicalRows: [row],
+        receivedRows: [Map<String, dynamic>.from(row)],
+        receivedTimeline: ChatTimeline(),
+      );
+      expect(sections.map((section) => section.source), [
+        ChatDisplaySource.canonical,
+        ChatDisplaySource.received,
+      ]);
+      for (final section in sections) {
+        final projected = section.items.single as Map;
+        expect(projected, row);
+        expect(projected['role'], 'user');
+        expect(projected['content'], same(row['content']));
+      }
+      expect(jsonEncode(row), before);
+    });
+  }
+
+  test('legacy todo snapshots support CRLF without rewriting the body', () {
+    final row = {
+      ...snapshots['reported']!,
+      'content': (snapshots['reported']!['content'] as String).replaceAll(
+        '\n',
+        '\r\n',
+      ),
+    };
+    expect(BackgroundReport.fromMessage(row)!.body, row['content']);
+  });
+
+  test('quotes, mixed human text and malformed todo lists stay human', () {
+    final body = snapshots['reported']!['content'] as String;
+    final header = body.split('\n').first;
+    for (final content in [
+      'I am getting this reminder:\n$body',
+      '"$body"',
+      '> ${body.replaceAll('\n', '\n> ')}',
+      '```text\n$body\n```',
+      '$body\nWhy is this appearing?',
+      ' $body',
+      header,
+      '$header\nThis is not a task list.',
+      '$header\n- [>] implementation. Work (pending)',
+      '$header\n- [ ] implementation. (pending)',
+      '$header\n- [ ] implementation.  (pending)',
+      '$header\n- [x] implementation. Finished (completed)',
+      '$header\n- [ ] missing status',
+      '$header\n- [ ] implementation. Work (pending)\n\n'
+          '[Skills pruned during compression — reload before acting on these tasks]\n'
+          'Arbitrary user prose',
+    ]) {
+      expect(
+        BackgroundReport.fromMessage({'role': 'user', 'content': content}),
+        isNull,
+        reason: content,
+      );
+    }
+    for (final role in ['assistant', 'agent', 'tool', 'system', null]) {
+      expect(
+        BackgroundReport.fromMessage({'role': role, 'content': body}),
+        isNull,
+      );
+    }
+    for (final kind in ['hidden', 'steer', 'unknown', false, []]) {
+      expect(
+        BackgroundReport.fromMessage({
+          'role': 'user',
+          'content': body,
+          'display_kind': kind,
+        }),
+        isNull,
+      );
+    }
+  });
+
+  test('a todo snapshot does not replace the real retry prompt', () {
+    final items = buildChatDisplayItems(
+      messages: [
+        {'id': 1, 'role': 'user', 'content': 'Real user prompt'},
+        snapshots['reported']!,
+        {'id': 3, 'role': 'assistant', 'content': 'Answer'},
+      ],
+    );
+    expect((items.last as Map)['_retry_prompt'], 'Real user prompt');
+  });
+
   for (final kind in ['async_delegation_complete', 'process_complete']) {
     test(
       'only exact server kind $kind classifies, without changing raw row',

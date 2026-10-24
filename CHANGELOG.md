@@ -25,6 +25,9 @@ shows only the three latest releases.
 - Accept the hosted SDK's observed `V2 Signer:` certificate output in the
   fail-closed APK publication gate, retaining single-signer production pinning
   and logging selected SDK tool paths/build-tools revision for diagnosis.
+- Make certificate files selectable on Android/iOS and ask for protected-file
+  passwords after selection. Retain encrypted PEM retries and certificate-chain
+  separators; reject an unusable PEM identity before reporting it loaded (#187).
 - Populate Activity from actual app-owned turn observations and honest gateway
   update metadata. Retain compression roots across restart and navigate older
   activity to the current conversation without duplicate continuation rows.
@@ -56,6 +59,13 @@ shows only the three latest releases.
   durable batch undo and correction-learning AI filing need separate contracts.
 - This development slice was assisted by Hermes Agent; it is not a published
   release and does not change the current stable version.
+
+### Thanks
+
+- @smhc contributed the mobile certificate-picker and password-entry improvements
+  in #187, with a physical Android mTLS report. Maintainer follow-ups add encrypted
+  PEM and certificate-chain regressions. Original contributor commits are retained.
+- Hermes Agent assisted with review, follow-up fixes and automated verification.
 
 ## [2.1.33] - 2026-10-24
 

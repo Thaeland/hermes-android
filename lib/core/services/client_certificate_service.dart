@@ -7,6 +7,7 @@ import 'package:pkcs12_parser/pkcs12_parser.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/client_certificate.dart';
+import 'tls_client_factory.dart';
 
 /// A certificate import failure with a message that is safe to show to the
 /// user. Parser internals stay out of the UI; the actionable distinction is
@@ -14,7 +15,16 @@ import '../models/client_certificate.dart';
 class ClientCertificateImportException implements Exception {
   final String message;
 
-  const ClientCertificateImportException(this.message);
+  /// True when the failure may be resolved by supplying (or correcting) the
+  /// container/key password. The dialog keeps the picked bytes in that case so
+  /// the user never has to re-pick the file, and re-runs the import when the
+  /// password field changes.
+  final bool passwordRelated;
+
+  const ClientCertificateImportException(
+    this.message, {
+    this.passwordRelated = false,
+  });
 
   @override
   String toString() => message;
@@ -164,12 +174,22 @@ class ClientCertificateService implements ClientCertificateFileStore {
         password == null || password.isEmpty ? null : password,
       );
     } on Pkcs12MacMismatchException {
+      // The MAC covers the whole container, so a mismatch means either a
+      // missing password or a wrong one. Only the first is worth prompting for.
+      if (password == null || password.isEmpty) {
+        throw const ClientCertificateImportException(
+          'This certificate needs its password. Enter it below and it will open automatically.',
+          passwordRelated: true,
+        );
+      }
       throw const ClientCertificateImportException(
         'The certificate password is incorrect, or the file is corrupted.',
+        passwordRelated: true,
       );
     } on Pkcs12BadPasswordException {
       throw const ClientCertificateImportException(
         'The certificate password is incorrect.',
+        passwordRelated: true,
       );
     } on Pkcs12UnsupportedException {
       throw const ClientCertificateImportException(
@@ -187,7 +207,10 @@ class ClientCertificateService implements ClientCertificateFileStore {
 
     // SecurityContext.useCertificateChain expects one PEM chain file, leaf
     // first, so concatenate the parser's issuer-ordered CA certificates.
-    final certificatePem = [parsed.certificatePem, ...parsed.caChainPem].join();
+    final certificatePem = [
+      parsed.certificatePem,
+      ...parsed.caChainPem,
+    ].join('\n');
     return _writePair(
       certificatePem: certificatePem,
       privateKeyPem: parsed.privateKeyPem,
@@ -195,6 +218,177 @@ class ClientCertificateService implements ClientCertificateFileStore {
       password: null,
       label: _resolveLabel(label, parsed.certificatePem),
     );
+  }
+
+  /// Imports a client identity from a single user-picked file, sniffing its
+  /// format from the content rather than the file name.
+  ///
+  /// Accepted inputs: a `.p12`/`.pfx` container; a lone PEM certificate; a
+  /// lone PEM private key; or a single PEM document holding both. A lone
+  /// half without its staged counterpart returns `null`, so the caller can
+  /// stage it and prompt for the missing half. Throws
+  /// [ClientCertificateImportException] when the bytes are none of these.
+  Future<ClientCertificateConfig?> importIdentityDocument({
+    required List<int> bytes,
+    String? password,
+    required String label,
+    List<int>? stagedCertificateBytes,
+    String? stagedCertificateName,
+    List<int>? stagedPrivateKeyBytes,
+  }) async {
+    if (_looksLikePkcs12(bytes)) {
+      return importPkcs12(bytes: bytes, password: password, label: label);
+    }
+    final text = _asPemText(bytes);
+    final certificateBlocks = _pemBlocks(text, 'CERTIFICATE');
+    String? privateKeyBlock = _firstPemBlock(text, [
+      'PRIVATE KEY',
+      'RSA PRIVATE KEY',
+      'EC PRIVATE KEY',
+      'ENCRYPTED PRIVATE KEY',
+      'OPENSSH PRIVATE KEY',
+    ]);
+    // Encrypted traditional OpenSSL keys carry the encryption marker in a
+    // header above the PEM block, not inside it — see _isEncryptedPrivateKey.
+    final privateKeyPem = privateKeyBlock == null
+        ? null
+        : _slicePemDocument(text, privateKeyBlock);
+    if (certificateBlocks.isNotEmpty && privateKeyPem != null) {
+      return _importPemPair(
+        certificatePem: certificateBlocks.join('\n'),
+        privateKeyPem: privateKeyPem,
+        password: _isEncryptedPrivateKey(privateKeyPem) ? password : null,
+        label: _resolveLabel(label, certificateBlocks.first),
+      );
+    }
+    final stagedCertificate = stagedCertificateBytes == null
+        ? null
+        : _asPemText(stagedCertificateBytes);
+    final stagedCertBlocks = stagedCertificate == null
+        ? <String>[]
+        : _pemBlocks(stagedCertificate, 'CERTIFICATE');
+    final stagedKey = stagedPrivateKeyBytes == null
+        ? null
+        : _asPemText(stagedPrivateKeyBytes);
+    final stagedKeyBlock = stagedKey == null
+        ? null
+        : _firstPemBlock(stagedKey, [
+            'PRIVATE KEY',
+            'RSA PRIVATE KEY',
+            'EC PRIVATE KEY',
+            'ENCRYPTED PRIVATE KEY',
+            'OPENSSH PRIVATE KEY',
+          ]);
+    final stagedKeyPem = stagedKey == null || stagedKeyBlock == null
+        ? null
+        : _slicePemDocument(stagedKey, stagedKeyBlock);
+    if (certificateBlocks.isNotEmpty && stagedKeyPem != null) {
+      return _importPemPair(
+        certificatePem: certificateBlocks.join('\n'),
+        privateKeyPem: stagedKeyPem,
+        password: _isEncryptedPrivateKey(stagedKeyPem) ? password : null,
+        label: _resolveLabel(label, certificateBlocks.first),
+      );
+    }
+    if (privateKeyPem != null && stagedCertBlocks.isNotEmpty) {
+      return _importPemPair(
+        certificatePem: stagedCertBlocks.join('\n'),
+        privateKeyPem: privateKeyPem,
+        password: _isEncryptedPrivateKey(privateKeyPem) ? password : null,
+        label: _resolveLabel(
+          stagedCertificateName ?? label,
+          stagedCertBlocks.first,
+        ),
+      );
+    }
+    if (certificateBlocks.isNotEmpty || privateKeyPem != null) {
+      // A lone half: the caller stages it and waits for its counterpart.
+      return null;
+    }
+    throw const ClientCertificateImportException(
+      'That file is not a certificate: pick a .p12/.pfx container or PEM certificate and key files.',
+    );
+  }
+
+  /// PKCS#12 is DER: an ASN.1 SEQUENCE at the front. PEM is base64 text, so a
+  /// leading `0x30 0x82` reliably separates the container from PEM material.
+  static bool _looksLikePkcs12(List<int> bytes) =>
+      bytes.length > 2 && bytes[0] == 0x30 && bytes[1] == 0x82;
+
+  /// Extracts the full text of every `BEGIN <label> ... END <label>` block,
+  /// preserving any headers above the first block (e.g. traditional OpenSSL
+  /// `Proc-Type`/`DEK-Info` encryption headers).
+  static List<String> _pemBlocks(String text, String label) {
+    final blocks = <String>[];
+    final begin = '-----BEGIN $label-----';
+    final end = '-----END $label-----';
+    var searchFrom = 0;
+    while (true) {
+      final beginIndex = text.indexOf(begin, searchFrom);
+      if (beginIndex < 0) return blocks;
+      final endIndex = text.indexOf(end, beginIndex + begin.length);
+      if (endIndex < 0) return blocks;
+      var blockStart = beginIndex;
+      // Keep encryption headers that precede the block: walk back over blank
+      // lines and `Name: value` header lines.
+      final headerBoundary = RegExp(
+        r'\n\s*\n',
+      ).allMatches(text.substring(0, beginIndex));
+      if (headerBoundary.isNotEmpty) {
+        final candidate = headerBoundary.last.end;
+        final headerText = text.substring(candidate, beginIndex);
+        if (headerText.trim().isNotEmpty &&
+            RegExp(r'^(?:[A-Za-z0-9-]+:[^\n]*\n?)+$').hasMatch(headerText)) {
+          blockStart = candidate;
+        }
+      }
+      blocks.add(text.substring(blockStart, endIndex + end.length));
+      searchFrom = endIndex + end.length;
+    }
+  }
+
+  static String? _firstPemBlock(String text, List<String> labels) {
+    String? earliest;
+    var earliestIndex = -1;
+    for (final label in labels) {
+      final begin = '-----BEGIN $label-----';
+      final index = text.indexOf(begin);
+      if (index >= 0 && (earliestIndex < 0 || index < earliestIndex)) {
+        earliestIndex = index;
+        earliest = label;
+      }
+    }
+    if (earliest == null) return null;
+    final begin = '-----BEGIN $earliest-----';
+    final end = '-----END $earliest-----';
+    final endIndex = text.indexOf(end, earliestIndex + begin.length);
+    if (endIndex < 0) return null;
+    return text.substring(earliestIndex, endIndex + end.length);
+  }
+
+  /// Returns the private-key PEM including any traditional-OpenSSL headers
+  /// above its block, mirroring [_pemBlocks].
+  static String _slicePemDocument(String text, String block) {
+    final blockIndex = text.indexOf(block);
+    if (blockIndex < 0) return block;
+    final headerBoundary = RegExp(
+      r'\n\s*\n',
+    ).allMatches(text.substring(0, blockIndex));
+    if (headerBoundary.isEmpty) {
+      final prefix = text.substring(0, blockIndex).trim();
+      if (prefix.isEmpty) return block;
+      // The block sits mid-document after other PEM blocks: slice from the
+      // block itself so the certificate half is not duplicated into the key.
+      return block;
+    }
+    final candidate = headerBoundary.last.end;
+    final headerText = text.substring(candidate, blockIndex);
+    if (headerText.trim().isNotEmpty &&
+        RegExp(r'^(?:[A-Za-z0-9-]+:[^\n]*\n?)+$').hasMatch(headerText)) {
+      return text.substring(candidate, blockIndex + block.length);
+    }
+    if (headerText.trim().isEmpty) return block;
+    return block;
   }
 
   /// Stores an already-PEM certificate/key pair chosen by the user.
@@ -217,13 +411,56 @@ class ClientCertificateService implements ClientCertificateFileStore {
         'The selected private key is not a PEM private key.',
       );
     }
-    return _writePair(
+    return _importPemPair(
       certificatePem: certificatePem,
       privateKeyPem: privateKeyPem,
       // Only an encrypted PEM key needs (and therefore retains) a password.
       password: _isEncryptedPrivateKey(privateKeyPem) ? password : null,
       label: _resolveLabel(label, certificatePem),
     );
+  }
+
+  /// Do not announce an identity until the transport can actually open it.
+  /// Password failures keep the editor's picked bytes available for retry.
+  Future<ClientCertificateConfig> _importPemPair({
+    required String certificatePem,
+    required String privateKeyPem,
+    required String? password,
+    required String label,
+  }) async {
+    final encrypted = _isEncryptedPrivateKey(privateKeyPem);
+    if (encrypted && (password == null || password.isEmpty)) {
+      throw const ClientCertificateImportException(
+        'This certificate needs its password. Enter it below and it will open automatically.',
+        passwordRelated: true,
+      );
+    }
+    final config = await _writePair(
+      certificatePem: certificatePem,
+      privateKeyPem: privateKeyPem,
+      password: encrypted ? password : null,
+      label: label,
+    );
+    try {
+      try {
+        const TlsClientFactory().securityContextFor(config);
+      } on TlsClientConfigurationException {
+        // dart:io can leave a failed PKCS#8 decrypt on its native error queue;
+        // the next chain load consumes it even with the correct password.
+        // Retry once with a fresh context, never bypassing parser validation.
+        const TlsClientFactory().securityContextFor(config);
+      }
+    } on TlsClientConfigurationException {
+      await discard(config);
+      ClientCertificateFileLease._current?.releaseIdentity(config);
+      throw ClientCertificateImportException(
+        encrypted
+            ? 'The certificate password is incorrect, or the file is corrupted.'
+            : 'The selected certificate and private key could not be loaded.',
+        passwordRelated: encrypted,
+      );
+    }
+    return config;
   }
 
   /// Restores a key pair carried by an encrypted configuration backup.
