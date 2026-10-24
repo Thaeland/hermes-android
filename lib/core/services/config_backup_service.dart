@@ -174,6 +174,7 @@ class ConfigBackupService {
     // and a failure cannot leave a connection pointing at missing files.
     final restoredConnections = <SavedConnection>[];
     final fileLease = ClientCertificateFileLease();
+    var certificateRestoreAttempted = false;
     try {
       await fileLease.run(() async {
         for (final connection in backup.connections) {
@@ -182,6 +183,9 @@ class ConfigBackupService {
             restoredConnections.add(connection);
             continue;
           }
+          // Restore may create a directory or one PEM and then fail. Record
+          // cleanup ownership before the first asynchronous materialization.
+          certificateRestoreAttempted = true;
           final restored = await _certificates.restore(
             certificatePem: certificate.certificatePem,
             privateKeyPem: certificate.privateKeyPem,
@@ -205,7 +209,12 @@ class ConfigBackupService {
       throw ConfigBackupException(error.message);
     } finally {
       await fileLease.close();
-      await _connectionManager.cleanupUnreferencedCertificates();
+      // Account transactions already collect identities removed or rotated by
+      // their physical commit. Only a restore can leave extra uncommitted files
+      // here; certificate-free imports must not start platform/filesystem I/O.
+      if (certificateRestoreAttempted) {
+        await _connectionManager.cleanupUnreferencedCertificates();
+      }
     }
 
     var applied = 0;

@@ -2256,6 +2256,12 @@ class _AddDialogState extends State<_AddDialog> {
     _certificateService = ClientCertificateService();
     _certificatePassword = TextEditingController();
     _clientCertificate = conn?.clientCertificate;
+    if (_clientCertificate case final certificate?) {
+      // Validation can finish on an already-loaded TLS context after another
+      // manager rotates this account. Keep the selected files until Save and
+      // its rollback/native cleanup settle, not just the validation request.
+      _certificateFileLease.retainIdentity(certificate);
+    }
     _useClientCertificate = conn?.clientCertificate != null;
     _host.addListener(_onHostChanged);
     _dashboardProxied = conn?.dashboardProxied ?? false;
