@@ -86,6 +86,22 @@ void main() {
     },
   );
 
+  test('custom stop phrases use the stock whole-utterance normalisation', () {
+    for (final text in [' "BONNE NUIT!" ', 'bonne nuit', 'Bonne nuit.']) {
+      expect(
+        AndroidPromptContext.forModel(text, stopPhrases: [' Bonne nuit ']),
+        text,
+      );
+    }
+    expect(
+      AndroidPromptContext.forModel(
+        'bonne nuit and make a report',
+        stopPhrases: ['bonne nuit'],
+      ),
+      endsWith(AndroidPromptContext.suffix),
+    );
+  });
+
   test('multimodal decoding never mutates the raw history or image part', () {
     final image = {
       'type': 'image_url',

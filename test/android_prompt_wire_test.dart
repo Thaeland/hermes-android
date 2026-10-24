@@ -12,6 +12,7 @@ import 'package:http/testing.dart';
 Future<Map<String, dynamic>> _normalPrompt(
   String text, {
   bool loseAck = false,
+  Map<String, dynamic>? config = const {},
 }) async {
   final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
   final requests = <Map<String, dynamic>>[];
@@ -22,6 +23,20 @@ Future<Map<String, dynamic>> _normalPrompt(
     sockets.add(socket);
     socket.listen((raw) {
       final request = jsonDecode(raw as String) as Map<String, dynamic>;
+      if (request['method'] == 'config.get') {
+        expect(request['params'], {'key': 'full'});
+        socket.add(
+          jsonEncode({
+            'jsonrpc': '2.0',
+            'id': request['id'],
+            if (config == null)
+              'error': {'code': -32601, 'message': 'Unavailable'}
+            else
+              'result': {'config': config},
+          }),
+        );
+        return;
+      }
       if (request['method'] != 'prompt.submit') return;
       requests.add(request);
       if (loseAck) {
@@ -88,6 +103,65 @@ Future<Map<String, dynamic>> _normalPrompt(
 }
 
 void main() {
+  test(
+    'configured typed voice-stop phrases retain exact stock wire text',
+    () async {
+      for (final phrases in <dynamic>[
+        'silencio total',
+        ['silencio total', '静かにして'],
+      ]) {
+        const text = ' "Silencio Total!" ';
+        expect(
+          await _normalPrompt(
+            text,
+            config: {
+              'voice': {'stop_phrases': phrases},
+            },
+          ),
+          {'session_id': 'warm-tui-session', 'text': text},
+        );
+      }
+      const unicode = '静かにして';
+      expect(
+        await _normalPrompt(
+          unicode,
+          config: {
+            'voice': {
+              'stop_phrases': [unicode],
+            },
+          },
+        ),
+        {'session_id': 'warm-tui-session', 'text': unicode},
+      );
+    },
+  );
+
+  test(
+    'unavailable stop configuration preserves text instead of guessing',
+    () async {
+      expect(
+        await _normalPrompt('a completely custom stop phrase', config: null),
+        {
+          'session_id': 'warm-tui-session',
+          'text': 'a completely custom stop phrase',
+        },
+      );
+    },
+  );
+
+  test(
+    'disabled configured stop phrases still allow ordinary context',
+    () async {
+      final params = await _normalPrompt(
+        'Create a report',
+        config: {
+          'voice': {'stop_phrases': []},
+        },
+      );
+      expect(params['text'], AndroidPromptContext.forModel('Create a report'));
+    },
+  );
+
   test(
     'stock normal prompt carries guidance without an Android backend field',
     () async {

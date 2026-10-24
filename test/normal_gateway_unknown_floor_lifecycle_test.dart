@@ -309,6 +309,8 @@ class _Gateway {
                       }
                     : method == 'projects.list'
                     ? {'projects': []}
+                    : method == 'config.get' && frame['params']['key'] == 'full'
+                    ? {'config': <String, dynamic>{}}
                     : {'ok': true},
             }),
           );

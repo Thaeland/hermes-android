@@ -932,8 +932,23 @@ class WsClient {
     required String sessionId,
     required StreamCallback onEvent,
     void Function()? onSent,
+    bool Function()? maySend,
     Duration timeout = const Duration(minutes: 10),
   }) async {
+    final source = _channel;
+    final promptText = await _androidPromptText(message);
+    // The read-only configuration lookup is an async boundary, not admission
+    // authority. Never lend its result to a replacement socket or stale owner.
+    if (!_connected || !identical(source, _channel)) {
+      throw JsonRpcError(
+        'prompt.submit',
+        'Desktop gateway connection closed',
+        reason: 'connection_closed',
+      );
+    }
+    if (maySend?.call() == false) {
+      throw StateError('Prompt admission is no longer owned.');
+    }
     final completion = Completer<void>();
     final terminalFuture = completion.future;
     // A close before the RPC acknowledgement rejects both the pending request
@@ -987,7 +1002,6 @@ class WsClient {
     });
 
     try {
-      final promptText = AndroidPromptContext.forModel(message);
       final response = await send('prompt.submit', {
         'session_id': sessionId,
         'text': promptText,
@@ -1003,6 +1017,10 @@ class WsClient {
           fallbackMessage: 'Unknown error',
         );
       }
+      // Stock typed voice controls acknowledge without starting an agent turn
+      // or emitting a terminal frame. Do not wait ten minutes for one.
+      final result = response['result'];
+      if (result is Map && result['voice_stopped'] == true) return;
       await terminalFuture;
     } finally {
       timer.cancel();
@@ -1040,6 +1058,35 @@ class WsClient {
       throw JsonRpcError('session.steer', 'Invalid steering acknowledgement');
     }
     return true;
+  }
+
+  Future<String> _androidPromptText(String message) async {
+    if (AndroidPromptContext.forModel(message) == message) return message;
+    try {
+      // Stock Hermes compares the whole typed text to voice.stop_phrases before
+      // dispatching the turn. Read this profile's existing configuration rather
+      // than guessing a language or fixed list. This never changes voice/model
+      // settings. If discovery is unavailable, leave the input untouched.
+      final response = await send('config.get', const {
+        'key': 'full',
+      }, timeout: const Duration(seconds: 2));
+      if (response['error'] != null) return message;
+      final result = response['result'];
+      final config = result is Map ? result['config'] : null;
+      if (config is! Map) return message;
+      final voice = config['voice'];
+      final raw = voice is Map ? voice['stop_phrases'] : null;
+      final phrases = raw is String
+          ? [raw]
+          : raw is List
+          ? raw
+                .where((p) => p is String || p is num || p is bool)
+                .map((p) => p.toString())
+          : const <String>[];
+      return AndroidPromptContext.forModel(message, stopPhrases: phrases);
+    } catch (_) {
+      return message;
+    }
   }
 
   /// Cooperatively interrupts the active turn for one gateway session.

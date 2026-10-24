@@ -3,12 +3,11 @@
 **Status: 3.0.0 release-candidate development.** This feature does not publish a
 release or change the stable app version.
 
-**Draft review status:** the app-only revision is not ready to merge. Review
-identified pending fixes for custom typed voice-stop phrases, image-only history
-presentation and literal client-note examples. Non-normal transport exports also
-need public-projection hardening. The full regression suite and APK builds must
-be rerun after those fixes; earlier attachment-build results do not validate this
-revision.
+**Verification status:** permanent regressions cover custom typed voice-stop
+phrases, image-only history presentation, literal client-note examples and public
+projection in non-normal transport exports. The final integrated tree still needs
+the full regression suite, native tests and APK builds; earlier attachment-build
+results do not validate this revision or establish physical-phone acceptance.
 
 ## Send a file from Hermes
 
@@ -20,15 +19,24 @@ For Remote Gateway connections, Android requests the stock rich-chat source
 (`desktop`) on create/resume. The app also adds a short, versioned Android
 client-context note to ordinary chat requests, including REST/SSE and reused
 TUI sessions. It explains the file-delivery syntax and distinguishes host paths
-from the phone. Slash commands and the fixed default stop controls remain
-unchanged; preserving custom voice-stop phrases is still a draft review item. No
-extra agent turn, agent reset or model/provider change is introduced.
+from the phone. Slash commands and default stop controls remain unchanged. Before
+framing an ordinary stock Remote Gateway prompt, Android reads that profile's
+existing `voice.stop_phrases` through `config.get` (`key: full`) and leaves matching
+typed controls verbatim, including custom languages and punctuation. The read is
+bounded to two seconds and is not cached across submits. If configuration cannot
+be read or its response is unrecognised, the app sends the original text without
+the note rather than risking a broken control. It does not change configuration
+or require another agent turn. No agent reset or model/provider change is
+introduced. REST/SSE does not use the stock `prompt.submit` voice-control handler.
 
 The note is ordinary user-message context, **not privileged or model-only
 metadata**. The backend saves it as part of the submitted user turn, so other
 clients, raw exports and future model context may include it. Android omits
 only its exact known note from user bubbles, edit/retry text, its chat export
-and recognised session previews. It never rewrites fetched transcript rows,
+and recognised session previews. Slash-prefixed input is never framed, so its
+literal note examples remain visible on reload and export. Empty decoded text
+parts in an image-only turn contribute no unsupported-content placeholder. The
+app never rewrites fetched transcript rows,
 alters earlier saved messages or strips assistant/tool output.
 
 Ask the agent to generate a file and deliver it in its reply. The standard Hermes

@@ -769,6 +769,7 @@ class DesktopGatewayClient {
         text,
         sessionId: gateway.sessionId,
         onEvent: onEvent,
+        maySend: maySend,
         onSent: () {
           emitted = true;
           _resumeOnlySessions.add(sessionId);
