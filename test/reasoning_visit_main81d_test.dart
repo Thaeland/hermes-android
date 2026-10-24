@@ -258,6 +258,17 @@ void main() {
                     .text,
                 'Keep next draft',
               );
+              final reopenedScroll = tester
+                  .widget<ListView>(find.byType(ListView).first)
+                  .controller!;
+              expect(
+                reopenedScroll.position.pixels,
+                closeTo(reopenedScroll.position.maxScrollExtent, 1),
+              );
+              // Reopening now starts at the latest content. Materialise the
+              // older saved card before checking its reset expansion choice.
+              reopenedScroll.jumpTo(0);
+              await tester.pump(const Duration(milliseconds: 350));
               expect(_expanded(tester, _reason('Saved reasoning')), verbose);
               if (_reason('Received reasoning updated').evaluate().isEmpty) {
                 await tester.scrollUntilVisible(
