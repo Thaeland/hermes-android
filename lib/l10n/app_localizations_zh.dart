@@ -546,6 +546,9 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
+  String get could_not_open_link => '无法打开此链接。';
+
+  @override
   String get could_not_open_the_hermes_dashboard => '无法打开 Hermes 仪表盘。';
 
   @override
@@ -3458,6 +3461,9 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String could_not_load_more_chats(Object error) {
     return '无法加载更多聊天：$error';
   }
+
+  @override
+  String get could_not_open_link => '无法打开此链接。';
 
   @override
   String get could_not_open_the_hermes_dashboard => '无法打开 Hermes 仪表盘。';

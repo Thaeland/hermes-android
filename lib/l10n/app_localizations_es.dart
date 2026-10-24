@@ -568,6 +568,9 @@ class AppLocalizationsEs extends AppLocalizations {
   }
 
   @override
+  String get could_not_open_link => 'No se pudo abrir este enlace.';
+
+  @override
   String get could_not_open_the_hermes_dashboard =>
       'No se pudo abrir el panel de Hermes.';
 
