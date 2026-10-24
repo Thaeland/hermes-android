@@ -34,10 +34,10 @@ Future<void> openMediaFilePreview({
   required RemoteFilesDataSource Function() filesClient,
   required MediaTagRef ref,
   Object? sourceIdentity,
+  InlineMediaPreviewOwner? owner,
 }) async {
   if (!context.mounted) return;
-  final owner = context
-      .findAncestorStateOfType<_InlineMediaPreviewScopeState>();
+  owner ??= InlineMediaPreviewScope.ownerOf(context);
   if (owner != null && !owner.accepts(filesClient, sourceIdentity, ref)) return;
   final navigator = Navigator.of(context, rootNavigator: true);
   final existing = _inlinePreviews[navigator];
@@ -81,11 +81,13 @@ class InlineMediaPreviewScope extends StatefulWidget {
   final WidgetBuilder builder;
 
   @override
-  State<InlineMediaPreviewScope> createState() =>
-      _InlineMediaPreviewScopeState();
+  State<InlineMediaPreviewScope> createState() => InlineMediaPreviewOwner();
+
+  static InlineMediaPreviewOwner? ownerOf(BuildContext context) =>
+      context.findAncestorStateOfType<InlineMediaPreviewOwner>();
 }
 
-class _InlineMediaPreviewScopeState extends State<InlineMediaPreviewScope> {
+class InlineMediaPreviewOwner extends State<InlineMediaPreviewScope> {
   AttachmentController? _controller;
   DialogRoute<void>? _route;
 

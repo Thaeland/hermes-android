@@ -129,7 +129,13 @@ void main() {
         // correlation above establishes the producer, never an output heuristic.
         'content': jsonEncode(_result), 'timestamp': 10,
       },
-      {'id': 4, 'role': 'assistant', 'content': 'Done.', 'timestamp': 11},
+      {
+        'id': 4,
+        'role': 'assistant',
+        'content': 'Done.',
+        'timestamp': 11,
+        'finish_reason': 'stop',
+      },
     ];
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pump();

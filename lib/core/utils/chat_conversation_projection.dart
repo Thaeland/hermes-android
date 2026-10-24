@@ -1,5 +1,7 @@
 import '../models/background_report.dart';
 import '../models/chat_timeline.dart';
+import 'android_prompt_context.dart';
+import 'generated_media.dart';
 import 'message_content.dart';
 
 /// A response receipt is different from lifecycle settlement or an idle socket.
@@ -52,12 +54,18 @@ List<Map<String, dynamic>> buildConversationDisplayItems({
   final items = <Map<String, dynamic>>[];
   String? prompt;
   for (final row in messages) {
-    if (BackgroundReport.fromMessage(row) != null || isToolResultMessage(row)) {
+    if (!isPublicDeliveryMessage(row) ||
+        BackgroundReport.fromMessage(row) != null ||
+        isToolResultMessage({...row, 'content': publicDeliveryText(row)})) {
       continue;
     }
     final role = row['role'] == 'agent' ? 'assistant' : row['role'];
     if (role != 'user' && role != 'assistant') continue;
-    var content = stripToolResultText(messageContentToText(row['content']));
+    var content = stripToolResultText(
+      messageContentToText(
+        AndroidPromptContext.displayContent(row, publicDeliveryContent(row)),
+      ),
+    );
     if (role == 'user') {
       if (content.isNotEmpty) {
         prompt = content;
@@ -85,7 +93,8 @@ List<Map<String, dynamic>> buildConversationDisplayItems({
       continue;
     }
     final scope = row['_normal_projection_id'] ?? row;
-    if (timeline?.scopes.contains(scope) == true) {
+    if (!row.containsKey('display_content') &&
+        timeline?.scopes.contains(scope) == true) {
       // Respect receipt retention, including scopes whose entire body was
       // evicted. Never resurrect their unbounded canonical accumulator.
       content = timeline!.runs
