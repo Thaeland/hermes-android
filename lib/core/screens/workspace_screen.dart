@@ -20,6 +20,7 @@ import '../services/android_share_intent_service.dart';
 import '../services/app_update_service.dart';
 import '../services/attachment_draft_service.dart';
 import '../services/chat_space_store.dart';
+import '../services/chat_assets_client.dart';
 import '../services/connection_manager.dart';
 import '../services/desktop_gateway_client.dart';
 import '../services/gateway_turn_application_controller.dart';
@@ -46,6 +47,7 @@ import '../widgets/new_chat_sheet.dart';
 import '../widgets/project_detail_screen.dart';
 import '../widgets/projects_pane.dart';
 import 'chat_screen.dart';
+import 'assets_screen.dart';
 import 'files_screen.dart';
 import 'cron_screen.dart';
 import 'memory_screen.dart';
@@ -180,6 +182,9 @@ class WorkspaceScreen extends StatefulWidget {
   /// Overrides the native Files screen.
   final WorkspaceFilesScreenBuilder? filesScreenBuilder;
 
+  /// Optional injected history reader; the caller retains its lifecycle.
+  final ChatAssetsDataSource Function(SavedConnection)? assetsSourceFactory;
+
   /// Overrides how the browser reads its attention and running signals.
   final WorkspaceTurnSignalsLoader? turnSignalsLoader;
 
@@ -231,6 +236,7 @@ class WorkspaceScreen extends StatefulWidget {
     this.testDashboardHttpClient,
     this.sessionScreenBuilder,
     this.filesScreenBuilder,
+    this.assetsSourceFactory,
     this.turnSignalsLoader,
     this.activityFeedLoader,
     this.onNewChat,
@@ -1866,6 +1872,31 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
     );
   }
 
+  Future<void> _openAssets() async {
+    final connection = widget.connection;
+    final factory = widget.assetsSourceFactory;
+    final source =
+        factory?.call(connection) ??
+        ChatAssetsClient.fromConnection(connection);
+    try {
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute<void>(
+          builder: (_) => AssetsScreen(
+            source: source,
+            filesClient: (session) => RemoteFilesClient.fromConnection(
+              connection,
+              sessionId: session.id,
+              maxDownloadBytes: 25 * 1024 * 1024,
+            ),
+            onOpenSession: (session) => unawaited(_openSession(session)),
+          ),
+        ),
+      );
+    } finally {
+      if (factory == null && source is ChatAssetsClient) source.close();
+    }
+  }
+
   void _openMoreEntry(MoreEntry entry) {
     final connection = widget.connection;
     switch (entry.id) {
@@ -1875,6 +1906,8 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
         _openWorkspaceSessionView(WorkspaceSessionView.archivedQuick);
       case 'files':
         unawaited(_openFiles());
+      case 'assets':
+        unawaited(_openAssets());
       case 'cron':
         _openCronJobs();
       case 'skills':

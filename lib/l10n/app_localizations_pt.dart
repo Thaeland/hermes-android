@@ -46,8 +46,114 @@ class AppLocalizationsPt extends AppLocalizations {
       'Received output is kept temporarily in this app session and may be shortened or removed as limits are reached. It may not be available after the app or connection is closed.';
 
   @override
+  String get theme_palette => 'Tema de cor';
+
+  @override
+  String get theme_palette_gold => 'Dourado';
+
+  @override
+  String get theme_palette_purple => 'Roxo';
+
+  @override
+  String get theme_palette_orange => 'Laranja';
+
+  @override
+  String get theme_palette_green => 'Verde';
+
+  @override
+  String get theme_palette_blue => 'Azul';
+
+  @override
+  String get theme_palette_red => 'Vermelho';
+
+  @override
+  String get theme_palette_teal => 'Verde-petróleo';
+
+  @override
+  String get theme_palette_pink => 'Rosa';
+
+  @override
+  String get theme_palette_indigo => 'Índigo';
+
+  @override
+  String get theme_palette_cyan => 'Ciano';
+
+  @override
+  String get assets_recent_subtitle =>
+      'Encontre arquivos compartilhados pelo Hermes em chats salvos';
+
+  @override
+  String get assets_scope_notice =>
+      'Arquivos gerados e compartilhados explicitamente pelo Hermes em respostas salvas. Esta é uma visão parcial do histórico de chats, não um catálogo completo de arquivos ou anexos. Os arquivos referenciados podem não existir mais.';
+
+  @override
+  String get assets_download_limit =>
+      'Os arquivos só são carregados ao tocar neles. Pré-visualizações e downloads têm limite de 25 MiB por arquivo; use o painel para arquivos maiores.';
+
+  @override
+  String get assets_search_hint =>
+      'Buscar nos arquivos encontrados ou nos chats de origem';
+
+  @override
+  String get assets_all => 'Todos';
+
+  @override
+  String get assets_images => 'Imagens';
+
+  @override
+  String get assets_audio => 'Áudio';
+
+  @override
+  String get assets_video => 'Vídeo';
+
+  @override
+  String get assets_documents => 'Documentos e outros arquivos';
+
+  @override
+  String get assets_empty =>
+      'Nenhum recurso encontrado nas mensagens examinadas';
+
+  @override
+  String get assets_empty_detail =>
+      'Examine mais chats ou mensagens mais antigas para consultar um período anterior. Anexos comuns e arquivos sem links não são indexados aqui.';
+
+  @override
+  String get assets_no_matches => 'Nenhum recurso correspondente';
+
+  @override
+  String get assets_load_more_chats => 'Examinar mais chats';
+
+  @override
+  String get assets_load_older_messages => 'Examinar mensagens mais antigas';
+
+  @override
+  String get assets_load_failed =>
+      'Algumas partes do histórico não puderam ser lidas. Os resultados estão incompletos. Verifique a conexão com o painel e tente novamente.';
+
+  @override
+  String get assets_retry_failed => 'Tentar novamente as leituras que falharam';
+
+  @override
+  String get assets_partial =>
+      'O servidor informou que o histórico está incompleto. Verifique o painel e atualize em seguida.';
+
+  @override
+  String assets_scan_summary(int files, int chats) {
+    return 'Referências a arquivos encontradas: $files · Chats examinados: $chats';
+  }
+
+  @override
+  String assets_open_chat(String title) {
+    return 'Abrir chat: $title';
+  }
+
+  @override
+  String get assets_file_too_large =>
+      'Este arquivo excede o limite de download. Abra o painel para baixá-lo.';
+
+  @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
-      'A one-off question. Archives itself after 72 hours; anything worth keeping is still remembered.';
+      'Uma pergunta pontual. É arquivada automaticamente após 72 horas; o que valer a pena guardar continua na memória.';
 
   @override
   String get archive_chat => 'Arquivar chat';
@@ -2957,6 +3063,116 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get background_report_collapse => 'Recolher relatório';
+
+  @override
+  String get theme_palette => 'Tema de cor';
+
+  @override
+  String get theme_palette_gold => 'Dourado';
+
+  @override
+  String get theme_palette_purple => 'Roxo';
+
+  @override
+  String get theme_palette_orange => 'Laranja';
+
+  @override
+  String get theme_palette_green => 'Verde';
+
+  @override
+  String get theme_palette_blue => 'Azul';
+
+  @override
+  String get theme_palette_red => 'Vermelho';
+
+  @override
+  String get theme_palette_teal => 'Verde-petróleo';
+
+  @override
+  String get theme_palette_pink => 'Rosa';
+
+  @override
+  String get theme_palette_indigo => 'Índigo';
+
+  @override
+  String get theme_palette_cyan => 'Ciano';
+
+  @override
+  String get assets_recent_subtitle =>
+      'Encontre arquivos compartilhados pelo Hermes em chats salvos';
+
+  @override
+  String get assets_scope_notice =>
+      'Arquivos gerados e compartilhados explicitamente pelo Hermes em respostas salvas. Esta é uma visão parcial do histórico de chats, não um catálogo completo de arquivos ou anexos. Os arquivos referenciados podem não existir mais.';
+
+  @override
+  String get assets_download_limit =>
+      'Os arquivos só são carregados ao tocar neles. Pré-visualizações e downloads têm limite de 25 MiB por arquivo; use o painel para arquivos maiores.';
+
+  @override
+  String get assets_search_hint =>
+      'Buscar nos arquivos encontrados ou nos chats de origem';
+
+  @override
+  String get assets_all => 'Todos';
+
+  @override
+  String get assets_images => 'Imagens';
+
+  @override
+  String get assets_audio => 'Áudio';
+
+  @override
+  String get assets_video => 'Vídeo';
+
+  @override
+  String get assets_documents => 'Documentos e outros arquivos';
+
+  @override
+  String get assets_empty =>
+      'Nenhum recurso encontrado nas mensagens examinadas';
+
+  @override
+  String get assets_empty_detail =>
+      'Examine mais chats ou mensagens mais antigas para consultar um período anterior. Anexos comuns e arquivos sem links não são indexados aqui.';
+
+  @override
+  String get assets_no_matches => 'Nenhum recurso correspondente';
+
+  @override
+  String get assets_load_more_chats => 'Examinar mais chats';
+
+  @override
+  String get assets_load_older_messages => 'Examinar mensagens mais antigas';
+
+  @override
+  String get assets_load_failed =>
+      'Algumas partes do histórico não puderam ser lidas. Os resultados estão incompletos. Verifique a conexão com o painel e tente novamente.';
+
+  @override
+  String get assets_retry_failed => 'Tentar novamente as leituras que falharam';
+
+  @override
+  String get assets_partial =>
+      'O servidor informou que o histórico está incompleto. Verifique o painel e atualize em seguida.';
+
+  @override
+  String assets_scan_summary(int files, int chats) {
+    return 'Referências a arquivos encontradas: $files · Chats examinados: $chats';
+  }
+
+  @override
+  String assets_open_chat(String title) {
+    return 'Abrir chat: $title';
+  }
+
+  @override
+  String get assets_file_too_large =>
+      'Este arquivo excede o limite de download. Abra o painel para baixá-lo.';
+
+  @override
+  String get a_one_off_question_archives_itself_after_72_hours_anything =>
+      'Uma pergunta pontual. É arquivada automaticamente após 72 horas; o que valer a pena guardar continua na memória.';
 
   @override
   String get archive_chat => 'Arquivar chat';

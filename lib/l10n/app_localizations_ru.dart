@@ -46,8 +46,114 @@ class AppLocalizationsRu extends AppLocalizations {
       'Received output is kept temporarily in this app session and may be shortened or removed as limits are reached. It may not be available after the app or connection is closed.';
 
   @override
+  String get theme_palette => 'Цветовая тема';
+
+  @override
+  String get theme_palette_gold => 'Золотой';
+
+  @override
+  String get theme_palette_purple => 'Фиолетовый';
+
+  @override
+  String get theme_palette_orange => 'Оранжевый';
+
+  @override
+  String get theme_palette_green => 'Зелёный';
+
+  @override
+  String get theme_palette_blue => 'Синий';
+
+  @override
+  String get theme_palette_red => 'Красный';
+
+  @override
+  String get theme_palette_teal => 'Бирюзовый';
+
+  @override
+  String get theme_palette_pink => 'Розовый';
+
+  @override
+  String get theme_palette_indigo => 'Индиго';
+
+  @override
+  String get theme_palette_cyan => 'Циан';
+
+  @override
+  String get assets_recent_subtitle =>
+      'Находите файлы, которыми Hermes поделился в сохранённых чатах';
+
+  @override
+  String get assets_scope_notice =>
+      'Созданные файлы, которыми Hermes явно поделился в сохранённых ответах. Здесь показана лишь часть истории чатов, а не полный каталог файлов или вложений. Файлы по найденным ссылкам могут больше не существовать.';
+
+  @override
+  String get assets_download_limit =>
+      'Файлы загружаются только по нажатию. Для предпросмотра и скачивания действует ограничение в 25 MiB на файл; для файлов большего размера используйте панель управления.';
+
+  @override
+  String get assets_search_hint =>
+      'Поиск среди найденных файлов или исходных чатов';
+
+  @override
+  String get assets_all => 'Все';
+
+  @override
+  String get assets_images => 'Изображения';
+
+  @override
+  String get assets_audio => 'Аудио';
+
+  @override
+  String get assets_video => 'Видео';
+
+  @override
+  String get assets_documents => 'Документы и другие файлы';
+
+  @override
+  String get assets_empty => 'В проверенных сообщениях ресурсы не найдены';
+
+  @override
+  String get assets_empty_detail =>
+      'Проверьте другие чаты или более старые сообщения, чтобы просмотреть более раннюю историю. Обычные вложения и файлы без ссылок здесь не индексируются.';
+
+  @override
+  String get assets_no_matches => 'Нет подходящих ресурсов';
+
+  @override
+  String get assets_load_more_chats => 'Проверить другие чаты';
+
+  @override
+  String get assets_load_older_messages => 'Проверить более старые сообщения';
+
+  @override
+  String get assets_load_failed =>
+      'Не удалось прочитать часть истории. Результаты неполные. Проверьте подключение к панели управления и повторите попытку.';
+
+  @override
+  String get assets_retry_failed =>
+      'Повторить неудачные попытки чтения истории';
+
+  @override
+  String get assets_partial =>
+      'Сервер сообщил о неполной истории. Проверьте панель управления, затем обновите данные.';
+
+  @override
+  String assets_scan_summary(int files, int chats) {
+    return 'Найдено ссылок на файлы: $files · Проверено чатов: $chats';
+  }
+
+  @override
+  String assets_open_chat(String title) {
+    return 'Открыть чат: $title';
+  }
+
+  @override
+  String get assets_file_too_large =>
+      'Размер этого файла превышает лимит скачивания. Откройте панель управления, чтобы скачать его.';
+
+  @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
-      'A one-off question. Archives itself after 72 hours; anything worth keeping is still remembered.';
+      'Разовый вопрос. Автоматически архивируется через 72 часа; всё, что стоит сохранить, останется в памяти.';
 
   @override
   String get archive_chat => 'Архивировать чат';

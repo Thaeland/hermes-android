@@ -24,12 +24,15 @@ import 'core/services/notification_approval_authority.dart';
 import 'core/services/connection_mutation_barrier.dart';
 import 'core/services/notification_prefs.dart';
 import 'core/services/text_size_preference.dart';
+import 'core/services/theme_preference.dart';
 import 'core/services/turn_notification_service.dart';
 import 'core/screens/chat_screen.dart';
 import 'core/screens/workspace_screen.dart';
 import 'core/theme/hermes_theme.dart';
 import 'core/utils/responsive.dart';
 import 'core/widgets/config_backup_card.dart';
+import 'core/widgets/theme_palette_picker.dart';
+import 'core/widgets/hermes_system_ui.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
@@ -161,6 +164,16 @@ class _StartupRecoveryApp extends StatelessWidget {
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: preferredSupportedLocales(),
       localeListResolutionCallback: resolvePreferredLocale,
+      themeMode: ThemePreferenceStore(prefs).readMode(),
+      theme: hermesTheme(
+        Brightness.light,
+        palette: ThemePreferenceStore(prefs).readPalette(),
+      ),
+      darkTheme: hermesTheme(
+        Brightness.dark,
+        palette: ThemePreferenceStore(prefs).readPalette(),
+      ),
+      builder: (context, child) => HermesSystemUi(child: child!),
       home: Builder(
         key: _rootKey,
         builder: (context) => Scaffold(
@@ -261,27 +274,18 @@ class HermesApp extends StatefulWidget {
   State<HermesApp> createState() => HermesAppState();
 
   static ThemeMode getThemeMode(SharedPreferences prefs) {
-    final stored = prefs.getString('theme_mode') ?? 'system';
-    switch (stored) {
-      case 'dark':
-        return ThemeMode.dark;
-      case 'light':
-        return ThemeMode.light;
-      default:
-        return ThemeMode.system;
-    }
+    return ThemePreferenceStore(prefs).readMode();
   }
 
   static Future<void> setThemeMode(
     SharedPreferences prefs,
     ThemeMode mode,
   ) async {
-    final value = mode == ThemeMode.dark
-        ? 'dark'
-        : mode == ThemeMode.light
-        ? 'light'
-        : 'system';
-    await prefs.setString('theme_mode', value);
+    await ThemePreferenceStore(prefs).saveMode(mode);
+  }
+
+  static HermesPalette getThemePalette(SharedPreferences prefs) {
+    return ThemePreferenceStore(prefs).readPalette();
   }
 
   static TextSizePreference getTextSizePreference(SharedPreferences prefs) {
@@ -1138,6 +1142,27 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
     if (mounted) setState(() {});
   }
 
+  Future<void> setThemePalette(HermesPalette palette) async {
+    try {
+      await ThemePreferenceStore(widget.connManager.prefs).savePalette(palette);
+    } finally {
+      refreshAppearancePreferences();
+    }
+  }
+
+  Future<void> setThemeMode(ThemeMode mode) async {
+    try {
+      await ThemePreferenceStore(widget.connManager.prefs).saveMode(mode);
+    } finally {
+      refreshAppearancePreferences();
+    }
+  }
+
+  /// Re-read preferences after a backup import without replacing the Navigator.
+  void refreshAppearancePreferences() {
+    if (mounted) setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
@@ -1147,18 +1172,26 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
       supportedLocales: preferredSupportedLocales(),
       localeListResolutionCallback: resolvePreferredLocale,
       themeMode: HermesApp.getThemeMode(widget.connManager.prefs),
-      theme: hermesTheme(Brightness.light),
-      darkTheme: hermesTheme(Brightness.dark),
+      theme: hermesTheme(
+        Brightness.light,
+        palette: HermesApp.getThemePalette(widget.connManager.prefs),
+      ),
+      darkTheme: hermesTheme(
+        Brightness.dark,
+        palette: HermesApp.getThemePalette(widget.connManager.prefs),
+      ),
       builder: (context, child) {
         final systemMediaQuery = MediaQuery.of(context);
         final preference = HermesApp.getTextSizePreference(
           widget.connManager.prefs,
         );
-        return MediaQuery(
-          data: systemMediaQuery.copyWith(
-            textScaler: preference.applyTo(systemMediaQuery.textScaler),
+        return HermesSystemUi(
+          child: MediaQuery(
+            data: systemMediaQuery.copyWith(
+              textScaler: preference.applyTo(systemMediaQuery.textScaler),
+            ),
+            child: child!,
           ),
-          child: child!,
         );
       },
       home: HomeScreen(
@@ -1223,14 +1256,13 @@ class HermesHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final tokens = HermesTokens.of(context);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(20, 48, 20, 20),
-      decoration: const BoxDecoration(
-        color: Colors.black,
-        border: Border(
-          bottom: BorderSide(color: Color(0xFFD4AF37), width: 0.5),
-        ),
+      decoration: BoxDecoration(
+        color: tokens.surface,
+        border: Border(bottom: BorderSide(color: tokens.accent, width: 0.5)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1242,7 +1274,7 @@ class HermesHeader extends StatelessWidget {
               fontFamily: 'Cinzel',
               fontSize: 28,
               fontWeight: FontWeight.w700,
-              color: const Color(0xFFD4AF37),
+              color: tokens.accent,
               letterSpacing: 6,
             ),
           ),
@@ -1252,7 +1284,7 @@ class HermesHeader extends StatelessWidget {
               subtitle!,
               style: TextStyle(
                 fontSize: 13,
-                color: Colors.grey[600],
+                color: tokens.muted,
                 letterSpacing: 1,
               ),
             ),
@@ -1346,6 +1378,9 @@ class HomeScreenState extends State<HomeScreen> {
       final result = await importer(contents, choice.passphrase, choice.mode);
       if (!mounted) return;
       _refresh();
+      context
+          .findAncestorStateOfType<HermesAppState>()
+          ?.refreshAppearancePreferences();
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(result.summary)));
@@ -1353,6 +1388,34 @@ class HomeScreenState extends State<HomeScreen> {
       if (!mounted) return;
       _showRestoreError(error);
     }
+  }
+
+  void _showAppearance() {
+    final app = context.findAncestorStateOfType<HermesAppState>();
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (sheetContext) => SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              sheetContext.l10n.appearance,
+              style: Theme.of(sheetContext).textTheme.titleLarge,
+            ),
+            const SizedBox(height: 16),
+            ThemeAppearanceSettings(
+              preferences: widget.connManager.prefs,
+              onChanged: app?.refreshAppearancePreferences,
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _showRestoreError(Object error) {
@@ -1555,25 +1618,27 @@ class HomeScreenState extends State<HomeScreen> {
                   padding: const EdgeInsets.all(10),
                   margin: const EdgeInsets.only(bottom: 12),
                   decoration: BoxDecoration(
-                    color: Colors.red.withValues(alpha: 0.1),
+                    color: Theme.of(context).colorScheme.errorContainer,
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: Colors.red.withValues(alpha: 0.3),
+                      color: Theme.of(context).colorScheme.error,
                     ),
                   ),
                   child: Row(
                     children: [
-                      const Icon(
+                      Icon(
                         Icons.error_outline,
-                        color: Colors.red,
+                        color: Theme.of(context).colorScheme.onErrorContainer,
                         size: 18,
                       ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           error!,
-                          style: const TextStyle(
-                            color: Colors.red,
+                          style: TextStyle(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onErrorContainer,
                             fontSize: 13,
                           ),
                         ),
@@ -1652,12 +1717,12 @@ class HomeScreenState extends State<HomeScreen> {
                       }
                     },
               child: validating
-                  ? const SizedBox(
+                  ? SizedBox(
                       width: 18,
                       height: 18,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        color: Colors.white,
+                        color: HermesTokens.of(context).onSurface,
                       ),
                     )
                   : Text(context.l10n.save),
@@ -1699,7 +1764,10 @@ class HomeScreenState extends State<HomeScreen> {
                     context
                         .l10n
                         .used_for_hosted_path_prefixes_and_for_the_settings_memory,
-                    style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                    style: TextStyle(
+                      color: HermesTokens.of(context).muted,
+                      fontSize: 12,
+                    ),
                   ),
                 ),
                 if (error != null)
@@ -1708,25 +1776,27 @@ class HomeScreenState extends State<HomeScreen> {
                     padding: const EdgeInsets.all(10),
                     margin: const EdgeInsets.only(bottom: 12),
                     decoration: BoxDecoration(
-                      color: Colors.red.withValues(alpha: 0.1),
+                      color: Theme.of(context).colorScheme.errorContainer,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
-                        color: Colors.red.withValues(alpha: 0.3),
+                        color: Theme.of(context).colorScheme.error,
                       ),
                     ),
                     child: Row(
                       children: [
-                        const Icon(
+                        Icon(
                           Icons.error_outline,
-                          color: Colors.red,
+                          color: Theme.of(context).colorScheme.onErrorContainer,
                           size: 18,
                         ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             error!,
-                            style: const TextStyle(
-                              color: Colors.red,
+                            style: TextStyle(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onErrorContainer,
                               fontSize: 13,
                             ),
                           ),
@@ -1894,12 +1964,12 @@ class HomeScreenState extends State<HomeScreen> {
                       }
                     },
               child: validating
-                  ? const SizedBox(
+                  ? SizedBox(
                       width: 18,
                       height: 18,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        color: Colors.white,
+                        color: HermesTokens.of(context).onSurface,
                       ),
                     )
                   : Text(context.l10n.save),
@@ -1920,14 +1990,14 @@ class HomeScreenState extends State<HomeScreen> {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: ListTile(
-        leading: const Icon(Icons.router, color: Color(0xFFD4AF37)),
+        leading: Icon(Icons.router, color: HermesTokens.of(context).accent),
         title: Text(conn.label),
         subtitle: Text(
           context.l10n.connection_address_key(
             '${conn.host}:${conn.port}${conn.gatewayPrefix != null && conn.gatewayPrefix!.isNotEmpty ? conn.gatewayPrefix! : ''}',
             conn.apiKey.isNotEmpty ? "\u2713" : "\u2717",
           ),
-          style: TextStyle(color: Colors.grey[600]),
+          style: TextStyle(color: HermesTokens.of(context).muted),
         ),
         trailing: PopupMenuButton<String>(
           onSelected: (v) async {
@@ -1977,7 +2047,7 @@ class HomeScreenState extends State<HomeScreen> {
               value: 'delete',
               child: Text(
                 context.l10n.delete,
-                style: TextStyle(color: Colors.red),
+                style: TextStyle(color: HermesTokens.of(context).danger),
               ),
             ),
           ],
@@ -2002,6 +2072,12 @@ class HomeScreenState extends State<HomeScreen> {
         ),
         centerTitle: true,
         actions: [
+          IconButton(
+            key: const Key('home_appearance_button'),
+            tooltip: context.l10n.appearance,
+            onPressed: _showAppearance,
+            icon: const Icon(Icons.palette_outlined),
+          ),
           if (_connections.isNotEmpty)
             IconButton(
               key: const Key('home_restore_config_menu'),
@@ -2016,7 +2092,11 @@ class HomeScreenState extends State<HomeScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.cloud_outlined, size: 64, color: Colors.grey[800]),
+                  Icon(
+                    Icons.cloud_outlined,
+                    size: 64,
+                    color: HermesTokens.of(context).muted,
+                  ),
                   const SizedBox(height: 16),
                   Text(
                     context.l10n.no_connections,
@@ -2027,9 +2107,9 @@ class HomeScreenState extends State<HomeScreen> {
                     context
                         .l10n
                         .tap_to_add_a_remote_hermes_gateway_api_server_port,
-                    style: Theme.of(
-                      context,
-                    ).textTheme.bodyMedium?.copyWith(color: Colors.grey[600]),
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: HermesTokens.of(context).muted,
+                    ),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 20),
@@ -2067,7 +2147,7 @@ class HomeScreenState extends State<HomeScreen> {
       floatingActionButton: FloatingActionButton(
         tooltip: context.l10n.add_connection,
         onPressed: _showAddDialog,
-        child: const Icon(Icons.add, color: Colors.black),
+        child: const Icon(Icons.add),
       ),
     );
   }
@@ -2539,22 +2619,27 @@ class _AddDialogState extends State<_AddDialog> {
                 padding: const EdgeInsets.all(10),
                 margin: const EdgeInsets.only(bottom: 12),
                 decoration: BoxDecoration(
-                  color: Colors.red.withValues(alpha: 0.1),
+                  color: Theme.of(context).colorScheme.errorContainer,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+                  border: Border.all(
+                    color: Theme.of(context).colorScheme.error,
+                  ),
                 ),
                 child: Row(
                   children: [
-                    const Icon(
+                    Icon(
                       Icons.error_outline,
-                      color: Colors.red,
+                      color: Theme.of(context).colorScheme.onErrorContainer,
                       size: 18,
                     ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         _error!,
-                        style: const TextStyle(color: Colors.red, fontSize: 13),
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onErrorContainer,
+                          fontSize: 13,
+                        ),
                       ),
                     ),
                   ],
@@ -2607,12 +2692,15 @@ class _AddDialogState extends State<_AddDialog> {
                     Icon(
                       _showDashboard ? Icons.expand_less : Icons.expand_more,
                       size: 20,
-                      color: Colors.grey[500],
+                      color: HermesTokens.of(context).muted,
                     ),
                     const SizedBox(width: 4),
                     Text(
                       context.l10n.custom_proxy_and_dashboard_details,
-                      style: TextStyle(color: Colors.grey[500], fontSize: 13),
+                      style: TextStyle(
+                        color: HermesTokens.of(context).muted,
+                        fontSize: 13,
+                      ),
                     ),
                   ],
                 ),
@@ -2653,7 +2741,10 @@ class _AddDialogState extends State<_AddDialog> {
                   context
                       .l10n
                       .optional_for_the_memory_cron_skills_settings_tabs_leave_blank,
-                  style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                  style: TextStyle(
+                    color: HermesTokens.of(context).muted,
+                    fontSize: 12,
+                  ),
                 ),
               ),
               TextField(
@@ -2867,12 +2958,12 @@ class _AddDialogState extends State<_AddDialog> {
               ? null
               : _validateAndSave,
           child: _validating
-              ? const SizedBox(
+              ? SizedBox(
                   width: 18,
                   height: 18,
                   child: CircularProgressIndicator(
                     strokeWidth: 2,
-                    color: Colors.white,
+                    color: HermesTokens.of(context).onSurface,
                   ),
                 )
               : Text(

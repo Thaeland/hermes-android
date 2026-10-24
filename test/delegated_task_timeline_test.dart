@@ -7,6 +7,7 @@ import 'package:hermes_android/core/controllers/delegated_task_controller.dart';
 import 'package:hermes_android/core/models/gateway_insight.dart';
 import 'package:hermes_android/core/screens/chat_screen.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
+import 'package:hermes_android/core/theme/hermes_theme.dart';
 
 import 'package:hermes_android/core/services/ws_client.dart';
 import 'package:hermes_android/core/widgets/delegated_task_timeline.dart';
@@ -23,6 +24,7 @@ import 'support/fake_voice_composer_adapter.dart';
 import 'delegated_task_history_test.dart' show FakeHistory, rows, task;
 
 Widget app(Widget home) => MaterialApp(
+  theme: hermesTheme(Brightness.light),
   localizationsDelegates: AppLocalizations.localizationsDelegates,
   supportedLocales: AppLocalizations.supportedLocales,
   home: home,

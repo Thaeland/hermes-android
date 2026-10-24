@@ -90,6 +90,7 @@ void main() {
     test('captures user preferences that belong in a backup', () async {
       final (service, _, _) = await buildService(<String, Object>{
         'theme_mode': 'dark',
+        'theme_palette': 'purple',
         'verbose_mode': true,
         'app_text_size_preference': 1.15,
         'voice_name': 'fr-CH-x-fra',
@@ -99,6 +100,7 @@ void main() {
       final backup = await service.export(appVersion: 'test');
 
       expect(backup.preferences['theme_mode'], 'dark');
+      expect(backup.preferences['theme_palette'], 'purple');
       expect(backup.preferences['verbose_mode'], true);
       expect(backup.preferences['app_text_size_preference'], 1.15);
       expect(backup.preferences['voice_name'], 'fr-CH-x-fra');
@@ -131,6 +133,7 @@ void main() {
     test('restores connections and preferences onto a blank install', () async {
       final (source, sourceManager, _) = await buildService(<String, Object>{
         'theme_mode': 'dark',
+        'theme_palette': 'purple',
         'verbose_mode': true,
       });
       await sourceManager.saveConnection(
@@ -151,6 +154,7 @@ void main() {
       expect(result.connectionsAdded, 1);
       expect(result.connectionsUpdated, 0);
       expect(targetPrefs.getString('theme_mode'), 'dark');
+      expect(targetPrefs.getString('theme_palette'), 'purple');
       expect(targetPrefs.getBool('verbose_mode'), true);
 
       final restored = await targetManager.loadConnectionsWithSecrets();

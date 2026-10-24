@@ -81,13 +81,20 @@ class RemoteFilesClient implements RemoteFilesDataSource {
   final DashboardClient dashboard;
   final String? profile;
   final String? sessionId;
+  final int? maxDownloadBytes;
 
-  RemoteFilesClient({required this.dashboard, this.profile, this.sessionId});
+  RemoteFilesClient({
+    required this.dashboard,
+    this.profile,
+    this.sessionId,
+    this.maxDownloadBytes,
+  });
 
   factory RemoteFilesClient.fromConnection(
     SavedConnection connection, {
     String? sessionId,
     http.Client? httpClient,
+    int? maxDownloadBytes,
   }) {
     final baseUri = Uri.parse(
       DesktopGatewayClient.normalizedGatewayBaseUrl(connection),
@@ -107,6 +114,7 @@ class RemoteFilesClient implements RemoteFilesDataSource {
       ),
       profile: connection.gatewayProfile,
       sessionId: sessionId,
+      maxDownloadBytes: maxDownloadBytes,
     );
   }
 
@@ -170,6 +178,7 @@ class RemoteFilesClient implements RemoteFilesDataSource {
     final response = await dashboard.apiGetBytes(
       'fs/download',
       queryParameters: _scopedQuery({'path': path}, includeSession: true),
+      maxBytes: maxDownloadBytes,
     );
     final disposition = response.headers['content-disposition'] ?? '';
     final match = RegExp(

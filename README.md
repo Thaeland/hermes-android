@@ -78,6 +78,14 @@ Older history is not silently cut off after 2,000 rows. Archived history uses
 the saved dashboard connection and profile; a failed read keeps available
 rows and offers Retry rather than claiming the archive is empty.
 
+## Unreleased development
+
+- **More → Assets** browses generated files explicitly shared in saved Hermes
+  replies. Search found filenames or source chats, filter by file type, preview
+  images and download/share files. History scans are incremental and downloads
+  are lazy, with a 25 MiB per-file limit. This is not a complete attachment or
+  filesystem catalogue. See [Browsing chat assets](docs/chat-assets.md).
+
 ## Remote Gateway edition highlights
 
 - One Desktop Gateway JSON-RPC session for text, images, and files.

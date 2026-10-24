@@ -1,6 +1,7 @@
 // Skills browser — list installed skills with enabled/disabled status.
 import 'package:flutter/material.dart';
 import '../services/connection_manager.dart';
+import '../theme/hermes_theme.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
 
@@ -78,6 +79,7 @@ class _SkillsScreenState extends State<SkillsScreen> {
   }
 
   Widget _buildBody() {
+    final tokens = HermesTokens.of(context);
     if (_loading) return const Center(child: CircularProgressIndicator());
     if (_error != null) {
       return Center(
@@ -86,7 +88,7 @@ class _SkillsScreenState extends State<SkillsScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.error_outline, size: 48, color: Colors.orange),
+              Icon(Icons.error_outline, size: 48, color: tokens.warning),
               const SizedBox(height: 16),
               Text(
                 context.l10n.failed_to_load_skills,
@@ -110,7 +112,7 @@ class _SkillsScreenState extends State<SkillsScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.extension_off, size: 48, color: Colors.grey[600]),
+            Icon(Icons.extension_off, size: 48, color: tokens.muted),
             const SizedBox(height: 16),
             Text(
               context.l10n.no_skills_found,
@@ -148,7 +150,7 @@ class _SkillsScreenState extends State<SkillsScreen> {
                   : null,
               trailing: Icon(
                 enabled ? Icons.check_circle : Icons.block,
-                color: enabled ? Colors.green : Colors.orange,
+                color: enabled ? tokens.success : tokens.warning,
                 size: 18,
               ),
             ),

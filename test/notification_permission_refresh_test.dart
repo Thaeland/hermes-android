@@ -107,11 +107,23 @@ void main() {
       await tester.pumpAndSettle();
 
       Future<void> resumeWith(bool value) async {
-        tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+        // Settings now remains complete while offline, including editable
+        // controls whose lifecycle listeners enforce Android's real sequence.
+        for (final state in [
+          AppLifecycleState.inactive,
+          AppLifecycleState.hidden,
+          AppLifecycleState.paused,
+        ]) {
+          tester.binding.handleAppLifecycleStateChanged(state);
+        }
         granted = value;
-        tester.binding.handleAppLifecycleStateChanged(
+        for (final state in [
+          AppLifecycleState.hidden,
+          AppLifecycleState.inactive,
           AppLifecycleState.resumed,
-        );
+        ]) {
+          tester.binding.handleAppLifecycleStateChanged(state);
+        }
         await tester.pumpAndSettle();
       }
 
