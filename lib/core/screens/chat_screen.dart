@@ -3646,6 +3646,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               : 'tool.update',
         );
       },
+      onReasoning: (text) => _handleDesktopGatewayEvent(
+        StreamEvent(type: 'reasoning.delta', data: {'text': text}),
+        responseGeneration,
+      ),
+      onStatus: (status) => _handleDesktopGatewayEvent(
+        StreamEvent(type: 'status.update', data: status),
+        responseGeneration,
+      ),
       onDone: () async {
         if (!mounted || responseGeneration != _responseGeneration) return;
         // The SSE client requires an explicit successful protocol completion.

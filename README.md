@@ -68,8 +68,10 @@ The candidate also preserves main's compact delegated-task labels
 and full read-only task details. With **Verbose Mode off**, chat shows user
 messages and completed Hermes replies; tools, reasoning, task cards, commentary
 and partial replies stay out of the conversation. The existing bottom status bar
-shows current work in either mode. Failure and uncertain-outcome notices remain
-available without a typing spinner. Quiet mode requires completion evidence for
+shows current work in either mode: reasoning, the active tool with its short
+progress description, or gateway status such as context compaction. This also
+works on REST/SSE connections when the server sends those events. Failure and
+uncertain-outcome notices remain available without a typing spinner. Quiet mode requires completion evidence for
 each assistant reply. Saved rows without it, including older answers from gateways
 that omit completion metadata, remain available in Verbose Mode.
 
