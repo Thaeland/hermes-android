@@ -3173,7 +3173,7 @@ abstract class AppLocalizations {
   /// No description provided for @show_tool_calls_thinking_and_message_metadata.
   ///
   /// In en, this message translates to:
-  /// **'Show tool calls, thinking, and message metadata'**
+  /// **'Show tools, reasoning, tasks and message details in collapsed sections. Off shows only the conversation.'**
   String get show_tool_calls_thinking_and_message_metadata;
 
   /// No description provided for @signal_messages.
@@ -3791,6 +3791,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Verbose Mode'**
   String get verbose_mode;
+
+  /// No description provided for @message_metadata.
+  ///
+  /// In en, this message translates to:
+  /// **'Message details'**
+  String get message_metadata;
 
   /// No description provided for @voice.
   ///

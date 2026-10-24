@@ -1008,7 +1008,13 @@ void main() {
         'one',
       ], reason: 'first stream delivered nothing after cancellation');
 
-      // Second stream completes normally.
+      // Second stream completes with explicit successful protocol evidence.
+      transport.latest.add(
+        utf8.encode(
+          'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'
+          'data: [DONE]\n\n',
+        ),
+      );
       await transport.latest.close();
       await secondSending;
       expect(secondDone, isTrue);

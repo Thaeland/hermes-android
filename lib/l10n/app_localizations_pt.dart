@@ -2188,6 +2188,9 @@ class AppLocalizationsPt extends AppLocalizations {
   String get verbose_mode => 'Modo detalhado';
 
   @override
+  String get message_metadata => 'Message details';
+
+  @override
   String get voice => 'Voz';
 
   @override

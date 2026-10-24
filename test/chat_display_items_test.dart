@@ -331,7 +331,7 @@ void main() {
       expect(items.single, isA<Map<String, dynamic>>());
     });
 
-    test('expands reasoning in verbose mode', () {
+    test('keeps reasoning collapsed in verbose mode', () {
       final items = buildChatDisplayItems(
         messages: [
           {
@@ -343,7 +343,7 @@ void main() {
         verbose: true,
       );
 
-      expect((items[0] as ChatReasoningItem).initiallyExpanded, isTrue);
+      expect((items[0] as ChatReasoningItem).initiallyExpanded, isFalse);
     });
 
     test('keeps gateway-marked verbose reasoning collapsed by default', () {

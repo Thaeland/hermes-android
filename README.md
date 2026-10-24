@@ -51,11 +51,20 @@ See the [background-work guide](docs/android-background-work.md),
 and acceptance checks. Upgrade the companion together with the fenced client.
 
 The unreleased integration also preserves main's compact delegated-task labels
-and full read-only task details. Reasoning, tools and delegated tasks start collapsed even with app Verbose
-selected; manual reasoning choices survive the current visit, not a true
-close/reopen. Saved history and unconfirmed received output remain separate,
-labelled sources, with possible repetition across them. See the
-[neutral integration and verification](docs/reviews/main-81d-neutral-integration.md).
+and full read-only task details. With **Verbose Mode off**, chat shows user
+messages and completed Hermes replies; tools, reasoning, task cards, commentary
+and partial replies stay out of the conversation. The existing bottom status bar
+shows current work in either mode. Failure and uncertain-outcome notices remain
+available without a typing spinner. Quiet mode requires completion evidence for
+each assistant reply. Saved rows without it, including older answers from gateways
+that omit completion metadata, remain available in Verbose Mode.
+
+With **Verbose Mode on**, all retained detail is available, with each expandable
+section initially collapsed. Manual choices survive updates and lazy scrolling
+within the current visit; closing and reopening the chat resets them. Saved and
+received output remain independent sources, labelled in Verbose mode, with
+possible repetition across them. See [Chat presentation](docs/chat-presentation.md)
+and the [neutral integration and verification](docs/reviews/main-81d-neutral-integration.md).
 
 ## Navigation changes (unreleased)
 
@@ -128,7 +137,7 @@ rows and offers Retry rather than claiming the archive is empty.
   while its contents update. Tool sections start collapsed on each chat visit,
   showing only the current call (or the latest call when none are running).
   Tap to view the full group; leaving and reopening the chat resets that choice.
-  Verbose mode explicitly opens tool details by default.
+  Enable Verbose mode to see these sections; they start collapsed.
 - **Activity** shows app-observed Remote Gateway turns: waiting for input,
   running, failed and completed, plus an explicit unconfirmed state during
   recovery or when an outcome cannot be proven. Recent turn metadata survives
@@ -165,8 +174,8 @@ After an outage, the app keeps recovery pending until it can verify the server's
 state. A proven-idle turn with no recorded terminal outcome becomes inactive
 with an outcome-unknown status. It does not generate a completion alert.
 
-The app shows the complete loaded saved-history window followed by retained
-received output labelled as an unconfirmed match to saved history. Received
+In Verbose mode, the app shows the complete loaded saved-history window followed
+by retained received output labelled as an unconfirmed match to saved history. Received
 output is bounded and temporary within the app/connection session, even after a
 successful turn. Repetition across these sources is intentional: an admission
 baseline or matching text cannot establish which saved row is a received reply.
@@ -190,7 +199,8 @@ sanitized implementation and validation record.
   for the full details and model information.
 - Reasoning starts collapsed on a new chat visit, even with gateway verbose
   hints. Your manual choice survives updates and scrolling during that visit;
-  the app's explicit Verbose mode remains an open default.
+  in that release, the app's explicit Verbose mode was an open default. The
+  unreleased 3.0 presentation described above starts all details collapsed.
 
 ## What's new in v2.1.32
 
@@ -199,7 +209,8 @@ sanitized implementation and validation record.
   latest call when none are running, while retaining group status and timing.
 - Expand a section to inspect every call. Your choice survives incoming events
   and scrolling within the visit; leaving and reopening resets it. Verbose
-  mode remains an explicit open default.
+  mode was an explicit open default in that release; the unreleased 3.0
+  presentation starts all details collapsed.
 
 ## What's new in v2.1.31
 
@@ -232,7 +243,9 @@ sanitized implementation and validation record.
   with a separate Agent notes tab for `MEMORY.md`. Reads follow the connection’s
   Hermes profile; long facts can be read in full. The view is read-only and does
   not enumerate external providers such as MemPalace. See [Saved memory facts](docs/MEMORY_FACTS.md).
-- **Verbose mode toggle** — show raw message metadata (role, tool calls, timestamps) in chat.
+- **Verbose mode toggle** — switch between conversation-only chat and retained
+  reasoning, tools, tasks and metadata, all initially collapsed. Current work
+  remains visible in the bottom status bar in either mode.
 - **Task inspection:** read recorded delegated-task history without joining or
   controlling the child runtime. The viewer preserves the parent chat and draft.
 - **Background work:** keep active stock Gateway turns above chat routes, review
@@ -494,7 +507,9 @@ Android app (Flutter)
 - **Send messages:** Type in the input field and tap Send. Enter/Return inserts a new line.
 - **Streaming responses:** Replies arrive through Remote Gateway JSON-RPC or legacy REST/SSE. The chat follows new content while you are at the end; scrolling up lets you read earlier messages.
 - **Tool progress** — When the agent uses tools, inline progress messages show the tool name, status, and progress.
-- **Verbose mode** — Toggle in the app settings to show raw message metadata (role, tool call IDs, timestamps).
+- **Verbose mode** — Toggle in the app settings. Off shows the conversation only;
+  on exposes retained reasoning, tools, tasks and message metadata in collapsed
+  sections. The bottom status bar shows current work in both modes.
 - **Markdown rendering** — Assistant messages render markdown (code blocks, tables, lists, links).
 - **Relative timestamps** — Messages show "2m ago", "3h ago", etc.
 

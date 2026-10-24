@@ -22,7 +22,7 @@ import 'support/fake_voice_composer_adapter.dart';
 import 'support/completed_stock_turn.dart';
 
 void main() {
-  setUp(() => SharedPreferences.setMockInitialValues({'verbose_mode': false}));
+  setUp(() => SharedPreferences.setMockInitialValues({'verbose_mode': true}));
 
   for (final flag in [
     'response_previewed',

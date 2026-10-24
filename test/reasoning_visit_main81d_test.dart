@@ -17,9 +17,13 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/fake_voice_composer_adapter.dart';
+import 'support/pump_chat_updates.dart';
 
 void main() {
-  setUp(() => SharedPreferences.setMockInitialValues({}));
+  setUp(() {
+    SharedPreferences.setMockInitialValues({'verbose_mode': true});
+    mockChatImageRecovery();
+  });
 
   for (final reverse in [false, true]) {
     test(
@@ -84,6 +88,8 @@ void main() {
                 'id': 2,
                 'role': 'assistant',
                 'content': 'Saved answer',
+                // This hand-written fixture is a known completed older reply.
+                'completed': true,
                 '_gateway_reasoning': 'Saved reasoning',
                 '_gateway_reasoning_verbose': true,
               },
@@ -115,7 +121,7 @@ void main() {
                 ),
               );
               await tester.tap(find.text('Open'));
-              await tester.pumpAndSettle();
+              await pumpChatUpdates(tester);
               final state = tester.state(find.byType(ChatScreen));
               final route = ModalRoute.of(
                 tester.element(find.byType(ChatScreen)),
@@ -126,10 +132,29 @@ void main() {
               final scroll = tester
                   .widget<ListView>(find.byType(ListView).first)
                   .controller!;
-              expect(_expanded(tester, _reason('Saved reasoning')), verbose);
-              await _choose(tester, _reason('Saved reasoning'), manual);
-              final savedKey = tester.widget(_reason('Saved reasoning')).key;
-              final savedState = tester.state(_reason('Saved reasoning'));
+              if (verbose) {
+                // New visits align to the latest section. Reveal the older
+                // saved card before checking that its route-local pin reset.
+                if (_reason('Saved reasoning').evaluate().isEmpty) {
+                  await tester.scrollUntilVisible(
+                    _reason('Saved reasoning'),
+                    -250,
+                    scrollable: find.byType(Scrollable).first,
+                  );
+                }
+                expect(_expanded(tester, _reason('Saved reasoning')), isFalse);
+                await _choose(tester, _reason('Saved reasoning'), manual);
+              } else {
+                _expectQuiet(tester);
+                expect(find.text('Saved prompt'), findsOneWidget);
+                expect(find.text('Saved answer'), findsOneWidget);
+              }
+              final savedKey = verbose
+                  ? tester.widget(_reason('Saved reasoning')).key
+                  : null;
+              final savedState = verbose
+                  ? tester.state(_reason('Saved reasoning'))
+                  : null;
               await tester.enterText(find.byType(TextField), 'Received prompt');
               await tester.tap(find.byTooltip('Send'));
               await tester.pump();
@@ -144,15 +169,31 @@ void main() {
                 'detail': 'Tool body',
               });
               await tester.pump(const Duration(milliseconds: 350));
-              await _reveal(tester, _reason('Received reasoning'));
-              expect(_expanded(tester, _reason('Received reasoning')), verbose);
-              await _choose(tester, _reason('Received reasoning'), manual);
-              final receivedKey = tester
-                  .widget(_reason('Received reasoning'))
-                  .key;
-              final receivedState = tester.state(_reason('Received reasoning'));
+              if (verbose) {
+                await _reveal(tester, _reason('Received reasoning'));
+                expect(
+                  _expanded(tester, _reason('Received reasoning')),
+                  isFalse,
+                );
+                await _choose(tester, _reason('Received reasoning'), manual);
+              } else {
+                _expectQuiet(tester);
+                expect(find.text('Received prompt'), findsOneWidget);
+              }
+              final receivedKey = verbose
+                  ? tester.widget(_reason('Received reasoning')).key
+                  : null;
+              final receivedState = verbose
+                  ? tester.state(_reason('Received reasoning'))
+                  : null;
               final tool = find.byType(GatewayActivityCard);
-              await _choose(tester, tool, true);
+              if (verbose) await _choose(tester, tool, true);
+              final owner = controller
+                  .normalSessionFor(_connection)
+                  .findChat('stored')!;
+              final receiptIds = owner.snapshot.timeline.runs
+                  .map((run) => run.id)
+                  .toList();
               await tester.enterText(find.byType(TextField), 'Keep next draft');
               key.currentState!.push<void>(
                 MaterialPageRoute(
@@ -180,21 +221,30 @@ void main() {
               );
               expect(composer.text, 'Keep next draft');
               expect(
-                _expanded(tester, _reason('Received reasoning updated')),
-                manual,
+                owner.snapshot.timeline.runs.map((run) => run.id),
+                receiptIds,
               );
-              expect(_expanded(tester, tool), isTrue);
-              expect(
-                tester.widget(_reason('Received reasoning updated')).key,
-                receivedKey,
-              );
-              expect(
-                tester.state(_reason('Received reasoning updated')),
-                same(receivedState),
-              );
+              if (verbose) {
+                expect(
+                  _expanded(tester, _reason('Received reasoning updated')),
+                  manual,
+                );
+                expect(_expanded(tester, tool), isTrue);
+                expect(
+                  tester.widget(_reason('Received reasoning updated')).key,
+                  receivedKey,
+                );
+                expect(
+                  tester.state(_reason('Received reasoning updated')),
+                  same(receivedState),
+                );
+              } else {
+                _expectQuiet(tester);
+                expect(find.text('Received prompt'), findsOneWidget);
+              }
               // At phone width/2x text, revealing the received/tool cells already
               // evicts saved reasoning. A wide mounted card keeps its controller.
-              if (width == 1000) {
+              if (verbose && width == 1000) {
                 expect(tester.widget(_reason('Saved reasoning')).key, savedKey);
                 expect(
                   tester.state(_reason('Saved reasoning')),
@@ -214,25 +264,31 @@ void main() {
               expect(_reason('Received reasoning updated'), findsNothing);
               scroll.jumpTo(0);
               await tester.pump(const Duration(milliseconds: 350));
-              expect(_expanded(tester, _reason('Saved reasoning')), manual);
-              expect(tester.widget(_reason('Saved reasoning')).key, savedKey);
-              await tester.scrollUntilVisible(
-                _reason('Received reasoning updated'),
-                350,
-                scrollable: find.byType(Scrollable).first,
-              );
-              expect(
-                _expanded(tester, _reason('Received reasoning updated')),
-                manual,
-              );
-              if (tool.evaluate().isEmpty) {
+              if (verbose) {
+                expect(_expanded(tester, _reason('Saved reasoning')), manual);
+                expect(tester.widget(_reason('Saved reasoning')).key, savedKey);
                 await tester.scrollUntilVisible(
-                  tool,
-                  250,
+                  _reason('Received reasoning updated'),
+                  350,
                   scrollable: find.byType(Scrollable).first,
                 );
+                expect(
+                  _expanded(tester, _reason('Received reasoning updated')),
+                  manual,
+                );
+                if (tool.evaluate().isEmpty) {
+                  await tester.scrollUntilVisible(
+                    tool,
+                    250,
+                    scrollable: find.byType(Scrollable).first,
+                  );
+                }
+                expect(_expanded(tester, tool), isTrue);
+              } else {
+                _expectQuiet(tester);
+                expect(find.text('Saved answer'), findsOneWidget);
+                expect(find.textContaining('Long received line'), findsNothing);
               }
-              expect(_expanded(tester, tool), isTrue);
               expect(
                 tester.widget<ListView>(find.byType(ListView).first).controller,
                 same(scroll),
@@ -243,13 +299,15 @@ void main() {
               });
               remote.event('message.complete', {'text': 'Received final'});
               remote.done.complete();
-              await tester.pumpAndSettle();
+              await pumpChatUpdates(tester);
               // Real route disposal resets choices, not retained output or draft.
               key.currentState!.pop();
-              await tester.pumpAndSettle();
+              await tester.pump();
+              await tester.pump(route!.reverseTransitionDuration);
+              await pumpChatUpdates(tester);
               expect(state.mounted, isFalse);
               await tester.tap(find.text('Open'));
-              await tester.pumpAndSettle();
+              await pumpChatUpdates(tester);
               expect(tester.state(find.byType(ChatScreen)), isNot(same(state)));
               expect(
                 tester
@@ -258,33 +316,48 @@ void main() {
                     .text,
                 'Keep next draft',
               );
-              expect(_expanded(tester, _reason('Saved reasoning')), verbose);
-              if (_reason('Received reasoning updated').evaluate().isEmpty) {
-                await tester.scrollUntilVisible(
-                  _reason('Received reasoning updated'),
-                  250,
-                  scrollable: find.byType(Scrollable).first,
+              if (verbose) {
+                // New visits align to the latest section. Reveal the older
+                // saved card before checking that its route-local pin reset.
+                if (_reason('Saved reasoning').evaluate().isEmpty) {
+                  await tester.scrollUntilVisible(
+                    _reason('Saved reasoning'),
+                    -250,
+                    scrollable: find.byType(Scrollable).first,
+                  );
+                }
+                expect(_expanded(tester, _reason('Saved reasoning')), isFalse);
+                if (_reason('Received reasoning updated').evaluate().isEmpty) {
+                  await tester.scrollUntilVisible(
+                    _reason('Received reasoning updated'),
+                    250,
+                    scrollable: find.byType(Scrollable).first,
+                  );
+                }
+                expect(
+                  _expanded(tester, _reason('Received reasoning updated')),
+                  isFalse,
                 );
+                expect(
+                  tester
+                      .widget<GatewayReasoningCard>(
+                        _reason('Received reasoning updated'),
+                      )
+                      .text,
+                  'Received reasoning updated',
+                );
+              } else {
+                _expectQuiet(tester);
+                expect(find.text('Saved answer'), findsOneWidget);
+                expect(find.text('Received final'), findsOneWidget);
               }
-              expect(
-                _expanded(tester, _reason('Received reasoning updated')),
-                verbose,
-              );
-              expect(
-                tester
-                    .widget<GatewayReasoningCard>(
-                      _reason('Received reasoning updated'),
-                    )
-                    .text,
-                'Received reasoning updated',
-              );
               expect(remote.submissions, 1);
               expect(rows.map((r) => r['id']), [1, 2]);
               expect(tester.takeException(), isNull);
             } finally {
               await tester.pumpWidget(const SizedBox.shrink());
               await controller.close();
-              await tester.pump();
+              await pumpChatUpdates(tester);
             }
           },
         );
@@ -328,11 +401,21 @@ void main() {
             ),
           );
           await tester.pumpWidget(app());
-          await tester.pumpAndSettle();
+          await pumpChatUpdates(tester);
           final state = tester.state(find.byType(ChatScreen));
-          expect(_expanded(tester, _reason('SSE saved reasoning')), verbose);
-          await _choose(tester, _reason('SSE saved reasoning'), !verbose);
-          final key = tester.widget(_reason('SSE saved reasoning')).key;
+          if (verbose) {
+            expect(_expanded(tester, _reason('SSE saved reasoning')), isFalse);
+            await _choose(tester, _reason('SSE saved reasoning'), true);
+            expect(find.text('Saved reply'), findsOneWidget);
+          } else {
+            _expectQuiet(tester);
+            expect(find.text('Saved prompt'), findsOneWidget);
+            // The metadata-free saved row is retained, not assumed final.
+            expect(find.text('Saved reply'), findsNothing);
+          }
+          final key = verbose
+              ? tester.widget(_reason('SSE saved reasoning')).key
+              : null;
           await tester.enterText(find.byType(TextField), 'SSE prompt');
           await tester.tap(find.byTooltip('Send'));
           await tester.pump();
@@ -347,26 +430,46 @@ void main() {
             })}\n\n',
           );
           await tester.pump(const Duration(milliseconds: 350));
-          expect(_expanded(tester, _reason('SSE saved reasoning')), !verbose);
-          expect(tester.widget(_reason('SSE saved reasoning')).key, key);
+          if (verbose) {
+            expect(_expanded(tester, _reason('SSE saved reasoning')), isTrue);
+            expect(tester.widget(_reason('SSE saved reasoning')).key, key);
+            // Pin closed explicitly; verbose no longer supplies an open default.
+            await _choose(tester, _reason('SSE saved reasoning'), false);
+          } else {
+            _expectQuiet(tester);
+            expect(find.text('SSE streamed reply'), findsNothing);
+            expect(find.text('SSE prompt'), findsOneWidget);
+          }
           expect(tester.state(find.byType(ChatScreen)), same(state));
           await client.finish();
-          await tester.pumpAndSettle();
-          expect(_expanded(tester, _reason('SSE saved reasoning')), !verbose);
+          await pumpChatUpdates(tester);
+          if (verbose) {
+            expect(_expanded(tester, _reason('SSE saved reasoning')), isFalse);
+            expect(tester.widget(_reason('SSE saved reasoning')).key, key);
+          } else {
+            _expectQuiet(tester);
+            expect(find.text('SSE streamed reply'), findsOneWidget);
+          }
           await tester.pumpWidget(const SizedBox.shrink());
           await tester.pump();
           await tester.pumpWidget(app());
-          await tester.pumpAndSettle();
-          expect(_expanded(tester, _reason('SSE saved reasoning')), verbose);
-          expect(
-            tester
-                .widget<GatewayReasoningCard>(_reason('SSE saved reasoning'))
-                .text,
-            'SSE saved reasoning',
-          );
+          await pumpChatUpdates(tester);
+          if (verbose) {
+            expect(_expanded(tester, _reason('SSE saved reasoning')), isFalse);
+            expect(
+              tester
+                  .widget<GatewayReasoningCard>(_reason('SSE saved reasoning'))
+                  .text,
+              'SSE saved reasoning',
+            );
+          } else {
+            _expectQuiet(tester);
+            expect(find.text('Saved reply'), findsNothing);
+          }
           expect(client.submissions, 1);
           await tester.pumpWidget(const SizedBox.shrink());
           await controller.close();
+          await pumpChatUpdates(tester);
         },
       );
     }
@@ -393,7 +496,7 @@ void main() {
           home: _screen(controller, remote, rows, connection: connection),
         );
         await tester.pumpWidget(app(_connection));
-        await tester.pumpAndSettle();
+        await pumpChatUpdates(tester);
         final state = tester.state(find.byType(ChatScreen));
         await _choose(tester, _reason('Saved reasoning'), true);
         final changed = SavedConnection(
@@ -405,12 +508,13 @@ void main() {
           gatewayProfile: profile ? 'second' : null,
         );
         await tester.pumpWidget(app(changed));
-        await tester.pumpAndSettle();
+        await pumpChatUpdates(tester);
         expect(tester.state(find.byType(ChatScreen)), same(state));
         expect(_expanded(tester, _reason('Saved reasoning')), isFalse);
         expect(remote.submissions, 0);
         await tester.pumpWidget(const SizedBox.shrink());
         await controller.close();
+        await pumpChatUpdates(tester);
       },
     );
   }
@@ -464,6 +568,14 @@ bool _expanded(WidgetTester tester, Finder card) => tester
     .isExpanded;
 Future<void> _choose(WidgetTester tester, Finder card, bool expanded) async {
   await _reveal(tester, card);
+  if (!expanded && !_expanded(tester, card)) {
+    // An untouched collapsed default is not a manual closed pin.
+    await tester.tap(
+      find.descendant(of: card, matching: find.byType(ListTile)).first,
+    );
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(_expanded(tester, card), isTrue);
+  }
   if (_expanded(tester, card) != expanded) {
     await tester.tap(
       find.descendant(of: card, matching: find.byType(ListTile)).first,
@@ -471,6 +583,12 @@ Future<void> _choose(WidgetTester tester, Finder card, bool expanded) async {
     await tester.pump(const Duration(milliseconds: 350));
   }
   expect(_expanded(tester, card), expanded);
+}
+
+void _expectQuiet(WidgetTester tester) {
+  expect(find.byType(GatewayReasoningCard), findsNothing);
+  expect(find.byType(GatewayActivityCard), findsNothing);
+  expect(find.byType(GatewaySubagentCard), findsNothing);
 }
 
 Future<void> _reveal(WidgetTester tester, Finder card) async {

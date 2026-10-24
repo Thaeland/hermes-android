@@ -2193,6 +2193,9 @@ class AppLocalizationsDe extends AppLocalizations {
   String get verbose_mode => 'Ausführlicher Modus';
 
   @override
+  String get message_metadata => 'Message details';
+
+  @override
   String get voice => 'Sprache';
 
   @override

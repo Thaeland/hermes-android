@@ -16,7 +16,9 @@ import 'support/completed_stock_turn.dart';
 
 void main() {
   setUp(() {
-    SharedPreferences.setMockInitialValues({'verbose_mode': false});
+    // These hydration/admission races assert raw saved history, not final-only
+    // quiet policy; leave the untyped source fixtures unchanged.
+    SharedPreferences.setMockInitialValues({'verbose_mode': true});
   });
 
   testWidgets(
@@ -290,8 +292,20 @@ void main() {
       expect(snapshot.historyRows.first['content'], 'Existing transcript row');
       expect(snapshot.historyRows.last['content'], 'Second reply');
       expect(snapshot.displayRows, isEmpty);
+      // Verbose keeps the independent saved/received sections; reveal the
+      // earlier saved rows instead of relying on their lazy layout at the end.
+      await tester.scrollUntilVisible(
+        find.text('Existing transcript row'),
+        -200,
+        scrollable: find.byType(Scrollable).first,
+      );
       expect(find.text('Existing transcript row'), findsOneWidget);
       expect(find.text('First turn'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('Second reply'),
+        200,
+        scrollable: find.byType(Scrollable).first,
+      );
       expect(find.text('Second turn'), findsOneWidget);
       expect(find.text('Second reply'), findsOneWidget);
     },

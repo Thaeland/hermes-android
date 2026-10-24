@@ -7,6 +7,7 @@ import '../models/chat_timeline.dart';
 import '../models/received_scope_outcome.dart';
 import '../models/gateway_activity.dart';
 import '../models/gateway_insight.dart';
+import '../utils/chat_conversation_projection.dart';
 import 'connection_manager.dart';
 import 'composer_draft_store.dart';
 import 'chat_presentation_state.dart';
@@ -81,6 +82,9 @@ class NormalGatewayChatSnapshot {
   final List<StreamEvent> auxiliaryEvents;
   final GatewayTurnStatus? status;
   final String? error;
+
+  /// Presentation revocation precedes durable permission to release admission.
+  final String? responseFailure;
   final String? rejectedDraft;
   final DesktopConnectionState connectionState;
   final ChatTimeline timeline;
@@ -100,6 +104,7 @@ class NormalGatewayChatSnapshot {
     required this.auxiliaryEvents,
     required this.status,
     required this.error,
+    this.responseFailure,
     required this.rejectedDraft,
     required this.connectionState,
     this.timeline = const ChatTimeline(),
@@ -693,6 +698,7 @@ class NormalGatewayChatOwner {
   set _lineageRootId(String? value) => _root._storedLineageRootId = value;
   String? _wireTurnId;
   final Set<String> _settledWireTurnIds = {};
+  bool _sawResponseActivity = false;
   int? _floor;
   int _generation = 0;
   Object? _reservation;
@@ -709,6 +715,7 @@ class NormalGatewayChatOwner {
   String? _createdEmptySessionId;
   final List<GatewayToolActivity> _tools = [];
   final List<GatewaySubagentActivity> _subagents = [];
+  final List<GatewaySubagentActivity> _activityChildren = [];
   bool _hasTurnSubagentPresentation = false;
   // Observer identity outlives parent presentation and its canonical hydration.
   final List<({GatewaySubagentActivity activity, int observation, int? anchor})>
@@ -781,6 +788,9 @@ class NormalGatewayChatOwner {
           auxiliaryEvents: List.unmodifiable(_auxiliaryEvents),
           status: _status,
           error: _error,
+          responseFailure: _terminalReceipt?.completed == false
+              ? _terminalReceipt!.error ?? 'Gateway turn failed'
+              : null,
           rejectedDraft:
               phase == NormalGatewayTurnPhase.failed &&
                   !wireEmitted &&
@@ -1159,6 +1169,8 @@ class NormalGatewayChatOwner {
     phase = NormalGatewayTurnPhase.preparing;
     wireEmitted = false;
     _wireTurnId = null;
+    _sawResponseActivity = false;
+    _activityChildren.clear();
     _error = null;
     _status = null;
     _notify();
@@ -1487,7 +1499,34 @@ class NormalGatewayChatOwner {
         if (snapshot.hasActiveTurn && wireEmitted) {
           _hasTurnSubagentPresentation = true;
         }
-        _mergeVisibleChild(_mergeObservedChild(update));
+        final known = _observedSubagents.any(
+          (child) => child.activity.matchesTask(update),
+        );
+        final activityIndex = _activityChildren.indexWhere(
+          (child) => child.matchesTask(update),
+        );
+        final current =
+            snapshot.hasActiveTurn &&
+            wireEmitted &&
+            (event.turnId == null || event.turnId == _wireTurnId) &&
+            (activityIndex >= 0 || event.type == 'subagent.start' && !known);
+        final merged = _mergeObservedChild(update);
+        _mergeVisibleChild(merged);
+        if (current) {
+          if (activityIndex < 0) {
+            _activityChildren.add(merged);
+          } else {
+            _activityChildren[activityIndex] = merged;
+          }
+        }
+        if (current && (!merged.isComplete || _status?.kind == 'subagent')) {
+          final active = _activityChildren
+              .where((task) => !task.isComplete)
+              .lastOrNull;
+          _status = active == null
+              ? null
+              : GatewayTurnStatus(kind: 'subagent', text: active.goal);
+        }
       }
       _notify(meaningfulActivity: update != null);
       return;
@@ -1495,7 +1534,8 @@ class NormalGatewayChatOwner {
     if (!snapshot.hasActiveTurn ||
         phase == NormalGatewayTurnPhase.preparing ||
         !wireEmitted ||
-        _settling) {
+        _settling ||
+        _terminalReceipt != null) {
       return;
     }
     final wireTurn = event.turnId;
@@ -1513,6 +1553,21 @@ class NormalGatewayChatOwner {
       // A terminal cannot establish ownership: it may be A's delayed bookend
       // arriving after B's onSent, before B has emitted any activity.
       if (!terminal) _wireTurnId ??= wireTurn;
+    }
+    final ownsResponse = wireTurn != null
+        ? wireTurn == _wireTurnId
+        : _sawResponseActivity;
+    if (event.type == 'message.complete' && !ownsResponse) {
+      // An ambiguous trailing completion may trigger reconciliation, but must
+      // not write A's text or timeline into B before B establishes activity.
+      requestRecovery();
+      return;
+    }
+    if (!terminal &&
+        (event.type.startsWith('message.') ||
+            event.type.startsWith('tool.') ||
+            event.type.startsWith('reasoning.'))) {
+      _sawResponseActivity = true;
     }
     if (phase == NormalGatewayTurnPhase.reconciling &&
         (event.type == 'message.delta' || event.type.startsWith('tool.'))) {
@@ -1545,6 +1600,7 @@ class NormalGatewayChatOwner {
         ? _display.last
         : null;
     if (reasoning != null && assistant != null) {
+      _status = const GatewayTurnStatus(kind: 'reasoning', text: '');
       _timeline = _timeline.reasoning(
         assistant['_normal_projection_id']!,
         reasoning,
@@ -1557,6 +1613,7 @@ class NormalGatewayChatOwner {
           assistant['_gateway_reasoning_replaces'] == true ||
           reasoning.mode == GatewayReasoningEventMode.replace;
     } else if (event.type == 'message.start' && assistant != null) {
+      _status = null;
       assistant.remove('_gateway_interim_boundary');
     } else if (event.type == 'message.delta' && assistant != null) {
       final token = event.data['text']?.toString() ?? '';
@@ -1567,6 +1624,7 @@ class NormalGatewayChatOwner {
       );
       _status = null;
     } else if (event.type == 'message.interim' && assistant != null) {
+      _status = null;
       final transition = GatewayInterimTransition.resolve(
         currentText: assistant['content']?.toString() ?? '',
         interimText: event.data['text']?.toString() ?? '',
@@ -1589,6 +1647,7 @@ class NormalGatewayChatOwner {
         });
       }
     } else if (event.type == 'message.complete' && assistant != null) {
+      _status = null;
       final text =
           event.data['rendered']?.toString() ??
           event.data['text']?.toString() ??
@@ -1610,6 +1669,8 @@ class NormalGatewayChatOwner {
           );
         }
         target['_gateway_pending_response'] = false;
+        target['_chat_response_complete'] =
+            ownsResponse && isSuccessfulResponseReceipt(event.data);
       }
     } else if (event.type.startsWith('tool.')) {
       final update = GatewayToolActivity.fromGatewayEvent(
@@ -1625,6 +1686,9 @@ class NormalGatewayChatOwner {
           _tools[index] = _tools[index].merge(update);
         }
         final activity = index < 0 ? _tools.last : _tools[index];
+        if (!activity.isTerminal || _status?.kind == 'tool') {
+          _status = GatewayTurnStatus.forRunningTool(_tools);
+        }
         final toolId = activity.toolId;
         if (toolId != null) {
           _session.presentation
@@ -1684,6 +1748,12 @@ class NormalGatewayChatOwner {
         ),
       );
     } else if (ownedLifecycleTerminal) {
+      if (isSuccessfulResponseReceipt(event.data) &&
+          assistant != null &&
+          assistant['_chat_response_complete'] != false &&
+          assistant['_gateway_interim'] != true) {
+        assistant['_chat_response_complete'] = true;
+      }
       unawaited(_settle(true, null));
     } else if (terminal) {
       // Stock message.complete precedes running=false (prompt_turn.py), and
@@ -1806,10 +1876,17 @@ class NormalGatewayChatOwner {
               acceptsResult: () =>
                   _current(generation) &&
                   snapshot.hasActiveTurn &&
+                  _terminalReceipt == null &&
                   !submissionWasPending &&
                   !_submissionPending,
             ));
       if (!_current(generation) || !snapshot.hasActiveTurn || _settling) return;
+      if (_terminalReceipt != null) {
+        // An owned terminal received during this read outranks the older
+        // recovery observation, including after a rejected tombstone write.
+        _recoveryQueued = true;
+        return;
+      }
       if (!_session._canRecover) return;
       // The submit completion queues a fresh recovery. Never inspect retained
       // errors, idle status or history from a pre-wait observation, even if its
@@ -1838,6 +1915,10 @@ class NormalGatewayChatOwner {
       }
       final fresh = await _readLatestHistory(stored);
       if (!_current(generation) || !snapshot.hasActiveTurn || _settling) return;
+      if (_terminalReceipt != null) {
+        _recoveryQueued = true;
+        return;
+      }
       if (!_session._canRecover) return;
       if (!_acceptHistory(fresh)) return;
       // Idle proves work ended, never success: stock may retain partial prose
@@ -1907,6 +1988,15 @@ class NormalGatewayChatOwner {
     _retryTimer = null;
     final marker = _marker;
     try {
+      if (completed == false) {
+        // The owned failure already disproves these responses. Do not wait for
+        // tombstone I/O to hide them, or let a retry revive their final markers.
+        for (final row in _display) {
+          row['_chat_response_complete'] = false;
+        }
+        _notify();
+        if (!_current(owned)) return;
+      }
       for (final receipt in [?marker, ..._additionalRestoredMarkers.values]) {
         await _session.pendingStore.put(receipt.withPhase('settled'));
         if (!_current(owned)) return;
@@ -1987,6 +2077,7 @@ class NormalGatewayChatOwner {
       }
       for (final row in _display) {
         row['_gateway_pending_response'] = false;
+        if (completed == false) row['_chat_response_complete'] = false;
       }
       _marker = null;
       _additionalRestoredMarkers.clear();
@@ -2032,7 +2123,9 @@ class NormalGatewayChatOwner {
     } finally {
       if (_current(owned)) {
         _settling = false;
-        if (snapshot.hasActiveTurn) requestRecovery();
+        // The recovery flight owns its retry/backoff. Requeueing from inside
+        // it would spin on a permanently rejected tombstone write.
+        if (snapshot.hasActiveTurn && !_recovering) requestRecovery();
       }
     }
   }

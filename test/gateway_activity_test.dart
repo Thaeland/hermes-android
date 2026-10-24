@@ -254,6 +254,10 @@ void main() {
 
       expect(find.text('1 failed • 1 total'), findsOneWidget);
       expect(find.textContaining('Terminal'), findsOneWidget);
+      expect(find.text('Terminal: Failed'), findsOneWidget);
+      expect(find.text('Synthetic command failed'), findsNothing);
+      await tester.tap(find.text('Tool activity'));
+      await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('Failed'), findsOneWidget);
       expect(find.text('Synthetic command failed'), findsOneWidget);
     });
@@ -285,6 +289,9 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      expect(find.text(detail), findsNothing);
+      await tester.tap(find.text('Tool activity'));
+      await tester.pumpAndSettle();
       expect(find.text('Completed in 1.3 s'), findsOneWidget);
       final detailWidget = tester.widget<Text>(find.text(detail));
       expect(detailWidget.maxLines, isNull);

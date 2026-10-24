@@ -20,7 +20,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   HttpOverrides? previous;
   setUp(() {
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({'verbose_mode': false});
     previous = HttpOverrides.current;
     HttpOverrides.global = null;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
@@ -131,6 +131,8 @@ void main() {
     testWidgets('READ actual deferred refresh superseded oldFails=$oldFails', (
       tester,
     ) async {
+      // Read authority uses raw, untyped history, not quiet-mode finality.
+      SharedPreferences.setMockInitialValues({'verbose_mode': true});
       final f = await _Fixture.mount(tester);
       try {
         final first = f.wire.holdNext();
@@ -469,6 +471,7 @@ void main() {
             tester,
             () => api.completed == api.started - 1 && api.started >= 3,
           );
+          expect(api.successfulHistories.last, [_row(103, 'New REST latest')]);
           held.release();
           await widgetUntil(
             tester,
@@ -481,8 +484,15 @@ void main() {
           );
           expect(
             find.text('New REST latest', findRichText: true),
+            findsNothing,
+          );
+          // A fresh GET is not a receipt-to-row match: this SSE response has
+          // no durable ID, so retain its completed received transcript.
+          expect(
+            find.text('REST wire reply', findRichText: true),
             findsOneWidget,
           );
+          expect(find.text('REST prompt', findRichText: true), findsOneWidget);
           expect(find.byType(MaterialBanner), findsNothing);
           await tester.enterText(find.byType(TextField), 'Next REST prompt');
           await tester.pump();
@@ -559,6 +569,8 @@ void main() {
   testWidgets('READ cold multi-page batch uses offset-zero authority only', (
     tester,
   ) async {
+    // This case verifies retained raw pagination, including non-final trace rows.
+    SharedPreferences.setMockInitialValues({'verbose_mode': true});
     final rows = [
       {'id': 1, 'role': 'user', 'content': 'Older user'},
       _row(2, 'Older answer'),
@@ -820,6 +832,7 @@ class _PhysicalApi extends ApiClient {
     : super(baseUrl: c.baseUrl, apiKey: 'fixture');
   int started = 0;
   int completed = 0;
+  final successfulHistories = <List<Map<String, dynamic>>>[];
   @override
   Future<List<Map<String, dynamic>>> getMessages(
     String sessionId, {
@@ -834,7 +847,15 @@ class _PhysicalApi extends ApiClient {
       offset: offset,
       latest: latest,
     );
-    f.then((_) => completed++, onError: (Object _) => completed++);
+    f.then<void>(
+      (rows) {
+        successfulHistories.add(rows);
+        completed++;
+      },
+      onError: (Object _) {
+        completed++;
+      },
+    );
     return f;
   }
 }

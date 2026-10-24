@@ -190,12 +190,20 @@ void main() {
     expect(find.text('2 completed'), findsOneWidget);
   });
 
-  testWidgets('verbose explicitly opens the card without counting as a tap', (
+  testWidgets('verbose changes neither the collapsed default nor manual pins', (
     tester,
   ) async {
     await _pumpCard(tester, [_finished('terminal', 'call-1')], verbose: true);
-    expect(_isExpanded(tester), isTrue);
+    expect(_isExpanded(tester), isFalse);
 
+    await _pumpCard(tester, [_finished('terminal', 'call-1')]);
+    expect(_isExpanded(tester), isFalse);
+    await _tapHeader(tester);
+    expect(_isExpanded(tester), isTrue);
+    await _pumpCard(tester, [_finished('terminal', 'call-1')], verbose: true);
+    expect(_isExpanded(tester), isTrue);
+    await _tapHeader(tester);
+    expect(_isExpanded(tester), isFalse);
     await _pumpCard(tester, [_finished('terminal', 'call-1')]);
     expect(_isExpanded(tester), isFalse);
   });

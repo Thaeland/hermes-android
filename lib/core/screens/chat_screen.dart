@@ -53,6 +53,8 @@ import '../models/gateway_turn_contract.dart';
 import '../models/projects_tree_overview.dart';
 import '../services/tool_activity_group_pins.dart';
 import '../utils/chat_display_items.dart';
+import '../utils/chat_conversation_projection.dart';
+import '../utils/rest_chat_reply_retention.dart';
 import '../utils/chat_history_scroll.dart';
 import '../utils/message_content.dart';
 import '../utils/responsive.dart';
@@ -62,6 +64,7 @@ import 'files_screen.dart';
 import '../widgets/background_report_card.dart';
 import '../widgets/gateway_activity_card.dart';
 import '../widgets/chat_context_header.dart';
+import '../widgets/chat_activity_bar.dart';
 import '../widgets/markdown_code_block.dart';
 import '../widgets/attachment_draft_tile.dart';
 import '../widgets/chat_end_affordance.dart';
@@ -413,6 +416,8 @@ class ChatScreen extends StatefulWidget {
 class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   List<Map<String, dynamic>> _messages = [];
   ChatTimeline _timeline = const ChatTimeline();
+  RestChatReplyRetention? _restReplyRetention;
+  bool _hasSuccessfulHistoryRead = false;
   late final ChatPresentationRegistry _presentationRegistry;
   late final ChatPresentationState _presentation;
   late final ComposerDraftWriter _draftWriter;
@@ -426,6 +431,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   late ToolActivityGroupPins _reasoningExpansionPins;
   // Bounded, visit-local choices only; no bodies or cross-source correlation.
   Map<Object, bool> _backgroundReportExpansions = {};
+  Map<Object, bool> _detailExpansions = {};
+  bool? _delegationExpanded;
   final ChatHistoryWindow _historyWindow = ChatHistoryWindow();
   bool _loadingOlder = false;
   int _historyReadIssued = 0;
@@ -471,7 +478,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Object? _normalSubscription;
   Object? _normalReservation;
   String? _normalTurnId;
-  NormalGatewayTurnPhase? _normalPhase;
+  String? _hiddenActivityTurnId;
   final Set<String> _normalInputSeen = {};
   final Set<String> _normalMaterializedIds = {};
   final Set<StreamEvent> _normalAuxiliarySeen = {};
@@ -506,6 +513,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _streaming = false;
   bool _preparingSend = false;
   GatewayTurnStatus? _gatewayTurnStatus;
+  String? _terminalTurnNotice;
   _ResponseTransport _activeResponseTransport = _ResponseTransport.none;
   String? _activeClientTurnId;
   bool _recoveringTurn = false;
@@ -809,22 +817,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         snapshot.connectionState != DesktopConnectionState.connected &&
         snapshot.wireEmitted &&
         snapshot.hasActiveTurn;
-    final justFailed =
-        snapshot.phase == NormalGatewayTurnPhase.failed &&
-        _normalPhase != NormalGatewayTurnPhase.failed &&
-        snapshot.wireEmitted;
-    _normalPhase = snapshot.phase;
-    if ((justDetached || justFailed) &&
+    if (justDetached &&
         _normalTurnId != null &&
         ModalRoute.of(context)?.isCurrent == true) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            justFailed
-                ? context.l10n.the_detached_reply_failed_2(snapshot.error ?? '')
-                : context
-                      .l10n
-                      .connection_switched_the_running_reply_continues_on_the_server_and,
+            context
+                .l10n
+                .connection_switched_the_running_reply_continues_on_the_server_and,
           ),
           persist: false,
         ),
@@ -945,11 +946,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             } else {
               _acceptRecentMessages(snapshot.historyRows);
             }
-            _messages = _historyWindow.rows;
+            _messages = _restHistoryForPresentation();
           });
         });
       }
-      _messages = _historyWindow.rows;
+      _messages = _restHistoryForPresentation();
       // Hydrated child roots and owner runtime IDs may differ. Preserve the
       // stable task anchor and forward all progress/final updates to the modal.
       for (final update in snapshot.subagents) {
@@ -1203,6 +1204,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _reasoningPresentation = registry.chatFor(widget.session.id);
       _reasoningExpansionPins = _reasoningPresentation.openReasoningVisit();
       _backgroundReportExpansions = {};
+      _detailExpansions = {};
+      _delegationExpanded = null;
     }
   }
 
@@ -1545,7 +1548,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _exportConversation() async {
     final buffer = StringBuffer('# $_sessionTitle\n\n');
     if (_normalChat != null) {
-      for (final section in _normalDisplaySections()) {
+      for (final section in _normalDisplaySections(verbose: true)) {
         if (section.source == ChatDisplaySource.auxiliary) continue;
         final received = section.source == ChatDisplaySource.received;
         buffer.writeln(
@@ -1899,6 +1902,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         (notification is OverscrollNotification &&
             notification.dragDetails != null);
     if (isDirectUserScroll) {
+      // A direct reader gesture cancels pending lazy-layout alignment too.
+      _initialEndFramesRemaining = 0;
+      _automaticScrollGeneration++;
       _scrollCoordinator.updateFromUserScroll(
         isNearEnd: _isNearEnd(notification.metrics),
       );
@@ -1906,11 +1912,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     return false;
   }
 
-  void _applyScrollTarget(ChatScrollTarget target) {
+  void _applyScrollTarget(ChatScrollTarget target, {bool converge = true}) {
     if (_openTaskController != null || !_scrollController.hasClients) return;
     final maxExtent = _scrollController.position.maxScrollExtent;
-    _scrollController.jumpTo(maxExtent);
+    if ((_scrollController.position.pixels - maxExtent).abs() >
+        _stableExtentTolerance) {
+      _scrollController.jumpTo(maxExtent);
+    }
     _syncEndAffordance(_scrollController.position);
+    if (converge) _startEndLayoutAlignment();
   }
 
   void _goToEnd() {
@@ -1956,6 +1966,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _scheduleScrollTarget(null);
       return;
     }
+    _startEndLayoutAlignment();
+  }
+
+  // Collapsed details and independent source sections have different lazy row
+  // estimates. Converge only an authorised end target, never an ordinary refresh.
+  void _startEndLayoutAlignment() {
     _initialEndFramesRemaining = _initialEndFrameBudget;
     _initialEndStableFrames = 0;
     _initialEndLastExtent = null;
@@ -1988,7 +2004,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       final extentIsStable =
           previousExtent != null &&
           (extent - previousExtent).abs() <= _stableExtentTolerance;
-      _applyScrollTarget(const ChatScrollTarget.end());
+      _applyScrollTarget(const ChatScrollTarget.end(), converge: false);
       _initialEndStableFrames = extentIsStable
           ? _initialEndStableFrames + 1
           : 0;
@@ -2000,6 +2016,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
       _scheduleNextInitialEndFrame();
     });
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   // Value equality permits harmless SavedConnection rehydration, but fences
@@ -2068,6 +2085,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     // binding, close or newer successful read there invalidates this callback.
     if (!_canApplyHistoryRead(read)) return false;
     _historyReadAccepted = read.observation;
+    _hasSuccessfulHistoryRead = true;
     return true;
   }
 
@@ -2114,8 +2132,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (!_acceptHistoryRead(read, latest!)) return;
       _historyWindow.acceptRecent(batch);
       _historyWindowRevision++;
-      final messages = _historyWindow.rows;
-      _extractToolMessages(messages);
+      final messages = _restHistoryForPresentation();
+      _extractToolMessages(
+        _historyWindow.rows,
+        replacePresentation: _restReplyRetention?.hasRetainedReply != true,
+      );
       setState(() {
         _messages = messages;
         _error = null;
@@ -2161,7 +2182,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       ),
     );
     _historyWindowRevision++;
-    _extractToolMessages(_historyWindow.rows);
+    _restReplyRetention?.reconcile(_historyWindow.rows);
+    _extractToolMessages(
+      _historyWindow.rows,
+      replacePresentation: _restReplyRetention?.hasRetainedReply != true,
+    );
   }
 
   Future<void> _loadOlderMessages() async {
@@ -2194,7 +2219,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _historyWindow.acceptOlder(older);
       final acceptedRevision = ++_historyWindowRevision;
       _extractToolMessages(_historyWindow.rows, replacePresentation: false);
-      setState(() => _messages = _historyWindow.rows);
+      setState(() => _messages = _restHistoryForPresentation());
       final normalSnapshot = _normalChat?.snapshot;
       if (normalSnapshot != null) {
         _applyNormalSnapshot(normalSnapshot, hydrateHistory: false);
@@ -2266,7 +2291,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (!_acceptHistoryRead(read, messages)) return;
       _acceptRecentMessages(messages);
       setState(() {
-        _messages = _historyWindow.rows;
+        _messages = _restHistoryForPresentation();
         _error = null;
       });
       final normalSnapshot = _normalChat?.snapshot;
@@ -2384,6 +2409,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           : _messages[messageIndex];
       message
         ..['content'] = nextText
+        ..['_chat_response_complete'] =
+            projection.status == GatewayRecoveryTurnStatus.completed &&
+            !projection.isFailClosed
         ..['_gateway_client_turn_id'] = projection.clientTurnId
         ..['_gateway_message_id'] = projection.messageId
         ..['_gateway_last_seq'] = projection.lastSeq
@@ -2409,6 +2437,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _sending = false;
         _streaming = false;
         _awaitingVoiceReply = false;
+        _terminalTurnNotice = projection.isFailClosed
+            ? context.l10n.hermes_stopped_recovery_safely_no_prompt_was_resent
+            : projection.status == GatewayRecoveryTurnStatus.failed
+            ? context.l10n.turn_failed
+            : projection.status == GatewayRecoveryTurnStatus.interrupted
+            ? context.l10n.response_stopped
+            : null;
         _gatewayTurnStatus = projection.isFailClosed
             ? GatewayTurnStatus(
                 kind: 'recovery_failed',
@@ -3372,11 +3407,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     // The server returns oldest-to-newest history. Preserve that order; the
     // gateway client appends the current prompt exactly once.
     final history = buildRestChatHistory(_messages);
+    final replyRetention = RestChatReplyRetention.admit(
+      _messages,
+      historyKnown: _hasSuccessfulHistoryRead,
+    );
     _scrollCoordinator.beginStreaming(isNearEnd: _isNearEnd());
 
     setState(() {
       _sending = true;
       _streaming = true;
+      _terminalTurnNotice = null;
       _gatewayTurnStatus = GatewayTurnStatus(
         kind: 'starting',
         text: context.l10n.starting_hermes,
@@ -3409,6 +3449,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       onToken: (token) {
         if (!mounted || responseGeneration != _responseGeneration) return;
         setState(() {
+          _gatewayTurnStatus = null;
           if (_messages.isNotEmpty && _messages.last['role'] == 'assistant') {
             final assistant = _messages.last;
             final current = assistant['content'] as String;
@@ -3433,6 +3474,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       },
       onDone: () async {
         if (!mounted || responseGeneration != _responseGeneration) return;
+        // The SSE client requires an explicit successful protocol completion.
+        final assistant = _lastAssistantMessage();
+        setState(() {
+          assistant?['_chat_response_complete'] = true;
+          assistant?['_gateway_pending_response'] = false;
+          replyRetention.complete(_messages);
+          _restReplyRetention = replyRetention;
+          _sending = false;
+          _streaming = false;
+          _gatewayTurnStatus = null;
+        });
         // Refresh messages to get the final server-side state. The token is
         // retained across both HTTP and attachment cleanup, including failure.
         final read = _beginHistoryRead(widget.session.id);
@@ -3445,7 +3497,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           if (!_acceptHistoryRead(read, messages)) return;
           _acceptRecentMessages(messages);
           setState(() {
-            _messages = _historyWindow.rows;
+            _messages = _restHistoryForPresentation();
             if (pendingImage != null) {
               _attachmentDrafts.removeWhere(
                 (draft) => draft.id == pendingImage.id,
@@ -3813,7 +3865,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
     if (reasoning != null) {
       setState(() {
-        _gatewayTurnStatus = null;
+        _gatewayTurnStatus = const GatewayTurnStatus(
+          kind: 'reasoning',
+          text: '',
+        );
         final assistant = _lastAssistantMessage();
         if (assistant == null) return;
         final current = assistant['_gateway_reasoning']?.toString() ?? '';
@@ -3926,6 +3981,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         );
         if (assistant != null) {
           assistant['_gateway_pending_response'] = false;
+          assistant['_chat_response_complete'] = isSuccessfulResponseReceipt(
+            event.data,
+          );
           if (completeText.isNotEmpty) {
             final current = assistant['content']?.toString() ?? '';
             if (current.isEmpty) _registerMaterializedAssistantMessage();
@@ -4116,13 +4174,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (update == null || !mounted) return;
     setState(() {
       final merged = _mergeSubagentActivity(update);
-      if (!merged.isComplete) {
-        _gatewayTurnStatus = GatewayTurnStatus(
-          kind: 'subagent',
-          text: context.l10n.delegated_task(
-            delegatedTaskGoal(context.l10n, merged),
-          ),
-        );
+      if ((_sending || _streaming) &&
+          (!merged.isComplete || _gatewayTurnStatus?.kind == 'subagent')) {
+        final active = _subagentActivities
+            .where((task) => !task.isComplete)
+            .lastOrNull;
+        _gatewayTurnStatus = active == null
+            ? null
+            : GatewayTurnStatus(
+                kind: 'subagent',
+                text: delegatedTaskGoal(context.l10n, active),
+              );
       }
     });
     if (_openTaskController == null) _scheduleStreamingFollow();
@@ -4140,7 +4202,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     // Fence queued callbacks too, without changing the parent's sticky follow
     // intent or deferring a jump until dismissal. Content keeps arriving.
     _automaticScrollGeneration++;
+    _initialEndFramesRemaining = 0;
     try {
+      // Freeze parent follow synchronously, then let its pending layout and
+      // semantics flush before inserting the modal's separate semantics tree.
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted || !identical(_openTaskController, controller)) return;
       await showDelegatedTaskTimeline(context, controller);
     } finally {
       controller.dispose();
@@ -4832,6 +4899,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       final turn = normal!.turnId;
       setState(() {
         _stopResponseInFlight = true;
+        _hiddenActivityTurnId = turn;
         _awaitingVoiceReply = false;
       });
       try {
@@ -4918,6 +4986,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           final assistant = _lastAssistantMessage();
           if (assistant != null) {
             assistant['_gateway_pending_response'] = false;
+            assistant['_chat_response_complete'] = false;
           }
         });
       }
@@ -4984,6 +5053,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _gatewayTurnStatus = null;
       _activeResponseTransport = _ResponseTransport.none;
       _awaitingVoiceReply = false;
+      _terminalTurnNotice = context.l10n.send_failed(e);
       if (removePendingUserMessage &&
           _messages.isNotEmpty &&
           _messages.last['role'] == 'user') {
@@ -4991,16 +5061,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
     });
 
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        hermesStatusSnackBar(
-          context,
-          message: context.l10n.send_failed(e),
-          status: HermesStatus.failed,
-          duration: const Duration(seconds: 6),
-        ),
-      );
-    }
+    // The persistent non-spinning bottom notice owns this failure. A transient
+    // snackbar would duplicate it and disappear on route reattachment.
   }
 
   void _upsertToolProgress(
@@ -5037,12 +5099,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         );
         _retainReceiptPresentation();
       }
-      _gatewayTurnStatus = GatewayTurnStatus(
-        kind: 'tool',
-        text: update.isTerminal
-            ? '${update.displayName}: ${update.statusLabel.toLowerCase()}'
-            : context.l10n.using(update.displayName),
-      );
+      if (!activity.isTerminal || _gatewayTurnStatus?.kind == 'tool') {
+        _gatewayTurnStatus = GatewayTurnStatus.forRunningTool(
+          _timeline
+              .forScope(assistant ?? Object())
+              .where((run) => run.activity != null)
+              .map((run) => run.activity!),
+        );
+      }
     });
 
     _scheduleStreamingFollow();
@@ -5194,9 +5258,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           ),
           child: Column(
             children: [
-              for (final notification in _gatewayNotifications.values)
-                _buildGatewayNotification(notification),
-              if (_legacyTransportFallback)
+              if (_verboseMode)
+                for (final notification in _gatewayNotifications.values)
+                  _buildGatewayNotification(notification),
+              if (_verboseMode && _legacyTransportFallback)
                 Container(
                   key: const ValueKey('legacy-transport-notice'),
                   width: double.infinity,
@@ -5277,6 +5342,46 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
+  String? get _currentActivityText {
+    final snapshot = _normalSnapshot;
+    if (snapshot != null) {
+      if (!snapshot.hasActiveTurn ||
+          snapshot.responseFailure != null ||
+          snapshot.turnId != null && snapshot.turnId == _hiddenActivityTurnId) {
+        return null;
+      }
+      if (snapshot.pendingInput.isNotEmpty) {
+        return context.l10n.hermes_is_waiting_for_input;
+      }
+    } else if (!_sending && !_streaming && !_pendingReattachResync) {
+      return null;
+    }
+    final status = _gatewayTurnStatus;
+    return switch (status?.kind) {
+      'tool' => context.l10n.using(status!.text),
+      'reasoning' => context.l10n.reasoning,
+      'subagent' => context.l10n.delegated_task(status!.text),
+      _ => status?.text ?? context.l10n.hermes_is_responding,
+    };
+  }
+
+  String? get _terminalNoticeText {
+    final snapshot = _normalSnapshot;
+    if (snapshot?.responseFailure case final failure?) {
+      return context.l10n.send_failed(failure);
+    }
+    if (snapshot?.hasActiveTurn == true) return null;
+    if (snapshot?.phase == NormalGatewayTurnPhase.failed) {
+      return context.l10n.send_failed(
+        snapshot?.error ?? context.l10n.turn_failed,
+      );
+    }
+    if (snapshot?.phase == NormalGatewayTurnPhase.reconciledUnknown) {
+      return snapshot?.status?.text;
+    }
+    return _terminalTurnNotice;
+  }
+
   Widget _buildInputBar({required double availableHeight}) {
     final tokens = HermesTokens.of(context);
     const minimumControlsHeight = 56.0;
@@ -5309,52 +5414,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (_gatewayTurnStatus != null &&
-                        (_sending ||
-                            _streaming ||
-                            _normalPhase ==
-                                NormalGatewayTurnPhase.reconciledUnknown))
-                      Container(
-                        width: double.infinity,
-                        margin: const EdgeInsets.fromLTRB(4, 2, 4, 2),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          color: tokens.accentContainer,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Row(
-                          children: [
-                            if (_normalPhase ==
-                                NormalGatewayTurnPhase.reconciledUnknown)
-                              Icon(
-                                Icons.info_outline,
-                                size: 14,
-                                color: tokens.onAccentContainer,
-                              )
-                            else
-                              SizedBox.square(
-                                dimension: 14,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 1.8,
-                                  color: tokens.onAccentContainer,
-                                ),
-                              ),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Text(
-                                _gatewayTurnStatus!.text,
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.bodySmall
-                                    ?.copyWith(color: tokens.onAccentContainer),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                    if (_currentActivityText case final activity?)
+                      ChatActivityBar(text: activity)
+                    else if (_terminalNoticeText case final notice?)
+                      ChatActivityBar(text: notice, isTerminalNotice: true),
                     Align(
                       alignment: Alignment.centerLeft,
                       child: Padding(
@@ -5621,7 +5684,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
-  List<ChatDisplaySection> _normalDisplaySections() =>
+  List<Map<String, dynamic>> _restHistoryForPresentation() =>
+      _restReplyRetention?.reconcile(_historyWindow.rows) ??
+      _historyWindow.rows;
+
+  List<ChatDisplaySection> _normalDisplaySections({bool? verbose}) =>
       buildNormalChatDisplaySections(
         canonicalRows: _messages,
         receivedRows: _normalSnapshot?.displayRows ?? const [],
@@ -5631,7 +5698,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         receivedOutcomes: _normalSnapshot?.receivedOutcomes ?? const [],
         subagentActivities: _subagentActivities,
         notices: _gatewayNotices,
-        verbose: _verboseMode,
+        verbose: verbose ?? _verboseMode,
+        conversationOnly: !(verbose ?? _verboseMode),
       );
 
   Widget _buildSourceHeading(ChatDisplaySource source) {
@@ -5706,6 +5774,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
+  void _pinDetail(Object identity, bool expanded) {
+    _detailExpansions.remove(identity);
+    _detailExpansions[identity] = expanded;
+    if (_detailExpansions.length > ToolActivityGroupPins.maxPins) {
+      _detailExpansions.remove(_detailExpansions.keys.first);
+    }
+  }
+
   Widget _buildDisplayItem(dynamic item, {ChatDisplaySource? source}) {
     if (item is ChatToolActivityGroup) {
       return GatewayActivityCard(
@@ -5724,7 +5800,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     if (item is List<GatewaySubagentActivity>) {
       return GatewaySubagentCard(
+        key: ValueKey((_reasoningExpansionPins, 'delegation')),
         activities: item,
+        pinnedExpansion: _delegationExpanded,
+        onPinChanged: (expanded) => _delegationExpanded = expanded,
         onOpenTask: (task) => unawaited(_openDelegatedTask(task)),
       );
     }
@@ -5751,7 +5830,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       );
     }
     if (item is GatewayNotice) {
-      return GatewayNoticeCard(notice: item);
+      final identity = (source, 'notice', item.identity);
+      return GatewayNoticeCard(
+        key: ValueKey((_detailExpansions, identity)),
+        notice: item,
+        initiallyExpanded: _detailExpansions[identity] ?? false,
+        onExpansionChanged: (expanded) => _pinDetail(identity, expanded),
+      );
     }
 
     final msg = item as Map<String, dynamic>;
@@ -5787,6 +5872,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       content: content,
       isUser: isUser,
       verbose: _verboseMode,
+      metadataExpanded:
+          _detailExpansions[(source, chatDisplayItemIdentity(msg))] ?? false,
+      onMetadataExpansionChanged: (expanded) =>
+          _pinDetail((source, chatDisplayItemIdentity(msg)), expanded),
       density: _chatDensity,
       metadata: msg,
       mediaReferencesFinal: msg['_gateway_pending_response'] != true,
@@ -5857,6 +5946,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         : const <ChatDisplaySection>[];
     final displayMessages = normal
         ? [for (final section in sections) ...section.items]
+        : !_verboseMode
+        ? buildConversationDisplayItems(
+            messages: _messages,
+            timeline: _timeline,
+          )
         : buildChatDisplayItems(
             messages: _messages,
             toolActivities: _toolActivities,
@@ -5868,7 +5962,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final cells = <({ChatDisplaySource? source, dynamic item, Key key})>[
       if (normal)
         for (final section in sections) ...[
-          if (section.source != ChatDisplaySource.auxiliary)
+          if (_verboseMode && section.source != ChatDisplaySource.auxiliary)
             (
               source: section.source,
               item: null,
@@ -5942,7 +6036,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             if (cell.source == null) return child;
             return KeyedSubtree(
               key: cell.key,
-              child: cell.source == ChatDisplaySource.received
+              child: _verboseMode && cell.source == ChatDisplaySource.received
                   ? _buildReceivedCell(
                       cell.item,
                       child,
@@ -5999,6 +6093,8 @@ class MessageBubble extends StatelessWidget {
   final bool isUser;
   final bool verbose;
   final ChatDensity density;
+  final bool metadataExpanded;
+  final ValueChanged<bool>? onMetadataExpansionChanged;
   final Map<String, dynamic> metadata;
   final Future<void> Function()? onReadAloud;
   final VoidCallback? onEdit;
@@ -6017,6 +6113,8 @@ class MessageBubble extends StatelessWidget {
     required this.isUser,
     this.verbose = false,
     this.density = ChatDensity.comfortable,
+    this.metadataExpanded = false,
+    this.onMetadataExpansionChanged,
     this.metadata = const {},
     this.onReadAloud,
     this.onEdit,
@@ -6387,23 +6485,30 @@ class MessageBubble extends StatelessWidget {
                   color: isUser ? tokens.accentContainer : tokens.surface,
                   borderRadius: BorderRadius.circular(6),
                 ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: metaLines
-                      .map(
-                        (line) => Text(
-                          line,
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontFamily: 'monospace',
-                            color: isUser
-                                ? tokens.onAccentContainer
-                                : tokens.onSurface,
+                child: Material(
+                  type: MaterialType.transparency,
+                  child: ExpansionTile(
+                    key: const ValueKey('message-metadata'),
+                    title: Text(context.l10n.message_metadata),
+                    dense: true,
+                    tilePadding: EdgeInsets.zero,
+                    initiallyExpanded: metadataExpanded,
+                    onExpansionChanged: onMetadataExpansionChanged,
+                    children: metaLines
+                        .map(
+                          (line) => Text(
+                            line,
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontFamily: 'monospace',
+                              color: isUser
+                                  ? tokens.onAccentContainer
+                                  : tokens.onSurface,
+                            ),
                           ),
-                        ),
-                      )
-                      .toList(),
+                        )
+                        .toList(),
+                  ),
                 ),
               ),
             ],
