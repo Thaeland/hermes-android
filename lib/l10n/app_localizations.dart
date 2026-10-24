@@ -4675,7 +4675,7 @@ abstract class AppLocalizations {
   /// No description provided for @certificate_password_optional.
   ///
   /// In en, this message translates to:
-  /// **'Certificate password (optional)'**
+  /// **'Certificate password (only if the file asks for one)'**
   String get certificate_password_optional;
 
   /// No description provided for @client_certificate_required.

@@ -2214,6 +2214,13 @@ class _AddDialogState extends State<_AddDialog> {
   String? _pemCertificateName;
   List<int>? _pemPrivateKeyBytes;
   String? _pemPrivateKeyName;
+
+  /// Bytes of the last pick that failed only because it needs a password.
+  /// Retained so the password field can retry the import without a re-pick.
+  List<int>? _pendingCertificateBytes;
+  String? _pendingCertificateName;
+  bool _pendingPasswordBytes = false;
+  Timer? _certificateRetryTimer;
   bool _importingCertificate = false;
   bool _validating = false;
   String? _error;
@@ -2256,6 +2263,7 @@ class _AddDialogState extends State<_AddDialog> {
     _gatewayProfile = TextEditingController(text: conn?.gatewayProfile ?? '');
     _certificateService = ClientCertificateService();
     _certificatePassword = TextEditingController();
+    _certificatePassword.addListener(_onCertificatePasswordChanged);
     _clientCertificate = conn?.clientCertificate;
     if (_clientCertificate case final certificate?) {
       // Validation can finish on an already-loaded TLS context after another
@@ -2392,14 +2400,69 @@ class _AddDialogState extends State<_AddDialog> {
           _pemPrivateKeyBytes = bytes;
           _pemPrivateKeyName = file.name;
         }
+        // A password-protected file arrives here with the bytes retained so the
+        // password field can retry without asking the user to pick again.
+        _pendingCertificateBytes = _pendingPasswordBytes ? bytes : null;
+        _pendingCertificateName = _pendingPasswordBytes ? file.name : null;
         if (mounted) setState(() {});
       } else {
+        _clearPendingCertificatePick();
         _pemCertificateBytes = null;
         _pemCertificateName = null;
         _pemPrivateKeyBytes = null;
         _pemPrivateKeyName = null;
       }
       if (_clientCertificate != null) return;
+    }
+  }
+
+  void _clearPendingCertificatePick() {
+    _pendingCertificateBytes = null;
+    _pendingCertificateName = null;
+    _pendingPasswordBytes = false;
+  }
+
+  /// Debounced so typing a password does not run a parse per keystroke.
+  void _onCertificatePasswordChanged() {
+    if (!_pendingPasswordBytes && _pendingCertificateBytes == null) return;
+    _certificateRetryTimer?.cancel();
+    _certificateRetryTimer = Timer(const Duration(milliseconds: 400), () {
+      if (!mounted) return;
+      unawaited(_retryPendingCertificateImport());
+    });
+  }
+
+  /// Re-runs the import for a pick that failed because it needs a password.
+  ///
+  /// Picking a certificate and then typing its password is the natural order,
+  /// so the first attempt is always made with whatever the password field
+  /// holds (usually nothing). A password failure keeps the bytes; this retries
+  /// as soon as the user types, and keeps the error visible while it is wrong.
+  Future<void> _retryPendingCertificateImport() async {
+    final bytes = _pendingCertificateBytes;
+    final name = _pendingCertificateName;
+    if (bytes == null || name == null) return;
+    if (_certificatePassword.text.trim().isEmpty) return;
+    if (_importingCertificate || _validating) return;
+
+    final config = await _runCertificateImport(
+      () => _certificateService.importIdentityDocument(
+        bytes: bytes,
+        password: _certificatePassword.text,
+        label: name,
+        stagedCertificateBytes: _pemCertificateBytes,
+        stagedCertificateName: _pemCertificateName,
+        stagedPrivateKeyBytes: _pemPrivateKeyBytes,
+      ),
+    );
+    if (!mounted) return;
+    if (config != null) {
+      _clearPendingCertificatePick();
+      _pemCertificateBytes = null;
+      _pemCertificateName = null;
+      _pemPrivateKeyBytes = null;
+      _pemPrivateKeyName = null;
+      if (_clientCertificate != null) setState(() {});
     }
   }
 
@@ -2475,6 +2538,7 @@ class _AddDialogState extends State<_AddDialog> {
       if (!mounted) return null;
       setState(() {
         _error = e.message;
+        _pendingPasswordBytes = e.passwordRelated;
         _importingCertificate = false;
       });
       return null;
@@ -2504,6 +2568,7 @@ class _AddDialogState extends State<_AddDialog> {
       _pemPrivateKeyBytes = null;
       _pemPrivateKeyName = null;
     });
+    _clearPendingCertificatePick();
   }
 
   Future<void> _validateAndSave() =>
@@ -3034,6 +3099,8 @@ class _AddDialogState extends State<_AddDialog> {
   @override
   void dispose() {
     unawaited(_certificateFileLease.close());
+    _certificateRetryTimer?.cancel();
+    _certificatePassword.removeListener(_onCertificatePasswordChanged);
     _host.removeListener(_onHostChanged);
     _label.dispose();
     _host.dispose();

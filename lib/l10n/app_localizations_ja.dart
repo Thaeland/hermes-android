@@ -2690,7 +2690,8 @@ class AppLocalizationsJa extends AppLocalizations {
   String get choose_certificate => 'Choose certificate';
 
   @override
-  String get certificate_password_optional => 'Certificate password (optional)';
+  String get certificate_password_optional =>
+      'Certificate password (only if the file asks for one)';
 
   @override
   String get client_certificate_required =>

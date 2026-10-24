@@ -140,4 +140,55 @@ void main() {
       ),
     );
   });
+
+  // Picking the file first and typing the password second is the natural
+  // order, so an empty password on a protected container must be reported as
+  // "needs a password" (and retryable), not as a corrupt file.
+  test('an empty password on a protected PKCS#12 asks for the password', () async {
+    await expectLater(
+      service.importIdentityDocument(
+        bytes: await fixture('client-test.p12'),
+        password: '',
+        label: 'fixture-client.p12',
+      ),
+      throwsA(
+        isA<ClientCertificateImportException>()
+            .having((e) => e.message, 'message', contains('needs its password'))
+            .having((e) => e.passwordRelated, 'passwordRelated', isTrue),
+      ),
+    );
+  });
+
+  test('a wrong password is flagged as password-related', () async {
+    await expectLater(
+      service.importIdentityDocument(
+        bytes: await fixture('client-test.p12'),
+        password: 'wrong-password',
+        label: 'fixture-client.p12',
+      ),
+      throwsA(
+        isA<ClientCertificateImportException>().having(
+          (e) => e.passwordRelated,
+          'passwordRelated',
+          isTrue,
+        ),
+      ),
+    );
+  });
+
+  test('an unreadable file is not flagged as password-related', () async {
+    await expectLater(
+      service.importIdentityDocument(
+        bytes: utf8.encode('not a certificate'),
+        label: 'notes.txt',
+      ),
+      throwsA(
+        isA<ClientCertificateImportException>().having(
+          (e) => e.passwordRelated,
+          'passwordRelated',
+          isFalse,
+        ),
+      ),
+    );
+  });
 }

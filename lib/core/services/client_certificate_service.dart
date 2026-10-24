@@ -14,7 +14,16 @@ import '../models/client_certificate.dart';
 class ClientCertificateImportException implements Exception {
   final String message;
 
-  const ClientCertificateImportException(this.message);
+  /// True when the failure may be resolved by supplying (or correcting) the
+  /// container/key password. The dialog keeps the picked bytes in that case so
+  /// the user never has to re-pick the file, and re-runs the import when the
+  /// password field changes.
+  final bool passwordRelated;
+
+  const ClientCertificateImportException(
+    this.message, {
+    this.passwordRelated = false,
+  });
 
   @override
   String toString() => message;
@@ -164,12 +173,22 @@ class ClientCertificateService implements ClientCertificateFileStore {
         password == null || password.isEmpty ? null : password,
       );
     } on Pkcs12MacMismatchException {
+      // The MAC covers the whole container, so a mismatch means either a
+      // missing password or a wrong one. Only the first is worth prompting for.
+      if (password == null || password.isEmpty) {
+        throw const ClientCertificateImportException(
+          'This certificate needs its password. Enter it below and it will open automatically.',
+          passwordRelated: true,
+        );
+      }
       throw const ClientCertificateImportException(
         'The certificate password is incorrect, or the file is corrupted.',
+        passwordRelated: true,
       );
     } on Pkcs12BadPasswordException {
       throw const ClientCertificateImportException(
         'The certificate password is incorrect.',
+        passwordRelated: true,
       );
     } on Pkcs12UnsupportedException {
       throw const ClientCertificateImportException(
