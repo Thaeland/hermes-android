@@ -64,18 +64,19 @@ class ThemePalettePicker extends StatefulWidget {
 
 class _ThemePalettePickerState extends State<ThemePalettePicker> {
   Future<void> _select(HermesPalette palette) async {
+    final onChanged = widget.onChanged;
     try {
       await ThemePreferenceStore(widget.preferences).savePalette(palette);
-      if (!mounted) return;
-      setState(() {});
-      widget.onChanged?.call();
     } catch (error) {
-      if (!mounted) return;
-      setState(() {});
-      widget.onChanged?.call();
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(context.l10n.failed(error))));
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(context.l10n.failed(error))));
+      }
+    } finally {
+      if (mounted) setState(() {});
+      // The app outlives this picker and still needs the settled save/rollback.
+      onChanged?.call();
     }
   }
 
@@ -198,18 +199,18 @@ class ThemeModePicker extends StatefulWidget {
 
 class _ThemeModePickerState extends State<ThemeModePicker> {
   Future<void> _select(ThemeMode mode) async {
+    final onChanged = widget.onChanged;
     try {
       await ThemePreferenceStore(widget.preferences).saveMode(mode);
-      if (!mounted) return;
-      setState(() {});
-      widget.onChanged?.call();
     } catch (error) {
-      if (!mounted) return;
-      setState(() {});
-      widget.onChanged?.call();
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(context.l10n.failed(error))));
+      if (mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(context.l10n.failed(error))));
+      }
+    } finally {
+      if (mounted) setState(() {});
+      onChanged?.call();
     }
   }
 

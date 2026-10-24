@@ -908,6 +908,7 @@ class HomeScreenState extends State<HomeScreen> {
   }
 
   void _showAppearance() {
+    final app = context.findAncestorStateOfType<HermesAppState>();
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -926,9 +927,7 @@ class HomeScreenState extends State<HomeScreen> {
             const SizedBox(height: 16),
             ThemeAppearanceSettings(
               preferences: widget.connManager.prefs,
-              onChanged: () => context
-                  .findAncestorStateOfType<HermesAppState>()
-                  ?.refreshAppearancePreferences(),
+              onChanged: app?.refreshAppearancePreferences,
             ),
           ],
         ),

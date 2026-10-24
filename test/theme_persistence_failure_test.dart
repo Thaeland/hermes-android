@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
 import 'package:hermes_android/core/services/theme_preference.dart';
 import 'package:hermes_android/core/theme/hermes_theme.dart';
+import 'package:hermes_android/core/widgets/theme_palette_picker.dart';
 import 'package:hermes_android/main.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -170,6 +171,157 @@ void main() {
       expect(ThemePreferenceStore(prefs).readPalette(), HermesPalette.green);
     },
   );
+
+  for (final paletteChange in [true, false]) {
+    testWidgets(
+      'held ${paletteChange ? 'palette' : 'mode'} save safely settles after root disposal',
+      (tester) async {
+        final prefs = _ControlledPreferences({
+          'theme_palette': 'blue',
+          'theme_mode': 'dark',
+        });
+        final save = Completer<bool>();
+        prefs.onWrite = (_, _) => save.future;
+        addTearDown(() {
+          if (!save.isCompleted) save.complete(true);
+        });
+        final appKey = GlobalKey<HermesAppState>();
+        await tester.pumpWidget(
+          MediaQuery(
+            data: const MediaQueryData(),
+            child: HermesApp(
+              key: appKey,
+              connManager: ConnectionManager(prefs),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('home_appearance_button')));
+        await tester.pumpAndSettle();
+        await tester.tap(
+          find.byKey(
+            Key(paletteChange ? 'theme_palette_green' : 'theme_mode_light'),
+          ),
+        );
+        await tester.pump();
+        expect(prefs.writes, hasLength(1));
+        final root = appKey.currentState!;
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pumpAndSettle();
+        expect(root.mounted, isFalse);
+        save.complete(true);
+        await tester.pumpAndSettle();
+        expect(prefs.cache, prefs.durable);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
+    for (final outcome in ['success', 'rejected', 'exception']) {
+      final kind = paletteChange ? 'palette' : 'mode';
+      testWidgets('dismissed $kind picker refreshes root after held $outcome', (
+        tester,
+      ) async {
+        final prefs = _ControlledPreferences({
+          'theme_palette': 'blue',
+          'theme_mode': 'dark',
+        });
+        final save = Completer<bool>();
+        final rollback = Completer<bool>();
+        final preferenceKey = paletteChange ? 'theme_palette' : 'theme_mode';
+        final selected = paletteChange ? 'green' : 'light';
+        prefs.onWrite = (key, value) {
+          if (key != preferenceKey) return Future.value(true);
+          return value == selected ? save.future : rollback.future;
+        };
+        addTearDown(() {
+          if (!save.isCompleted) save.complete(false);
+          if (!rollback.isCompleted) rollback.complete(true);
+        });
+        final appKey = GlobalKey<HermesAppState>();
+        await tester.pumpWidget(
+          MediaQuery(
+            data: const MediaQueryData(),
+            child: HermesApp(
+              key: appKey,
+              connManager: ConnectionManager(prefs),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final navigator = tester.state<NavigatorState>(
+          find.byType(Navigator).first,
+        );
+        await tester.tap(find.byKey(const Key('home_appearance_button')));
+        await tester.pumpAndSettle();
+        final picker = tester.state(
+          find.byType(paletteChange ? ThemePalettePicker : ThemeModePicker),
+        );
+        await tester.tap(find.byKey(Key('${preferenceKey}_$selected')));
+        await tester.pump();
+        expect(prefs.writes, [(preferenceKey, selected)]);
+        expect(prefs.cache[preferenceKey], selected);
+
+        if (outcome != 'success') {
+          // A root rebuild can observe the plugin's optimistic cache while
+          // persistence is held. Completion must reconcile that projection.
+          appKey.currentState!.refreshAppearancePreferences();
+          await tester.pumpAndSettle();
+        }
+        navigator.pop();
+        await tester.pumpAndSettle();
+        expect(picker.mounted, isFalse);
+
+        if (outcome == 'exception') {
+          save.completeError(StateError('Storage unavailable'));
+        } else {
+          save.complete(outcome == 'success');
+        }
+        await tester.pumpAndSettle();
+        if (outcome != 'success') {
+          expect(prefs.writes, [
+            (preferenceKey, selected),
+            (preferenceKey, paletteChange ? 'blue' : 'dark'),
+          ]);
+          // The root must still be reconciled when rollback itself awaits
+          // storage after the picker has already gone away.
+          rollback.complete(true);
+          await tester.pumpAndSettle();
+        }
+
+        final tokens = HermesTokens.of(
+          tester.element(find.text('No connections')),
+        );
+        expect(
+          tokens.palette,
+          paletteChange && outcome == 'success'
+              ? HermesPalette.green
+              : HermesPalette.blue,
+        );
+        expect(
+          tokens.brightness,
+          !paletteChange && outcome == 'success'
+              ? Brightness.light
+              : Brightness.dark,
+        );
+        expect(prefs.cache, prefs.durable);
+        expect(find.byType(SnackBar), findsNothing);
+        expect(
+          tester.state<NavigatorState>(find.byType(Navigator).first),
+          same(navigator),
+        );
+        expect(appKey.currentState!.mounted, isTrue);
+        expect(tester.takeException(), isNull);
+
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pumpAndSettle();
+        await prefs.reload();
+        expect(
+          prefs.getString(preferenceKey),
+          outcome == 'success' ? selected : (paletteChange ? 'blue' : 'dark'),
+        );
+      });
+    }
+  }
 
   testWidgets(
     'failed picker saves retain confirmed selection and root appearance',

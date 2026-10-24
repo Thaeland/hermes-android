@@ -4,8 +4,9 @@
 
 Open **More → Assets** on a connection with an authenticated Hermes Dashboard.
 The browser finds explicit `MEDIA:` file references in saved assistant replies,
-including inline links. Paths inside code examples and user/tool/system messages
-are not treated as delivered files.
+including inline links. Paths inside Markdown code or quoted examples (including
+list-item fences and lazy blockquote continuations), and user/tool/system messages,
+are not treated as delivered files. Later real deliveries remain discoverable.
 
 ## Use
 
@@ -55,6 +56,11 @@ correction-learning AI filing. The chat `session.undo` RPC edits transcript turn
 and must not be used as organisation undo.
 
 ## Implementation
+
+Discovery and inline/standalone media rendering share the locked Markdown grammar
+for code and quote exclusions. Parser-only occurrence IDs correlate eligible
+inline nodes with the original source matches; paths and replacement offsets are
+never reconstructed from normalized Markdown text.
 
 Hermes Agent assisted with this feature and its tests. No production release,
 F-Droid update or physical-phone validation is implied by a local development

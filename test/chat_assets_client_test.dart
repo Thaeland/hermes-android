@@ -11,6 +11,8 @@ import 'package:hermes_android/core/utils/media_tags.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
+import 'support/media_markdown_fixtures.dart';
+
 Session _session([String id = 'source-session']) => Session(
   id: id,
   title: 'Source chat',
@@ -91,6 +93,22 @@ class _CloseTrackingClient extends MockClient {
 
 void main() {
   group('ChatAsset and chatAssetsFromMessages', () {
+    for (final example in mediaMarkdownExamples.entries) {
+      test('${example.key} discovers only later real assistant deliveries', () {
+        final source = _session();
+        final assets = chatAssetsFromMessages(source, [
+          {
+            'role': 'assistant',
+            'content': '${example.value}\n\nMEDIA:/out/real.pdf',
+            'timestamp': 2,
+          },
+        ]);
+        expect(assets.map((asset) => asset.ref.path), ['/out/real.pdf']);
+        expect(assets.single.session, same(source));
+        expect(assets.single.timestamp, 2);
+      });
+    }
+
     test(
       'identity is a lossless session/path tuple, not a delimiter or hash',
       () {

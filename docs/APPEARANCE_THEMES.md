@@ -24,6 +24,7 @@ The Android launcher icon and native launch screen are branding assets, not Flut
 - Read active colours through `HermesTokens.of(context)` or `Theme.of(context).colorScheme`. Do not instantiate default token sets inside presentation widgets; doing so ignores the selected palette.
 - Use the paired `onAccent` and `onAccentContainer` foregrounds over their respective fills. Use `foregroundFor` for opaque semantic fills, not a fixed white/black assumption.
 - `ThemePreferenceStore` persists enum names under `theme_palette`, independently of `theme_mode`. Unknown or incorrectly typed values fall back non-destructively to Gold.
+- Save and rollback completion refresh the surviving app even if the Appearance sheet or picker has closed. Only picker-local state and error snackbars depend on the picker still being mounted.
 - Code-block caches retain parser nodes, not theme-dependent text styles, so existing blocks recolour on same-brightness palette changes.
 - Contrast tests cover every palette in light/dark mode, normal-size body/muted/accent text, semantic badges, selected surfaces, scheme pairs and component foregrounds with a minimum 4.5:1 text contrast.
 - Widget tests cover live selection, navigation/draft retention, restart, backup restoration, offline Settings, and compact layouts with enlarged text.

@@ -16,6 +16,7 @@ dependencies:
   # UI
   cupertino_icons: ^1.0.8
   flutter_markdown: ^0.7.6
+  markdown: ^7.3.0
 
   # State management
   flutter_riverpod: ^2.6.1
