@@ -13,6 +13,12 @@ Your expansion choices survive updates and lazy scrolling during the visit.
 Closing and reopening the chat resets those choices. Covering a chat with a task
 inspector does not start a new visit.
 
+Machine-authored model/personality notices, automatic recovery, internal
+notifications and recognised legacy automation messages use Background task cards,
+not user bubbles. Process reports keep their Background process cards. Quiet mode
+hides these details. See [internal-message classification](internal-message-classification.md)
+for supported formats and the limits of old history without provenance metadata.
+
 ## Completion and saved history
 
 A successful response receipt confirms received prose. An owned successful turn

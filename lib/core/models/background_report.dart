@@ -1,5 +1,7 @@
 import 'dart:math' as math;
 
+import 'legacy_background_message.dart';
+
 enum BackgroundReportKind { task, process }
 
 typedef _TaskListCandidate = ({
@@ -8,9 +10,10 @@ typedef _TaskListCandidate = ({
   int contentLength,
 });
 
-/// Display-only background report. Prefer server annotations; legacy standalone
-/// todo snapshots need a narrow format fallback because they have no annotation.
-/// Quoted headers and mixed human messages are not classified as reports.
+/// Display-only background report, never a change to the model/request history.
+/// Prefer server annotations; old standalone runtime notices and todo snapshots
+/// need conservative compatibility matching because they lack durable metadata.
+/// Quoted headers and mixed human messages are not classified by prefix alone.
 class BackgroundReport {
   const BackgroundReport._({
     required this.kind,
@@ -25,30 +28,44 @@ class BackgroundReport {
   final bool hasIssues;
 
   static BackgroundReport? fromMessage(Map<String, dynamic> message) {
-    final kind = switch (message['display_kind']) {
-      'async_delegation_complete' => BackgroundReportKind.task,
-      'process_complete' => BackgroundReportKind.process,
-      _ => null,
-    };
-    final body = message['content'];
-    if (body is! String) return null;
-    if (kind == null) {
-      // Explicit server kinds (including hidden/steer) always take precedence.
-      if (message['role'] != 'user' ||
-          (message['display_kind'] != null && message['display_kind'] != '') ||
-          !_isPreservedTaskList(body)) {
-        return null;
-      }
-      return BackgroundReport._(
-        kind: BackgroundReportKind.task,
-        body: body,
-        summary: null,
-        hasIssues: false,
-      );
-    }
-
     final metadata = message['display_metadata'];
     final fields = metadata is Map ? metadata : const {};
+    if (fields['model_only'] == true || message['display_kind'] == 'hidden') {
+      return null;
+    }
+    var kind = switch (message['display_kind']) {
+      'async_delegation_complete' => BackgroundReportKind.task,
+      'process_complete' => BackgroundReportKind.process,
+      'model_switch' ||
+      'personality_switch' ||
+      'auto_continue' ||
+      'internal_notification' when message['role'] == 'user' =>
+        BackgroundReportKind.task,
+      _ => null,
+    };
+    // A public replacement (including null/empty) must not expose the private
+    // carrier. Keep the raw row untouched and classify its public text only.
+    final hasProjection = message.containsKey('display_content');
+    final body = hasProjection
+        ? message['display_content']
+        : message['content'];
+    if (body is! String || body.isEmpty) return null;
+    if (kind == null) {
+      // Explicit unknown/human kinds and public projections outrank heuristics.
+      if (message['role'] != 'user' ||
+          hasProjection ||
+          (message['display_kind'] != null && message['display_kind'] != '')) {
+        return null;
+      }
+      if (_isPreservedTaskList(body) || LegacyBackgroundMessage.isTask(body)) {
+        kind = BackgroundReportKind.task;
+      } else if (LegacyBackgroundMessage.isProcess(body)) {
+        kind = BackgroundReportKind.process;
+      } else {
+        return null;
+      }
+    }
+
     final displayText = fields['display_text'];
     // Bound only the preview, never the original body (including whitespace,
     // literal escapes and tool-looking markup).

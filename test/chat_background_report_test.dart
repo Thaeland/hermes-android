@@ -14,6 +14,7 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/fake_voice_composer_adapter.dart';
+import 'support/internal_background_message_fixture.dart';
 import 'support/preserved_task_list_fixture.dart';
 
 const _quote =
@@ -34,11 +35,26 @@ void main() {
         .setMockMethodCallHandler(picker, null);
   });
 
-  for (final snapshotCase in preservedTaskListFixtures().entries) {
+  final internalFixtures = internalBackgroundMessageFixtures();
+  final taskCases = {
+    ...preservedTaskListFixtures(),
+    for (final name in [
+      'model_switch',
+      'legacy_model_switch',
+      'personality_set',
+      'auto_continue',
+      'internal_notification',
+      'length_continuation_output_limit',
+      'legacy_delegation_batch',
+      'heartbeat',
+    ])
+      name: Map<String, dynamic>.from(internalFixtures[name]!['row'] as Map),
+  };
+  for (final snapshotCase in taskCases.entries) {
     for (final verbose in [false, true]) {
       for (final arrivesOnRefresh in [false, true]) {
         testWidgets(
-          'untagged compression task list ${snapshotCase.key} follows quiet/verbose card policy '
+          'internal task ${snapshotCase.key} follows quiet/verbose card policy '
           'verbose=$verbose arrivesOnRefresh=$arrivesOnRefresh',
           (tester) async {
             SharedPreferences.setMockInitialValues({'verbose_mode': verbose});
@@ -124,7 +140,7 @@ void main() {
                   .singleWhere((row) => row['id'] == 3);
               expect(canonical['role'], 'user');
               expect(canonical['content'], body);
-              expect(canonical['display_kind'], isNull);
+              expect(canonical['display_kind'], snapshot['display_kind']);
               await tester.pumpWidget(const SizedBox.shrink());
               await tester.pumpWidget(_app(fixture, controller));
               await tester.pumpAndSettle();
