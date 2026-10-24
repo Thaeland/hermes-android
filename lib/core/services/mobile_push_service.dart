@@ -26,6 +26,13 @@ class MobilePushRoute {
   final Map<String, dynamic> authority;
 }
 
+/// A read-only diagnosis, owned by its caller rather than shared consent state.
+class MobilePushAvailability {
+  const MobilePushAvailability._(this.status, this.error);
+  final String status;
+  final String? error;
+}
+
 /// Optional, one explicitly selected saved connection per Android installation.
 /// Native encrypted storage is the source of truth. Startup never requests
 /// permission, registers a distributor, or blocks credential hydration.
@@ -335,8 +342,12 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   /// Read-only server check while off: never requests permission or registers.
-  Future<void> checkAvailability(SavedConnection connection) async {
-    if (!supported || _closed || enabled || enabling) return;
+  /// Results must be fenced by the caller's lifetime/operation/connection. They
+  /// never change shared consent status/errors or invalidate its epoch.
+  Future<MobilePushAvailability?> checkAvailability(
+    SavedConnection connection,
+  ) async {
+    if (!supported || _closed || enabled || enabling) return null;
     final epoch = _epoch;
     final fingerprint = binding(connection);
     final mutation = ConnectionMutationBarrier.capture(connection.id);
@@ -350,19 +361,15 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
         binding(_connection(connection.id)!) == fingerprint;
     final client = _clientFactory(connection);
     try {
-      if (!await _refreshCredentialCache(connection.id) || !current()) return;
-      await MobilePushApi(client).capabilities(authorized: true);
-      if (!current()) return;
-      error = null;
-      status = 'Off; server API ready';
-      notifyListeners();
-    } catch (e) {
-      if (current()) {
-        error = _message(e);
-        status = 'Error';
-        notifyListeners();
+      if (!await _refreshCredentialCache(connection.id) || !current()) {
+        return null;
       }
-      rethrow;
+      await MobilePushApi(client).capabilities(authorized: true);
+      return current()
+          ? const MobilePushAvailability._('Off; server API ready', null)
+          : null;
+    } catch (e) {
+      return current() ? MobilePushAvailability._('Error', _message(e)) : null;
     } finally {
       client.close();
     }
