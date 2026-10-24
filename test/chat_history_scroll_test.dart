@@ -759,6 +759,7 @@ void main() {
     for (final (status, readHistory) in [
       (200, false),
       (200, true),
+      (503, false),
       (503, true),
     ]) {
       testWidgets(
@@ -820,6 +821,19 @@ void main() {
           );
           expect(historyGate.isCompleted, isFalse);
           final position = scroll.position;
+          final openingViewport = position.viewportDimension;
+          final latest = find.byWidgetPredicate(
+            (widget) =>
+                widget is MessageBubble &&
+                widget.content == messages.last['content'],
+          );
+          expect(latest, findsOneWidget);
+          expect(
+            tester.getRect(latest).bottom,
+            lessThanOrEqualTo(
+              tester.getRect(find.byType(ListView).first).bottom,
+            ),
+          );
           if (readHistory) {
             await tester.drag(
               find.byType(ListView).first,
@@ -839,6 +853,16 @@ void main() {
               scroll.position.pixels,
               closeTo(scroll.position.maxScrollExtent, 1),
             );
+            expect(latest, findsOneWidget);
+            expect(
+              tester.getRect(latest).bottom,
+              lessThanOrEqualTo(
+                tester.getRect(find.byType(ListView).first).bottom,
+              ),
+            );
+            if (status == 503) {
+              expect(position.viewportDimension, lessThan(openingViewport));
+            }
           }
           expect(
             find.byType(MaterialBanner),

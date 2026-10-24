@@ -573,6 +573,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final _endAffordanceController = ChatEndAffordanceController();
   bool _streamFollowScheduled = false;
   bool _initialEndFrameScheduled = false;
+  bool _openingHistoryChromePending = true;
+  bool _openingScrollInterrupted = false;
   double? _initialEndLastExtent;
   int _initialEndStableFrames = 0;
   int _initialEndFramesRemaining = 0;
@@ -1894,11 +1896,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   bool _handleScrollNotification(ScrollNotification notification) {
     final isDirectUserScroll =
+        (notification is ScrollStartNotification &&
+            notification.dragDetails != null) ||
         (notification is ScrollUpdateNotification &&
             notification.dragDetails != null) ||
         (notification is OverscrollNotification &&
             notification.dragDetails != null);
     if (isDirectUserScroll) {
+      _openingScrollInterrupted = true;
       _initialEndFramesRemaining = 0;
       _scrollCoordinator.updateFromUserScroll(
         isNearEnd: _isNearEnd(notification.metrics),
@@ -1957,6 +1962,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _scheduleScrollTarget(null);
       return;
     }
+    _scheduleOpeningEndFrames();
+  }
+
+  void _scheduleOpeningEndFrames() {
     _initialEndFramesRemaining = _initialEndFrameBudget;
     _initialEndStableFrames = 0;
     _initialEndLastExtent = null;
@@ -2080,7 +2089,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _loadingHistoryRead = null;
     if (_historyReadAttached(read) &&
         read.responseGeneration == _responseGeneration) {
+      // The first read can replace a thin loader with a taller error banner
+      // after retained history has already used its one-shot alignment. Keep
+      // only an untouched, exactly-at-end opening anchored across that layout.
+      final keepOpeningEnd =
+          _openingHistoryChromePending &&
+          !_openingScrollInterrupted &&
+          _openTaskController == null &&
+          _scrollCoordinator.initialEndAlignmentConsumed &&
+          _scrollController.hasClients &&
+          (_scrollController.position.maxScrollExtent -
+                      _scrollController.position.pixels)
+                  .abs() <=
+              1;
+      _openingHistoryChromePending = false;
       setState(() => _loading = false);
+      if (keepOpeningEnd) _scheduleOpeningEndFrames();
     }
   }
 
@@ -4136,6 +4160,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           DashboardTaskHistory.fromConnection(widget.connection),
     );
     _openTaskController = controller;
+    _openingScrollInterrupted = true;
     // Fence queued callbacks too, without changing the parent's sticky follow
     // intent or deferring a jump until dismissal. Content keeps arriving.
     _automaticScrollGeneration++;
