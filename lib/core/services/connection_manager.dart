@@ -868,6 +868,24 @@ class ConnectionManager {
     await _deleteUnreferencedCertificates(previousConnections, connections);
   }
 
+  /// Reconciles released editor/import files against physical saved metadata.
+  ///
+  /// Share the list owner with account writes, including the reference read and
+  /// collection. A failed save may have committed; unknown reachability must
+  /// retain files. This best-effort cleanup never replaces the mutation error.
+  Future<void> cleanupUnreferencedCertificates() async {
+    try {
+      await _withSavedListTransaction([], () async {
+        final connections = _connectionsFromMaps(_readConnectionMaps());
+        await _certificateFiles.deleteUnreferenced(
+          _certificateDirectories(connections),
+        );
+      });
+    } catch (_) {
+      // Retry collection after a later successful physical metadata read.
+    }
+  }
+
   /// Removes certificate/key files no longer referenced by any connection.
   ///
   /// Runs only after a successful commit and is best-effort: storage cleanup

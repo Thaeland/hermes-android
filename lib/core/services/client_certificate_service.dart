@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -19,6 +20,91 @@ class ClientCertificateImportException implements Exception {
   String toString() => message;
 }
 
+/// Owns newly materialized files until an editor/import and its saves settle.
+///
+/// Only directory paths are shared across service instances. Registration occurs
+/// before filesystem creation/rename, so a collector cannot observe an unleased
+/// half-written identity. Closing joins admitted work before releasing paths.
+class ClientCertificateFileLease {
+  static final _zoneKey = Object();
+  static final _references = <String, int>{};
+
+  final _directories = <String>{};
+  int _operations = 0;
+  bool _closed = false;
+  Completer<void>? _closing;
+
+  Future<T> run<T>(Future<T> Function() action) async {
+    if (_closed) throw StateError('Certificate file owner is closed.');
+    _operations++;
+    try {
+      return await runZoned(action, zoneValues: {_zoneKey: this});
+    } finally {
+      _operations--;
+      _releaseIfClosed();
+    }
+  }
+
+  /// Completes after close and all admitted work have released their paths.
+  Future<void> get whenClosed => _closed && _operations == 0
+      ? Future<void>.value()
+      : (_closing ??= Completer<void>()).future;
+
+  /// Idempotent; disposal cannot release files beneath an admitted save/import.
+  Future<void> close() {
+    _closed = true;
+    _releaseIfClosed();
+    if (_operations == 0) return Future<void>.value();
+    return (_closing ??= Completer<void>()).future;
+  }
+
+  void _retain(String directory) {
+    if (_closed && _operations == 0) {
+      throw StateError('Certificate file owner is closed.');
+    }
+    final path = ClientCertificateService._normalize(directory);
+    if (_directories.add(path)) {
+      _references[path] = (_references[path] ?? 0) + 1;
+    }
+  }
+
+  /// Drops a replaced pick without retaining every abandoned path for the
+  /// lifetime of a long-lived editor. This does not delete any files.
+  void releaseIdentity(ClientCertificateConfig config) =>
+      _releaseDirectory(config.directoryPath);
+
+  void _releaseDirectory(String directory) {
+    final path = ClientCertificateService._normalize(directory);
+    if (_directories.remove(path)) {
+      final remaining = _references[path]! - 1;
+      if (remaining == 0) {
+        _references.remove(path);
+      } else {
+        _references[path] = remaining;
+      }
+    }
+  }
+
+  void _releaseIfClosed() {
+    if (!_closed || _operations != 0) return;
+    for (final path in _directories.toList()) {
+      _releaseDirectory(path);
+    }
+    final closing = _closing;
+    _closing = null;
+    closing?.complete();
+  }
+
+  static ClientCertificateFileLease? get _current =>
+      Zone.current[_zoneKey] as ClientCertificateFileLease?;
+
+  static void _retainMaterializedDirectory(String path) =>
+      _current?._retain(path);
+
+  static bool _isLeased(String path) =>
+      _references.containsKey(ClientCertificateService._normalize(path));
+}
+
 /// Removes certificate/key files that no saved connection references.
 ///
 /// Kept as a narrow interface so [ConnectionManager] can garbage-collect
@@ -26,8 +112,8 @@ class ClientCertificateImportException implements Exception {
 /// unit tests.
 abstract interface class ClientCertificateFileStore {
   /// Deletes every stored identity whose directory is not in
-  /// [referencedDirectoryPaths]. Best-effort: unreferenced staged imports are
-  /// also cleared.
+  /// [referencedDirectoryPaths] and no live file lease owns. Best-effort:
+  /// abandoned staged imports are also cleared.
   Future<void> deleteUnreferenced(Iterable<String> referencedDirectoryPaths);
 }
 
@@ -38,10 +124,10 @@ abstract interface class ClientCertificateFileStore {
 ///
 /// Imports are **staged**: files are written under `client-certs/.staging/`
 /// and only moved into their permanent `client-certs/<id>/` directory by
-/// [commit], which the connection editor calls once the connection save has
-/// succeeded. A cancelled or failed save therefore never leaves a live
-/// private key behind; [discard] and [cleanupStaging] remove abandoned
-/// imports.
+/// [commit], after connection validation. Editors/imports use a
+/// [ClientCertificateFileLease] through save, rollback and native cleanup.
+/// A failed save is not proof of rollback: collect permanent files only under
+/// the saved-list owner after reading their physical references.
 class ClientCertificateService implements ClientCertificateFileStore {
   static const String _directoryName = 'client-certs';
   static const String _stagingDirectoryName = '.staging';
@@ -135,8 +221,8 @@ class ClientCertificateService implements ClientCertificateFileStore {
 
   /// Restores a key pair carried by an encrypted configuration backup.
   ///
-  /// Writes straight into the permanent directory: a backup restore is a
-  /// complete, already-committed operation.
+  /// Run within a [ClientCertificateFileLease] until the account transaction
+  /// settles: permanent files are not yet referenced while the import queues.
   Future<ClientCertificateConfig> restore({
     required String certificatePem,
     required String privateKeyPem,
@@ -176,15 +262,22 @@ class ClientCertificateService implements ClientCertificateFileStore {
   ///
   /// Returns [config] unchanged when it is already permanent.
   Future<ClientCertificateConfig> commit(ClientCertificateConfig config) async {
-    if (!await isStaged(config)) return config;
+    if (!await isStaged(config)) {
+      ClientCertificateFileLease._retainMaterializedDirectory(
+        config.directoryPath,
+      );
+      return config;
+    }
     final directory = Directory(config.directoryPath);
     final root = await _rootDirectory();
     final destination = Directory(
       '${root.path}${Platform.pathSeparator}${const Uuid().v4()}',
     );
+    ClientCertificateFileLease._retainMaterializedDirectory(destination.path);
     try {
       await destination.parent.create(recursive: true);
       await directory.rename(destination.path);
+      ClientCertificateFileLease._current?._releaseDirectory(directory.path);
     } catch (_) {
       throw const ClientCertificateImportException(
         'The client certificate could not be stored securely on this device.',
@@ -220,7 +313,7 @@ class ClientCertificateService implements ClientCertificateFileStore {
     final root = await _rootDirectory();
     if (!_isWithin(config.directoryPath, root.path)) return;
     if (await isStaged(config)) return;
-    await _deleteDirectory(config.directoryPath);
+    await _deleteDirectory(config.directoryPath, unlessLeased: true);
   }
 
   /// Removes abandoned staged imports (app start, or after a failed save).
@@ -230,7 +323,7 @@ class ClientCertificateService implements ClientCertificateFileStore {
       if (!staging.existsSync()) return;
       await for (final entity in staging.list()) {
         if (entity is Directory) {
-          await _deleteDirectory(entity.path);
+          await _deleteDirectory(entity.path, unlessLeased: true);
         }
       }
     } catch (_) {
@@ -248,8 +341,7 @@ class ClientCertificateService implements ClientCertificateFileStore {
     final referenced = <String>{
       for (final path in referencedDirectoryPaths) _normalize(path),
     };
-    // Staged imports are never "referenced" by a saved connection: they are
-    // leftovers from a cancelled flow.
+    // Staging is not saved metadata; a live editor still owns its staged files.
     await cleanupStaging();
     final stagingPath = (await _stagingRoot()).path;
     try {
@@ -257,7 +349,7 @@ class ClientCertificateService implements ClientCertificateFileStore {
         if (entity is! Directory) continue;
         if (_isWithin(entity.path, stagingPath)) continue;
         if (referenced.contains(_normalize(entity.path))) continue;
-        await _deleteDirectory(entity.path);
+        await _deleteDirectory(entity.path, unlessLeased: true);
       }
     } catch (_) {
       // Garbage collection must never fail a connection save.
@@ -318,6 +410,7 @@ class ClientCertificateService implements ClientCertificateFileStore {
     final directory = Directory(
       '${staging.path}${Platform.pathSeparator}${const Uuid().v4()}',
     );
+    ClientCertificateFileLease._retainMaterializedDirectory(directory.path);
     await directory.create(recursive: true);
     return directory;
   }
@@ -327,12 +420,17 @@ class ClientCertificateService implements ClientCertificateFileStore {
     final directory = Directory(
       '${root.path}${Platform.pathSeparator}${const Uuid().v4()}',
     );
+    ClientCertificateFileLease._retainMaterializedDirectory(directory.path);
     await directory.create(recursive: true);
     return directory;
   }
 
-  Future<void> _deleteDirectory(String path) async {
+  Future<void> _deleteDirectory(
+    String path, {
+    bool unlessLeased = false,
+  }) async {
     try {
+      if (unlessLeased && ClientCertificateFileLease._isLeased(path)) return;
       final directory = Directory(path);
       if (directory.existsSync()) await directory.delete(recursive: true);
     } catch (_) {
