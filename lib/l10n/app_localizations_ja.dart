@@ -400,7 +400,7 @@ class AppLocalizationsJa extends AppLocalizations {
   String get auto_device_default => '自動（端末のデフォルト）';
 
   @override
-  String get automation => '自動化';
+  String get agent => 'エージェント';
 
   @override
   String get autonomous_agents => '自律エージェント';

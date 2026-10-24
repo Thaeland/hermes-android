@@ -414,7 +414,7 @@ class AppLocalizationsEs extends AppLocalizations {
       'Automático (predeterminado del dispositivo)';
 
   @override
-  String get automation => 'Automatización';
+  String get agent => 'Agente';
 
   @override
   String get autonomous_agents => 'Agentes autónomos';

@@ -399,7 +399,7 @@ class AppLocalizationsKo extends AppLocalizations {
   String get auto_device_default => '자동 (기기 기본값)';
 
   @override
-  String get automation => '자동화';
+  String get agent => '에이전트';
 
   @override
   String get autonomous_agents => '자율 에이전트';

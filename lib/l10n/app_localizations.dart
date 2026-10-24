@@ -816,11 +816,11 @@ abstract class AppLocalizations {
   /// **'Auto (device default)'**
   String get auto_device_default;
 
-  /// No description provided for @automation.
+  /// More menu section containing Cron, Skills and Memory.
   ///
   /// In en, this message translates to:
-  /// **'Automation'**
-  String get automation;
+  /// **'Agent'**
+  String get agent;
 
   /// No description provided for @autonomous_agents.
   ///

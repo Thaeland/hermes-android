@@ -118,13 +118,15 @@ filesystem trees. It keeps no separate persistent transcript/file index on the
 phone. Live received output and saved history retain their existing separate
 ownership and provenance; discovering a file does not prove a turn completed.
 
-## Organisation entries
+## Organisation features
 
-**Pin, batch and undo** and **AI-assisted filing** still need separate backend
-contracts. Device-only pins and individual Project moves already work from the
-Chats menu; they do not provide shared pin ordering, atomic batches, universal
-move undo or correction-learning filing. The chat `session.undo` RPC edits
-transcript turns and must not be used as organisation undo.
+The unused Organisation section and its **Pin, batch and undo** and
+**AI-assisted filing** placeholders have been removed from More. These features
+require backend functionality that does not exist as a complete contract.
+Device-only pins and individual Project moves already work from the Chats menu;
+they do not provide shared pin ordering, atomic batches, universal move undo or
+correction-learning AI filing. The chat `session.undo` RPC edits transcript turns
+and must not be used as organisation undo.
 
 Hermes Agent assisted with implementation and regression tests. Local tests and
 APK builds do not imply physical-phone acceptance, a production release or an

@@ -413,7 +413,7 @@ class AppLocalizationsDe extends AppLocalizations {
   String get auto_device_default => 'Automatisch (Gerätestandard)';
 
   @override
-  String get automation => 'Automatisierung';
+  String get agent => 'Agent';
 
   @override
   String get autonomous_agents => 'Autonome Agenten';

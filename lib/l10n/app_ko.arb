@@ -110,7 +110,7 @@
   "attachment_drafts": "첨부 파일 초안",
   "attachment_of": "첨부 파일 {index}/{total}",
   "auto_device_default": "자동 (기기 기본값)",
-  "automation": "자동화",
+  "agent": "에이전트",
   "autonomous_agents": "자율 에이전트",
   "background_recovery_unavailable_legacy_transport": "백그라운드 복구를 사용할 수 없음 — 레거시 전송",
   "background_task_completed": "백그라운드 작업 완료",
