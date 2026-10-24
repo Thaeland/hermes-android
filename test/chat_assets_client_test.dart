@@ -165,7 +165,7 @@ void main() {
       },
     );
 
-    test('only explicit assistant/agent deliveries are eligible', () {
+    test('explicit assistant/agent text and file links, never sidecars', () {
       final messages = <Map<String, dynamic>>[
         for (final role in [
           'user',
@@ -199,6 +199,8 @@ void main() {
       expect(assets.map((asset) => asset.ref.path), [
         '/out/b.mp3',
         '/out/a.png',
+        '/out/not-delivered.pdf',
+        '/out/upload.png',
       ]);
       expect(
         assets.every((asset) => identical(asset.session, session)),

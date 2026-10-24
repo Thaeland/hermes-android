@@ -151,9 +151,7 @@ class _AssetsScreenState extends State<AssetsScreen> {
             page.messages,
           )) {
             final previous = _assets[asset.id];
-            if (previous == null || asset.timestamp > previous.timestamp) {
-              _assets[asset.id] = asset;
-            }
+            _assets[asset.id] = previous?.merge(asset) ?? asset;
           }
           _scannedSessions.add(cursor.session.id);
           _failed.remove(cursor.key);
@@ -361,6 +359,7 @@ class _AssetsScreenState extends State<AssetsScreen> {
                   key: ValueKey('$_assetEpoch:${asset.id}'),
                   ref: asset.ref,
                   filesClient: () => widget.filesClient(asset.session),
+                  sourceIdentity: (widget.source, asset.session.id),
                 ),
                 Align(
                   alignment: Alignment.centerLeft,

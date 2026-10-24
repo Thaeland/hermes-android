@@ -222,9 +222,24 @@ class MediaTagRef {
   /// names, so trailing punctuation inside them is part of the path.
   final bool quoted;
 
-  const MediaTagRef({required this.path, this.quoted = false});
+  /// Optional producer-provided name for image URLs without a file extension.
+  final String? suggestedFilename;
+
+  const MediaTagRef({
+    required this.path,
+    this.quoted = false,
+    this.suggestedFilename,
+  });
 
   String get filename {
+    if (suggestedFilename case final name?) return name;
+    final uri = Uri.tryParse(path);
+    if (uri != null &&
+        (uri.scheme == 'https' || uri.scheme == 'http') &&
+        uri.host.isNotEmpty) {
+      return uri.pathSegments.where((part) => part.isNotEmpty).lastOrNull ??
+          'attachment';
+    }
     final segments = path.split(RegExp(r'[/\\]'));
     return segments.isEmpty ? path : segments.last;
   }
@@ -331,13 +346,13 @@ String? mediaPathFromArtifactHref(String href) {
 /// Shares the rendering parser's quoting, punctuation and Markdown-code rules.
 /// Keeps source order and repeated occurrences; consumers can dedupe by their
 /// own session/path identity. Paths are never decoded or normalised.
-List<MediaTagRef> extractMediaTagRefs(String text) {
+List<MediaTagRef> extractMediaTagRefs(String text, {bool isFinal = true}) {
   final refs = <MediaTagRef>[];
-  for (final match in _deliveryMatches(text, isFinal: true)) {
+  for (final match in _deliveryMatches(text, isFinal: isFinal)) {
     final parsed = _parseMediaTag(
       match,
       textLength: text.length,
-      isFinal: true,
+      isFinal: isFinal,
     );
     if (parsed != null) refs.add(parsed.ref);
   }

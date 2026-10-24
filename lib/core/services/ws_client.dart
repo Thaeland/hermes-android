@@ -989,6 +989,10 @@ class WsClient {
       final response = await send('prompt.submit', {
         'session_id': sessionId,
         'text': message,
+        // Per-turn identity also covers reattaching to an already-live TUI
+        // session. Older gateways accept but ignore unknown surface values;
+        // create/resume still request their supported rich-chat source above.
+        'surface': 'android',
       }, onSent: onSent);
       final error = response['error'];
       if (error != null) {
@@ -1142,6 +1146,10 @@ class WsClient {
   Future<ResumedGatewaySession> resumeSessionDetails(String sessionId) async {
     final result = await send('session.resume', {
       'session_id': sessionId,
+      // Stock Hermes calls its attachment-capable graphical chat surface
+      // "desktop". Omission inherits the server's launch surface, often TUI,
+      // whose prompt explicitly tells the agent it cannot send attachments.
+      'source': 'desktop',
       // Session attachment must not carry the rendered transcript. Android
       // hydrates its visible history through bounded REST requests; returning
       // it here duplicates a potentially multi-megabyte transfer and can make
@@ -1312,7 +1320,7 @@ class WsClient {
     String? model,
     String? workingDirectory,
   }) async {
-    final params = <String, dynamic>{};
+    final params = <String, dynamic>{'source': 'desktop'};
     if (model != null) params['model'] = model;
     final cwd = workingDirectory?.trim();
     if (cwd != null && cwd.isNotEmpty) params['cwd'] = cwd;

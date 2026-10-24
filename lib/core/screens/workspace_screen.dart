@@ -1886,7 +1886,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
             filesClient: (session) => RemoteFilesClient.fromConnection(
               connection,
               sessionId: session.id,
-              maxDownloadBytes: 25 * 1024 * 1024,
+              maxDownloadBytes: maxAttachmentDownloadBytes,
             ),
             onOpenSession: (session) => unawaited(_openSession(session)),
           ),

@@ -158,7 +158,10 @@ void main() {
           .toList();
       expect(creates, hasLength(gateway.existing ? 0 : 1));
       if (!gateway.existing) {
-        expect(creates.single['params'], {'cwd': '/fixture-project'});
+        expect(creates.single['params'], {
+          'source': 'desktop',
+          'cwd': '/fixture-project',
+        });
       }
       final submits = gateway.requests.where(
         (r) => r['method'] == 'prompt.submit',
@@ -167,6 +170,7 @@ void main() {
       expect(submits.single['params'], {
         'session_id': 'runtime-first',
         'text': 'First prompt',
+        'surface': 'android',
       });
       expect(await normal.pendingStore.load(normal.scope), isEmpty);
       await tester.pumpWidget(const SizedBox.shrink());

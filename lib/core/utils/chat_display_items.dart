@@ -1,8 +1,13 @@
+import 'dart:convert';
+
 import '../models/background_report.dart';
 import '../models/chat_timeline.dart';
 import '../models/received_scope_outcome.dart';
 import '../models/gateway_activity.dart';
 import '../models/gateway_insight.dart';
+import 'delivered_files.dart';
+import 'generated_media.dart';
+import 'media_tags.dart';
 import 'message_content.dart';
 
 /// UI provenance only. These sections never enter history, wire payloads or WAL.
@@ -93,6 +98,10 @@ Map<Object, ReceivedScopeOutcome> _receivedOutcomeAnchors(
                     fact.scopes.contains(item['_normal_projection_id']) ||
                 item is ChatReasoningItem &&
                     fact.scopes.contains(runScopes[item.id]) ||
+                item is ChatAttachmentItem &&
+                    fact.scopes.contains(
+                      item.scope ?? toolScopes[item.activity],
+                    ) ||
                 item is ChatToolActivityGroup &&
                     item.activities.any(
                       (tool) => fact.scopes.contains(toolScopes[tool]),
@@ -107,6 +116,7 @@ Map<Object, ReceivedScopeOutcome> _receivedOutcomeAnchors(
 Object chatDisplayItemIdentity(dynamic item) {
   if (item is ChatToolActivityGroup) return ('tool', item.id);
   if (item is ChatReasoningItem) return ('reasoning', item.id);
+  if (item is ChatAttachmentItem) return ('attachment', item.id);
   if (item is GatewayNotice) return ('notice', item.identity);
   if (item is List<GatewaySubagentActivity>) return 'tasks';
   final row = item as Map<String, dynamic>;
@@ -127,6 +137,25 @@ class ChatReasoningItem {
   final String? id;
 
   const ChatReasoningItem(this.text, this.initiallyExpanded, {this.id});
+}
+
+/// A validated producer deliverable, not tool/debug text or an assistant row.
+/// Identity belongs to its originating call/reference, never its list position.
+class ChatAttachmentItem {
+  const ChatAttachmentItem({
+    required this.id,
+    required this.ref,
+    this.scope,
+    this.activity,
+  });
+
+  final String id;
+  final MediaTagRef ref;
+
+  /// UI-only provenance. Independent reducers may reuse public tool ids, so
+  /// those strings alone must never infer a received lifecycle scope.
+  final Object? scope;
+  final GatewayToolActivity? activity;
 }
 
 /// Consecutive tool activities rendered as a single activity card.
@@ -151,7 +180,7 @@ class ChatToolActivityGroup {
 /// Project a raw Hermes message list into the heterogeneous list the chat
 /// screen renders.
 ///
-/// The result mixes four item kinds, in the order the conversation produced
+/// The result mixes these item kinds, in the order the conversation produced
 /// them:
 ///
 /// - `Map<String, dynamic>` — a user or assistant bubble, carrying
@@ -159,6 +188,7 @@ class ChatToolActivityGroup {
 ///   replies, `_retry_prompt` with the user prompt that caused it;
 /// - [ChatToolActivityGroup] — consecutive tool results collapsed into one
 ///   activity card;
+/// - [ChatAttachmentItem] — independently visible validated tool deliveries;
 /// - [ChatReasoningItem] — exposed reasoning at its receipt position (or before
 ///   the bubble when only a legacy snapshot exists);
 /// - `GatewaySubagentActivity` list and [GatewayNotice] — appended last.
@@ -176,6 +206,35 @@ List<dynamic> buildChatDisplayItems({
   bool verbose = false,
   ChatTimeline? timeline,
 }) {
+  final toolNamesById = generatedMediaToolCallNames(messages);
+  final storedResults =
+      Map<Map<String, dynamic>, GeneratedMediaResult>.identity();
+  final storedResultsById = <String, GeneratedMediaResult>{};
+  for (final message in messages) {
+    if (message['role'] != 'tool') continue;
+    final result = generatedMediaResultFromToolMessage(
+      message,
+      toolNamesById: toolNamesById,
+    );
+    storedResults[message] = result;
+    final id = message['tool_call_id'] ?? message['toolCallId'];
+    if (id is String && id.isNotEmpty) {
+      if (storedResultsById[id]?.isFailure != true) {
+        storedResultsById[id] = result;
+      }
+    }
+  }
+  final suppressedDeliveryIds = <String>{
+    for (final message in messages)
+      if (message['role'] == 'tool' &&
+          (!isPublicDeliveryMessage(message) ||
+              message.containsKey('display_content') &&
+                  storedResults[message]!.deliveredFiles.isEmpty ||
+              storedResults[message]!.isFailure))
+        if ((message['tool_call_id'] ?? message['toolCallId'])
+            case final String id)
+          id,
+  };
   final toolQueue = toolActivities
       .where((a) => timeline?.excludesTool(a) != true)
       .toList();
@@ -194,15 +253,29 @@ List<dynamic> buildChatDisplayItems({
     scopeRows[scope] = message;
   }
   final liveRuns =
-      timeline?.runs.where((r) => scopeTurns.containsKey(r.scope)).toList() ??
+      timeline?.runs
+          .where(
+            (r) =>
+                scopeTurns.containsKey(r.scope) &&
+                isPublicDeliveryMessage(scopeRows[r.scope]!) &&
+                !scopeRows[r.scope]!.containsKey('display_content'),
+          )
+          .toList() ??
       const <ChatTimelineRun>[];
   // Ownership survives full eviction of a scope's runs. Otherwise its canonical
   // assistant accumulator would silently re-render all the evicted prose.
-  final liveScopes = timeline?.scopes ?? const <Object>{};
+  // An explicit server public-content projection replaces this scope's live
+  // accumulator, even when null/empty. Do not replay its physical text/tools
+  // or let receipt ownership suppress the replacement public prose below.
+  final liveScopes = (timeline?.scopes ?? const <Object>{})
+      .where(
+        (scope) => !(scopeRows[scope]?.containsKey('display_content') ?? false),
+      )
+      .toSet();
   final anchors = <int, Object>{};
   for (final message in messages) {
     final scope = scopeFor(message);
-    if (liveScopes.contains(scope)) {
+    if (liveScopes.contains(scope) && isPublicDeliveryMessage(message)) {
       anchors.putIfAbsent(scopeTurns[scope]!, () => scope);
     }
   }
@@ -225,19 +298,46 @@ List<dynamic> buildChatDisplayItems({
   );
   final displayItems = <dynamic>[];
   final currentGroup = <GatewayToolActivity>[];
+  final currentAttachments = <ChatAttachmentItem>[];
   String? currentGroupId;
   String? lastUserPrompt;
 
   void flushToolGroup() {
-    if (currentGroup.isEmpty) return;
-    displayItems.add(
-      ChatToolActivityGroup(
-        id: currentGroupId ?? currentGroup.first.identity,
-        activities: currentGroup.toList(),
-      ),
-    );
+    if (currentGroup.isNotEmpty) {
+      displayItems.add(
+        ChatToolActivityGroup(
+          id: currentGroupId ?? currentGroup.first.identity,
+          activities: currentGroup.toList(),
+        ),
+      );
+    }
+    displayItems.addAll(currentAttachments);
     currentGroup.clear();
+    currentAttachments.clear();
     currentGroupId = null;
+  }
+
+  void addAttachments(
+    Iterable<MediaTagRef> refs,
+    String origin, {
+    Object? scope,
+    GatewayToolActivity? activity,
+  }) {
+    if (activity?.hasFailedDelivery == true ||
+        suppressedDeliveryIds.contains(activity?.toolId) ||
+        storedResultsById[activity?.toolId]?.isFailure == true) {
+      return;
+    }
+    for (final ref in refs) {
+      currentAttachments.add(
+        ChatAttachmentItem(
+          id: jsonEncode([origin, ref.path]),
+          ref: ref,
+          scope: scope,
+          activity: activity,
+        ),
+      );
+    }
   }
 
   for (final msg in messages) {
@@ -251,13 +351,18 @@ List<dynamic> buildChatDisplayItems({
       displayItems.add({...msg, 'role': role});
       continue;
     }
-    if (isToolResultMessage(msg)) {
+    // A physical tool wrapper cannot overrule replacement public assistant text.
+    // Explicit tool roles still take the tool-result path.
+    if (isToolResultMessage(
+      role == 'assistant' ? {...msg, 'content': publicDeliveryText(msg)} : msg,
+    )) {
       final callId = msg['tool_call_id'] ?? msg['toolCallId'];
       final match = callId == null || callId == ''
           ? (toolQueue.isEmpty ? -1 : 0)
           : toolQueue.indexWhere((activity) => activity.toolId == callId);
-      if (match >= 0) {
-        final activity = toolQueue.removeAt(match);
+      final activity = match >= 0 ? toolQueue.removeAt(match) : null;
+      if (!isPublicDeliveryMessage(msg)) continue;
+      if (activity != null) {
         if (currentGroup.isEmpty) {
           // A stored row's id survives latest-history window shifts. If
           // neither the activity nor the row has an id, its local identity
@@ -269,9 +374,39 @@ List<dynamic> buildChatDisplayItems({
         }
         currentGroup.add(activity);
       }
+      // Receipt chronology, including eviction, owns live tools. A durable
+      // result cannot invent a second slot ahead of its actual receipt run.
+      final liveOwned =
+          callId is String &&
+          callId.isNotEmpty &&
+          (liveTools.any((tool) => tool.toolId == callId) ||
+              timeline?.excludesTool(
+                    GatewayToolActivity(
+                      toolId: callId,
+                      name: 'tool',
+                      phase: GatewayToolActivityPhase.completed,
+                    ),
+                  ) ==
+                  true);
+      if (!liveOwned && !suppressedDeliveryIds.contains(callId)) {
+        final storedResult = storedResults[msg];
+        final refs = storedResult?.deliveredFiles ?? const <MediaTagRef>[];
+        if (storedResult?.isFailure != true) {
+          final rowId = msg['id'] ?? msg['message_id'];
+          addAttachments(
+            refs.isNotEmpty ? refs : activity?.deliveredFiles ?? const [],
+            activity?.identity ??
+                (callId is String && callId.isNotEmpty
+                    ? 'tool:$callId'
+                    : 'message:${rowId ?? identityHashCode(msg)}'),
+            activity: activity,
+          );
+        }
+      }
       continue;
     }
     if (role != 'user' && role != 'assistant') continue;
+    if (!isPublicDeliveryMessage(msg)) continue;
 
     final scope = scopeFor(msg);
     if (liveScopes.contains(scope) && !anchoredRuns.containsKey(scope)) {
@@ -283,6 +418,18 @@ List<dynamic> buildChatDisplayItems({
         if (run.kind == ChatTimelineKind.tool) {
           currentGroupId ??= run.activity!.identity;
           currentGroup.add(run.activity!);
+          if (isPublicDeliveryMessage(scopeRows[run.scope]!)) {
+            final storedRefs =
+                storedResultsById[run.activity!.toolId]?.deliveredFiles;
+            addAttachments(
+              storedRefs?.isNotEmpty == true
+                  ? storedRefs!
+                  : run.activity!.deliveredFiles,
+              run.activity!.identity,
+              scope: run.scope,
+              activity: run.activity,
+            );
+          }
           continue;
         }
         flushToolGroup();
@@ -301,9 +448,16 @@ List<dynamic> buildChatDisplayItems({
       continue;
     }
 
-    final content = stripToolResultText(messageContentToText(msg['content']));
+    final content = stripToolResultText(
+      role == 'assistant'
+          ? publicDeliveryText(msg)
+          : messageContentToText(publicDeliveryContent(msg)),
+    );
     final reasoning = msg['_gateway_reasoning']?.toString() ?? '';
-    final hasReasoning = role == 'assistant' && reasoning.trim().isNotEmpty;
+    final hasReasoning =
+        role == 'assistant' &&
+        !msg.containsKey('display_content') &&
+        reasoning.trim().isNotEmpty;
     if (content.isEmpty && !hasReasoning) continue;
 
     flushToolGroup();
@@ -336,17 +490,65 @@ List<dynamic> buildChatDisplayItems({
   // legacy snapshots without receipt ownership get an unmatched trailing card;
   // otherwise this queue could resurrect tools removed by the live budget.
   if (toolQueue.isNotEmpty && (timeline == null || timeline.scopes.isEmpty)) {
-    displayItems.add(
-      ChatToolActivityGroup(
-        id: toolQueue.first.identity,
-        activities: toolQueue.toList(),
-      ),
-    );
+    currentGroupId = toolQueue.first.identity;
+    currentGroup.addAll(toolQueue);
+    for (final activity in toolQueue) {
+      addAttachments(
+        activity.deliveredFiles,
+        activity.identity,
+        activity: activity,
+      );
+    }
+    flushToolGroup();
   }
   if (subagentActivities.isNotEmpty) {
     displayItems.add(List<GatewaySubagentActivity>.from(subagentActivities));
   }
   displayItems.addAll(notices);
 
-  return displayItems;
+  // Prefer an explicit public assistant delivery over its tool-result echo.
+  // Inspect only actual projected text, never reasoning or evicted prose. Each
+  // saved/received source calls this independently; no cross-source matching.
+  final echoedPaths = <String>{
+    for (final item in displayItems)
+      if (item is Map<String, dynamic> &&
+          (item['role'] == 'assistant' || item['role'] == 'agent') &&
+          isPublicDeliveryMessage(item))
+        for (final ref in extractDeliveredFileRefs(
+          item['_display_content'] is String
+              ? item['_display_content'] as String
+              : publicDeliveryText(item),
+          isFinal: item['_gateway_pending_response'] != true,
+        ))
+          ref.path,
+  };
+  final deliveredPaths = <String>{};
+  final producerRefs = <String, MediaTagRef>{};
+  for (final item in displayItems.whereType<ChatAttachmentItem>()) {
+    if (item.ref.suggestedFilename != null) {
+      producerRefs.putIfAbsent(item.ref.path, () => item.ref);
+    }
+  }
+  return [
+    for (final item in displayItems)
+      if (item is! ChatAttachmentItem ||
+          !echoedPaths.contains(item.ref.path) &&
+              deliveredPaths.add(item.ref.path))
+        if (item is Map<String, dynamic> &&
+            (item['role'] == 'assistant' || item['role'] == 'agent') &&
+            isPublicDeliveryMessage(item))
+          {
+            ...item,
+            // Presentation metadata only: the original history/wire rows are
+            // untouched. Keep a producer's image hint when its card yields to
+            // an exact public echo within this saved/received source.
+            if (producerRefs.isNotEmpty)
+              '_delivery_refs': Map<String, MediaTagRef>.unmodifiable({
+                for (final path in echoedPaths)
+                  if (producerRefs.containsKey(path)) path: producerRefs[path]!,
+              }),
+          }
+        else
+          item,
+  ];
 }

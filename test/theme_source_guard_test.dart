@@ -6,12 +6,12 @@ void main() {
   test('UI colours come from active tokens, not fixed branding or brightness', () {
     // Palette seeds and semantic ramps belong in the single design-system root.
     const themeRoot = 'lib/core/theme/hermes_theme.dart';
-    const mediaViewer = 'lib/core/widgets/media_artifact_card.dart';
-    // Exact intentional media exceptions, not a blanket file exemption.
+    const mediaViewer = 'lib/core/widgets/attachment_preview_dialog.dart';
+    // Exact image-only cinema exceptions, not a blanket preview exemption.
+    // Documents continue to use the active application's ColorScheme.
     const mediaExceptions = {
-      'backgroundColor: Colors.black,',
-      'style: IconButton.styleFrom(backgroundColor: Colors.black),',
-      'icon: const Icon(Icons.close, color: Colors.white),',
+      'final foreground = image ? Colors.white : scheme.onSurface;',
+      'backgroundColor: image ? Colors.black : scheme.surface,',
     };
     final literalColor = RegExp(
       r'\b(?:Color|MaterialColor|MaterialAccentColor)\s*\('

@@ -24,6 +24,74 @@ class AppLocalizationsKo extends AppLocalizations {
   String get background_report_collapse => '보고서 접기';
 
   @override
+  String get attachment_tap_to_preview => '탭하여 미리 보기';
+
+  @override
+  String get attachment_save => '저장';
+
+  @override
+  String get attachment_share => '공유';
+
+  @override
+  String get attachment_saved => '파일을 저장했습니다';
+
+  @override
+  String get attachment_save_cancelled => '저장을 취소했습니다';
+
+  @override
+  String get attachment_save_failed => '이 파일을 저장하지 못했습니다. 다시 시도해 주세요.';
+
+  @override
+  String get attachment_share_failed => '이 파일을 공유하지 못했습니다. 다시 시도해 주세요.';
+
+  @override
+  String get attachment_download_failed =>
+      '이 파일을 불러오지 못했습니다. 연결을 확인하고 다시 시도해 주세요.';
+
+  @override
+  String get attachment_no_inline_preview =>
+      '이 파일 형식은 미리 볼 수 없습니다. 원본 파일을 저장하거나 공유하여 다른 앱에서 여세요.';
+
+  @override
+  String get attachment_image_failed =>
+      '이 이미지를 디코딩하지 못했습니다. 원본 파일은 저장하거나 공유할 수 있습니다.';
+
+  @override
+  String get attachment_text_truncated =>
+      '미리 보기가 축약되었습니다. 전체 내용을 읽으려면 파일을 저장하거나 공유하세요.';
+
+  @override
+  String get attachment_text_unavailable =>
+      '이 파일을 텍스트로 표시하지 못했습니다. 원본 파일을 저장하거나 공유하세요.';
+
+  @override
+  String get attachment_pdf_failed => '이 PDF를 미리 볼 수 없습니다. 원본 파일을 저장하거나 공유하세요.';
+
+  @override
+  String get attachment_pdf_unavailable =>
+      'PDF 미리 보기는 Android에서 사용할 수 있습니다. 이 파일은 저장하거나 공유할 수 있습니다.';
+
+  @override
+  String attachment_pdf_page(int page, int total) {
+    return '$total페이지 중 $page페이지';
+  }
+
+  @override
+  String get attachment_previous_page => '이전 페이지';
+
+  @override
+  String get attachment_next_page => '다음 페이지';
+
+  @override
+  String get attachment_loading => '미리 보기 불러오는 중…';
+
+  @override
+  String get attachment_close => '미리 보기 닫기';
+
+  @override
+  String get attachment_retry => '다시 시도';
+
+  @override
   String get saved_history_heading => 'Saved history';
 
   @override

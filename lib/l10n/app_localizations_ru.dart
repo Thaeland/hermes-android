@@ -25,6 +25,77 @@ class AppLocalizationsRu extends AppLocalizations {
   String get background_report_collapse => 'Свернуть отчёт';
 
   @override
+  String get attachment_tap_to_preview => 'Нажмите для просмотра';
+
+  @override
+  String get attachment_save => 'Сохранить';
+
+  @override
+  String get attachment_share => 'Поделиться';
+
+  @override
+  String get attachment_saved => 'Файл сохранён';
+
+  @override
+  String get attachment_save_cancelled => 'Сохранение отменено';
+
+  @override
+  String get attachment_save_failed =>
+      'Не удалось сохранить файл. Повторите попытку.';
+
+  @override
+  String get attachment_share_failed =>
+      'Не удалось поделиться файлом. Повторите попытку.';
+
+  @override
+  String get attachment_download_failed =>
+      'Не удалось загрузить файл. Проверьте подключение и повторите попытку.';
+
+  @override
+  String get attachment_no_inline_preview =>
+      'Предпросмотр этого типа файлов недоступен. Сохраните исходный файл или поделитесь им, чтобы открыть в другом приложении.';
+
+  @override
+  String get attachment_image_failed =>
+      'Не удалось декодировать изображение. Исходный файл по-прежнему можно сохранить или отправить.';
+
+  @override
+  String get attachment_text_truncated =>
+      'Предпросмотр сокращён. Сохраните файл или поделитесь им, чтобы прочитать его целиком.';
+
+  @override
+  String get attachment_text_unavailable =>
+      'Не удалось отобразить файл как текст. Сохраните исходный файл или поделитесь им.';
+
+  @override
+  String get attachment_pdf_failed =>
+      'Не удалось открыть предпросмотр PDF. Сохраните исходный файл или поделитесь им.';
+
+  @override
+  String get attachment_pdf_unavailable =>
+      'Предпросмотр PDF доступен на Android. Этот файл по-прежнему можно сохранить или отправить.';
+
+  @override
+  String attachment_pdf_page(int page, int total) {
+    return 'Страница $page из $total';
+  }
+
+  @override
+  String get attachment_previous_page => 'Предыдущая страница';
+
+  @override
+  String get attachment_next_page => 'Следующая страница';
+
+  @override
+  String get attachment_loading => 'Загрузка предпросмотра…';
+
+  @override
+  String get attachment_close => 'Закрыть предпросмотр';
+
+  @override
+  String get attachment_retry => 'Повторить';
+
+  @override
   String get saved_history_heading => 'Saved history';
 
   @override

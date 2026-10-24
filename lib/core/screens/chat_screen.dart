@@ -40,6 +40,7 @@ import '../services/notification_prefs.dart';
 import '../services/voice_composer_adapter.dart';
 import '../services/ws_client.dart';
 import '../utils/media_tags.dart';
+import '../utils/delivered_files.dart';
 import '../models/attachment_draft.dart';
 import '../models/background_report.dart';
 import '../models/chat_timeline.dart';
@@ -5706,7 +5707,31 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
+  RemoteFilesDataSource _newMediaFilesClient() =>
+      widget.testMediaFilesClient?.call(_storedSessionKey) ??
+      RemoteFilesClient.fromConnection(
+        widget.connection,
+        sessionId: _storedSessionKey,
+        maxDownloadBytes: maxAttachmentDownloadBytes,
+      );
+
   Widget _buildDisplayItem(dynamic item, {ChatDisplaySource? source}) {
+    if (item is ChatAttachmentItem) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: MediaArtifactCard(
+          key: ValueKey((
+            widget.connection,
+            _storedSessionKey,
+            source,
+            item.id,
+          )),
+          ref: item.ref,
+          filesClient: _newMediaFilesClient,
+          sourceIdentity: (widget.connection, _storedSessionKey, source),
+        ),
+      );
+    }
     if (item is ChatToolActivityGroup) {
       return GatewayActivityCard(
         key: ValueKey<String>('tool-activity-${item.id}'),
@@ -5790,14 +5815,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       density: _chatDensity,
       metadata: msg,
       mediaReferencesFinal: msg['_gateway_pending_response'] != true,
-      mediaFilesClient: isUser
-          ? null
-          : () =>
-                widget.testMediaFilesClient?.call(_storedSessionKey) ??
-                RemoteFilesClient.fromConnection(
-                  widget.connection,
-                  sessionId: _storedSessionKey,
-                ),
+      mediaSourceIdentity: (widget.connection, _storedSessionKey, source),
+      mediaFilesClient: isUser ? null : _newMediaFilesClient,
       onReadAloud: isUser
           ? null
           : () => _readAssistantText(content, announce: true),
@@ -6010,6 +6029,7 @@ class MessageBubble extends StatelessWidget {
   /// with no session to resolve paths against — a same-path local file on
   /// the phone would be worse than a dead link).
   final RemoteFilesDataSource Function()? mediaFilesClient;
+  final Object? mediaSourceIdentity;
 
   const MessageBubble({
     super.key,
@@ -6022,6 +6042,7 @@ class MessageBubble extends StatelessWidget {
     this.onEdit,
     this.onRetry,
     this.mediaFilesClient,
+    this.mediaSourceIdentity,
     this.mediaReferencesFinal = true,
   });
 
@@ -6052,11 +6073,20 @@ class MessageBubble extends StatelessWidget {
         // prose colours with the dialog's own onSurface, not onAccent.
         final dialogTheme = Theme.of(dialogContext);
         return AlertDialog(
-          title: Text(context.l10n.select_text),
+          title: Text(dialogContext.l10n.select_text),
           content: SingleChildScrollView(
             child: MarkdownBody(
-              data: content,
+              data: !isUser && mediaFilesClient != null
+                  ? inlineDeliveredFilesAsLinks(
+                      content,
+                      isFinal: mediaReferencesFinal,
+                    )
+                  : content,
               selectable: true,
+              sizedImageBuilder: (image) =>
+                  Text(image.alt ?? image.title ?? ''),
+              onTapLink: (text, href, title) =>
+                  _openDeliveredLink(context, href),
               styleSheet: _messageStyleSheet(
                 dialogTheme,
                 HermesTokens.of(dialogContext),
@@ -6068,11 +6098,45 @@ class MessageBubble extends StatelessWidget {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: Text(context.l10n.close),
+              child: Text(dialogContext.l10n.close),
             ),
           ],
         );
       },
+    );
+  }
+
+  MediaTagRef _deliveryRef(MediaTagRef ref) {
+    final hints = metadata['_delivery_refs'];
+    final hint = hints is Map<String, MediaTagRef> ? hints[ref.path] : null;
+    if (ref.suggestedFilename != null || hint?.suggestedFilename == null) {
+      return ref;
+    }
+    return MediaTagRef(
+      path: ref.path,
+      quoted: ref.quoted,
+      suggestedFilename: hint!.suggestedFilename,
+    );
+  }
+
+  void _openDeliveredLink(BuildContext context, String? href) {
+    final filesClient = !isUser ? mediaFilesClient : null;
+    final path = href == null ? null : deliveredFilePathFromHref(href);
+    if (filesClient == null || path == null || !context.mounted) return;
+    final eligible = extractDeliveredFileRefs(
+      content,
+      isFinal: mediaReferencesFinal,
+    ).any((ref) => ref.path == path);
+    if (!eligible) return;
+    unawaited(
+      openMediaFilePreview(
+        context: context,
+        filesClient: filesClient,
+        ref: _deliveryRef(MediaTagRef(path: path)),
+        sourceIdentity: mediaSourceIdentity,
+      ).catchError((Object error) {
+        debugPrint('media preview failed: $error');
+      }),
     );
   }
 
@@ -6128,6 +6192,7 @@ class MessageBubble extends StatelessWidget {
   /// documentation, not a delivery. Mid-line refs stay in the prose as
   /// markdown links so they never fragment a list item or table row.
   List<Widget> _renderContent(
+    BuildContext context,
     ThemeData theme,
     HermesTokens tokens,
     bool isUser,
@@ -6140,26 +6205,34 @@ class MessageBubble extends StatelessWidget {
       assistantTextColor: assistantTextColor,
     );
     final filesClient = !isUser ? mediaFilesClient : null;
+    final mediaPaths = filesClient == null
+        ? const <String>{}
+        : {
+            for (final ref in extractMediaTagRefs(
+              content,
+              isFinal: mediaReferencesFinal,
+            ))
+              ref.path,
+          };
+    final markdownRefs = <String, MediaTagRef>{};
+    if (filesClient != null) {
+      for (final ref in extractMarkdownFileRefs(
+        content,
+        isFinal: mediaReferencesFinal,
+      )) {
+        if (!mediaPaths.contains(ref.path)) {
+          markdownRefs.putIfAbsent(ref.path, () => ref);
+        }
+      }
+    }
     Widget prose(String text) => MarkdownBody(
       data: text,
       selectable: false,
       styleSheet: styleSheet,
-      onTapLink: filesClient == null
-          ? null
-          : (linkText, href, title) {
-              final path = href == null
-                  ? null
-                  : mediaPathFromArtifactHref(href);
-              if (path == null) return;
-              unawaited(
-                downloadAndShareMediaFile(
-                  filesClient: filesClient,
-                  ref: MediaTagRef(path: path),
-                ).catchError((Object e) {
-                  debugPrint('media link download failed: $e');
-                }),
-              );
-            },
+      // Local images become lazy file cards below. Never let Markdown load a
+      // host path from the phone or contact an arbitrary image URL on render.
+      sizedImageBuilder: (image) => Text(image.alt ?? image.title ?? ''),
+      onTapLink: (linkText, href, title) => _openDeliveredLink(context, href),
     );
 
     final parseMedia = filesClient != null;
@@ -6187,9 +6260,10 @@ class MessageBubble extends StatelessWidget {
             MediaArtifactCard(
               // The occurrence ordinal keeps repeated paths unique while
               // remaining stable as a streamed suffix grows.
-              key: ValueKey((path, occurrence)),
-              ref: segment.media!,
+              key: ValueKey((mediaSourceIdentity, path, occurrence)),
+              ref: _deliveryRef(segment.media!),
               filesClient: filesClient,
+              sourceIdentity: mediaSourceIdentity,
             ),
           );
         } else if (segment.text.trim().isNotEmpty) {
@@ -6213,6 +6287,14 @@ class MessageBubble extends StatelessWidget {
           block
         else
           ...renderProse(block as String),
+      if (filesClient != null)
+        for (final ref in markdownRefs.values)
+          MediaArtifactCard(
+            key: ValueKey((mediaSourceIdentity, 'file-link', ref.path)),
+            ref: _deliveryRef(ref),
+            filesClient: filesClient,
+            sourceIdentity: mediaSourceIdentity,
+          ),
     ];
   }
 
@@ -6321,7 +6403,19 @@ class MessageBubble extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => InlineMediaPreviewScope(
+    filesClient: isUser ? null : mediaFilesClient,
+    sourceIdentity: mediaSourceIdentity,
+    references: isUser || mediaFilesClient == null
+        ? const []
+        : extractDeliveredFileRefs(
+            content,
+            isFinal: mediaReferencesFinal,
+          ).map(_deliveryRef).toList(growable: false),
+    builder: _buildBubble,
+  );
+
+  Widget _buildBubble(BuildContext context) {
     final theme = Theme.of(context);
     final tokens = HermesTokens.of(context);
     final userBubbleColor = tokens.accent;
@@ -6335,7 +6429,11 @@ class MessageBubble extends StatelessWidget {
       metaLines.add('role: $role');
       // Show any extra fields that aren't role/content
       for (final entry in metadata.entries) {
-        if (entry.key == 'role' || entry.key == 'content') continue;
+        if (entry.key == 'role' ||
+            entry.key == 'content' ||
+            entry.key == '_delivery_refs') {
+          continue;
+        }
         final value = entry.value?.toString() ?? 'null';
         if (value.length > 80) {
           metaLines.add('${entry.key}: ${value.substring(0, 80)}…');
@@ -6412,7 +6510,13 @@ class MessageBubble extends StatelessWidget {
             // language, copy, and wrap controls. User bubbles never parse
             // MEDIA: — the contract is assistant-side delivery, and quoted
             // tags in a prompt must stay verbatim.
-            ..._renderContent(theme, tokens, isUser, assistantTextColor),
+            ..._renderContent(
+              context,
+              theme,
+              tokens,
+              isUser,
+              assistantTextColor,
+            ),
             SizedBox(height: density.bodyBottomGap),
           ],
         ),

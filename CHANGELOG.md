@@ -22,6 +22,9 @@ shows only the three latest releases.
 
 ### Fixed
 
+- Request attachment-capable chat instructions explicitly rather than inheriting
+  the gateway host's terminal/TUI surface. Ordinary Remote Gateway prompts also
+  identify Android to gateways supporting per-turn Android surface notes.
 - Populate Activity from actual app-owned turn observations and honest gateway
   update metadata. Retain compression roots across restart and navigate older
   activity to the current conversation without duplicate continuation rows.
@@ -36,6 +39,16 @@ shows only the three latest releases.
 
 ### Added
 
+- Generated attachments share timeline and Assets discovery: explicit `MEDIA:`
+  deliveries, filesystem Markdown links and recognised successful image-tool
+  results. Files stay visible independently of verbose tool details.
+- Attachment popups preview images, Android PDF pages and inert text; other
+  binary files retain a metadata/download fallback. Download opens the native
+  save picker directly from either the card or popup, separately from Share.
+- Chat attachment downloads use the same streaming 25 MiB budget as Assets.
+  URL-only generated images use a separate, credential-free HTTPS connection
+  only after a tap; gateway authentication never goes to the image host.
+
 - Native **More → Assets** browser for explicit generated-file references in
   saved Hermes replies. Includes filename/source-chat search, file-type filters,
   on-demand image previews, download/share and navigation to the source chat.
@@ -47,7 +60,8 @@ shows only the three latest releases.
 
 ### Limits
 
-- Assets is reconstructed from saved `MEDIA:` references, not a server-owned
+- Assets is reconstructed from explicit saved deliveries and recognised media
+  producer results, not a server-owned
   catalogue of all attachments, project files or outputs. Referenced files may
   have expired or been removed. The Organisation placeholders remain gated:
   durable batch undo and correction-learning AI filing need separate contracts.
