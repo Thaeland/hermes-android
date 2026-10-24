@@ -14,6 +14,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import zipfile
 from pathlib import Path
 
@@ -101,6 +102,12 @@ def sdk_tools() -> tuple[Path, Path]:
             "Android SDK has no compatible executable aapt/apksigner build-tools pair"
         )
     _, selected = max(candidates)
+    print(
+        f"Android SDK: {sdk}; build-tools revision: {selected.name}; "
+        f"aapt: {selected / 'aapt'}; apksigner: {selected / 'apksigner'}",
+        file=sys.stderr,
+        flush=True,
+    )
     return selected / "aapt", selected / "apksigner"
 
 
@@ -204,19 +211,52 @@ def verify_badging(output: str, abi: str, version_name: str, version_code: int) 
 
 
 def verify_signer(output: str) -> None:
-    lines = [
-        line
-        for line in output.splitlines()
-        if line.startswith("Signer #") and "certificate SHA-256 digest" in line
-    ]
-    match = re.fullmatch(
-        r"Signer #1 certificate SHA-256 digest:[ \t]*([0-9a-fA-F]{64})",
-        lines[0] if len(lines) == 1 else "",
+    error = (
+        "APK signer must be the single pinned production SHA-256 certificate"
     )
-    if match is None or match.group(1).lower() != PRODUCTION_CERT_SHA256:
-        raise ValueError(
-            "APK signer must be the single pinned production SHA-256 certificate"
+    # These are the two observed current-signer record formats. Do not search
+    # arbitrary certificate/public-key/source-stamp text for the pinned digest.
+    fields = {
+        "certificate DN": r".+",
+        "certificate SHA-256 digest": r"[0-9a-fA-F]{64}",
+        "certificate SHA-1 digest": r"[0-9a-fA-F]{40}",
+        "certificate MD5 digest": r"[0-9a-fA-F]{32}",
+        "key algorithm": r"[A-Za-z0-9-]+",
+        "key size (bits)": r"[1-9][0-9]*",
+        "public key SHA-256 digest": r"[0-9a-fA-F]{64}",
+        "public key SHA-1 digest": r"[0-9a-fA-F]{40}",
+        "public key MD5 digest": r"[0-9a-fA-F]{32}",
+    }
+    records = {}
+    prefix = None
+    signer_count_seen = False
+    for line in output.splitlines():
+        if line.startswith("Number of signers:"):
+            if signer_count_seen or line != "Number of signers: 1":
+                raise ValueError(error)
+            signer_count_seen = True
+            continue
+        match = re.fullmatch(
+            r"(Signer #1 |V2 Signer: )([^:]+):[ \t]*(.*)", line
         )
+        if match is None:
+            if re.search(r"signer|certificate|public key", line, re.IGNORECASE):
+                raise ValueError(error)
+            continue
+        current_prefix, field, value = match.groups()
+        if (
+            (prefix is not None and current_prefix != prefix)
+            or field in records
+            or field not in fields
+            or re.fullmatch(fields[field], value) is None
+        ):
+            raise ValueError(error)
+        prefix = current_prefix
+        # Count records, not unique digests: duplicate identical signers are
+        # ambiguous too, including a second DN without its SHA-256 line.
+        records[field] = value
+    if records.get("certificate SHA-256 digest", "").lower() != PRODUCTION_CERT_SHA256:
+        raise ValueError(error)
 
 
 def verify_packaged_assets(apk: Path, expected: dict[str, bytes]) -> None:
