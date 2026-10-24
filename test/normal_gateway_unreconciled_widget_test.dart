@@ -99,7 +99,18 @@ void main() {
             }, turnId: 'wire-1');
             await widgetUntil(
               tester,
-              () => find.text('Received reply').evaluate().isNotEmpty,
+              () => owner.snapshot.displayRows.any(
+                (row) =>
+                    row['role'] == 'assistant' &&
+                    row['content'] == 'Received reply',
+              ),
+            );
+            await tester.pump();
+            expect(
+              find.text('Received reply'),
+              verbose ? findsOneWidget : findsNothing,
+              reason:
+                  'quiet mode requires this response\'s positive completion receipt',
             );
             final l10n = AppLocalizations.of(
               tester.element(find.byType(ChatScreen)),
@@ -128,7 +139,7 @@ void main() {
             expect(find.text('Received reply'), findsOneWidget);
             expect(
               find.textContaining(l10n.received_output_badge),
-              findsOneWidget,
+              verbose ? findsOneWidget : findsNothing,
             );
 
             await tester.enterText(find.byType(TextField), 'Keep draft');

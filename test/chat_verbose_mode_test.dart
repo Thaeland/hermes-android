@@ -991,13 +991,25 @@ void main() {
       expect(find.byType(GatewayNoticeCard), findsOneWidget);
       expect(
         find.text('Received output — match to saved history unconfirmed'),
-        findsOneWidget,
+        findsNothing,
       );
+      expect(find.text('Received · match unconfirmed'), findsWidgets);
       expect(find.text('Retained quiet reasoning'), findsNothing);
       await _tapTile(tester, _tile(GatewayReasoningCard));
       expect(find.text('Retained quiet reasoning'), findsOneWidget);
       expect(f.submissions, 1);
       await f.complete(tester, 'Retained final');
+      await tester.tap(find.byTooltip('Chat actions').hitTestable());
+      await _frames(tester);
+      await tester.tap(find.text('About received output').hitTestable());
+      await _frames(tester);
+      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(
+        find.text('Received output — match to saved history unconfirmed'),
+        findsOneWidget,
+      );
+      await tester.tap(find.widgetWithText(TextButton, 'Close'));
+      await _frames(tester);
       await f.leave(tester);
       await _verbose(false);
       await f.reopen(tester);
