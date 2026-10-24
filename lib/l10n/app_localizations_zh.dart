@@ -31,6 +31,9 @@ class AppLocalizationsZh extends AppLocalizations {
       'Received output — match to saved history unconfirmed';
 
   @override
+  String get received_output_details => 'About received output';
+
+  @override
   String get received_output_explanation =>
       'This may also appear in saved history. The app cannot confirm a match.';
 

@@ -67,6 +67,114 @@ void main() {
   });
 
   for (final width in [400.0, 1000.0]) {
+    for (final verbose in [false, true]) {
+      testWidgets(
+        'NOTICE details are on demand at $width with verbose $verbose',
+        (tester) async {
+          SharedPreferences.setMockInitialValues({'verbose_mode': verbose});
+          await tester.binding.setSurfaceSize(Size(width, 1400));
+          addTearDown(() => tester.binding.setSurfaceSize(null));
+          final wire = (await tester.runAsync(BindingServer.start))!;
+          wire.creates = 1;
+          wire.rows.add({
+            'id': 37,
+            'role': 'assistant',
+            'content': 'Saved context',
+          });
+          final controller = GatewayTurnApplicationController();
+          try {
+            await _mount(tester, wire, controller, textScale: 1.7);
+            final owner = controller
+                .normalSessionFor(wire.connection)
+                .findChat('stored')!;
+            await widgetUntil(
+              tester,
+              () => owner.snapshot.historyRows.isNotEmpty,
+            );
+            await tester.enterText(find.byType(TextField), 'Prompt');
+            await tester.tap(find.byTooltip('Send'));
+            await widgetUntil(tester, () => wire.prompts.length == 1);
+            wire.event('message.delta', {
+              'text': 'Received reply',
+            }, turnId: 'wire-1');
+            await widgetUntil(
+              tester,
+              () => find.text('Received reply').evaluate().isNotEmpty,
+            );
+            final l10n = AppLocalizations.of(
+              tester.element(find.byType(ChatScreen)),
+            )!;
+            void expectNoNotice() {
+              expect(find.text(l10n.received_output_heading), findsNothing);
+              expect(find.text(l10n.received_output_explanation), findsNothing);
+              expect(find.text(l10n.received_output_lifetime), findsNothing);
+              expect(
+                find.byKey(
+                  const ValueKey((ChatDisplaySource.received, 'heading')),
+                ),
+                findsNothing,
+              );
+            }
+
+            expectNoNotice();
+            wire.running = false;
+            wire.event('message.complete', {
+              'text': 'Received reply',
+            }, turnId: 'wire-1');
+            wire.event('turn.end', {}, turnId: 'wire-1');
+            await widgetUntil(tester, () => !owner.snapshot.hasActiveTurn);
+            await tester.pumpAndSettle();
+            expectNoNotice();
+            expect(find.text('Received reply'), findsOneWidget);
+            expect(
+              find.textContaining(l10n.received_output_badge),
+              findsOneWidget,
+            );
+
+            await tester.enterText(find.byType(TextField), 'Keep draft');
+            final composer = tester
+                .widget<TextField>(find.byType(TextField))
+                .controller!;
+            composer.selection = const TextSelection(
+              baseOffset: 2,
+              extentOffset: 6,
+            );
+            final draft = composer.value;
+            final receivedRows = owner.snapshot.displayRows;
+            final historyRows = owner.snapshot.historyRows;
+            final screen = tester.state(find.byType(ChatScreen));
+            await tester.tap(find.byTooltip('Chat actions').hitTestable());
+            await tester.pumpAndSettle();
+            await tester.tap(find.text('About received output').hitTestable());
+            await tester.pump(kThemeAnimationDuration);
+            await tester.pumpAndSettle();
+            expect(find.byType(AlertDialog), findsOneWidget);
+            expect(find.text(l10n.received_output_heading), findsOneWidget);
+            expect(find.text(l10n.received_output_explanation), findsOneWidget);
+            expect(find.text(l10n.received_output_lifetime), findsOneWidget);
+            await tester.tap(find.widgetWithText(TextButton, 'Close'));
+            await tester.pumpAndSettle();
+
+            expectNoNotice();
+            expect(find.text('Received reply'), findsOneWidget);
+            expect(tester.state(find.byType(ChatScreen)), same(screen));
+            expect(composer.value, draft);
+            expect(owner.snapshot.displayRows, receivedRows);
+            expect(owner.snapshot.historyRows, historyRows);
+            expect(wire.prompts, hasLength(1));
+            expect(tester.takeException(), isNull);
+          } finally {
+            await tester.pumpWidget(const SizedBox.shrink());
+            await controller.close();
+            await tester.runAsync(wire.close);
+            await tester.pump(const Duration(seconds: 16));
+          }
+        },
+      );
+    }
+  }
+
+  for (final width in [400.0, 1000.0]) {
     for (final mode in ['loading', '500']) {
       testWidgets(
         'POLICY idle accepted saved rows remain usable during $mode at $width',
@@ -188,13 +296,12 @@ void main() {
         final heading = find.text(
           'Received output — match to saved history unconfirmed',
         );
-        expect(heading, findsOneWidget);
-        expect(tester.getSemantics(heading).flagsCollection.isHeader, isTrue);
+        expect(heading, findsNothing);
         expect(
           find.text(
             'This may also appear in saved history. The app cannot confirm a match.',
           ),
-          findsOneWidget,
+          findsNothing,
         );
         expect(find.text('Received · match unconfirmed'), findsWidgets);
         expect(find.byType(ListView), findsOneWidget);
