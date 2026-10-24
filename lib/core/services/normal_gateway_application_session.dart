@@ -1583,7 +1583,9 @@ class NormalGatewayChatOwner {
         (event.type == 'message.delta' || event.type.startsWith('tool.'))) {
       phase = NormalGatewayTurnPhase.running;
     }
-    if (_display.isEmpty &&
+    // A restored running turn can receive guidance before assistant activity.
+    // A user-only projection must not prevent its response scaffold.
+    if (!_display.any((row) => row['role'] == 'assistant') &&
         (event.type.startsWith('message.') ||
             event.type.startsWith('tool.') ||
             event.type.startsWith('reasoning.'))) {

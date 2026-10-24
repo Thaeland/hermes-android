@@ -27,6 +27,84 @@ void main() {
   });
 
   test(
+    'restored running guidance preserves the first received assistant activity',
+    () async {
+      final initialController = GatewayTurnApplicationController();
+      final initial = initialController.normalSessionFor(gateway.connection);
+      await initial.ready;
+      await initial.pendingStore.put(
+        NormalGatewayPendingMarker(
+          scope: initial.scope,
+          localSessionId: 'mobile',
+          storedSessionId: 'stored',
+          turnId: 'restored-turn',
+          rowFloor: 10,
+          phase: 'emitted',
+          createdAt: 1,
+          updatedAt: 1,
+        ),
+      );
+      await initialController.close();
+      final controller = GatewayTurnApplicationController();
+      addTearDown(controller.close);
+      final session = controller.normalSessionFor(gateway.connection);
+      await session.ready;
+      final chat = session.findChat('stored')!;
+      await _until(() => chat.canSteer);
+      expect(chat.snapshot.displayRows, isEmpty);
+      expect(await chat.steer('Continue after restart'), isTrue);
+      expect(chat.snapshot.displayRows.single['display_kind'], 'steer');
+
+      gateway.event('reasoning.delta', {'text': 'First reasoning'});
+      gateway.event('tool.start', {
+        'tool': 'read_file',
+        'tool_id': 'early-tool',
+      });
+      gateway.event('message.delta', {'text': 'After restart'});
+      await _until(() => chat.snapshot.tools.isNotEmpty);
+      expect(
+        chat.snapshot.displayRows.where((row) => row['role'] == 'assistant'),
+        hasLength(1),
+        reason: 'Acknowledged guidance is not an assistant response scaffold',
+      );
+      await _until(
+        () => chat.snapshot.displayRows.last['content'] == 'After restart',
+      );
+      expect(
+        chat.snapshot.displayRows.last['_gateway_reasoning'],
+        'First reasoning',
+      );
+      expect(
+        chat.snapshot.timeline.runs.map(
+          (run) => run.activity?.toolId ?? run.text,
+        ),
+        ['First reasoning', 'early-tool', 'After restart'],
+      );
+      expect(chat.turnId, 'restored-turn');
+      expect(
+        (await session.pendingStore.load(session.scope)).single.turnId,
+        'restored-turn',
+      );
+      expect(chat.snapshot.hasActiveTurn, isTrue);
+      expect(
+        gateway.requests.where(
+          (request) => request['method'] == 'session.steer',
+        ),
+        hasLength(1),
+      );
+      expect(
+        gateway.requests.where(
+          (request) =>
+              request['method'] == 'prompt.submit' ||
+              request['method'] == 'session.create' ||
+              request['method'] == 'session.interrupt',
+        ),
+        isEmpty,
+      );
+    },
+  );
+
+  test(
     'steering uses the bound runtime once without interrupting or resubmitting',
     () async {
       gateway.holdSteerAck = true;
