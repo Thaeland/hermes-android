@@ -145,6 +145,12 @@ with sandbox:
             "output": "Fixture output\n[brackets] and literal \\n", **event})
         add(name, body, "process_complete", "process")
         add("legacy_" + name, body, expected="process")
+    with patch("tools.delegate_tool.get_subagent_attribution", return_value={
+        "goal": "Inspect files\nRun tests", "delegation_id": "deleg_fixture"}):
+        body = format_process_notification({"type": "watch_match", "session_id": "process-fixture",
+            "owner_task_id": "sa-fixture", "command": "fixture-command", "pattern": "ready", "output": "Fixture output"})
+        assert isinstance(body, str) and 'Inspect files\nRun tests' in body
+        add("legacy_process_watch_multiline_attribution", body, expected="process")
     for name, message in [
         ("watch_disabled", source_template("tools/process_registry.py", "Watch patterns disabled for process ",
             session=SimpleNamespace(id="fixture-process"), why="reached the lifetime cap of 100 delivered matches. ")),
@@ -164,6 +170,8 @@ with sandbox:
         body = format_process_notification({**base_event, **extra})
         add(name, body, "async_delegation_complete", sealed=False)
         add("legacy_" + name, body, sealed=False)
+        multi = {**base_event, **extra, "goal": "Inspect files\nRun tests", "goals": ["Inspect files\nRun tests"]}
+        add("legacy_" + name + "_multiline", format_process_notification(multi), sealed=False)
     db.close()
 
 output = Path(__file__).resolve().parents[1] / "test/fixtures/internal_background_messages.json"

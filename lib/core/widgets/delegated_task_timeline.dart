@@ -68,6 +68,21 @@ class _DelegatedTaskTimelineState extends State<DelegatedTaskTimeline>
   }
 
   @override
+  void didUpdateWidget(covariant DelegatedTaskTimeline oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (identical(oldWidget.controller, controller)) return;
+    oldWidget.controller.removeListener(_changed);
+    oldWidget.controller.dispose();
+    _backgroundReportExpansions.clear();
+    controller.addListener(_changed);
+    controller.setForeground(
+      WidgetsBinding.instance.lifecycleState == null ||
+          WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed,
+    );
+    controller.start();
+  }
+
+  @override
   void didChangeAppLifecycleState(AppLifecycleState state) =>
       controller.setForeground(state == AppLifecycleState.resumed);
   @override
@@ -124,7 +139,7 @@ class _DelegatedTaskTimelineState extends State<DelegatedTaskTimeline>
           Expanded(
             child: ListView(
               controller: _scrollController,
-              key: const PageStorageKey('task-timeline-scroll'),
+              key: PageStorageKey(('task-timeline-scroll', controller)),
               padding: const EdgeInsets.all(12),
               children: [
                 _identity(context),
@@ -202,7 +217,9 @@ class _DelegatedTaskTimelineState extends State<DelegatedTaskTimeline>
                 for (final row in transcript)
                   if (row.backgroundReport case final report?)
                     BackgroundReportCard(
-                      key: ValueKey('task-background-${row.id}'),
+                      // Expansion's bool must not share the list's double
+                      // scroll-offset PageStorage entry during lazy eviction.
+                      key: PageStorageKey('task-background-${row.id}'),
                       report: report,
                       initiallyExpanded:
                           _backgroundReportExpansions[row.id] ?? false,

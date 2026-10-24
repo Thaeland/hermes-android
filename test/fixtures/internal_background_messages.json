@@ -27,7 +27,7 @@
         "api_content": null,
         "display_kind": "model_switch",
         "display_metadata": null,
-        "message_uid": "a797f930a88a45988dea6649f0d9afdb",
+        "message_uid": "9c243bcf44f9405e80c3ffb5a3342fa6",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -60,7 +60,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "0f2794434f744b9294160e66bbfc2f4b",
+        "message_uid": "7c202ccd792d47dfb95f6d21b923ceac",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -93,7 +93,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "cebc42e48e274f49b56fff9a857ebd04",
+        "message_uid": "57c71797b290478681ec22909b66b27c",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -126,7 +126,7 @@
         "api_content": null,
         "display_kind": "personality_switch",
         "display_metadata": null,
-        "message_uid": "7c1f1abd4f4a4c8e8f537fad5c0c1161",
+        "message_uid": "8909a8ff495648429f56b779c1685748",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -159,7 +159,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "0b83a7b99d954314b4741c5e89081806",
+        "message_uid": "7f99844c83e645ccb9859a9f9f9317b4",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -192,7 +192,7 @@
         "api_content": null,
         "display_kind": "personality_switch",
         "display_metadata": null,
-        "message_uid": "38decce6f0324414a1b7dbce940b74b3",
+        "message_uid": "f584abc754f84ed79f174edd1b4a5493",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -225,7 +225,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "59ef9cddb54340e1bb1948aaaad2043f",
+        "message_uid": "8f9363ef576b4b1e80b1c7dc554b16b6",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -258,7 +258,7 @@
         "api_content": null,
         "display_kind": "auto_continue",
         "display_metadata": null,
-        "message_uid": "3c90a0f8e47742cd82bd51f9b40dc2bb",
+        "message_uid": "49e38c898789440d8a69d8fe2516181b",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -291,7 +291,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "df41c2b2eae94f428dc44ac83ff46885",
+        "message_uid": "cdc9dac60be449579836351a31a356ad",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -324,7 +324,7 @@
         "api_content": null,
         "display_kind": "internal_notification",
         "display_metadata": null,
-        "message_uid": "c4eade54526643399a772dce93e00b37",
+        "message_uid": "3b2865be23b949cd904c0c30b6de1471",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -357,7 +357,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "67c7d7f1dfcc4ee590331067d1a6ece2",
+        "message_uid": "fa975cf8db92475f97c991dec1292bba",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -390,7 +390,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "94b289ccafa84ada878e5c57549a3bef",
+        "message_uid": "debedd87f02940f5bfd24d479ff52e90",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -423,7 +423,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "0d4bad1f38064835924646192578873e",
+        "message_uid": "b9b0d41725dd447ea26c2b49d4885eeb",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -456,7 +456,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "65edb9912e0c42e69eda87774337a055",
+        "message_uid": "be50e025c68640f98f3266336f23c7af",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -489,7 +489,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "ee91423923ad4acaa6c6b0c81abf70b4",
+        "message_uid": "660b7e95de2647d586f463b632c73179",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -522,7 +522,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "c13e26870ad941259a9444139c2e0dd7",
+        "message_uid": "2f2b6f0231a945138bbf0312773a6405",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -555,7 +555,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "b0d5437ccda7416f9b3400767641694a",
+        "message_uid": "abea6dd9fcc64df3a42a8246ff3ee741",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -588,7 +588,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "2599e6deb2dc4b578dd5f63d50a1617d",
+        "message_uid": "d4dab631f92d494a82bedca3a51457bf",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -621,7 +621,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "5c12867165534251b602026add9a416f",
+        "message_uid": "0dca95660d664280812693e65029fe48",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -654,7 +654,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "6cdfbcbb77dc4761a93a67a29aac066a",
+        "message_uid": "2e4a15b60f0942af9492a56c91952c74",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -687,7 +687,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "60a85778581a4b0ea4eb1e0d7339af1b",
+        "message_uid": "e025328de449410e88f52ef6a3878cf0",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -720,7 +720,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "032b4249100149468d4d5ec637a52ea5",
+        "message_uid": "de0c9ec657634d4cb06612c885fdf353",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -753,7 +753,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "271ffe167496468587ba818cd9c99ef1",
+        "message_uid": "f6cc62c5f0484603ab421caef610c0a6",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -786,7 +786,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "84a1783c5318417da29eaa3c8da81224",
+        "message_uid": "9a09a92f8d8143d0a74b116930162cfd",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -819,7 +819,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "63a1641b07754f3bab06933257fab9cc",
+        "message_uid": "ecf947c34dee4695900962151f51e5f8",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -852,7 +852,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "ebc0478e00db4f88b784baa794a97b88",
+        "message_uid": "6f4174885d7b4d84b468bc3ae40fad4b",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -885,7 +885,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "65aa828f820e4d61a242e793df8c84ab",
+        "message_uid": "22ae77664d194022bfb61798dc54b691",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -918,7 +918,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "eec97e73436f4ac5af67450bc773b65a",
+        "message_uid": "ef7953255b51452f96bfe0b5862fe51d",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -951,7 +951,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "e5b772938b154b29a33cc76b8745a563",
+        "message_uid": "c1d68e6d74a64194a943e2d94952645d",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -984,7 +984,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "5596fc7d119a48808e4f671535616845",
+        "message_uid": "2e7c03c2c6a341d5a421280e78f1c5a7",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -1017,7 +1017,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "df45d12493c04909a33b5909745ead40",
+        "message_uid": "96880e43182542dd814cf7432d9c58e5",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -1050,7 +1050,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "a85dd392f53849089949fe50f3201d20",
+        "message_uid": "ccc01a6fbcb74481a745530b2fa10d9a",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -1083,7 +1083,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "34187651b495412b89ebd6b66b49c003",
+        "message_uid": "444e97d3e59747b18456c113c0bbea48",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -1116,7 +1116,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "21b416126a764f94aab72e942ae2e04f",
+        "message_uid": "07593ea44086405ba2f5acea7075dff6",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -1149,7 +1149,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "92a1c5d303664bd488de4326d256961d",
+        "message_uid": "7c1e119d847047ada2a8ea424bbcc1f1",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -1182,7 +1182,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "be516d638624462fab955d92f77b23ea",
+        "message_uid": "2724023a5473414cba50966e21b4a73b",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -1215,7 +1215,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "baecd33b4dcd42da9f0ededb61414d24",
+        "message_uid": "a776420a4df9446fabf8938d0e324454",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -1248,7 +1248,7 @@
         "api_content": null,
         "display_kind": "process_complete",
         "display_metadata": null,
-        "message_uid": "0085334b60bb4c56910c722ecbcb78f2",
+        "message_uid": "adcf00a85ebd4dbab08abf50ef35684b",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -1281,7 +1281,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "ca01f29afc3241f6aa84040cf054a949",
+        "message_uid": "e65fb911f9bf4093a072976cd40ead91",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -1314,7 +1314,7 @@
         "api_content": null,
         "display_kind": "process_complete",
         "display_metadata": null,
-        "message_uid": "f2f3e8e696a84ef09c45d2d5151c3520",
+        "message_uid": "b6ea2cda40714bd297b57da827f3183a",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -1347,7 +1347,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "1eb1525aae8e47f482d723a36314c8b8",
+        "message_uid": "97a785b7657c430c8664329706efacb8",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -1380,7 +1380,7 @@
         "api_content": null,
         "display_kind": "process_complete",
         "display_metadata": null,
-        "message_uid": "ca045f01efc5479291028db1aa1edff9",
+        "message_uid": "fdf4db5938f14e899868de64bc2f4646",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -1413,7 +1413,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "91afec44171b48a2b5590ae6e70c1331",
+        "message_uid": "84e68994549149c9a7547614b1c1dbab",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -1446,7 +1446,7 @@
         "api_content": null,
         "display_kind": "process_complete",
         "display_metadata": null,
-        "message_uid": "aee819f2b87143178638c4650a73b507",
+        "message_uid": "f1578ea4890644e9bd5c9f3b7c25736f",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -1479,7 +1479,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "32f23cacef814be685b0e8c97bd3222c",
+        "message_uid": "476928169a144c2b93a20d9b46f858eb",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -1512,7 +1512,7 @@
         "api_content": null,
         "display_kind": "process_complete",
         "display_metadata": null,
-        "message_uid": "68a47707185546cfaf385582d605b4c5",
+        "message_uid": "43f09ea708ad4c868ff8f25efc44164a",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -1545,7 +1545,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "54010edb720146688cdfc0a8ce23a718",
+        "message_uid": "91b48d8da4e84a2e95c38191e16d337a",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -1578,7 +1578,7 @@
         "api_content": null,
         "display_kind": "process_complete",
         "display_metadata": null,
-        "message_uid": "458af46789214871bb88b0d0ade9bc24",
+        "message_uid": "d38654dffd04496ab8db47e53ea7be1c",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -1611,7 +1611,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "3ad1801650254d7185cb5f36ca9ef715",
+        "message_uid": "846b54ecae6b493db47403d5fc4ccd16",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -1644,7 +1644,7 @@
         "api_content": null,
         "display_kind": "process_complete",
         "display_metadata": null,
-        "message_uid": "8b897f9180cb43db94e0bbf351fadab3",
+        "message_uid": "5d3275a18d834bfdb721352326ad9b2a",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -1677,7 +1677,40 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "f843ef2c41bd4f1aaaa55a03966cf38b",
+        "message_uid": "d6ba81bbe8064f26b814c6bf0cbda828",
+        "absorbed_message_uids": null,
+        "tool_call_uids": null,
+        "tool_call_uid": null
+      },
+      "expected": "process",
+      "sealed": true
+    },
+    "legacy_process_watch_multiline_attribution": {
+      "row": {
+        "id": 53,
+        "session_id": "fixture",
+        "role": "user",
+        "content": "[IMPORTANT: Background process process-fixture matched watch pattern \"ready\".\nStarted by subagent sa-fixture of delegation deleg_fixture. Task: \"Inspect files\nRun tests\"\nCommand: fixture-command\nMatched output:\nFixture output]",
+        "tool_call_id": null,
+        "tool_calls": null,
+        "tool_name": null,
+        "effect_disposition": null,
+        "timestamp": 1700000000.0,
+        "token_count": null,
+        "finish_reason": null,
+        "reasoning": null,
+        "reasoning_content": null,
+        "reasoning_details": null,
+        "codex_reasoning_items": null,
+        "codex_message_items": null,
+        "platform_message_id": null,
+        "observed": 0,
+        "active": 1,
+        "compacted": 0,
+        "api_content": null,
+        "display_kind": null,
+        "display_metadata": null,
+        "message_uid": "ec6de27f5b5a47d6bd07e3fdcaf2c973",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -1687,7 +1720,7 @@
     },
     "watch_disabled": {
       "row": {
-        "id": 53,
+        "id": 54,
         "session_id": "fixture",
         "role": "user",
         "content": "[IMPORTANT: Watch patterns disabled for process fixture-process — reached the lifetime cap of 100 delivered matches. Falling back to notify_on_complete semantics; you'll get exactly one notification when the process exits.]",
@@ -1710,7 +1743,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "bc15aecd03ea4c4ca216639ea154c9fd",
+        "message_uid": "58dd7e79c795453ba84862892d8cc8eb",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -1720,7 +1753,7 @@
     },
     "watch_overflow_tripped": {
       "row": {
-        "id": 54,
+        "id": 55,
         "session_id": "fixture",
         "role": "user",
         "content": "[IMPORTANT: Watch-pattern overflow: >10 notifications in 60s across all processes. Suppressing further watch_match events for 60s.]",
@@ -1743,7 +1776,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "a4d1f767559f4bb093917489e09b0405",
+        "message_uid": "d4f46102d55140b1839dbe64e186be70",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -1753,7 +1786,7 @@
     },
     "watch_overflow_released": {
       "row": {
-        "id": 55,
+        "id": 56,
         "session_id": "fixture",
         "role": "user",
         "content": "[IMPORTANT: Watch-pattern notifications resumed. 5 match event(s) were suppressed during the flood.]",
@@ -1776,7 +1809,7 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "07575ae0d6434239887b09e01a6eaa83",
+        "message_uid": "5ac25eb7599f4b96875c6ab88a407588",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -1785,39 +1818,6 @@
       "sealed": true
     },
     "delegation_single": {
-      "row": {
-        "id": 56,
-        "session_id": "fixture",
-        "role": "user",
-        "content": "[ASYNC DELEGATION COMPLETE — deleg_fixture]\nA background subagent you dispatched earlier has finished. You may have moved on since dispatching it; the full task source is below so you can act on the result or re-dispatch if things have changed.\n\nDispatched: 2023-11-15 09:13:20 (1m ago)\nOriginal goal: Inspect fixture\nRole: leaf   Model: fixture-model\nStatus: completed   API calls: 0   Duration: 60s\n--- RESULT ---\nFixture result",
-        "tool_call_id": null,
-        "tool_calls": null,
-        "tool_name": null,
-        "effect_disposition": null,
-        "timestamp": 1700000000.0,
-        "token_count": null,
-        "finish_reason": null,
-        "reasoning": null,
-        "reasoning_content": null,
-        "reasoning_details": null,
-        "codex_reasoning_items": null,
-        "codex_message_items": null,
-        "platform_message_id": null,
-        "observed": 0,
-        "active": 1,
-        "compacted": 0,
-        "api_content": null,
-        "display_kind": "async_delegation_complete",
-        "display_metadata": null,
-        "message_uid": "7e557dfbb77c48949513d8bc60af8bfc",
-        "absorbed_message_uids": null,
-        "tool_call_uids": null,
-        "tool_call_uid": null
-      },
-      "expected": "task",
-      "sealed": false
-    },
-    "legacy_delegation_single": {
       "row": {
         "id": 57,
         "session_id": "fixture",
@@ -1840,9 +1840,75 @@
         "active": 1,
         "compacted": 0,
         "api_content": null,
+        "display_kind": "async_delegation_complete",
+        "display_metadata": null,
+        "message_uid": "676f3258da6c415f8cd91949e378696e",
+        "absorbed_message_uids": null,
+        "tool_call_uids": null,
+        "tool_call_uid": null
+      },
+      "expected": "task",
+      "sealed": false
+    },
+    "legacy_delegation_single": {
+      "row": {
+        "id": 58,
+        "session_id": "fixture",
+        "role": "user",
+        "content": "[ASYNC DELEGATION COMPLETE — deleg_fixture]\nA background subagent you dispatched earlier has finished. You may have moved on since dispatching it; the full task source is below so you can act on the result or re-dispatch if things have changed.\n\nDispatched: 2023-11-15 09:13:20 (1m ago)\nOriginal goal: Inspect fixture\nRole: leaf   Model: fixture-model\nStatus: completed   API calls: 0   Duration: 60s\n--- RESULT ---\nFixture result",
+        "tool_call_id": null,
+        "tool_calls": null,
+        "tool_name": null,
+        "effect_disposition": null,
+        "timestamp": 1700000000.0,
+        "token_count": null,
+        "finish_reason": null,
+        "reasoning": null,
+        "reasoning_content": null,
+        "reasoning_details": null,
+        "codex_reasoning_items": null,
+        "codex_message_items": null,
+        "platform_message_id": null,
+        "observed": 0,
+        "active": 1,
+        "compacted": 0,
+        "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "8dffea7443414614b71401b08dbb2c64",
+        "message_uid": "2ce2b8ad0f0e40feb13b2d921d7f16a6",
+        "absorbed_message_uids": null,
+        "tool_call_uids": null,
+        "tool_call_uid": null
+      },
+      "expected": "task",
+      "sealed": false
+    },
+    "legacy_delegation_single_multiline": {
+      "row": {
+        "id": 59,
+        "session_id": "fixture",
+        "role": "user",
+        "content": "[ASYNC DELEGATION COMPLETE — deleg_fixture]\nA background subagent you dispatched earlier has finished. You may have moved on since dispatching it; the full task source is below so you can act on the result or re-dispatch if things have changed.\n\nDispatched: 2023-11-15 09:13:20 (1m ago)\nOriginal goal: Inspect files\nRun tests\nRole: leaf   Model: fixture-model\nStatus: completed   API calls: 0   Duration: 60s\n--- RESULT ---\nFixture result",
+        "tool_call_id": null,
+        "tool_calls": null,
+        "tool_name": null,
+        "effect_disposition": null,
+        "timestamp": 1700000000.0,
+        "token_count": null,
+        "finish_reason": null,
+        "reasoning": null,
+        "reasoning_content": null,
+        "reasoning_details": null,
+        "codex_reasoning_items": null,
+        "codex_message_items": null,
+        "platform_message_id": null,
+        "observed": 0,
+        "active": 1,
+        "compacted": 0,
+        "api_content": null,
+        "display_kind": null,
+        "display_metadata": null,
+        "message_uid": "de4e688a63034c148388c1d565ea6244",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -1852,7 +1918,7 @@
     },
     "delegation_batch": {
       "row": {
-        "id": 58,
+        "id": 60,
         "session_id": "fixture",
         "role": "user",
         "content": "[ASYNC DELEGATION BATCH COMPLETE — deleg_fixture]\nA background fan-out unit you dispatched earlier — 1 subagent(s) — has finished; its consolidated results are below. Any other units from the same delegate_task call report separately as they finish. You may have moved on since dispatching — act on these or re-dispatch if things have changed. If you are still waiting on siblings, end your turn after acting on this one.\n\nDispatched: 2023-11-15 09:13:20 (1m ago)\nRole: leaf   Model: fixture-model   Total duration: 60s\n\n--- ✓ TASK 1/1: Inspect fixture  (status=completed) ---\nFixture result",
@@ -1875,7 +1941,7 @@
         "api_content": null,
         "display_kind": "async_delegation_complete",
         "display_metadata": null,
-        "message_uid": "321de98e510d4a1fae72d3c367c4baea",
+        "message_uid": "49fd9acedf8445579cba750d7c80caf8",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -1885,7 +1951,7 @@
     },
     "legacy_delegation_batch": {
       "row": {
-        "id": 59,
+        "id": 61,
         "session_id": "fixture",
         "role": "user",
         "content": "[ASYNC DELEGATION BATCH COMPLETE — deleg_fixture]\nA background fan-out unit you dispatched earlier — 1 subagent(s) — has finished; its consolidated results are below. Any other units from the same delegate_task call report separately as they finish. You may have moved on since dispatching — act on these or re-dispatch if things have changed. If you are still waiting on siblings, end your turn after acting on this one.\n\nDispatched: 2023-11-15 09:13:20 (1m ago)\nRole: leaf   Model: fixture-model   Total duration: 60s\n\n--- ✓ TASK 1/1: Inspect fixture  (status=completed) ---\nFixture result",
@@ -1908,7 +1974,40 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "525ac98e121e463c9c06477998e4d1d6",
+        "message_uid": "c798849d74aa4446a1159d0f348c1414",
+        "absorbed_message_uids": null,
+        "tool_call_uids": null,
+        "tool_call_uid": null
+      },
+      "expected": "task",
+      "sealed": false
+    },
+    "legacy_delegation_batch_multiline": {
+      "row": {
+        "id": 62,
+        "session_id": "fixture",
+        "role": "user",
+        "content": "[ASYNC DELEGATION BATCH COMPLETE — deleg_fixture]\nA background fan-out unit you dispatched earlier — 1 subagent(s) — has finished; its consolidated results are below. Any other units from the same delegate_task call report separately as they finish. You may have moved on since dispatching — act on these or re-dispatch if things have changed. If you are still waiting on siblings, end your turn after acting on this one.\n\nDispatched: 2023-11-15 09:13:20 (1m ago)\nRole: leaf   Model: fixture-model   Total duration: 60s\n\n--- ✓ TASK 1/1: Inspect files\nRun tests  (status=completed) ---\nFixture result",
+        "tool_call_id": null,
+        "tool_calls": null,
+        "tool_name": null,
+        "effect_disposition": null,
+        "timestamp": 1700000000.0,
+        "token_count": null,
+        "finish_reason": null,
+        "reasoning": null,
+        "reasoning_content": null,
+        "reasoning_details": null,
+        "codex_reasoning_items": null,
+        "codex_message_items": null,
+        "platform_message_id": null,
+        "observed": 0,
+        "active": 1,
+        "compacted": 0,
+        "api_content": null,
+        "display_kind": null,
+        "display_metadata": null,
+        "message_uid": "c079902e16714fc590d758e43a6aa414",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -1918,7 +2017,7 @@
     },
     "delegation_failed": {
       "row": {
-        "id": 60,
+        "id": 63,
         "session_id": "fixture",
         "role": "user",
         "content": "[ASYNC DELEGATION TASK FAILED — deleg_fixture, task 1/1]\nOne subagent in a background fan-out you dispatched has failed while its siblings are still running. The batch's consolidated results will still arrive when the last sibling finishes; this is an early warning so you can re-dispatch or investigate now instead of then.\nTask: Inspect fixture\nStatus: failed   Duration: 2s\nError: Fixture failure",
@@ -1941,7 +2040,7 @@
         "api_content": null,
         "display_kind": "async_delegation_complete",
         "display_metadata": null,
-        "message_uid": "12496c551bf0439f8928385ceea2f9f2",
+        "message_uid": "537b6be7a8f84552b0d73ddaf8f6b865",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null
@@ -1951,7 +2050,7 @@
     },
     "legacy_delegation_failed": {
       "row": {
-        "id": 61,
+        "id": 64,
         "session_id": "fixture",
         "role": "user",
         "content": "[ASYNC DELEGATION TASK FAILED — deleg_fixture, task 1/1]\nOne subagent in a background fan-out you dispatched has failed while its siblings are still running. The batch's consolidated results will still arrive when the last sibling finishes; this is an early warning so you can re-dispatch or investigate now instead of then.\nTask: Inspect fixture\nStatus: failed   Duration: 2s\nError: Fixture failure",
@@ -1974,7 +2073,40 @@
         "api_content": null,
         "display_kind": null,
         "display_metadata": null,
-        "message_uid": "093f4cde2281489dae55288a36ee6034",
+        "message_uid": "348f89488fdd4dbabf370cad35e020c8",
+        "absorbed_message_uids": null,
+        "tool_call_uids": null,
+        "tool_call_uid": null
+      },
+      "expected": "task",
+      "sealed": false
+    },
+    "legacy_delegation_failed_multiline": {
+      "row": {
+        "id": 65,
+        "session_id": "fixture",
+        "role": "user",
+        "content": "[ASYNC DELEGATION TASK FAILED — deleg_fixture, task 1/1]\nOne subagent in a background fan-out you dispatched has failed while its siblings are still running. The batch's consolidated results will still arrive when the last sibling finishes; this is an early warning so you can re-dispatch or investigate now instead of then.\nTask: Inspect files\nRun tests\nStatus: failed   Duration: 2s\nError: Fixture failure",
+        "tool_call_id": null,
+        "tool_calls": null,
+        "tool_name": null,
+        "effect_disposition": null,
+        "timestamp": 1700000000.0,
+        "token_count": null,
+        "finish_reason": null,
+        "reasoning": null,
+        "reasoning_content": null,
+        "reasoning_details": null,
+        "codex_reasoning_items": null,
+        "codex_message_items": null,
+        "platform_message_id": null,
+        "observed": 0,
+        "active": 1,
+        "compacted": 0,
+        "api_content": null,
+        "display_kind": null,
+        "display_metadata": null,
+        "message_uid": "f8c372287dde414297c934897383cb2d",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null

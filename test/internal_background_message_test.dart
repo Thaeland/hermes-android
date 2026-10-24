@@ -6,6 +6,7 @@ import 'package:hermes_android/core/models/chat_timeline.dart';
 import 'package:hermes_android/core/services/delegated_task_history.dart';
 import 'package:hermes_android/core/utils/chat_conversation_projection.dart';
 import 'package:hermes_android/core/utils/chat_display_items.dart';
+import 'package:hermes_android/core/utils/android_prompt_context.dart';
 
 import 'support/internal_background_message_fixture.dart';
 
@@ -15,6 +16,74 @@ const _modelSwitch =
     'metadata when answering questions about what model/provider is active.]';
 
 void main() {
+  test(
+    'merged notices never consume bracketed human or Android follow-ups',
+    () {
+      final fixtures = internalBackgroundMessageFixtures();
+      for (final name in [
+        'legacy_personality_set',
+        'legacy_process_complete',
+        'legacy_process_watch',
+      ]) {
+        final original = fixtures[name]!['row'] as Map;
+        for (final human in [
+          'Return [yes/no]',
+          AndroidPromptContext.forModel('Explain the change'),
+        ]) {
+          final body = '${original['content']}\n\n$human';
+          final row = <String, dynamic>{
+            'id': 2,
+            'role': 'user',
+            'content': body,
+          };
+          expect(
+            BackgroundReport.fromMessage(row),
+            isNull,
+            reason: '$name: $human',
+          );
+          final messages = [
+            {'id': 1, 'role': 'user', 'content': 'Unrelated older question'},
+            row,
+            {
+              'id': 3,
+              'role': 'assistant',
+              'content': 'Answer',
+              'finish_reason': 'stop',
+            },
+          ];
+          for (final items in [
+            buildChatDisplayItems(messages: messages),
+            buildConversationDisplayItems(messages: messages),
+          ]) {
+            final answer = items.last as Map;
+            expect(
+              answer['_retry_prompt'],
+              contains(
+                human.startsWith('Return')
+                    ? 'Return [yes/no]'
+                    : 'Explain the change',
+              ),
+            );
+            expect(answer['_retry_prompt'], isNot('Unrelated older question'));
+          }
+        }
+      }
+    },
+  );
+
+  test('malformed MCP, process and goal walls are bounded literal scans', () {
+    for (final body in [
+      '[IMPORTANT: MCP servers have been reloaded. ${'1' * 40000}',
+      '[IMPORTANT: Background process fixture completed normally (exit code 0).\nCommand: ${'fixture-command\nOutput:\n' * 5000}',
+      '[Continuing toward your standing goal]\nGoal: ${'Goal\n\nCompletion contract:\n' * 5000}',
+    ]) {
+      expect(
+        BackgroundReport.fromMessage({'role': 'user', 'content': body}),
+        isNull,
+      );
+    }
+  });
+
   for (final entry in internalBackgroundMessageFixtures().entries) {
     test('backend-produced ${entry.key} is background in every projection', () {
       final fixture = entry.value;

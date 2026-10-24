@@ -77,6 +77,13 @@ unless the server annotates them. Do not solve missing provenance by hiding all
 messages with a reserved-looking prefix. Producers should supply the appropriate
 known kind (or `hidden`) when adding a new automated turn.
 
+Bracketed personality/process compatibility stops at the first complete outer
+frame, including when a human follow-up ends with an Android context footer or
+`[yes/no]`. Ambiguous untyped output with unbalanced brackets remains human;
+annotated reports do not have this limitation. Variable fields are scanned with
+fixed literal boundaries rather than backtracking wildcard regexes. Multiline
+delegation goals and process-watch attribution are supported.
+
 The source audit also covered scheduled-job execution prompts, coalesced gateway
 completion delivery, CLI handoff, Graph/Raft/Yuanbao automation and verification
 hooks. Their typed forms are covered by the table above. Unannotated forms without
@@ -90,7 +97,11 @@ selected producer f-strings, stages them through `_stage_turn_user_message`,
 persists them in disposable `SessionDB` and calls the real API client projection.
 The fixture records its backend revision. Database access is restricted to the
 sandbox and network connections are forbidden; no existing chat is inspected.
+The capture supplies known display kinds when staging typed cases; it exercises
+the real API projection, not an end-to-end run of both history serializers.
 
 The tests check full-body preservation, source separation, quiet/verbose policy,
 retry ownership, public/hidden precedence, quotes and human tails, CRLF bodies,
 real ChatScreen cold-load/refresh/reopen behaviour and delegated-task cards.
+Delegated coverage includes independent report pins across actual lazy eviction,
+scroll-storage isolation, refresh, reopening and same-State controller replacement.
