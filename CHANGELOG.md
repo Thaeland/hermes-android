@@ -22,18 +22,21 @@ shows only the three latest releases.
 
 ### Fixed
 
-- Keep separate Stop and Send controls while Hermes is responding. Remote
-  Gateway sends guidance through `session.steer` without starting another turn;
-  legacy REST explicitly stops its current response before sending a new one.
-- Preserve newer composer edits while guidance is awaiting acknowledgement.
-  Rejected or unconfirmed guidance keeps the draft, with no automatic resend or
-  interrupt fallback. Both controls retain 48 dp targets on narrow screens.
+- Make certificate files selectable on Android/iOS and ask for protected-file
+  passwords after selection. Retain encrypted PEM retries and certificate-chain
+  separators; reject an unusable PEM identity before reporting it loaded (#187).
 - Populate Activity from actual app-owned turn observations and honest gateway
   update metadata. Retain compression roots across restart and navigate older
   activity to the current conversation without duplicate continuation rows.
 - Verify manual Archive / Unarchive against the exact stored chat. An expired
   Quick Chat is reported restored only after its local retention change is
   durable; failed writes leave the row retryable rather than a phantom success.
+- Keep separate Stop and Send controls while Hermes is responding. Remote
+  Gateway sends guidance through `session.steer` without starting another turn;
+  legacy REST explicitly stops its current response before sending a new one.
+- Preserve newer composer edits while guidance is awaiting acknowledgement.
+  Rejected or unconfirmed guidance keeps the draft, with no automatic resend or
+  interrupt fallback. Both controls retain 48 dp targets on narrow screens.
 - Replace completed archive snapshots independently of pending active history,
   and show incomplete/retry state when expired Quick Chat IDs remain unresolved.
 - Keep newer external chat titles when an older aggregate scan completes,
@@ -59,6 +62,13 @@ shows only the three latest releases.
   durable batch undo and correction-learning AI filing need separate contracts.
 - This development slice was assisted by Hermes Agent; it is not a published
   release and does not change the current stable version.
+
+### Thanks
+
+- @smhc contributed the mobile certificate-picker and password-entry improvements
+  in #187, with a physical Android mTLS report. Maintainer follow-ups add encrypted
+  PEM and certificate-chain regressions. Original contributor commits are retained.
+- Hermes Agent assisted with review, follow-up fixes and automated verification.
 
 ## [2.1.33] - 2026-10-24
 
