@@ -70,6 +70,28 @@ abstract final class LegacyBackgroundMessage {
       text.isNotEmpty &&
       text.codeUnits.every((unit) => unit >= 48 && unit <= 57);
 
+  static bool _singleLine(String text) =>
+      !text.contains('\n') && !text.contains('\r');
+  static bool _headerField(String text) =>
+      _singleLine(text) && !text.contains('[') && !text.contains(']');
+  static bool _token(String text) => _singleLine(text) && !text.contains(' ');
+  static bool _signedInteger(String text) =>
+      _digits(text.startsWith('-') ? text.substring(1) : text);
+  static bool _attempt(String text) {
+    final parts = text.split('/');
+    return parts.length == 2 && parts.every(_digits);
+  }
+
+  static bool _loopTick(String text) {
+    var end = 0;
+    while (end < text.length &&
+        text.codeUnitAt(end) >= 48 &&
+        text.codeUnitAt(end) <= 57) {
+      end++;
+    }
+    return end > 0 && _headerField(text);
+  }
+
   static bool _isModelSwitch(String text) {
     const prefix = '[System: The active model for this chat has changed to ';
     const suffix =
@@ -194,19 +216,22 @@ abstract final class LegacyBackgroundMessage {
     if (_header(lines.first, 'TASK FAILED')) return _isDelegationFailure(lines);
     if (_header(lines.first, 'COMPLETE')) {
       if (lines[1] != _singleDelegationIntro) return false;
-      final result = lines.indexOf('--- RESULT ---');
-      if (result < 4 || result == lines.length - 1) return false;
-      final status = lines[result - 1];
-      if (!status.startsWith('Status: ') ||
-          !status.contains('   API calls: ') ||
-          !status.contains('   Duration: ')) {
-        return false;
-      }
       var hasGoal = false;
-      for (var index = 2; index < result - 1; index++) {
+      var hasRole = false;
+      for (var index = 2; index < lines.length - 1; index++) {
         final line = lines[index];
         if (line.startsWith('Original goal: ')) hasGoal = true;
-        if (hasGoal && _isDelegationRole(line)) return true;
+        if (hasGoal && _isDelegationRole(line)) hasRole = true;
+        // A literal delimiter can occur inside the goal/context. Inspect every
+        // candidate once and accept only one following the complete preamble.
+        if (hasRole && line == '--- RESULT ---') {
+          final status = lines[index - 1];
+          if (status.startsWith('Status: ') &&
+              status.contains('   API calls: ') &&
+              status.contains('   Duration: ')) {
+            return true;
+          }
+        }
       }
       return false;
     }
@@ -224,9 +249,7 @@ abstract final class LegacyBackgroundMessage {
       if (_isDelegationRole(line, batch: true)) hasRole = true;
       if (!hasRole) continue;
       if (line == '--- ERROR ---') return true;
-      if (line.startsWith('--- ✓ TASK ') ||
-          line.startsWith('--- ✗ TASK ') ||
-          line.startsWith('--- ⚠ TASK ')) {
+      if (_batchTaskStart(line)) {
         hasTaskHeader = true;
       }
       if (hasTaskHeader &&
@@ -249,6 +272,16 @@ abstract final class LegacyBackgroundMessage {
     return duration > model + modelLabel.length &&
         duration + durationLabel.length < line.length - 1 &&
         line.endsWith('s');
+  }
+
+  static bool _batchTaskStart(String line) {
+    for (final prefix in ['--- ✓ TASK ', '--- ✗ TASK ', '--- ⚠ TASK ']) {
+      if (!line.startsWith(prefix)) continue;
+      final colon = line.indexOf(': ', prefix.length);
+      return colon > prefix.length &&
+          _attempt(line.substring(prefix.length, colon));
+    }
+    return false;
   }
 
   static bool _isDelegationFailure(List<String> lines) {
@@ -359,6 +392,7 @@ abstract final class LegacyBackgroundMessage {
           "Each tool call's arguments must be under ~8K tokens to avoid stream timeouts. The "
           "cut was a transport interruption, not a capability change — your tools remain fully "
           "available.]",
+      validators: {0: _singleLine},
     ),
     // legacy_auto_continue
     _TextEnvelope(
@@ -374,6 +408,7 @@ abstract final class LegacyBackgroundMessage {
       "\n\nIf there is nothing meaningful to do or report for this instruction right now, "
           "reply briefly that nothing has changed and stop — do not invent work.",
       between: ["]\n"],
+      validators: {0: _headerField},
     ),
     // continuation_prompt_template
     _TextEnvelope(
@@ -415,6 +450,7 @@ abstract final class LegacyBackgroundMessage {
         "\nOutput (tail):\n```\n",
       ],
       allowEmptyLastField: true,
+      validators: {1: _attempt, 2: _singleLine, 3: _signedInteger},
     ),
     // wakeup_prompt_template
     _TextEnvelope(
@@ -426,6 +462,7 @@ abstract final class LegacyBackgroundMessage {
           "the thing you were watching has finished, say so and end your reply with "
           "LOOP_COMPLETE on its own line — that stops the loop.",
       between: ["]\nRecurring task: "],
+      validators: {0: _loopTick},
     ),
     // wakeup_prompt_with_until_template
     _TextEnvelope(
@@ -437,6 +474,7 @@ abstract final class LegacyBackgroundMessage {
           "status.\nIf the stop condition is met, or the task is no longer applicable, say so "
           "and end your reply with LOOP_COMPLETE on its own line — that stops the loop.",
       between: ["]\nRecurring task: ", "\n\nStop condition: "],
+      validators: {0: _loopTick},
     ),
     // output_contract_retry
     _TextEnvelope(
@@ -464,6 +502,7 @@ abstract final class LegacyBackgroundMessage {
           "terminal `kanban_complete(summary=..., artifacts=[...])` if the work is done, or "
           "`kanban_block(reason=...)` if you are blocked.]",
       between: ["). Error: ", ".\n\nTask `"],
+      validators: {0: _attempt, 1: _singleLine, 2: _singleLine},
     ),
   ];
 
@@ -474,6 +513,7 @@ abstract final class LegacyBackgroundMessage {
       "Falling back to notify_on_complete semantics; you'll get exactly one notification "
           "when the process exits.]",
       between: [" — "],
+      validators: {0: _token, 1: _singleLine},
     ),
     // watch_overflow_tripped
     _TextEnvelope(
@@ -483,11 +523,13 @@ abstract final class LegacyBackgroundMessage {
         " notifications in ",
         "s across all processes. Suppressing further watch_match events for ",
       ],
+      validators: {0: _digits, 1: _digits, 2: _digits},
     ),
     // watch_overflow_released
     _TextEnvelope(
       "[IMPORTANT: Watch-pattern notifications resumed. ",
       " match event(s) were suppressed during the flood.]",
+      validators: {0: _digits},
     ),
   ];
 }
@@ -498,21 +540,29 @@ class _TextEnvelope {
     this.suffix, {
     this.between = const [],
     this.allowEmptyLastField = false,
+    this.validators = const {},
   });
   final String prefix;
   final String suffix;
   final List<String> between;
   final bool allowEmptyLastField;
+  final Map<int, bool Function(String)> validators;
 
   bool matches(String text) {
     if (!text.startsWith(prefix) || !text.endsWith(suffix)) return false;
     final end = text.length - suffix.length;
     var cursor = prefix.length;
+    var field = 0;
     for (final literal in between) {
       final next = text.indexOf(literal, cursor);
       if (next <= cursor || next + literal.length > end) return false;
+      if (!_validField(field++, text.substring(cursor, next))) return false;
       cursor = next + literal.length;
     }
-    return allowEmptyLastField ? cursor <= end : cursor < end;
+    if (!(allowEmptyLastField ? cursor <= end : cursor < end)) return false;
+    return _validField(field, text.substring(cursor, end));
   }
+
+  bool _validField(int index, String value) =>
+      validators[index]?.call(value) ?? true;
 }

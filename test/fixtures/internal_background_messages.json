@@ -1916,9 +1916,42 @@
       "expected": "task",
       "sealed": false
     },
-    "delegation_batch": {
+    "legacy_delegation_single_literal_delimiter": {
       "row": {
         "id": 60,
+        "session_id": "fixture",
+        "role": "user",
+        "content": "[ASYNC DELEGATION COMPLETE — deleg_fixture]\nA background subagent you dispatched earlier has finished. You may have moved on since dispatching it; the full task source is below so you can act on the result or re-dispatch if things have changed.\n\nDispatched: 2023-11-15 09:13:20 (1m ago)\nOriginal goal: Inspect files\n--- RESULT ---\nRun tests\nRole: leaf   Model: fixture-model\nStatus: completed   API calls: 0   Duration: 60s\n--- RESULT ---\nFixture result",
+        "tool_call_id": null,
+        "tool_calls": null,
+        "tool_name": null,
+        "effect_disposition": null,
+        "timestamp": 1700000000.0,
+        "token_count": null,
+        "finish_reason": null,
+        "reasoning": null,
+        "reasoning_content": null,
+        "reasoning_details": null,
+        "codex_reasoning_items": null,
+        "codex_message_items": null,
+        "platform_message_id": null,
+        "observed": 0,
+        "active": 1,
+        "compacted": 0,
+        "api_content": null,
+        "display_kind": null,
+        "display_metadata": null,
+        "message_uid": "5d9bdc3084b25ee196e39455b9375954",
+        "absorbed_message_uids": null,
+        "tool_call_uids": null,
+        "tool_call_uid": null
+      },
+      "expected": "task",
+      "sealed": false
+    },
+    "delegation_batch": {
+      "row": {
+        "id": 61,
         "session_id": "fixture",
         "role": "user",
         "content": "[ASYNC DELEGATION BATCH COMPLETE — deleg_fixture]\nA background fan-out unit you dispatched earlier — 1 subagent(s) — has finished; its consolidated results are below. Any other units from the same delegate_task call report separately as they finish. You may have moved on since dispatching — act on these or re-dispatch if things have changed. If you are still waiting on siblings, end your turn after acting on this one.\n\nDispatched: 2023-11-15 09:13:20 (1m ago)\nRole: leaf   Model: fixture-model   Total duration: 60s\n\n--- ✓ TASK 1/1: Inspect fixture  (status=completed) ---\nFixture result",
@@ -1951,7 +1984,7 @@
     },
     "legacy_delegation_batch": {
       "row": {
-        "id": 61,
+        "id": 62,
         "session_id": "fixture",
         "role": "user",
         "content": "[ASYNC DELEGATION BATCH COMPLETE — deleg_fixture]\nA background fan-out unit you dispatched earlier — 1 subagent(s) — has finished; its consolidated results are below. Any other units from the same delegate_task call report separately as they finish. You may have moved on since dispatching — act on these or re-dispatch if things have changed. If you are still waiting on siblings, end your turn after acting on this one.\n\nDispatched: 2023-11-15 09:13:20 (1m ago)\nRole: leaf   Model: fixture-model   Total duration: 60s\n\n--- ✓ TASK 1/1: Inspect fixture  (status=completed) ---\nFixture result",
@@ -1984,7 +2017,7 @@
     },
     "legacy_delegation_batch_multiline": {
       "row": {
-        "id": 62,
+        "id": 63,
         "session_id": "fixture",
         "role": "user",
         "content": "[ASYNC DELEGATION BATCH COMPLETE — deleg_fixture]\nA background fan-out unit you dispatched earlier — 1 subagent(s) — has finished; its consolidated results are below. Any other units from the same delegate_task call report separately as they finish. You may have moved on since dispatching — act on these or re-dispatch if things have changed. If you are still waiting on siblings, end your turn after acting on this one.\n\nDispatched: 2023-11-15 09:13:20 (1m ago)\nRole: leaf   Model: fixture-model   Total duration: 60s\n\n--- ✓ TASK 1/1: Inspect files\nRun tests  (status=completed) ---\nFixture result",
@@ -2015,9 +2048,42 @@
       "expected": "task",
       "sealed": false
     },
+    "legacy_delegation_batch_literal_delimiter": {
+      "row": {
+        "id": 64,
+        "session_id": "fixture",
+        "role": "user",
+        "content": "[ASYNC DELEGATION BATCH COMPLETE — deleg_fixture]\nA background fan-out unit you dispatched earlier — 1 subagent(s) — has finished; its consolidated results are below. Any other units from the same delegate_task call report separately as they finish. You may have moved on since dispatching — act on these or re-dispatch if things have changed. If you are still waiting on siblings, end your turn after acting on this one.\n\nDispatched: 2023-11-15 09:13:20 (1m ago)\nRole: leaf   Model: fixture-model   Total duration: 60s\n\n--- ✓ TASK 1/1: Inspect files\n--- RESULT ---\nRun tests  (status=completed) ---\nFixture result",
+        "tool_call_id": null,
+        "tool_calls": null,
+        "tool_name": null,
+        "effect_disposition": null,
+        "timestamp": 1700000000.0,
+        "token_count": null,
+        "finish_reason": null,
+        "reasoning": null,
+        "reasoning_content": null,
+        "reasoning_details": null,
+        "codex_reasoning_items": null,
+        "codex_message_items": null,
+        "platform_message_id": null,
+        "observed": 0,
+        "active": 1,
+        "compacted": 0,
+        "api_content": null,
+        "display_kind": null,
+        "display_metadata": null,
+        "message_uid": "9103fb767eac52b1b4604442210d34b8",
+        "absorbed_message_uids": null,
+        "tool_call_uids": null,
+        "tool_call_uid": null
+      },
+      "expected": "task",
+      "sealed": false
+    },
     "delegation_failed": {
       "row": {
-        "id": 63,
+        "id": 65,
         "session_id": "fixture",
         "role": "user",
         "content": "[ASYNC DELEGATION TASK FAILED — deleg_fixture, task 1/1]\nOne subagent in a background fan-out you dispatched has failed while its siblings are still running. The batch's consolidated results will still arrive when the last sibling finishes; this is an early warning so you can re-dispatch or investigate now instead of then.\nTask: Inspect fixture\nStatus: failed   Duration: 2s\nError: Fixture failure",
@@ -2050,7 +2116,7 @@
     },
     "legacy_delegation_failed": {
       "row": {
-        "id": 64,
+        "id": 66,
         "session_id": "fixture",
         "role": "user",
         "content": "[ASYNC DELEGATION TASK FAILED — deleg_fixture, task 1/1]\nOne subagent in a background fan-out you dispatched has failed while its siblings are still running. The batch's consolidated results will still arrive when the last sibling finishes; this is an early warning so you can re-dispatch or investigate now instead of then.\nTask: Inspect fixture\nStatus: failed   Duration: 2s\nError: Fixture failure",
@@ -2083,7 +2149,7 @@
     },
     "legacy_delegation_failed_multiline": {
       "row": {
-        "id": 65,
+        "id": 67,
         "session_id": "fixture",
         "role": "user",
         "content": "[ASYNC DELEGATION TASK FAILED — deleg_fixture, task 1/1]\nOne subagent in a background fan-out you dispatched has failed while its siblings are still running. The batch's consolidated results will still arrive when the last sibling finishes; this is an early warning so you can re-dispatch or investigate now instead of then.\nTask: Inspect files\nRun tests\nStatus: failed   Duration: 2s\nError: Fixture failure",
@@ -2107,6 +2173,39 @@
         "display_kind": null,
         "display_metadata": null,
         "message_uid": "f97c1cb03cce5adda8a0fc9e7698b83d",
+        "absorbed_message_uids": null,
+        "tool_call_uids": null,
+        "tool_call_uid": null
+      },
+      "expected": "task",
+      "sealed": false
+    },
+    "legacy_delegation_failed_literal_delimiter": {
+      "row": {
+        "id": 68,
+        "session_id": "fixture",
+        "role": "user",
+        "content": "[ASYNC DELEGATION TASK FAILED — deleg_fixture, task 1/1]\nOne subagent in a background fan-out you dispatched has failed while its siblings are still running. The batch's consolidated results will still arrive when the last sibling finishes; this is an early warning so you can re-dispatch or investigate now instead of then.\nTask: Inspect files\n--- RESULT ---\nRun tests\nStatus: failed   Duration: 2s\nError: Fixture failure",
+        "tool_call_id": null,
+        "tool_calls": null,
+        "tool_name": null,
+        "effect_disposition": null,
+        "timestamp": 1700000000.0,
+        "token_count": null,
+        "finish_reason": null,
+        "reasoning": null,
+        "reasoning_content": null,
+        "reasoning_details": null,
+        "codex_reasoning_items": null,
+        "codex_message_items": null,
+        "platform_message_id": null,
+        "observed": 0,
+        "active": 1,
+        "compacted": 0,
+        "api_content": null,
+        "display_kind": null,
+        "display_metadata": null,
+        "message_uid": "53cf308f8cb554cca97c2bd1258d7ebf",
         "absorbed_message_uids": null,
         "tool_call_uids": null,
         "tool_call_uid": null

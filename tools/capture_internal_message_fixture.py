@@ -175,6 +175,9 @@ with sandbox:
         add("legacy_" + name, body, sealed=False)
         multi = {**base_event, **extra, "goal": "Inspect files\nRun tests", "goals": ["Inspect files\nRun tests"]}
         add("legacy_" + name + "_multiline", format_process_notification(multi), sealed=False)
+        marker_goal = "Inspect files\n--- RESULT ---\nRun tests"
+        marker_event = {**base_event, **extra, "goal": marker_goal, "goals": [marker_goal]}
+        add("legacy_" + name + "_literal_delimiter", format_process_notification(marker_event), sealed=False)
     db.close()
 
 output = Path(__file__).resolve().parents[1] / "test/fixtures/internal_background_messages.json"

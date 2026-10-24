@@ -17,6 +17,39 @@ const _modelSwitch =
 
 void main() {
   test(
+    'human comments cannot replace fixed-domain numeric producer fields',
+    () {
+      final fixtures = internalBackgroundMessageFixtures();
+      for (final entry in <String, List<String>>{
+        'watch_overflow_released': [
+          'resumed. ',
+          'resumed. Why were these suppressed? ',
+        ],
+        'watch_overflow_tripped': [
+          '>10 notifications',
+          '>Why 10 notifications',
+        ],
+        'continuation_prompt_gate_failed_template': [
+          'attempt 1/3',
+          'attempt why 1/3',
+        ],
+        'wakeup_prompt_template': ['wakeup #2', 'wakeup #Why 2'],
+        'kanban_recovery': ['attempt 1/3', 'attempt why 1/3'],
+        'legacy_delegation_batch': ['TASK 1/1', 'TASK why 1/1'],
+      }.entries) {
+        final body = fixtures[entry.key]!['row']['content'] as String;
+        final human = body.replaceFirst(entry.value[0], entry.value[1]);
+        expect(human, isNot(body));
+        expect(
+          BackgroundReport.fromMessage({'role': 'user', 'content': human}),
+          isNull,
+          reason: entry.key,
+        );
+      }
+    },
+  );
+
+  test(
     'merged notices never consume bracketed human or Android follow-ups',
     () {
       final fixtures = internalBackgroundMessageFixtures();
