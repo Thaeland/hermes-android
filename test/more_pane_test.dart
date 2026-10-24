@@ -60,7 +60,6 @@ void main() {
           'files',
           'assets',
           'unassigned',
-          'archived-quick',
           'cron',
           'skills',
           'memory',
@@ -68,6 +67,24 @@ void main() {
           'dashboard',
         ]),
       );
+    });
+
+    test('archive access stays in Chats rather than More', () {
+      for (final dashboardReachable in [true, false]) {
+        final entries = buildMoreSections(
+          dashboardReachable: dashboardReachable,
+          l10n: l10n,
+        ).expand((section) => section.entries);
+
+        expect(
+          entries.map((entry) => entry.id),
+          isNot(contains('archived-quick')),
+        );
+        expect(
+          entries.map((entry) => entry.title),
+          isNot(contains(l10n.archived_quick_chats)),
+        );
+      }
     });
 
     test('Unassigned chats is not mislabeled as the action Inbox', () {
@@ -225,9 +242,10 @@ void main() {
         };
 
         expect(entries['files']!.availability, MoreEntryAvailability.available);
-        for (final id in ['unassigned', 'archived-quick']) {
-          expect(entries[id]!.availability, MoreEntryAvailability.available);
-        }
+        expect(
+          entries['unassigned']!.availability,
+          MoreEntryAvailability.available,
+        );
       },
     );
 
@@ -278,6 +296,22 @@ void main() {
         scrollable: find.byType(Scrollable).first,
       );
       expect(find.text('Settings'), findsOneWidget);
+    });
+
+    testWidgets('does not render the redundant archive card', (tester) async {
+      await _pumpPane(tester, sections: sections());
+
+      expect(find.text(l10n.archived_quick_chats), findsNothing);
+      expect(
+        find.text(
+          l10n.review_or_promote_quick_chats_past_their_retention_period,
+        ),
+        findsNothing,
+      );
+      expect(find.byIcon(Icons.archive_outlined), findsNothing);
+      expect(find.text(l10n.unassigned_chats), findsOneWidget);
+      expect(find.text(l10n.files), findsOneWidget);
+      expect(find.text(l10n.assets), findsOneWidget);
     });
 
     for (final dashboardReachable in [true, false]) {

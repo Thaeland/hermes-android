@@ -208,18 +208,28 @@ void main() {
           await _waitForImport(tester, () => password.evaluate().isEmpty);
           expect(password, findsNothing);
           expect(picker.calls, hasLength(1));
-          expect(
-            support.listSync(recursive: true).whereType<File>(),
-            hasLength(2),
-          );
+          final stagedFiles = support
+              .listSync(recursive: true)
+              .whereType<File>()
+              .toList();
+          expect(stagedFiles, hasLength(2));
+          final stagedDirectories = {
+            for (final file in stagedFiles) file.parent.path,
+          };
+          expect(stagedDirectories, hasLength(1));
+          final stagedDirectory = Directory(stagedDirectories.single);
           await tester.runAsync(() async {
             await tester.tap(find.text('Cancel'));
           });
           await _waitForImport(
             tester,
-            () => support.listSync(recursive: true).whereType<File>().isEmpty,
+            // Recursive listing races the real asynchronous directory deletion:
+            // a child can disappear after listSync has enumerated its parent.
+            // Wait for this exact owned identity to be gone before traversing.
+            () => !stagedDirectory.existsSync(),
           );
           await tester.pumpAndSettle();
+          expect(stagedFiles.every((file) => !file.existsSync()), isTrue);
           expect(support.listSync(recursive: true).whereType<File>(), isEmpty);
         },
       );

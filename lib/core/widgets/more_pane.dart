@@ -1,5 +1,6 @@
 /// The More destination pane.
 ///
+/// The fifth top-level destination (Chats / Crons / Projects / Activity / More).
 /// Groups Workspace, Agent and System capabilities, with a Dashboard fallback
 /// for functionality that does not yet have a native screen. Roadmap-only
 /// organisation placeholders are omitted from the menu.
@@ -8,6 +9,7 @@
 ///
 /// 1. **Keep supported capabilities discoverable.** A surface the current
 ///    connection cannot serve stays disabled *with a precise reason*.
+///    Capabilities exposed in other destinations need not be duplicated here.
 /// 2. **Explain, do not crash.** Availability is data, so tests can assert it
 ///    without pumping a widget, and the pane simply renders it.
 library;
@@ -96,13 +98,6 @@ List<MoreSection> buildMoreSections({
           title: l10n.unassigned_chats,
           subtitle: l10n.chats_that_are_not_assigned_to_a_project,
           icon: Icons.inbox_outlined,
-        ),
-        MoreEntry(
-          id: 'archived-quick',
-          title: l10n.archived_quick_chats,
-          subtitle:
-              l10n.review_or_promote_quick_chats_past_their_retention_period,
-          icon: Icons.archive_outlined,
         ),
         MoreEntry(
           id: 'files',
