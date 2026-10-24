@@ -46,7 +46,27 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
-      '일회성 질문입니다. 72시간 후에 자동으로 보관 처리되며, 보관할 가치가 있는 내용은 기억에 유지됩니다.';
+      'A one-off question. Archives itself after 72 hours; anything worth keeping is still remembered.';
+
+  @override
+  String get archive_chat => '채팅 보관';
+
+  @override
+  String get unarchive_chat => '채팅 보관 해제';
+
+  @override
+  String get chat_archived => '채팅이 보관되었습니다';
+
+  @override
+  String get chat_unarchived => '채팅 보관이 해제되었습니다';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return '채팅 보관 상태를 변경할 수 없습니다: $error';
+  }
+
+  @override
+  String get quick_chat_description => '일회성 질문입니다.';
 
   @override
   String get ai_full_text => 'AI + 전문 검색';
@@ -154,7 +174,8 @@ class AppLocalizationsKo extends AppLocalizations {
   String get archived => '보관됨';
 
   @override
-  String get archived_conversations_appear_here => '보관된 대화가 여기에 표시됩니다.';
+  String get archived_conversations_appear_here =>
+      '보관한 대화만 여기에 표시됩니다. 이전 채팅은 모든 채팅에 남아 있습니다.';
 
   @override
   String get archived_quick_chats => '보관된 빠른 채팅';
@@ -189,9 +210,6 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get auto_device_default => '자동 (기기 기본값)';
-
-  @override
-  String get auto_archives_after_72_hours => '72시간 후 자동 보관';
 
   @override
   String get automation => '자동화';
@@ -521,6 +539,16 @@ class AppLocalizationsKo extends AppLocalizations {
 
   @override
   String get cron => 'Cron';
+
+  @override
+  String get crons => 'Crons';
+
+  @override
+  String get cron_conversations_empty =>
+      'Conversations from scheduled jobs appear here, including older runs.';
+
+  @override
+  String get search_cron_conversations => 'Search cron conversations';
 
   @override
   String get cron_jobs => 'Cron 작업';
@@ -2795,4 +2823,45 @@ class AppLocalizationsKo extends AppLocalizations {
   String task_tasks_finished(Object count) {
     return '$count delegated task(s) finished';
   }
+
+  @override
+  String get activity_status_unconfirmed => '상태 미확인';
+
+  @override
+  String get activity_recently_updated => '최근 업데이트됨';
+
+  @override
+  String get activity_reconnecting => '다시 연결 중 — 턴 상태 확인 중';
+
+  @override
+  String get activity_outcome_unknown => '턴의 결과를 확인할 수 없었습니다. 채팅을 열어 확인하세요.';
+
+  @override
+  String get activity_chat_updated_detail =>
+      '게이트웨이에 기록된 채팅 활동입니다. 턴의 실시간 상태는 확인할 수 없습니다.';
+
+  @override
+  String get activity_updated => '업데이트됨';
+
+  @override
+  String get activity_empty_title => '최근 활동 없음';
+
+  @override
+  String get activity_empty_detail =>
+      '이 앱에서 시작한 턴과 지난 7일 동안 업데이트된 게이트웨이 채팅이 여기에 표시됩니다.';
+
+  @override
+  String get activity_read_error =>
+      '활동에서 턴 기록이나 게이트웨이 채팅을 읽을 수 없었습니다. 연결을 확인한 후 다시 시도하세요.';
+
+  @override
+  String get activity_chat_unavailable =>
+      '이 채팅은 더 이상 사용할 수 없거나 게이트웨이에 연결할 수 없습니다.';
+
+  @override
+  String get activity_partial_title => '활동이 일부만 로드됨';
+
+  @override
+  String get activity_partial_detail =>
+      '게이트웨이 활동의 제한된 범위가 표시됩니다. 다른 채팅이 더 있을 수 있습니다. 아래로 당겨 새로고침하세요.';
 }

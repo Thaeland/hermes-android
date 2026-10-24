@@ -46,7 +46,27 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
-      '一次性问题。将在 72 小时后自动归档；任何值得保留的内容都会被记住。';
+      'A one-off question. Archives itself after 72 hours; anything worth keeping is still remembered.';
+
+  @override
+  String get archive_chat => '归档聊天';
+
+  @override
+  String get unarchive_chat => '取消归档聊天';
+
+  @override
+  String get chat_archived => '聊天已归档';
+
+  @override
+  String get chat_unarchived => '聊天已取消归档';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return '无法更新聊天归档状态：$error';
+  }
+
+  @override
+  String get quick_chat_description => '一次性问题。';
 
   @override
   String get ai_full_text => 'AI + 全文';
@@ -155,7 +175,8 @@ class AppLocalizationsZh extends AppLocalizations {
   String get archived => '已归档';
 
   @override
-  String get archived_conversations_appear_here => '已归档的对话将显示在这里。';
+  String get archived_conversations_appear_here =>
+      '这里只显示已归档的对话。旧聊天仍保留在“所有聊天”中。';
 
   @override
   String get archived_quick_chats => '已归档的快速聊天';
@@ -189,9 +210,6 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get auto_device_default => '自动（设备默认）';
-
-  @override
-  String get auto_archives_after_72_hours => '72 小时后自动归档';
 
   @override
   String get automation => '自动化';
@@ -520,6 +538,16 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String get cron => 'Cron';
+
+  @override
+  String get crons => 'Crons';
+
+  @override
+  String get cron_conversations_empty =>
+      'Conversations from scheduled jobs appear here, including older runs.';
+
+  @override
+  String get search_cron_conversations => 'Search cron conversations';
 
   @override
   String get cron_jobs => 'Cron 任务';
@@ -2771,6 +2799,42 @@ class AppLocalizationsZh extends AppLocalizations {
   String task_tasks_finished(Object count) {
     return '$count delegated task(s) finished';
   }
+
+  @override
+  String get activity_status_unconfirmed => '状态未确认';
+
+  @override
+  String get activity_recently_updated => '最近更新';
+
+  @override
+  String get activity_reconnecting => '正在重新连接 — 正在检查轮次状态';
+
+  @override
+  String get activity_outcome_unknown => '无法确认本轮对话的结果。请打开聊天查看。';
+
+  @override
+  String get activity_chat_updated_detail => '网关已记录聊天活动；无法获取轮次的实时状态。';
+
+  @override
+  String get activity_updated => '已更新';
+
+  @override
+  String get activity_empty_title => '暂无近期活动';
+
+  @override
+  String get activity_empty_detail => '在此应用中启动的轮次，以及过去7天内更新的网关聊天都会显示在这里。';
+
+  @override
+  String get activity_read_error => '活动功能无法读取轮次记录或网关聊天。请检查连接后重试。';
+
+  @override
+  String get activity_chat_unavailable => '此聊天已不可用，或无法连接到网关。';
+
+  @override
+  String get activity_partial_title => '活动已部分加载';
+
+  @override
+  String get activity_partial_detail => '目前仅显示网关活动的有限范围。可能还有更多聊天，请下拉刷新。';
 }
 
 /// The translations for Chinese, using the Han script (`zh_Hans`).
@@ -2793,8 +2857,24 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get background_report_collapse => '收起报告';
 
   @override
-  String get a_one_off_question_archives_itself_after_72_hours_anything =>
-      '一次性问题。将在 72 小时后自动归档；任何值得保留的内容都会被记住。';
+  String get archive_chat => '归档聊天';
+
+  @override
+  String get unarchive_chat => '取消归档聊天';
+
+  @override
+  String get chat_archived => '聊天已归档';
+
+  @override
+  String get chat_unarchived => '聊天已取消归档';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return '无法更新聊天归档状态：$error';
+  }
+
+  @override
+  String get quick_chat_description => '一次性问题。';
 
   @override
   String get ai_full_text => 'AI + 全文';
@@ -2903,7 +2983,8 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get archived => '已归档';
 
   @override
-  String get archived_conversations_appear_here => '已归档的对话将显示在这里。';
+  String get archived_conversations_appear_here =>
+      '这里只显示已归档的对话。旧聊天仍保留在“所有聊天”中。';
 
   @override
   String get archived_quick_chats => '已归档的快速聊天';
@@ -2937,9 +3018,6 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get auto_device_default => '自动（设备默认）';
-
-  @override
-  String get auto_archives_after_72_hours => '72 小时后自动归档';
 
   @override
   String get automation => '自动化';
@@ -5474,4 +5552,40 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String task_tasks_finished(Object count) {
     return '$count delegated task(s) finished';
   }
+
+  @override
+  String get activity_status_unconfirmed => '状态未确认';
+
+  @override
+  String get activity_recently_updated => '最近更新';
+
+  @override
+  String get activity_reconnecting => '正在重新连接 — 正在检查轮次状态';
+
+  @override
+  String get activity_outcome_unknown => '无法确认本轮对话的结果。请打开聊天查看。';
+
+  @override
+  String get activity_chat_updated_detail => '网关已记录聊天活动；无法获取轮次的实时状态。';
+
+  @override
+  String get activity_updated => '已更新';
+
+  @override
+  String get activity_empty_title => '暂无近期活动';
+
+  @override
+  String get activity_empty_detail => '在此应用中启动的轮次，以及过去7天内更新的网关聊天都会显示在这里。';
+
+  @override
+  String get activity_read_error => '活动功能无法读取轮次记录或网关聊天。请检查连接后重试。';
+
+  @override
+  String get activity_chat_unavailable => '此聊天已不可用，或无法连接到网关。';
+
+  @override
+  String get activity_partial_title => '活动已部分加载';
+
+  @override
+  String get activity_partial_detail => '目前仅显示网关活动的有限范围。可能还有更多聊天，请下拉刷新。';
 }

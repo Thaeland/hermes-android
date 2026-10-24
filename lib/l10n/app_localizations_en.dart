@@ -50,6 +50,26 @@ class AppLocalizationsEn extends AppLocalizations {
       'A one-off question. Archives itself after 72 hours; anything worth keeping is still remembered.';
 
   @override
+  String get archive_chat => 'Archive chat';
+
+  @override
+  String get unarchive_chat => 'Unarchive chat';
+
+  @override
+  String get chat_archived => 'Chat archived';
+
+  @override
+  String get chat_unarchived => 'Chat unarchived';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return 'Could not update chat archive: $error';
+  }
+
+  @override
+  String get quick_chat_description => 'A one-off question.';
+
+  @override
   String get ai_full_text => 'AI + full-text';
 
   @override
@@ -158,7 +178,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get archived_conversations_appear_here =>
-      'Archived conversations appear here.';
+      'Only archived conversations appear here. Older chats remain in All chats.';
 
   @override
   String get archived_quick_chats => 'Archived quick chats';
@@ -193,9 +213,6 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get auto_device_default => 'Auto (device default)';
-
-  @override
-  String get auto_archives_after_72_hours => 'Auto-archives after 72 hours';
 
   @override
   String get automation => 'Automation';
@@ -535,6 +552,16 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get cron => 'Cron';
+
+  @override
+  String get crons => 'Crons';
+
+  @override
+  String get cron_conversations_empty =>
+      'Conversations from scheduled jobs appear here, including older runs.';
+
+  @override
+  String get search_cron_conversations => 'Search cron conversations';
 
   @override
   String get cron_jobs => 'Cron Jobs';
@@ -2847,4 +2874,46 @@ class AppLocalizationsEn extends AppLocalizations {
   String task_tasks_finished(Object count) {
     return '$count delegated task(s) finished';
   }
+
+  @override
+  String get activity_status_unconfirmed => 'Status unconfirmed';
+
+  @override
+  String get activity_recently_updated => 'Recently updated';
+
+  @override
+  String get activity_reconnecting => 'Reconnecting — checking the turn status';
+
+  @override
+  String get activity_outcome_unknown =>
+      'The turn’s outcome could not be confirmed. Open the chat to check.';
+
+  @override
+  String get activity_chat_updated_detail =>
+      'Chat activity recorded by the gateway; live turn status is unavailable.';
+
+  @override
+  String get activity_updated => 'Updated';
+
+  @override
+  String get activity_empty_title => 'No recent activity';
+
+  @override
+  String get activity_empty_detail =>
+      'Turns started in this app and gateway chats updated in the last 7 days appear here.';
+
+  @override
+  String get activity_read_error =>
+      'Activity could not read its turn records or gateway chats. Check the connection and try again.';
+
+  @override
+  String get activity_chat_unavailable =>
+      'This chat is no longer available, or the gateway could not be reached.';
+
+  @override
+  String get activity_partial_title => 'Activity partially loaded';
+
+  @override
+  String get activity_partial_detail =>
+      'Showing a limited window of gateway activity. More chats may exist; pull to refresh.';
 }

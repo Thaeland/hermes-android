@@ -186,6 +186,42 @@ abstract class AppLocalizations {
   /// **'A one-off question. Archives itself after 72 hours; anything worth keeping is still remembered.'**
   String get a_one_off_question_archives_itself_after_72_hours_anything;
 
+  /// No description provided for @archive_chat.
+  ///
+  /// In en, this message translates to:
+  /// **'Archive chat'**
+  String get archive_chat;
+
+  /// No description provided for @unarchive_chat.
+  ///
+  /// In en, this message translates to:
+  /// **'Unarchive chat'**
+  String get unarchive_chat;
+
+  /// No description provided for @chat_archived.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat archived'**
+  String get chat_archived;
+
+  /// No description provided for @chat_unarchived.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat unarchived'**
+  String get chat_unarchived;
+
+  /// No description provided for @could_not_update_chat_archive.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not update chat archive: {error}'**
+  String could_not_update_chat_archive(Object error);
+
+  /// No description provided for @quick_chat_description.
+  ///
+  /// In en, this message translates to:
+  /// **'A one-off question.'**
+  String get quick_chat_description;
+
   /// No description provided for @ai_full_text.
   ///
   /// In en, this message translates to:
@@ -381,7 +417,7 @@ abstract class AppLocalizations {
   /// No description provided for @archived_conversations_appear_here.
   ///
   /// In en, this message translates to:
-  /// **'Archived conversations appear here.'**
+  /// **'Only archived conversations appear here. Older chats remain in All chats.'**
   String get archived_conversations_appear_here;
 
   /// No description provided for @archived_quick_chats.
@@ -443,12 +479,6 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Auto (device default)'**
   String get auto_device_default;
-
-  /// No description provided for @auto_archives_after_72_hours.
-  ///
-  /// In en, this message translates to:
-  /// **'Auto-archives after 72 hours'**
-  String get auto_archives_after_72_hours;
 
   /// No description provided for @automation.
   ///
@@ -998,6 +1028,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Cron'**
   String get cron;
+
+  /// No description provided for @crons.
+  ///
+  /// In en, this message translates to:
+  /// **'Crons'**
+  String get crons;
+
+  /// No description provided for @cron_conversations_empty.
+  ///
+  /// In en, this message translates to:
+  /// **'Conversations from scheduled jobs appear here, including older runs.'**
+  String get cron_conversations_empty;
+
+  /// No description provided for @search_cron_conversations.
+  ///
+  /// In en, this message translates to:
+  /// **'Search cron conversations'**
+  String get search_cron_conversations;
 
   /// No description provided for @cron_jobs.
   ///
@@ -4821,6 +4869,78 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'{count} delegated task(s) finished'**
   String task_tasks_finished(Object count);
+
+  /// No description provided for @activity_status_unconfirmed.
+  ///
+  /// In en, this message translates to:
+  /// **'Status unconfirmed'**
+  String get activity_status_unconfirmed;
+
+  /// No description provided for @activity_recently_updated.
+  ///
+  /// In en, this message translates to:
+  /// **'Recently updated'**
+  String get activity_recently_updated;
+
+  /// No description provided for @activity_reconnecting.
+  ///
+  /// In en, this message translates to:
+  /// **'Reconnecting — checking the turn status'**
+  String get activity_reconnecting;
+
+  /// No description provided for @activity_outcome_unknown.
+  ///
+  /// In en, this message translates to:
+  /// **'The turn’s outcome could not be confirmed. Open the chat to check.'**
+  String get activity_outcome_unknown;
+
+  /// No description provided for @activity_chat_updated_detail.
+  ///
+  /// In en, this message translates to:
+  /// **'Chat activity recorded by the gateway; live turn status is unavailable.'**
+  String get activity_chat_updated_detail;
+
+  /// No description provided for @activity_updated.
+  ///
+  /// In en, this message translates to:
+  /// **'Updated'**
+  String get activity_updated;
+
+  /// No description provided for @activity_empty_title.
+  ///
+  /// In en, this message translates to:
+  /// **'No recent activity'**
+  String get activity_empty_title;
+
+  /// No description provided for @activity_empty_detail.
+  ///
+  /// In en, this message translates to:
+  /// **'Turns started in this app and gateway chats updated in the last 7 days appear here.'**
+  String get activity_empty_detail;
+
+  /// No description provided for @activity_read_error.
+  ///
+  /// In en, this message translates to:
+  /// **'Activity could not read its turn records or gateway chats. Check the connection and try again.'**
+  String get activity_read_error;
+
+  /// No description provided for @activity_chat_unavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'This chat is no longer available, or the gateway could not be reached.'**
+  String get activity_chat_unavailable;
+
+  /// No description provided for @activity_partial_title.
+  ///
+  /// In en, this message translates to:
+  /// **'Activity partially loaded'**
+  String get activity_partial_title;
+
+  /// No description provided for @activity_partial_detail.
+  ///
+  /// In en, this message translates to:
+  /// **'Showing a limited window of gateway activity. More chats may exist; pull to refresh.'**
+  String get activity_partial_detail;
 }
 
 class _AppLocalizationsDelegate

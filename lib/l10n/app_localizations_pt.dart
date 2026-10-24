@@ -47,7 +47,27 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
-      'Uma pergunta pontual. É arquivada automaticamente após 72 horas; o que valer a pena guardar continua na memória.';
+      'A one-off question. Archives itself after 72 hours; anything worth keeping is still remembered.';
+
+  @override
+  String get archive_chat => 'Arquivar chat';
+
+  @override
+  String get unarchive_chat => 'Desarquivar chat';
+
+  @override
+  String get chat_archived => 'Chat arquivado';
+
+  @override
+  String get chat_unarchived => 'Chat desarquivado';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return 'Não foi possível alterar o arquivo do chat: $error';
+  }
+
+  @override
+  String get quick_chat_description => 'Uma pergunta pontual.';
 
   @override
   String get ai_full_text => 'IA + texto completo';
@@ -159,7 +179,7 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get archived_conversations_appear_here =>
-      'Conversas arquivadas aparecem aqui.';
+      'Só as conversas arquivadas aparecem aqui. Os chats antigos continuam em Todos os chats.';
 
   @override
   String get archived_quick_chats => 'Chats rápidos arquivados';
@@ -195,10 +215,6 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get auto_device_default => 'Automático (padrão do dispositivo)';
-
-  @override
-  String get auto_archives_after_72_hours =>
-      'Arquiva automaticamente após 72 horas';
 
   @override
   String get automation => 'Automação';
@@ -543,6 +559,16 @@ class AppLocalizationsPt extends AppLocalizations {
 
   @override
   String get cron => 'Cron';
+
+  @override
+  String get crons => 'Crons';
+
+  @override
+  String get cron_conversations_empty =>
+      'Conversations from scheduled jobs appear here, including older runs.';
+
+  @override
+  String get search_cron_conversations => 'Search cron conversations';
 
   @override
   String get cron_jobs => 'Tarefas Cron';
@@ -2867,6 +2893,49 @@ class AppLocalizationsPt extends AppLocalizations {
   String task_tasks_finished(Object count) {
     return '$count delegated task(s) finished';
   }
+
+  @override
+  String get activity_status_unconfirmed => 'Estado não confirmado';
+
+  @override
+  String get activity_recently_updated => 'Atualizado recentemente';
+
+  @override
+  String get activity_reconnecting =>
+      'A restabelecer ligação — a verificar o estado do turno';
+
+  @override
+  String get activity_outcome_unknown =>
+      'Não foi possível confirmar o resultado do turno. Abra o chat para verificar.';
+
+  @override
+  String get activity_chat_updated_detail =>
+      'Atividade do chat registada pelo Gateway; o estado do turno em tempo real não está disponível.';
+
+  @override
+  String get activity_updated => 'Atualizado';
+
+  @override
+  String get activity_empty_title => 'Sem atividade recente';
+
+  @override
+  String get activity_empty_detail =>
+      'Aqui aparecem os turnos iniciados nesta app e os chats do Gateway atualizados nos últimos 7 dias.';
+
+  @override
+  String get activity_read_error =>
+      'A Atividade não conseguiu ler os registos dos turnos ou os chats do Gateway. Verifique a ligação e tente novamente.';
+
+  @override
+  String get activity_chat_unavailable =>
+      'Este chat já não está disponível ou não foi possível contactar o Gateway.';
+
+  @override
+  String get activity_partial_title => 'Atividade parcialmente carregada';
+
+  @override
+  String get activity_partial_detail =>
+      'É apresentado um intervalo limitado da atividade do gateway. Podem existir mais conversas; puxe para atualizar.';
 }
 
 /// The translations for Portuguese, as used in Brazil (`pt_BR`).
@@ -2890,8 +2959,24 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String get background_report_collapse => 'Recolher relatório';
 
   @override
-  String get a_one_off_question_archives_itself_after_72_hours_anything =>
-      'Uma pergunta pontual. É arquivada automaticamente após 72 horas; o que valer a pena guardar continua na memória.';
+  String get archive_chat => 'Arquivar chat';
+
+  @override
+  String get unarchive_chat => 'Desarquivar chat';
+
+  @override
+  String get chat_archived => 'Chat arquivado';
+
+  @override
+  String get chat_unarchived => 'Chat desarquivado';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return 'Não foi possível alterar o arquivo do chat: $error';
+  }
+
+  @override
+  String get quick_chat_description => 'Uma pergunta pontual.';
 
   @override
   String get ai_full_text => 'IA + texto completo';
@@ -3003,7 +3088,7 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get archived_conversations_appear_here =>
-      'Conversas arquivadas aparecem aqui.';
+      'Só as conversas arquivadas aparecem aqui. Os chats antigos continuam em Todos os chats.';
 
   @override
   String get archived_quick_chats => 'Chats rápidos arquivados';
@@ -3039,10 +3124,6 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get auto_device_default => 'Automático (padrão do dispositivo)';
-
-  @override
-  String get auto_archives_after_72_hours =>
-      'Arquiva automaticamente após 72 horas';
 
   @override
   String get automation => 'Automação';
@@ -5667,4 +5748,47 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String task_tasks_finished(Object count) {
     return '$count delegated task(s) finished';
   }
+
+  @override
+  String get activity_status_unconfirmed => 'Status não confirmado';
+
+  @override
+  String get activity_recently_updated => 'Atualizado recentemente';
+
+  @override
+  String get activity_reconnecting =>
+      'Reconectando — verificando o status do turno';
+
+  @override
+  String get activity_outcome_unknown =>
+      'Não foi possível confirmar o resultado do turno. Abra o chat para verificar.';
+
+  @override
+  String get activity_chat_updated_detail =>
+      'Atividade do chat registrada pelo Gateway; o status do turno em tempo real não está disponível.';
+
+  @override
+  String get activity_updated => 'Atualizado';
+
+  @override
+  String get activity_empty_title => 'Nenhuma atividade recente';
+
+  @override
+  String get activity_empty_detail =>
+      'Aqui aparecem os turnos iniciados neste app e os chats do Gateway atualizados nos últimos 7 dias.';
+
+  @override
+  String get activity_read_error =>
+      'A Atividade não conseguiu ler os registros dos turnos ou os chats do Gateway. Verifique a conexão e tente novamente.';
+
+  @override
+  String get activity_chat_unavailable =>
+      'Este chat não está mais disponível ou não foi possível acessar o Gateway.';
+
+  @override
+  String get activity_partial_title => 'Atividade parcialmente carregada';
+
+  @override
+  String get activity_partial_detail =>
+      'Um intervalo limitado da atividade do gateway é exibido. Pode haver mais conversas; puxe para atualizar.';
 }

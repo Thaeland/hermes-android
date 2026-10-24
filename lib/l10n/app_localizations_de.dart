@@ -47,7 +47,27 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
-      'Eine einmalige Frage. Wird nach 72 Stunden automatisch archiviert; alles, was es wert ist, bleibt im Gedächtnis.';
+      'A one-off question. Archives itself after 72 hours; anything worth keeping is still remembered.';
+
+  @override
+  String get archive_chat => 'Chat archivieren';
+
+  @override
+  String get unarchive_chat => 'Chat aus Archiv holen';
+
+  @override
+  String get chat_archived => 'Chat archiviert';
+
+  @override
+  String get chat_unarchived => 'Chat aus Archiv geholt';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return 'Archivstatus des Chats konnte nicht geändert werden: $error';
+  }
+
+  @override
+  String get quick_chat_description => 'Eine einmalige Frage.';
 
   @override
   String get ai_full_text => 'KI + Volltext';
@@ -159,7 +179,7 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get archived_conversations_appear_here =>
-      'Archivierte Unterhaltungen erscheinen hier.';
+      'Hier erscheinen nur archivierte Unterhaltungen. Ältere Chats bleiben unter „Alle Chats“.';
 
   @override
   String get archived_quick_chats => 'Archivierte Schnellchats';
@@ -195,10 +215,6 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get auto_device_default => 'Automatisch (Gerätestandard)';
-
-  @override
-  String get auto_archives_after_72_hours =>
-      'Automatische Archivierung nach 72 Stunden';
 
   @override
   String get automation => 'Automatisierung';
@@ -545,6 +561,16 @@ class AppLocalizationsDe extends AppLocalizations {
 
   @override
   String get cron => 'Cron';
+
+  @override
+  String get crons => 'Crons';
+
+  @override
+  String get cron_conversations_empty =>
+      'Conversations from scheduled jobs appear here, including older runs.';
+
+  @override
+  String get search_cron_conversations => 'Search cron conversations';
 
   @override
   String get cron_jobs => 'Cron-Jobs';
@@ -2872,4 +2898,47 @@ class AppLocalizationsDe extends AppLocalizations {
   String task_tasks_finished(Object count) {
     return '$count delegated task(s) finished';
   }
+
+  @override
+  String get activity_status_unconfirmed => 'Status unbestätigt';
+
+  @override
+  String get activity_recently_updated => 'Kürzlich aktualisiert';
+
+  @override
+  String get activity_reconnecting =>
+      'Verbindung wird wiederhergestellt — Turn-Status wird geprüft';
+
+  @override
+  String get activity_outcome_unknown =>
+      'Das Ergebnis des Turns konnte nicht bestätigt werden. Öffne den Chat, um es zu prüfen.';
+
+  @override
+  String get activity_chat_updated_detail =>
+      'Das Gateway hat Chat-Aktivität aufgezeichnet; der aktuelle Turn-Status ist nicht verfügbar.';
+
+  @override
+  String get activity_updated => 'Aktualisiert';
+
+  @override
+  String get activity_empty_title => 'Keine aktuellen Aktivitäten';
+
+  @override
+  String get activity_empty_detail =>
+      'Hier erscheinen in dieser App gestartete Turns und Gateway-Chats, die in den letzten 7 Tagen aktualisiert wurden.';
+
+  @override
+  String get activity_read_error =>
+      'Die Aktivitätsansicht konnte ihre Turn-Aufzeichnungen oder Gateway-Chats nicht lesen. Prüfe die Verbindung und versuche es erneut.';
+
+  @override
+  String get activity_chat_unavailable =>
+      'Dieser Chat ist nicht mehr verfügbar oder das Gateway konnte nicht erreicht werden.';
+
+  @override
+  String get activity_partial_title => 'Aktivität teilweise geladen';
+
+  @override
+  String get activity_partial_detail =>
+      'Es wird ein begrenzter Ausschnitt der Gateway-Aktivität angezeigt. Möglicherweise gibt es weitere Chats. Zum Aktualisieren nach unten ziehen.';
 }

@@ -9,6 +9,7 @@ import 'gateway_turn_coordinator.dart';
 import 'gateway_turn_journal.dart';
 import 'gateway_turn_recovery.dart';
 import 'normal_gateway_application_session.dart';
+import 'operational_activity_store.dart';
 import 'connection_manager.dart';
 import 'chat_presentation_state.dart';
 import 'turn_notification_service.dart';
@@ -137,6 +138,7 @@ class GatewayTurnApplicationController {
   /// never a socket whose lifetime is tied to a ChatScreen route.
   static final standalone = GatewayTurnApplicationController();
   final GatewayTurnApplicationSessionFactory _sessionFactory;
+  final OperationalActivityStore _activityStore;
   final Map<String, GatewayTurnApplicationSession> _sessions = {};
   final Map<String, Object?> _sessionMutations = {};
   final Map<String, NormalGatewayApplicationSession> _normalSessions = {};
@@ -153,7 +155,9 @@ class GatewayTurnApplicationController {
   GatewayTurnApplicationController({
     GatewayTurnApplicationSessionFactory? sessionFactory,
     GatewayTurnJournalFactory? journalFactory,
-  }) : _sessionFactory =
+    OperationalActivityStore? activityStore,
+  }) : _activityStore = activityStore ?? OperationalActivityStore(),
+       _sessionFactory =
            sessionFactory ??
            ((connection) => _CoordinatorGatewayTurnApplicationSession(
              DesktopGatewayClient.fromConnection(connection),
@@ -224,12 +228,14 @@ class GatewayTurnApplicationController {
               connection,
               scope: key,
               presentation: presentationFor(connection),
+              activityStore: _activityStore,
               onActivityChanged: _notifyActivityListeners,
             )
           : NormalGatewayApplicationSession(
               connection: connection,
               scope: key,
               presentation: presentationFor(connection),
+              activityStore: _activityStore,
               submit: submit,
               resume:
                   resume ??
@@ -250,6 +256,16 @@ class GatewayTurnApplicationController {
 
   Iterable<NormalGatewayChatActivity> get activeChatActivities =>
       _normalSessions.values.expand((session) => session.activeChatActivities);
+
+  /// Uses exactly the owner's credential-inclusive configuration scope, but
+  /// does not create sockets, recovery coordinators or normal chat owners.
+  Future<List<OperationalActivityRecord>> readActivityRecords(
+    SavedConnection connection, {
+    Map<String, String> sessionRoots = const {},
+  }) => _activityStore.load(
+    _connectionScopeKey(connection),
+    sessionRoots: sessionRoots,
+  );
 
   void setLifecycle({required bool background, bool? backgroundWorkEnabled}) {
     _background = background;

@@ -46,7 +46,27 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
-      '単発の質問用。72時間後に自動アーカイブされますが、残す価値のある内容は記憶されます。';
+      'A one-off question. Archives itself after 72 hours; anything worth keeping is still remembered.';
+
+  @override
+  String get archive_chat => 'チャットをアーカイブ';
+
+  @override
+  String get unarchive_chat => 'チャットのアーカイブを解除';
+
+  @override
+  String get chat_archived => 'チャットをアーカイブしました';
+
+  @override
+  String get chat_unarchived => 'チャットのアーカイブを解除しました';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return 'チャットのアーカイブ状態を更新できませんでした: $error';
+  }
+
+  @override
+  String get quick_chat_description => '単発の質問用。';
 
   @override
   String get ai_full_text => 'AI + 全文';
@@ -155,7 +175,8 @@ class AppLocalizationsJa extends AppLocalizations {
   String get archived => 'アーカイブ済み';
 
   @override
-  String get archived_conversations_appear_here => 'アーカイブした会話がここに表示されます。';
+  String get archived_conversations_appear_here =>
+      'アーカイブした会話のみがここに表示されます。古いチャットは「すべてのチャット」に残ります。';
 
   @override
   String get archived_quick_chats => 'アーカイブ済みクイックチャット';
@@ -189,9 +210,6 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get auto_device_default => '自動（端末のデフォルト）';
-
-  @override
-  String get auto_archives_after_72_hours => '72時間後に自動アーカイブ';
 
   @override
   String get automation => '自動化';
@@ -523,6 +541,16 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get cron => 'Cron';
+
+  @override
+  String get crons => 'Crons';
+
+  @override
+  String get cron_conversations_empty =>
+      'Conversations from scheduled jobs appear here, including older runs.';
+
+  @override
+  String get search_cron_conversations => 'Search cron conversations';
 
   @override
   String get cron_jobs => 'Cronジョブ';
@@ -2793,4 +2821,45 @@ class AppLocalizationsJa extends AppLocalizations {
   String task_tasks_finished(Object count) {
     return '$count delegated task(s) finished';
   }
+
+  @override
+  String get activity_status_unconfirmed => '状態未確認';
+
+  @override
+  String get activity_recently_updated => '最近更新';
+
+  @override
+  String get activity_reconnecting => '再接続中 — ターンの状態を確認しています';
+
+  @override
+  String get activity_outcome_unknown => 'ターンの結果を確認できませんでした。チャットを開いて確認してください。';
+
+  @override
+  String get activity_chat_updated_detail =>
+      'ゲートウェイが記録したチャットのアクティビティです。ターンの現在の状態は確認できません。';
+
+  @override
+  String get activity_updated => '更新済み';
+
+  @override
+  String get activity_empty_title => '最近のアクティビティはありません';
+
+  @override
+  String get activity_empty_detail =>
+      'このアプリで開始したターンと、過去7日間に更新されたゲートウェイのチャットがここに表示されます。';
+
+  @override
+  String get activity_read_error =>
+      'アクティビティでターンの記録またはゲートウェイのチャットを読み取れませんでした。接続を確認して、もう一度お試しください。';
+
+  @override
+  String get activity_chat_unavailable =>
+      'このチャットは利用できなくなったか、ゲートウェイに接続できませんでした。';
+
+  @override
+  String get activity_partial_title => 'アクティビティは一部のみ読み込まれています';
+
+  @override
+  String get activity_partial_detail =>
+      'ゲートウェイのアクティビティを限られた範囲で表示しています。他にもチャットがある可能性があります。下に引いて更新してください。';
 }

@@ -47,7 +47,27 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
-      'Une question ponctuelle. S\'archive automatiquement après 72 heures ; tout ce qui mérite d\'être conservé reste en mémoire.';
+      'A one-off question. Archives itself after 72 hours; anything worth keeping is still remembered.';
+
+  @override
+  String get archive_chat => 'Archiver la discussion';
+
+  @override
+  String get unarchive_chat => 'Désarchiver la discussion';
+
+  @override
+  String get chat_archived => 'Discussion archivée';
+
+  @override
+  String get chat_unarchived => 'Discussion désarchivée';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return 'Impossible de modifier l’archivage de la discussion : $error';
+  }
+
+  @override
+  String get quick_chat_description => 'Une question ponctuelle.';
 
   @override
   String get ai_full_text => 'IA + texte intégral';
@@ -159,7 +179,7 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get archived_conversations_appear_here =>
-      'Les discussions archivées apparaissent ici.';
+      'Seules les discussions archivées apparaissent ici. Les anciennes restent dans Toutes les discussions.';
 
   @override
   String get archived_quick_chats => 'Discussions rapides archivées';
@@ -195,10 +215,6 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get auto_device_default => 'Automatique (par défaut de l\'appareil)';
-
-  @override
-  String get auto_archives_after_72_hours =>
-      'Archivage automatique après 72 heures';
 
   @override
   String get automation => 'Automatisation';
@@ -543,6 +559,16 @@ class AppLocalizationsFr extends AppLocalizations {
 
   @override
   String get cron => 'Cron';
+
+  @override
+  String get crons => 'Crons';
+
+  @override
+  String get cron_conversations_empty =>
+      'Conversations from scheduled jobs appear here, including older runs.';
+
+  @override
+  String get search_cron_conversations => 'Search cron conversations';
 
   @override
   String get cron_jobs => 'Tâches Cron';
@@ -2872,4 +2898,47 @@ class AppLocalizationsFr extends AppLocalizations {
   String task_tasks_finished(Object count) {
     return '$count delegated task(s) finished';
   }
+
+  @override
+  String get activity_status_unconfirmed => 'Statut non confirmé';
+
+  @override
+  String get activity_recently_updated => 'Mis à jour récemment';
+
+  @override
+  String get activity_reconnecting =>
+      'Reconnexion — vérification de l’état du tour';
+
+  @override
+  String get activity_outcome_unknown =>
+      'Le résultat du tour n’a pas pu être confirmé. Ouvrez la discussion pour le vérifier.';
+
+  @override
+  String get activity_chat_updated_detail =>
+      'Activité de la discussion enregistrée par la passerelle ; l’état du tour en temps réel n’est pas disponible.';
+
+  @override
+  String get activity_updated => 'Mis à jour';
+
+  @override
+  String get activity_empty_title => 'Aucune activité récente';
+
+  @override
+  String get activity_empty_detail =>
+      'Les tours lancés dans cette application et les discussions de la passerelle mises à jour au cours des 7 derniers jours apparaissent ici.';
+
+  @override
+  String get activity_read_error =>
+      'La vue Activité n’a pas pu lire ses enregistrements de tours ou les discussions de la passerelle. Vérifiez la connexion et réessayez.';
+
+  @override
+  String get activity_chat_unavailable =>
+      'Cette discussion n’est plus disponible ou la passerelle n’a pas pu être jointe.';
+
+  @override
+  String get activity_partial_title => 'Activité partiellement chargée';
+
+  @override
+  String get activity_partial_detail =>
+      'Une période limitée de l’activité de la passerelle est affichée. D’autres discussions peuvent exister ; tirez vers le bas pour actualiser.';
 }

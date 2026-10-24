@@ -12,6 +12,7 @@ import 'composer_draft_store.dart';
 import 'chat_presentation_state.dart';
 import 'desktop_gateway_client.dart';
 import 'normal_gateway_pending_store.dart';
+import 'operational_activity_store.dart';
 import 'notification_prefs.dart';
 import 'turn_notification_service.dart';
 import 'notification_approval_authority.dart';
@@ -116,6 +117,8 @@ class NormalGatewayChatSnapshot {
 /// One stock client and independent history client per configuration scope.
 /// Routes only subscribe; this object owns ingress, recovery and notifications.
 class NormalGatewayApplicationSession {
+  static const activityHeartbeatInterval = Duration(seconds: 30);
+  static const activityRetryInterval = Duration(seconds: 30);
   final SavedConnection connection;
   final Map<String, String> _approvalOrigin;
   final Object? _accountMutation;
@@ -123,6 +126,8 @@ class NormalGatewayApplicationSession {
   final DesktopGatewayClient? client;
   final ApiClient? _historyClient;
   final NormalGatewayPendingStore pendingStore;
+  final OperationalActivityStore activityStore;
+  final int Function() _activityNowEpochMs;
   final NormalGatewayPromptSubmit _submit;
   final bool _usesClientSubmit;
   final NormalGatewayResume _resume;
@@ -143,6 +148,8 @@ class NormalGatewayApplicationSession {
   bool _closed = false;
   bool _background = false;
   bool _backgroundWorkEnabled = true;
+  Future<void>? _activityWrite;
+  final Map<String, _PendingActivityWrite> _pendingActivity = {};
   DesktopConnectionState _connectionState = DesktopConnectionState.disconnected;
 
   NormalGatewayApplicationSession({
@@ -151,6 +158,8 @@ class NormalGatewayApplicationSession {
     DesktopGatewayClient? client,
     ApiClient? historyClient,
     NormalGatewayPendingStore? pendingStore,
+    OperationalActivityStore? activityStore,
+    int Function()? activityNowEpochMs,
     NormalGatewayPromptSubmit? submit,
     NormalGatewayResume? resume,
     NormalGatewayHistory? history,
@@ -162,6 +171,9 @@ class NormalGatewayApplicationSession {
        _accountMutation = ConnectionMutationBarrier.capture(connection.id),
        _historyClient = historyClient,
        pendingStore = pendingStore ?? NormalGatewayPendingStore(),
+       activityStore = activityStore ?? OperationalActivityStore(),
+       _activityNowEpochMs =
+           activityNowEpochMs ?? (() => DateTime.now().millisecondsSinceEpoch),
        notifications = notifications ?? TurnNotificationService.shared,
        _submit = submit ?? client!.submitPrompt,
        _usesClientSubmit = submit == null,
@@ -201,12 +213,14 @@ class NormalGatewayApplicationSession {
     SavedConnection connection, {
     required String scope,
     ChatPresentationRegistry? presentation,
+    OperationalActivityStore? activityStore,
     void Function()? onActivityChanged,
   }) {
     return NormalGatewayApplicationSession(
       connection: connection,
       scope: scope,
       presentation: presentation,
+      activityStore: activityStore,
       client: DesktopGatewayClient.fromConnection(connection),
       historyClient: ApiClient(
         baseUrl: connection.baseUrl,
@@ -238,6 +252,7 @@ class NormalGatewayApplicationSession {
   NormalGatewayChatOwner chatFor(
     String localSessionId, {
     String? storedSessionId,
+    String? lineageRootId,
     required String title,
     String? workingDirectory,
   }) {
@@ -250,6 +265,7 @@ class NormalGatewayApplicationSession {
         NormalGatewayChatOwner._(this, localSessionId, title, workingDirectory);
     _aliases[localSessionId] = owner;
     owner.title = title;
+    owner._lineageRootId = lineageRootId ?? owner._lineageRootId;
     if (storedSessionId != null) {
       owner = _bind(owner, storedSessionId, localAlias: localSessionId);
     }
@@ -329,6 +345,7 @@ class NormalGatewayApplicationSession {
     final rejection = loser._rejectForHandoff();
     winner._adoptPreWireHistory(loser, stored);
     winner._adoptChildObservers(loser);
+    winner._lineageRootId ??= loser._lineageRootId;
     // Ownership transferred, not copied into a second retained body owner.
     // External immutable snapshots may still exist; these losing buffers no
     // longer own presentation and must not survive a later terminal close.
@@ -507,6 +524,72 @@ class NormalGatewayApplicationSession {
     }
   }
 
+  void _recordActivity(OperationalActivityRecord record) {
+    if (_closed) return;
+    _pendingActivity[record.key] = _PendingActivityWrite(record);
+    // Retain repair ownership by turn, not by the chat's latest turn. Include
+    // in-flight records too: their write may fail after this batch is accepted.
+    // The store serializes both snapshots, so an old completion cannot win.
+    _writeActivity(_pendingActivity.values.toList(growable: false));
+  }
+
+  void _retryActivity() {
+    if (_closed) return;
+    final now = _activityNowEpochMs();
+    final retry = _pendingActivity.values
+        .where((pending) {
+          final notBefore = pending.retryNotBeforeEpochMs;
+          return pending.flights == 0 &&
+              (notBefore == null || now >= notBefore);
+        })
+        .toList(growable: false);
+    if (retry.isEmpty) return;
+    for (final pending in retry) {
+      // Permit one immediate repair probe, then back off independently of
+      // token delivery and failed-write completion. No timer or retry spin:
+      // later real progress can probe again, and a new accepted observation
+      // always carries older dirty turns along in its single physical write.
+      pending.retryNotBeforeEpochMs =
+          now + activityRetryInterval.inMilliseconds;
+    }
+    _writeActivity(retry);
+  }
+
+  void _writeActivity(List<_PendingActivityWrite> accepted) {
+    for (final pending in accepted) {
+      pending.flights++;
+    }
+    final records = accepted.map((pending) => pending.record).toList();
+    // Single observations retain the put contract; multi-turn repairs share
+    // a read/modify/write and failure reload instead of multiplying disk I/O.
+    final flight = records.length == 1
+        ? activityStore.put(records.single)
+        : activityStore.putAll(records);
+    final write = flight
+        .then<void>(
+          (_) {
+            for (final pending in accepted) {
+              if (identical(_pendingActivity[pending.record.key], pending)) {
+                _pendingActivity.remove(pending.record.key);
+              }
+            }
+          },
+          onError: (Object _, StackTrace _) {
+            // Optional presentation metadata must never change turn authority.
+            // Keep the exact failed observation (including its original time).
+          },
+        )
+        .whenComplete(() {
+          for (final pending in accepted) {
+            pending.flights--;
+          }
+        });
+    _activityWrite = write;
+    write.whenComplete(() {
+      if (identical(_activityWrite, write)) _activityWrite = null;
+    }).ignore();
+  }
+
   bool ownsApprovalRequest({
     required String sessionId,
     required String requestId,
@@ -561,12 +644,24 @@ class NormalGatewayApplicationSession {
     }
     client?.close();
     _historyClient?.close();
+    // Closing fences new metadata synchronously, then joins the last accepted
+    // write. Its global queue also covers every earlier write from this owner.
+    await _activityWrite;
+    _pendingActivity.clear();
   }
 
   bool get isClosed => _closed;
   bool get hasCurrentAccount =>
       !_closed &&
       ConnectionMutationBarrier.isCurrent(connection.id, _accountMutation);
+}
+
+class _PendingActivityWrite {
+  final OperationalActivityRecord record;
+  int flights = 0;
+  int? retryNotBeforeEpochMs;
+
+  _PendingActivityWrite(this.record);
 }
 
 class NormalGatewayChatOwner {
@@ -593,6 +688,9 @@ class NormalGatewayChatOwner {
   bool get wireEmitted => _root._wireEmitted;
   set wireEmitted(bool value) => _root._wireEmitted = value;
   StateError? _handoffRejection;
+  String? _storedLineageRootId;
+  String? get _lineageRootId => _root._storedLineageRootId;
+  set _lineageRootId(String? value) => _root._storedLineageRootId = value;
   String? _wireTurnId;
   final Set<String> _settledWireTurnIds = {};
   int? _floor;
@@ -636,6 +734,7 @@ class NormalGatewayChatOwner {
   bool _settling = false;
   bool _submissionPending = false;
   ({bool? completed, String? error, int generation})? _terminalReceipt;
+  OperationalActivityRecord? _lastActivityRecord;
   NormalGatewayChatOwner._(
     this._session,
     this._localSessionId,
@@ -952,10 +1051,13 @@ class NormalGatewayChatOwner {
     if (_subagents.length > 128) _subagents.removeAt(0);
   }
 
-  void _notify() {
+  void _notify({bool meaningfulActivity = false}) {
     if (_session._closed || _redirect != null) return;
     final generation = _generation;
     final revision = ++_notificationRevision;
+    // Queue before notifying app-wide readers: a listener's read must join
+    // this exact transition, not observe the previous persisted state.
+    _recordActivity(meaningfulActivity: meaningfulActivity);
     final state = snapshot;
     for (final entry in _listeners.entries.toList(growable: false)) {
       if (!_current(generation) || revision != _notificationRevision) return;
@@ -964,6 +1066,77 @@ class NormalGatewayChatOwner {
     if (_current(generation) && revision == _notificationRevision) {
       _session.onActivityChanged?.call();
     }
+  }
+
+  void _recordActivity({
+    int? updatedAtEpochMs,
+    String? restoredLocalId,
+    bool meaningfulActivity = false,
+  }) {
+    final id = turnId;
+    if (_session._closed || id == null) return;
+    // Reservation/preparation is not submitted work. In particular, opening a
+    // chat or cancelling preparation must not resurrect its preceding turn.
+    final state = switch (phase) {
+      NormalGatewayTurnPhase.idle || NormalGatewayTurnPhase.preparing => null,
+      NormalGatewayTurnPhase.submitting => OperationalActivityState.submitted,
+      NormalGatewayTurnPhase.running => OperationalActivityState.running,
+      NormalGatewayTurnPhase.reconciling =>
+        OperationalActivityState.reconciling,
+      NormalGatewayTurnPhase.reconciledUnknown =>
+        OperationalActivityState.unknown,
+      NormalGatewayTurnPhase.completed => OperationalActivityState.completed,
+      NormalGatewayTurnPhase.failed => OperationalActivityState.failed,
+    };
+    if (state == null) return;
+    final active = const {
+      OperationalActivityState.submitted,
+      OperationalActivityState.running,
+      OperationalActivityState.reconciling,
+    }.contains(state);
+    final effectiveState = active && _pendingInput.isNotEmpty
+        ? OperationalActivityState.needsInput
+        : state;
+    final previous = _lastActivityRecord;
+    final local =
+        restoredLocalId ??
+        (previous?.turnId == id ? previous!.localSessionId : localSessionId);
+    final unchanged =
+        previous != null &&
+        previous.turnId == id &&
+        previous.localSessionId == local &&
+        previous.storedSessionId == storedSessionId &&
+        previous.lineageRootId == _lineageRootId &&
+        previous.state == effectiveState;
+    final now = _session._activityNowEpochMs();
+    final heartbeat =
+        unchanged &&
+        active &&
+        meaningfulActivity &&
+        now - previous.updatedAtEpochMs >=
+            NormalGatewayApplicationSession
+                .activityHeartbeatInterval
+                .inMilliseconds;
+    if (unchanged && !heartbeat) {
+      if (meaningfulActivity) _session._retryActivity();
+      return;
+    }
+    final record = OperationalActivityRecord(
+      scope: _session.scope,
+      localSessionId: local,
+      storedSessionId: storedSessionId,
+      lineageRootId: _lineageRootId,
+      turnId: id,
+      state: effectiveState,
+      updatedAtEpochMs:
+          updatedAtEpochMs ??
+          (unchanged && !heartbeat ? previous.updatedAtEpochMs : now),
+    );
+    _lastActivityRecord = record;
+    // Activity is an optional index, never a prerequisite for submitting,
+    // settling or recovering real work. New unchanged progress observations
+    // are heartbeat-bounded; dirty retries have a separate bounded cooldown.
+    _session._recordActivity(record);
   }
 
   bool _current(int generation) =>
@@ -1234,6 +1407,10 @@ class NormalGatewayChatOwner {
     // Even write_ahead may have emitted before process death. Never resend.
     wireEmitted = true;
     phase = NormalGatewayTurnPhase.reconciling;
+    _recordActivity(
+      updatedAtEpochMs: marker.updatedAt,
+      restoredLocalId: marker.localSessionId,
+    );
   }
 
   void _event(StreamEvent event) {
@@ -1312,7 +1489,7 @@ class NormalGatewayChatOwner {
         }
         _mergeVisibleChild(_mergeObservedChild(update));
       }
-      _notify();
+      _notify(meaningfulActivity: update != null);
       return;
     }
     if (!snapshot.hasActiveTurn ||
@@ -1515,7 +1692,12 @@ class NormalGatewayChatOwner {
       // Resume/history are the authority; never infer ownership from arrival.
       requestRecovery();
     }
-    _notify();
+    _notify(
+      meaningfulActivity:
+          event.type.startsWith('message.') ||
+          event.type.startsWith('tool.') ||
+          reasoning != null,
+    );
   }
 
   Map<String, dynamic>? _completionAssistantMessage(
@@ -1680,7 +1862,7 @@ class NormalGatewayChatOwner {
         // No row/count heuristic is needed to know the server is now idle.
         await _settle(null, null, generation: generation);
       } else {
-        _notify();
+        _notify(meaningfulActivity: running);
       }
     } catch (_) {
       // A failed resume/history read is unknown, never an empty completion.

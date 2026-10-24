@@ -1116,8 +1116,8 @@ class ApiClient {
     return page.sessions;
   }
 
-  /// Fetches one session by exact id, paging through the list until it is
-  /// found: a notification may name a session older than the first page.
+  /// Resolves an id or compression root to the visible canonical session.
+  /// A notification or persisted Activity row may predate the current tip.
   /// [canContinue] fences each page, not just the final result. Notification
   /// navigation uses it to revoke captured credentials/consent while a request
   /// is suspended; other callers retain the original paging behaviour.
@@ -1128,19 +1128,50 @@ class ApiClient {
     Future<bool> Function()? canContinue,
     bool Function()? isCurrent,
   }) async {
+    const pageSize = 50;
     var offset = 0;
+    var pinBound = 0;
+    var zeroNewPages = 0;
+    final seen = <String>{};
+    Session? exact;
     while (true) {
       if (canContinue != null && !await canContinue()) return null;
       if (isCurrent != null && !isCurrent()) return null;
-      final result = await getSessionsPage(limit: 50, offset: offset);
+      final result = await getSessionsPage(limit: pageSize, offset: offset);
       if (isCurrent != null && !isCurrent()) return null;
       if (canContinue != null && !await canContinue()) return null;
       if (isCurrent != null && !isCurrent()) return null;
+      final continuations =
+          result.sessions
+              .where(
+                (session) =>
+                    session.lineageRootId == sessionId &&
+                    session.id != sessionId,
+              )
+              .toList()
+            ..sort((a, b) => b.lastActive.compareTo(a.lastActive));
+      if (continuations.isNotEmpty) return continuations.first;
+      var newRows = 0;
       for (final session in result.sessions) {
-        if (session.id == sessionId) return session;
+        if (seen.add(session.id)) newRows++;
+        if (session.id == sessionId) {
+          exact = session;
+          if (session.lineageRootId != null &&
+              session.lineageRootId != sessionId) {
+            return session;
+          }
+        }
       }
-      if (!result.hasMore || result.sessions.isEmpty) return null;
-      offset += result.sessions.length;
+      // A pin can back-fill an obsolete root before its current tip's window.
+      // Keep it as fallback, not proof that the continuation does not exist.
+      if (!result.hasMore && result.sessions.length < pageSize) return exact;
+      final pins = result.sessions.where((session) => session.pinned).length;
+      if (pins > pinBound) pinBound = pins;
+      zeroNewPages = newRows == 0 ? zeroNewPages + 1 : 0;
+      if (zeroNewPages >= (pinBound == 0 ? 1 : pinBound ~/ pageSize + 1)) {
+        return exact;
+      }
+      offset += pageSize;
     }
   }
 
@@ -1186,6 +1217,43 @@ class ApiClient {
       throw const FormatException('Gateway returned no saved session title');
     }
     return saved['title'] as String;
+  }
+
+  /// Persists a server-owned archive flag and verifies the exact target.
+  /// Neither a sparse/mismatched PATCH response nor a failed read-back is
+  /// reported as success; callers keep their current rows and offer retry.
+  Future<bool> setSessionArchived({
+    required String sessionId,
+    required bool archived,
+  }) async {
+    if (sessionId.trim().isEmpty) {
+      throw ArgumentError.value(sessionId, 'sessionId', 'must not be blank');
+    }
+    final encodedId = Uri.encodeComponent(sessionId);
+    final response = await _http
+        .patch(
+          Uri.parse('$baseUrl/api/sessions/$encodedId'),
+          headers: _headers,
+          body: jsonEncode({'archived': archived}),
+        )
+        .timeout(requestTimeout);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw Exception('HTTP ${response.statusCode}: ${response.body}');
+    }
+    final data = jsonDecode(response.body);
+    final saved = data is Map ? data['session'] : null;
+    if (saved is! Map ||
+        saved['id'] != sessionId ||
+        saved['archived'] != archived) {
+      throw const FormatException(
+        'Gateway returned no confirmed archive state',
+      );
+    }
+    final confirmed = await getSession(sessionId);
+    if (confirmed['id'] != sessionId || confirmed['archived'] != archived) {
+      throw const FormatException('Gateway archive read-back did not match');
+    }
+    return archived;
   }
 
   // ── Messages ─────────────────────────────────────────────────────────
@@ -2070,16 +2138,24 @@ class DashboardClient {
   /// semantics as the live list can repeat rows across pages, and an
   /// inflated `all.length >= total` would stop before every offset
   /// window has been read, truncating the archive. Rows are deduplicated
-  /// by session id so repeats never surface twice. [maxPages] is the
-  /// explicit safety cap: if it is reached while the list was not
-  /// exhausted the read throws rather than silently returning a partial
-  /// archive — callers degrade honestly on the error instead of showing
-  /// a truncated list as complete.
+  /// by session id so repeats never surface twice. [maxPages] is an optional
+  /// safety cap. A progressive browser can omit it, retain successful pages,
+  /// and cancel when its owner is disposed without truncating old history.
   Future<List<Session>> getArchivedSessions({
     int pageSize = 100,
-    int maxPages = 20,
+    int? maxPages = 200,
+    int? firstPageSize,
     String? gatewayProfile,
+    void Function(List<Session>)? onProgress,
+    bool Function()? shouldContinue,
+    bool Function()? isCancelled,
   }) async {
+    if (pageSize < 1 ||
+        pageSize > 100 ||
+        (maxPages != null && maxPages < 1) ||
+        (firstPageSize != null && (firstPageSize < 1 || firstPageSize > 100))) {
+      throw ArgumentError('Invalid archived session paging limits');
+    }
     final all = <Session>[];
     final seenIds = <String>{};
     var offset = 0;
@@ -2089,19 +2165,26 @@ class DashboardClient {
     // (see the loop comment): max pins on any page bounds the pin set, and
     // k consecutive zero-new windows consume k*pageSize disjoint pins.
     var pinBound = 0;
-    var zeroNewPages = 0;
-    for (var page = 0; page < maxPages; page++) {
+    var zeroNewWindowRows = 0;
+    for (var page = 0; maxPages == null || page < maxPages; page++) {
+      if (shouldContinue?.call() == false || (isCancelled?.call() ?? false)) {
+        throw StateError('Archived session read cancelled');
+      }
+      final limit = page == 0 ? (firstPageSize ?? pageSize) : pageSize;
       final data = await apiGet(
         'sessions',
         queryParameters: {
           'archived': 'only',
           'order': 'recent',
-          'limit': '$pageSize',
+          'limit': '$limit',
           'offset': '$offset',
           if (gatewayProfile != null && gatewayProfile.isNotEmpty)
             'profile': gatewayProfile,
         },
       );
+      if (isCancelled?.call() ?? false) {
+        throw StateError('Archived session scan cancelled');
+      }
       // The dashboard router reports the filtered row count alongside the
       // page (`total = session_count(same scope)`), so the LIMIT/OFFSET
       // windows together cover exactly `total` rows — pins inside the
@@ -2123,7 +2206,11 @@ class DashboardClient {
           newRows++;
         }
       }
-      offset += pageSize;
+      if (shouldContinue?.call() == false || (isCancelled?.call() ?? false)) {
+        throw StateError('Archived session read cancelled');
+      }
+      if (newRows > 0) onProgress?.call(List.unmodifiable(all));
+      offset += limit;
       if (total != null) {
         if (offset >= total) {
           exhausted = true;
@@ -2138,14 +2225,13 @@ class DashboardClient {
       final pinsOnPage = rows.where((row) => row.pinned).length;
       if (pinsOnPage > pinBound) pinBound = pinsOnPage;
       if (rows.isEmpty || newRows == 0) {
-        zeroNewPages++;
-        final required = pinBound == 0 ? 1 : pinBound ~/ pageSize + 1;
-        if (zeroNewPages >= required) {
+        zeroNewWindowRows += limit;
+        if (zeroNewWindowRows > pinBound) {
           exhausted = true;
           break;
         }
       } else {
-        zeroNewPages = 0;
+        zeroNewWindowRows = 0;
       }
     }
     if (!exhausted) {

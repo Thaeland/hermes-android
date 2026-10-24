@@ -36,26 +36,47 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
 - Previous upstream releases remain available from the
   [Releases](https://github.com/rusty4444/hermes-android/releases) page.
 
-## Unreleased hardening after v2.1.32
+## Integrated 3.0 release-candidate hardening
 
-This branch preserves the published v2.1.32 features and adds stricter submission
+This branch preserves the published v2.1.33 features and adds stricter submission
 observation epochs, confirmed background-policy ownership, targeted notification
 cleanup, canonical draft ownership and paired push registration fences.
 Tool expansion remains per visit: choices survive lazy scrolling and identity
 binding, but a genuinely closed and reopened chat starts collapsed. Covering a
-retained route is not a new visit. The release identity above remains unchanged;
-this branch is not a new release or a versioned release candidate.
+retained route is not a new visit. This is an unreleased candidate; device acceptance and publication gates remain
+separate.
 See the [background-work guide](docs/android-background-work.md),
 [Android push guide](docs/mobile-push-android.md) and
 [server companion guide](docs/mobile-push-server.md) for the additional contracts
 and acceptance checks. Upgrade the companion together with the fenced client.
 
 The unreleased integration also preserves main's compact delegated-task labels
-and full read-only task details. Reasoning defaults collapsed unless app Verbose
-is selected; manual reasoning choices survive the current visit, not a true
+and full read-only task details. Reasoning, tools and delegated tasks start collapsed even with app Verbose
+selected; manual reasoning choices survive the current visit, not a true
 close/reopen. Saved history and unconfirmed received output remain separate,
 labelled sources, with possible repetition across them. See the
 [neutral integration and verification](docs/reviews/main-81d-neutral-integration.md).
+
+## Navigation changes (unreleased)
+
+The bottom bar is **Chats → Crons → Projects → Activity → More**. Chats is the
+default screen; the separate Home tab has been removed.
+
+- **Chats** lists human conversations with search and All, Recent, Unassigned
+  and Archived filters. A compact **Needs you / Running now** section appears
+  above the list only when the device has observed relevant work.
+- **Crons** lists conversations produced by scheduled jobs, including older
+  runs and runs whose job has since been deleted. It has its own search and
+  All, Recent and Archived filters. Cron conversations do not appear in Chats.
+  The settings button opens the existing cron-job manager; **More → Cron**
+  remains available too. Script-only jobs without a conversation are still
+  inspected through the job manager, not invented as chat sessions.
+- **Projects**, **Activity** and **More** retain their existing roles.
+
+Both conversation browsers show a small first preview while history loads.
+Older history is not silently cut off after 2,000 rows. Archived history uses
+the saved dashboard connection and profile; a failed read keeps available
+rows and offers Retry rather than claiming the archive is empty.
 
 ## Remote Gateway edition highlights
 
@@ -100,6 +121,18 @@ labelled sources, with possible repetition across them. See the
   showing only the current call (or the latest call when none are running).
   Tap to view the full group; leaving and reopening the chat resets that choice.
   Verbose mode explicitly opens tool details by default.
+- **Activity** shows app-observed Remote Gateway turns: waiting for input,
+  running, failed and completed, plus an explicit unconfirmed state during
+  recovery or when an outcome cannot be proven. Recent turn metadata survives
+  app restarts; no prompt, response, title or approval content is stored there.
+  It also lists gateway chats updated within seven days, including REST-only
+  connections and chats started elsewhere. These are labelled **Updated**, not
+  assumed to be running or completed. The tab refreshes while visible,
+  pauses beneath other tabs/chat routes and in the background, supports
+  pull-to-refresh and opens the relevant chat. A bounded gateway scan is
+  labelled partially loaded rather than claiming no activity or an exhaustive
+  count. This is not a complete server audit log: live outcomes from other
+  clients and historic per-turn outcomes predating this build are unavailable.
 - Persistent reconnect/session resume and defensive retry handling.
 - App-owned stock Gateway turns outlive an open chat route. Reopen a chat to
   reattach, including while other chats run. Pending markers survive process
@@ -202,7 +235,8 @@ sanitized implementation and validation record.
 
 ## Screenshots
 
-The Home, Chats, More, Cron Jobs and Settings screenshots use anonymised example details.
+These screenshots show the published release and use anonymised example details.
+The unreleased navigation above replaces its Home tab.
 
 <table>
   <tr>

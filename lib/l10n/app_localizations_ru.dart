@@ -47,7 +47,27 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
-      'Разовый вопрос. Автоматически архивируется через 72 часа; всё, что стоит сохранить, останется в памяти.';
+      'A one-off question. Archives itself after 72 hours; anything worth keeping is still remembered.';
+
+  @override
+  String get archive_chat => 'Архивировать чат';
+
+  @override
+  String get unarchive_chat => 'Разархивировать чат';
+
+  @override
+  String get chat_archived => 'Чат архивирован';
+
+  @override
+  String get chat_unarchived => 'Чат разархивирован';
+
+  @override
+  String could_not_update_chat_archive(Object error) {
+    return 'Не удалось изменить статус архивации чата: $error';
+  }
+
+  @override
+  String get quick_chat_description => 'Разовый вопрос.';
 
   @override
   String get ai_full_text => 'ИИ + полный текст';
@@ -159,7 +179,7 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get archived_conversations_appear_here =>
-      'Архивированные диалоги появятся здесь.';
+      'Здесь отображаются только архивированные диалоги. Старые чаты остаются в разделе «Все чаты».';
 
   @override
   String get archived_quick_chats => 'Архивированные быстрые чаты';
@@ -194,9 +214,6 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get auto_device_default => 'Автоматически (по умолчанию устройства)';
-
-  @override
-  String get auto_archives_after_72_hours => 'Автоархивация через 72 часа';
 
   @override
   String get automation => 'Автоматизация';
@@ -536,6 +553,16 @@ class AppLocalizationsRu extends AppLocalizations {
 
   @override
   String get cron => 'Cron';
+
+  @override
+  String get crons => 'Crons';
+
+  @override
+  String get cron_conversations_empty =>
+      'Conversations from scheduled jobs appear here, including older runs.';
+
+  @override
+  String get search_cron_conversations => 'Search cron conversations';
 
   @override
   String get cron_jobs => 'Задачи Cron';
@@ -2870,4 +2897,46 @@ class AppLocalizationsRu extends AppLocalizations {
   String task_tasks_finished(Object count) {
     return '$count delegated task(s) finished';
   }
+
+  @override
+  String get activity_status_unconfirmed => 'Статус не подтверждён';
+
+  @override
+  String get activity_recently_updated => 'Недавно обновлено';
+
+  @override
+  String get activity_reconnecting => 'Переподключение — проверка статуса хода';
+
+  @override
+  String get activity_outcome_unknown =>
+      'Не удалось подтвердить результат хода. Откройте чат для проверки.';
+
+  @override
+  String get activity_chat_updated_detail =>
+      'Активность чата записана шлюзом; текущий статус хода недоступен.';
+
+  @override
+  String get activity_updated => 'Обновлено';
+
+  @override
+  String get activity_empty_title => 'Нет недавней активности';
+
+  @override
+  String get activity_empty_detail =>
+      'Здесь отображаются ходы, начатые в этом приложении, и чаты шлюза, обновлённые за последние 7 дней.';
+
+  @override
+  String get activity_read_error =>
+      'Раздел «Активность» не смог прочитать записи ходов или чаты шлюза. Проверьте подключение и повторите попытку.';
+
+  @override
+  String get activity_chat_unavailable =>
+      'Этот чат больше недоступен или не удалось связаться со шлюзом.';
+
+  @override
+  String get activity_partial_title => 'Активность загружена частично';
+
+  @override
+  String get activity_partial_detail =>
+      'Показана ограниченная часть активности шлюза. Могут существовать другие чаты; потяните вниз для обновления.';
 }
