@@ -38,11 +38,82 @@ class AppLocalizationsJa extends AppLocalizations {
       'メッセージの配信を確認できませんでした。下書きは保持されています。再試行する前にチャットを確認してください。';
 
   @override
+  String get attachment_tap_to_preview => 'タップしてプレビュー';
+
+  @override
+  String get attachment_save => '保存';
+
+  @override
+  String get attachment_share => '共有';
+
+  @override
+  String get attachment_saved => 'ファイルを保存しました';
+
+  @override
+  String get attachment_save_cancelled => '保存をキャンセルしました';
+
+  @override
+  String get attachment_save_failed => 'このファイルを保存できませんでした。もう一度お試しください。';
+
+  @override
+  String get attachment_share_failed => 'このファイルを共有できませんでした。もう一度お試しください。';
+
+  @override
+  String get attachment_download_failed =>
+      'このファイルを読み込めませんでした。接続を確認して、もう一度お試しください。';
+
+  @override
+  String get attachment_no_inline_preview =>
+      'この種類のファイルはプレビューできません。元のファイルを保存または共有して、別のアプリで開いてください。';
+
+  @override
+  String get attachment_image_failed => 'この画像をデコードできませんでした。元のファイルは保存または共有できます。';
+
+  @override
+  String get attachment_text_truncated =>
+      'プレビューを短縮しました。全文を読むにはファイルを保存または共有してください。';
+
+  @override
+  String get attachment_text_unavailable =>
+      'このファイルをテキストとして表示できませんでした。元のファイルを保存または共有してください。';
+
+  @override
+  String get attachment_pdf_failed =>
+      'このPDFをプレビューできませんでした。元のファイルを保存または共有してください。';
+
+  @override
+  String get attachment_pdf_unavailable =>
+      'PDFのプレビューはAndroidで利用できます。このファイルは保存または共有できます。';
+
+  @override
+  String attachment_pdf_page(int page, int total) {
+    return '$totalページ中$pageページ';
+  }
+
+  @override
+  String get attachment_previous_page => '前のページ';
+
+  @override
+  String get attachment_next_page => '次のページ';
+
+  @override
+  String get attachment_loading => 'プレビューを読み込み中…';
+
+  @override
+  String get attachment_close => 'プレビューを閉じる';
+
+  @override
+  String get attachment_retry => '再試行';
+
+  @override
   String get saved_history_heading => 'Saved history';
 
   @override
   String get received_output_heading =>
       'Received output — match to saved history unconfirmed';
+
+  @override
+  String get received_output_details => 'About received output';
 
   @override
   String get received_output_explanation =>
@@ -2141,6 +2212,9 @@ class AppLocalizationsJa extends AppLocalizations {
 
   @override
   String get verbose_mode => '詳細モード';
+
+  @override
+  String get message_metadata => 'Message details';
 
   @override
   String get voice => '音声';

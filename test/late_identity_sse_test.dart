@@ -13,9 +13,13 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/fake_voice_composer_adapter.dart';
+import 'support/pump_chat_updates.dart';
 
 void main() {
-  setUp(() => SharedPreferences.setMockInitialValues({'verbose_mode': false}));
+  setUp(() {
+    SharedPreferences.setMockInitialValues({'verbose_mode': true});
+    mockChatImageRecovery();
+  });
 
   for (final lateId in [false, true]) {
     testWidgets(
@@ -48,9 +52,7 @@ void main() {
         await tester.pump();
         expect(_expanded(tester), isTrue);
         await client.finish();
-        for (var i = 0; i < 5; i++) {
-          await tester.pump();
-        }
+        await pumpChatUpdates(tester);
         client.history = [
           {'id': 1, 'role': 'user', 'content': 'One prompt'},
           {
@@ -138,7 +140,7 @@ void main() {
       expect(_activities(tester).last.toolId, isNull);
       await tester.pumpWidget(const SizedBox.shrink());
       await client.finish();
-      await tester.pump();
+      await pumpChatUpdates(tester);
     },
   );
 
@@ -172,7 +174,7 @@ void main() {
       );
       await tester.pumpWidget(const SizedBox.shrink());
       await client.finish();
-      await tester.pump();
+      await pumpChatUpdates(tester);
     },
   );
 }

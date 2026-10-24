@@ -23,6 +23,7 @@ class MainActivity : FlutterActivity() {
     private var launchChannel: MethodChannel? = null
     private var initialShareIntent: Intent? = null
     private var initialLaunchAction: String? = null
+    private var attachmentPdfPreview: AttachmentPdfPreview? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         initialShareIntent = intent.takeIf(::isShareIntent)
@@ -33,6 +34,8 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        attachmentPdfPreview?.close()
+        attachmentPdfPreview = AttachmentPdfPreview(this, flutterEngine.dartExecutor.binaryMessenger)
         BackgroundWorkPlatform.install(this, flutterEngine.dartExecutor.binaryMessenger)
         MobilePushPlugin.install(flutterEngine)
         shareChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, shareChannelName).apply {
@@ -74,6 +77,8 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        attachmentPdfPreview?.close()
+        attachmentPdfPreview = null
         // Finishing with Back removes the Activity without calling the
         // service's onTaskRemoved. Stop natively before the Flutter engine
         // tears down: Dart's async "stop" message can otherwise be lost,

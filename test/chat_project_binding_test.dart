@@ -12,6 +12,7 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/fake_voice_composer_adapter.dart';
+import 'support/pump_chat_updates.dart';
 
 Widget _chat({
   String? projectCwd,
@@ -72,6 +73,7 @@ Widget _chat({
 }
 
 void main() {
+  setUp(mockChatImageRecovery);
   setUp(() => SharedPreferences.setMockInitialValues({'verbose_mode': false}));
 
   testWidgets('project draft binds cwd before its first legacy prompt', (
@@ -89,7 +91,7 @@ void main() {
         submit: () async => events.add('submit'),
       ),
     );
-    await tester.pumpAndSettle();
+    await pumpChatUpdates(tester);
     await tester.enterText(
       find.byKey(const Key('chat-message-composer')),
       'Start work',
@@ -98,7 +100,7 @@ void main() {
     await tester.pump();
     expect(events, ['bind:draft-project:/srv/projects/work']);
     bind.complete();
-    await tester.pumpAndSettle();
+    await pumpChatUpdates(tester);
     expect(events, ['bind:draft-project:/srv/projects/work', 'submit']);
   });
 
@@ -110,13 +112,13 @@ void main() {
         submit: () async => events.add('submit'),
       ),
     );
-    await tester.pumpAndSettle();
+    await pumpChatUpdates(tester);
     await tester.enterText(
       find.byKey(const Key('chat-message-composer')),
       'Quick question',
     );
     await tester.tap(find.byTooltip('Send'));
-    await tester.pumpAndSettle();
+    await pumpChatUpdates(tester);
     expect(events, ['submit']);
   });
 
@@ -131,13 +133,13 @@ void main() {
         submit: () async => submitted = true,
       ),
     );
-    await tester.pumpAndSettle();
+    await pumpChatUpdates(tester);
     await tester.enterText(
       find.byKey(const Key('chat-message-composer')),
       'Do not lose this',
     );
     await tester.tap(find.byTooltip('Send'));
-    await tester.pumpAndSettle();
+    await pumpChatUpdates(tester);
     expect(submitted, isFalse);
     expect(
       tester

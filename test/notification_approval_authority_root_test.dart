@@ -17,6 +17,7 @@ import 'package:hermes_android/core/services/android_launch_intent_service.dart'
 import 'package:hermes_android/core/services/background_work_prefs.dart';
 import 'package:hermes_android/core/services/connection_keepalive_service.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
+import 'package:hermes_android/core/utils/android_prompt_context.dart';
 import 'package:hermes_android/core/services/gateway_turn_application_controller.dart';
 import 'package:hermes_android/core/services/gateway_turn_journal.dart';
 import 'package:hermes_android/core/services/mobile_push_service.dart';
@@ -709,7 +710,7 @@ void main() {
   HttpOverrides? previous;
   setUp(() {
     SharedPreferences.setMockInitialValues({
-      'verbose_mode': false,
+      'verbose_mode': true,
       BackgroundWorkPrefsStore.storageKey: true,
     });
     backgroundWorkEnabled.value = true;
@@ -778,6 +779,15 @@ void main() {
               'tool': 'terminal',
               'detail': 'Received tool detail',
             }, turnId: 'wire-1');
+            await widgetUntil(tester, () => owner.snapshot.tools.isNotEmpty);
+            // Verbose message metadata and source headings take real sliver
+            // space; reveal the received detail through the actual list.
+            await tester.scrollUntilVisible(
+              _reason(),
+              500,
+              scrollable: find.byType(Scrollable).first,
+            );
+            await tester.pump(const Duration(milliseconds: 350));
             await widgetUntil(
               tester,
               () =>
@@ -836,6 +846,30 @@ void main() {
               find.byType(GatewaySubagentCard),
             );
             expect(taskCard.activities.single.goal, goal);
+            final taskSection = find.descendant(
+              of: find.byType(GatewaySubagentCard),
+              matching: find.byType(ExpansionTile),
+            );
+            bool taskExpanded() => tester
+                .widget<Expansible>(
+                  find.descendant(
+                    of: taskSection,
+                    matching: find.byType(Expansible),
+                  ),
+                )
+                .controller
+                .isExpanded;
+            expect(taskExpanded(), false);
+            await tester.ensureVisible(taskSection);
+            await tester.tap(taskSection);
+            await tester.pump(const Duration(milliseconds: 350));
+            await tester.scrollUntilVisible(
+              taskSection,
+              250,
+              scrollable: find.byType(Scrollable).first,
+            );
+            await tester.pump(const Duration(milliseconds: 350));
+            expect(taskExpanded(), true);
             final tile = find.byKey(
               const ValueKey('delegated-task-root78-child'),
             );
@@ -1102,6 +1136,14 @@ void main() {
             );
             expect(_reasonExpanded(tester), true);
             expect(tester.widget(_reason()).key, innerReasonKey);
+            // Removing the notice changes lazy viewport/cache boundaries. Reveal
+            // the tool cell explicitly rather than assuming it is built with
+            // the preceding reasoning card.
+            await tester.scrollUntilVisible(
+              _tools(),
+              250,
+              scrollable: find.byType(Scrollable).first,
+            );
             expect(_toolExpanded(tester), true);
             expect(tester.widget(_tools()).key, toolKey);
             // Prior lazy eviction may remount cards; unchanged no-eviction controller is
@@ -1162,7 +1204,7 @@ void main() {
             expect(f.server.prompts, hasLength(1));
             expect(
               f.server.prompts.single['text'],
-              'Combined explicit request',
+              AndroidPromptContext.forModel('Combined explicit request'),
             );
             expect(
               f.server.prompts.single.keys.any(

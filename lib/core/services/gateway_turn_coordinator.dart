@@ -6,6 +6,7 @@ import 'dart:io';
 import 'package:uuid/uuid.dart';
 
 import '../models/gateway_turn_contract.dart';
+import '../utils/android_prompt_context.dart';
 import 'gateway_turn_journal.dart';
 import 'gateway_turn_recovery.dart';
 import 'ws_client.dart';
@@ -614,8 +615,15 @@ class GatewayTurnCoordinator {
     final client = _client!;
     final runtime = _runtimeBinding!;
     final durable = _durableBinding!;
-    if (utf8.encode(text).length > runtime.capability.maxPromptBytes!) {
-      throw ArgumentError.value(text, 'text', 'Prompt exceeds gateway limit.');
+    final promptText = attachments.isEmpty
+        ? AndroidPromptContext.forModel(text)
+        : AndroidPromptContext.forAttachment(text);
+    if (utf8.encode(promptText).length > runtime.capability.maxPromptBytes!) {
+      throw ArgumentError.value(
+        text,
+        'text',
+        'Prompt plus Android context exceeds gateway limit.',
+      );
     }
     final wireAttachments = _validatedAttachments(attachments, runtime);
 
@@ -647,7 +655,7 @@ class GatewayTurnCoordinator {
         'session_id': runtime.runtimeSessionId,
         'version': GatewayTurnRecoveryCapability.promptSubmitVersion,
         'client_turn_id': clientTurnId,
-        'text': text,
+        'text': promptText,
         if (wireAttachments.isNotEmpty) 'attachments': wireAttachments,
       });
       result = _resultOrThrow('prompt.submit', response);

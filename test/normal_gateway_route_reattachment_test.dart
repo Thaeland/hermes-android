@@ -30,7 +30,7 @@ import 'package:hermes_android/core/services/delegated_task_history.dart';
 import 'package:hermes_android/core/widgets/delegated_task_timeline.dart';
 
 void main() {
-  setUp(() => SharedPreferences.setMockInitialValues({'verbose_mode': false}));
+  setUp(() => SharedPreferences.setMockInitialValues({'verbose_mode': true}));
 
   for (final (following, width) in [
     (true, 400.0),
@@ -351,8 +351,18 @@ void main() {
         expect(expanded(), isFalse);
         expect(find.text('First reasoning. '), findsNothing);
         // MAIN81D C/R geometry: reveal the actual lazy header before tapping.
-        await tester.ensureVisible(find.text('Reasoning'));
-        await tester.tap(find.text('Reasoning'));
+        await tester.ensureVisible(
+          find.descendant(
+            of: find.byType(GatewayReasoningCard),
+            matching: find.text('Reasoning'),
+          ),
+        );
+        await tester.tap(
+          find.descendant(
+            of: find.byType(GatewayReasoningCard),
+            matching: find.text('Reasoning'),
+          ),
+        );
         await tester.pump(const Duration(milliseconds: 300));
         expect(expanded(), isTrue);
         expect(find.text('First reasoning. '), findsOneWidget);
@@ -402,8 +412,18 @@ void main() {
           remote.rpc.complete();
           await tester.pump();
         }
-        await tester.ensureVisible(find.text('Reasoning'));
-        await tester.tap(find.text('Reasoning'));
+        await tester.ensureVisible(
+          find.descendant(
+            of: find.byType(GatewayReasoningCard),
+            matching: find.text('Reasoning'),
+          ),
+        );
+        await tester.tap(
+          find.descendant(
+            of: find.byType(GatewayReasoningCard),
+            matching: find.text('Reasoning'),
+          ),
+        );
         await tester.pump(const Duration(milliseconds: 300));
         expect(expanded(), isTrue);
         expect(
@@ -465,6 +485,8 @@ void main() {
         expect(expanded(), isFalse);
         expect(find.text('Read file: Running'), findsOneWidget);
         expect(find.textContaining('Terminal'), findsNothing);
+        await tester.ensureVisible(find.text('Tool activity'));
+        await tester.pump();
         await tester.tap(find.text('Tool activity'));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 400));
@@ -542,6 +564,8 @@ void main() {
           .controller!
           .isExpanded;
       expect(expanded(), isFalse);
+      await tester.ensureVisible(find.text('Tool activity'));
+      await tester.pump();
       await tester.tap(find.text('Tool activity'));
       await tester.pump(const Duration(milliseconds: 400));
       expect(expanded(), isTrue);
@@ -556,9 +580,13 @@ void main() {
       );
       expect(expanded(), isFalse);
       expect(find.text('Retained call detail'), findsNothing);
+      await tester.ensureVisible(find.text('Tool activity'));
+      await tester.pump();
       await tester.tap(find.text('Tool activity'));
       await tester.pump(const Duration(milliseconds: 400));
       expect(expanded(), isTrue);
+      await tester.ensureVisible(find.text('Tool activity'));
+      await tester.pump();
       await tester.tap(find.text('Tool activity'));
       await tester.pump(const Duration(milliseconds: 400));
       expect(expanded(), isFalse);
@@ -591,6 +619,8 @@ void main() {
       expect(expanded(), isFalse);
       expect(find.text('Terminal: Working'), findsOneWidget);
       expect(find.text('Updated call detail'), findsNothing);
+      await tester.ensureVisible(find.text('Tool activity'));
+      await tester.pump();
       await tester.tap(find.text('Tool activity'));
       await tester.pump(const Duration(milliseconds: 400));
       expect(find.text('Updated call detail'), findsOneWidget);
@@ -677,8 +707,13 @@ void main() {
   );
 
   testWidgets(
-    'canonical reopen replaces completed wire presentation after delayed persistence',
+    'canonical reopen preserves independent completed wire output after delayed persistence',
     (tester) async {
+      // End-aligned reopening and collapsed metadata add real row height.
+      // Keep both complete source projections mounted for the order assertion;
+      // lazy eviction in a short viewport is not missing canonical history.
+      await tester.binding.setSurfaceSize(const Size(800, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
       final controller = GatewayTurnApplicationController();
       addTearDown(controller.close);
       final remote = _Remote();
@@ -767,6 +802,8 @@ void main() {
   testWidgets('older-only paging preserves completed wire chronology', (
     tester,
   ) async {
+    await tester.binding.setSurfaceSize(const Size(800, 1400));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
     final controller = GatewayTurnApplicationController();
     addTearDown(controller.close);
     final remote = _Remote();
@@ -833,7 +870,7 @@ void main() {
     final retained = owner.snapshot;
     expect(retained.phase, NormalGatewayTurnPhase.completed);
     expect(retained.rowFloor, 60);
-    final olderButton = find.byKey(const Key('chat-load-older'));
+    final olderButton = find.byKey(const Key('chat-load-older')).hitTestable();
     await tester.scrollUntilVisible(
       olderButton,
       -400,
@@ -969,8 +1006,26 @@ void main() {
           tester.widget<TextField>(find.byType(TextField)).controller!.text,
           'Keep draft',
         );
-        expect(find.text('Canonical parent final'), findsOneWidget);
-        expect(find.text('Wire parent preview'), findsOneWidget);
+        final canonicalFinal = inChatSource(
+          find.text('Canonical parent final'),
+          ChatDisplaySource.canonical,
+        );
+        final receivedPreview = inChatSource(
+          find.text('Wire parent preview'),
+          ChatDisplaySource.received,
+        );
+        await tester.scrollUntilVisible(
+          canonicalFinal,
+          -200,
+          scrollable: find.byType(Scrollable).first,
+        );
+        expect(canonicalFinal, findsOneWidget);
+        await tester.scrollUntilVisible(
+          receivedPreview,
+          200,
+          scrollable: find.byType(Scrollable).first,
+        );
+        expect(receivedPreview, findsOneWidget);
         await tester.pumpWidget(const SizedBox.shrink());
         await tester.pump();
       },

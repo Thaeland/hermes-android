@@ -38,7 +38,7 @@ void main() {
     for (final verbose in [false, true]) {
       for (final arrivesOnRefresh in [false, true]) {
         testWidgets(
-          'untagged compression task list ${snapshotCase.key} is a collapsed background card '
+          'untagged compression task list ${snapshotCase.key} follows quiet/verbose card policy '
           'verbose=$verbose arrivesOnRefresh=$arrivesOnRefresh',
           (tester) async {
             SharedPreferences.setMockInitialValues({'verbose_mode': verbose});
@@ -51,7 +51,12 @@ void main() {
               ..clear()
               ..addAll([
                 {'id': 1, 'role': 'user', 'content': 'Real user prompt'},
-                {'id': 2, 'role': 'assistant', 'content': 'Ordinary answer'},
+                {
+                  'id': 2,
+                  'role': 'assistant',
+                  'content': 'Ordinary answer',
+                  'finish_reason': 'stop',
+                },
                 if (!arrivesOnRefresh) {...snapshot, 'id': 3},
               ]);
             final controller = GatewayTurnApplicationController();
@@ -64,10 +69,14 @@ void main() {
                 await _refresh(tester);
               }
               final card = find.byType(BackgroundReportCard);
-              expect(card, findsOneWidget);
-              expect(find.text('Background task'), findsOneWidget);
-              expect(_expanded(tester, card), isFalse);
+              expect(card, verbose ? findsOneWidget : findsNothing);
+              expect(
+                find.text('Background task'),
+                verbose ? findsOneWidget : findsNothing,
+              );
+              if (verbose) expect(_expanded(tester, card), isFalse);
               expect(find.text(body, skipOffstage: false), findsNothing);
+              expect(find.text('Ordinary answer'), findsOneWidget);
               final humans = tester
                   .widgetList<MessageBubble>(find.byType(MessageBubble))
                   .where((bubble) => bubble.isUser)
@@ -76,21 +85,36 @@ void main() {
                 'Real user prompt',
               ]);
               expect(humans.single.onEdit, isNotNull);
+              expect(humans.single.verbose, verbose);
               await tester.enterText(find.byType(TextField), 'Keep this draft');
-              await tester.tap(
-                find.descendant(of: card, matching: find.text('Expand report')),
-              );
-              await tester.pumpAndSettle();
-              expect(_expanded(tester, card), isTrue);
-              expect(find.text(body), findsOneWidget);
-              expect(
-                find.descendant(of: card, matching: find.byType(MessageBubble)),
-                findsNothing,
-              );
-              final key = tester.widget(card).key;
+              if (verbose) {
+                await tester.tap(
+                  find.descendant(
+                    of: card,
+                    matching: find.text('Expand report'),
+                  ),
+                );
+                await tester.pumpAndSettle();
+                expect(_expanded(tester, card), isTrue);
+                expect(find.text(body), findsOneWidget);
+                expect(
+                  find.descendant(
+                    of: card,
+                    matching: find.byType(MessageBubble),
+                  ),
+                  findsNothing,
+                );
+              }
+              final key = verbose ? tester.widget(card).key : null;
               await _refresh(tester);
-              expect(tester.widget(card).key, key);
-              expect(_expanded(tester, card), isTrue);
+              if (verbose) {
+                expect(tester.widget(card).key, key);
+                expect(_expanded(tester, card), isTrue);
+              } else {
+                expect(card, findsNothing);
+                expect(find.text(body, skipOffstage: false), findsNothing);
+                expect(find.text('Ordinary answer'), findsOneWidget);
+              }
               expect(_draft(tester), 'Keep this draft');
               final canonical = controller
                   .normalSessionFor(fixture.connection)
@@ -104,7 +128,8 @@ void main() {
               await tester.pumpWidget(const SizedBox.shrink());
               await tester.pumpWidget(_app(fixture, controller));
               await tester.pumpAndSettle();
-              expect(_expanded(tester, card), isFalse);
+              expect(card, verbose ? findsOneWidget : findsNothing);
+              if (verbose) expect(_expanded(tester, card), isFalse);
               expect(find.text(body, skipOffstage: false), findsNothing);
               expect(fixture.submits, 0);
               expect(
@@ -139,18 +164,24 @@ void main() {
             await tester.pumpAndSettle();
             expect(fixture.reads, greaterThan(0));
             expect(fixture.requests.every((r) => r.method == 'GET'), isTrue);
-            expect(find.byType(BackgroundReportCard), findsNWidgets(2));
+            expect(
+              find.byType(BackgroundReportCard),
+              verbose ? findsNWidgets(2) : findsNothing,
+            );
             final screen = tester.state(find.byType(ChatScreen));
             final report = _report('Task summary');
             final other = _report('Process summary');
-            final key = tester.widget(report).key;
-            expect(_expanded(tester, report), isFalse);
-            expect(_expanded(tester, other), isFalse);
+            final key = verbose ? tester.widget(report).key : null;
+            if (verbose) {
+              expect(_expanded(tester, report), isFalse);
+              expect(_expanded(tester, other), isFalse);
+            }
             expect(find.text(_body, skipOffstage: false), findsNothing);
             expect(
               find.text('Issues reported — expand for details.'),
-              findsOneWidget,
+              verbose ? findsOneWidget : findsNothing,
             );
+            expect(find.text('Ordinary answer'), findsOneWidget);
             final humans = tester
                 .widgetList<MessageBubble>(find.byType(MessageBubble))
                 .where((bubble) => bubble.isUser)
@@ -178,30 +209,53 @@ void main() {
               find.byType(TextField),
               'Unsent draft stays here',
             );
-            await tester.tap(
-              find.descendant(of: report, matching: find.text('Expand report')),
-            );
-            await tester.pumpAndSettle();
-            expect(find.text(_body), findsOneWidget);
-            expect(_expanded(tester, other), isFalse);
-            expect(
-              find.descendant(of: report, matching: find.byType(SelectionArea)),
-              findsOneWidget,
-            );
-            expect(
-              find.descendant(of: report, matching: find.byType(MessageBubble)),
-              findsNothing,
-            );
+            if (verbose) {
+              await tester.tap(
+                find.descendant(
+                  of: report,
+                  matching: find.text('Expand report'),
+                ),
+              );
+              await tester.pumpAndSettle();
+              expect(find.text(_body), findsOneWidget);
+              expect(_expanded(tester, other), isFalse);
+              expect(
+                find.descendant(
+                  of: report,
+                  matching: find.byType(SelectionArea),
+                ),
+                findsOneWidget,
+              );
+              expect(
+                find.descendant(
+                  of: report,
+                  matching: find.byType(MessageBubble),
+                ),
+                findsNothing,
+              );
+            }
             await _refresh(tester);
             expect(tester.state(find.byType(ChatScreen)), same(screen));
-            expect(tester.widget(report).key, key);
-            expect(_expanded(tester, report), isTrue);
-            expect(_expanded(tester, other), isFalse);
+            if (verbose) {
+              expect(tester.widget(report).key, key);
+              expect(_expanded(tester, report), isTrue);
+              expect(_expanded(tester, other), isFalse);
+            } else {
+              expect(find.byType(BackgroundReportCard), findsNothing);
+              expect(find.text(_body, skipOffstage: false), findsNothing);
+              expect(find.text(_quote), findsOneWidget);
+              expect(find.text('Ordinary answer'), findsOneWidget);
+            }
             expect(_draft(tester), 'Unsent draft stays here');
 
             // Real lazy sliver eviction (not just a widget rebuilt at one index).
             fixture.rows.add({
               'id': 5,
+              'role': 'user',
+              'content': 'Filler prompt',
+            });
+            fixture.rows.add({
+              'id': 6,
               'role': 'assistant',
               'content': List.generate(
                 200,
@@ -217,20 +271,28 @@ void main() {
             expect(report, findsNothing);
             scroll.jumpTo(0);
             await tester.pumpAndSettle();
-            expect(_expanded(tester, report), isTrue);
-            expect(_expanded(tester, other), isFalse);
-            expect(tester.widget(report).key, key);
+            if (verbose) {
+              expect(_expanded(tester, report), isTrue);
+              expect(_expanded(tester, other), isFalse);
+              expect(tester.widget(report).key, key);
+            } else {
+              expect(find.byType(BackgroundReportCard), findsNothing);
+              expect(find.text(_quote), findsOneWidget);
+              expect(find.text('Ordinary answer'), findsOneWidget);
+            }
             expect(tester.state(find.byType(ChatScreen)), same(screen));
             expect(_draft(tester), 'Unsent draft stays here');
-            await tester.tap(
-              find.descendant(
-                of: report,
-                matching: find.text('Collapse report'),
-              ),
-            );
-            await tester.pumpAndSettle();
+            if (verbose) {
+              await tester.tap(
+                find.descendant(
+                  of: report,
+                  matching: find.text('Collapse report'),
+                ),
+              );
+              await tester.pumpAndSettle();
+              expect(_expanded(tester, report), isFalse);
+            }
             expect(find.text(_body, skipOffstage: false), findsNothing);
-            expect(_expanded(tester, report), isFalse);
             final canonical = controller
                 .normalSessionFor(fixture.connection)
                 .findChat('stored-reports')!
@@ -317,7 +379,7 @@ void main() {
   testWidgets(
     'same-State account/controller replacement resets report controllers only',
     (tester) async {
-      SharedPreferences.setMockInitialValues({});
+      SharedPreferences.setMockInitialValues({'verbose_mode': true});
       await tester.binding.setSurfaceSize(const Size(1000, 1400));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       final fixture = _History();
@@ -443,7 +505,13 @@ class _History {
       'display_metadata': {'display_text': 'Process summary'},
     },
     {'id': 3, 'role': 'user', 'content': _quote},
-    {'id': 4, 'role': 'assistant', 'content': 'Ordinary answer'},
+    // This ordinary bubble is a completed answer, not an untyped trace row.
+    {
+      'id': 4,
+      'role': 'assistant',
+      'content': 'Ordinary answer',
+      'completed': true,
+    },
   ];
   Future<http.Response> respond(http.Request request) async {
     requests.add(request);

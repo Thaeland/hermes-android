@@ -7,6 +7,7 @@ import 'package:hermes_android/core/screens/chat_screen.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
 import 'package:hermes_android/core/services/gateway_turn_application_controller.dart';
 import 'package:hermes_android/core/services/normal_gateway_application_session.dart';
+import 'package:hermes_android/core/utils/android_prompt_context.dart';
 import 'package:hermes_android/core/utils/chat_display_items.dart';
 import 'package:hermes_android/l10n/app_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -25,7 +26,7 @@ void main() {
   final messenger =
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
   setUp(() {
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({'verbose_mode': true});
     old = HttpOverrides.current;
     HttpOverrides.global = null;
     exports.clear();
@@ -183,8 +184,8 @@ void main() {
               findsOneWidget,
             );
             expect(wire.prompts.map((p) => p['text']), [
-              'First local prompt',
-              'Second local prompt',
+              AndroidPromptContext.forModel('First local prompt'),
+              AndroidPromptContext.forModel('Second local prompt'),
             ]);
             await tester.tap(find.byTooltip('Chat actions').hitTestable());
             await tester.pumpAndSettle();

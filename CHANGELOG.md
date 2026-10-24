@@ -6,8 +6,18 @@ shows only the three latest releases.
 
 ## [Unreleased]
 
+## [3.0.0-rc.2] - 2026-10-24
+
+Testing candidate only. The latest stable release remains **2.1.33**. Back up
+settings before installing; phone acceptance is required before stable 3.0
+promotion or GitLab/F-Droid updates. Base code **3001** produces split codes
+**30011**, **30012** and **30013**, above RC1's **30001–30003**.
+
 ### Changed
 
+- Keep quiet conversation presentation separate from Verbose Mode details.
+  Quiet mode requires source-local reply-completion evidence; expandable
+  verbose details start collapsed and preserve manual choices during a visit.
 - Remove the unused Organisation section and its **Pin, batch and undo** and
   **AI-assisted filing** placeholders from More. Rename **Automation** to
   **Agent**, which groups Cron, Skills and Memory, across all supported languages.
@@ -25,9 +35,28 @@ shows only the three latest releases.
 
 ### Fixed
 
+- Preserve the previous completed reply when Stop or Stop and send cancels a
+  new REST response before its first text arrives.
+- Bound actual certificate-file reads to 1 MiB, fence pending picker/import
+  callbacks and clear obsolete password retries when selecting another file.
+- Preserve configured typed voice-stop phrases and literal slash-command text
+  when adding Android attachment guidance. Leave input unchanged if the gateway
+  cannot provide its voice configuration.
+- Keep image-only history free of empty-text placeholders and keep hidden,
+  model-only and replaced physical content out of chat exports.
+- Open chats at the latest visible message without pulling a reader away from
+  older history during refreshes, streaming or delegated-task inspection (#186).
 - Make certificate files selectable on Android/iOS and ask for protected-file
   passwords after selection. Retain encrypted PEM retries and certificate-chain
   separators; reject an unusable PEM identity before reporting it loaded (#187).
+- Remove the large received-output notice from the chat transcript. Keep its
+  explanation under Chat actions → About received output, without changing
+  message provenance, recovery or export details.
+- Request attachment-capable chat instructions explicitly rather than inheriting
+  the gateway host's terminal/TUI surface. Android adds its own versioned client
+  guidance through existing chat protocols, including reused TUI sessions;
+  no backend patch or Android companion is required. User-facing message text
+  remains clean while raw server history retains the app-added context.
 - Populate Activity from actual app-owned turn observations and honest gateway
   update metadata. Retain compression roots across restart and navigate older
   activity to the current conversation without duplicate continuation rows.
@@ -54,6 +83,16 @@ shows only the three latest releases.
 
 ### Added
 
+- Generated attachments share timeline and Assets discovery: explicit `MEDIA:`
+  deliveries, filesystem Markdown links and recognised successful image-tool
+  results. Files stay visible independently of verbose tool details.
+- Attachment popups preview images, Android PDF pages and inert text; other
+  binary files retain a metadata/download fallback. Download opens the native
+  save picker directly from either the card or popup, separately from Share.
+- Chat attachment downloads use the same streaming 25 MiB budget as Assets.
+  URL-only generated images use a separate, credential-free HTTPS connection
+  only after a tap; gateway authentication never goes to the image host.
+
 - Native **More → Assets** browser for explicit generated-file references in
   saved Hermes replies. Includes filename/source-chat search, file-type filters,
   on-demand image previews, download/share and navigation to the source chat.
@@ -65,12 +104,13 @@ shows only the three latest releases.
 
 ### Limits
 
-- Assets is reconstructed from saved `MEDIA:` references, not a server-owned
+- Assets is reconstructed from explicit saved deliveries and recognised media
+  producer results, not a server-owned
   catalogue of all attachments, project files or outputs. Referenced files may
   have expired or been removed. Organisation placeholders are not shown:
   durable batch undo and correction-learning AI filing need separate contracts.
-- This development slice was assisted by Hermes Agent; it is not a published
-  release and does not change the current stable version.
+- This testing candidate was assisted by Hermes Agent. Automated verification
+  does not establish phone acceptance, and the current stable version is unchanged.
 
 ### Thanks
 

@@ -97,8 +97,15 @@ class _GatewayReasoningCardState extends State<GatewayReasoningCard> {
 
 class GatewayNoticeCard extends StatelessWidget {
   final GatewayNotice notice;
+  final bool initiallyExpanded;
+  final ValueChanged<bool>? onExpansionChanged;
 
-  const GatewayNoticeCard({required this.notice, super.key});
+  const GatewayNoticeCard({
+    required this.notice,
+    this.initiallyExpanded = false,
+    this.onExpansionChanged,
+    super.key,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -106,35 +113,20 @@ class GatewayNoticeCard extends StatelessWidget {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(
-              isBackground
-                  ? Icons.task_alt_outlined
-                  : Icons.fact_check_outlined,
-              size: 21,
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: SelectionArea(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      notice.title,
-                      style: Theme.of(context).textTheme.labelLarge,
-                    ),
-                    const SizedBox(height: 4),
-                    Text(notice.text),
-                  ],
-                ),
-              ),
-            ),
-          ],
+      child: ExpansionTile(
+        initiallyExpanded: initiallyExpanded,
+        onExpansionChanged: onExpansionChanged,
+        leading: Icon(
+          isBackground ? Icons.task_alt_outlined : Icons.fact_check_outlined,
+          size: 21,
         ),
+        title: Text(notice.title),
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(14),
+            child: SelectionArea(child: Text(notice.text)),
+          ),
+        ],
       ),
     );
   }
@@ -143,10 +135,14 @@ class GatewayNoticeCard extends StatelessWidget {
 class GatewaySubagentCard extends StatelessWidget {
   final List<GatewaySubagentActivity> activities;
   final ValueChanged<GatewaySubagentActivity>? onOpenTask;
+  final bool? pinnedExpansion;
+  final ValueChanged<bool>? onPinChanged;
 
   const GatewaySubagentCard({
     required this.activities,
     this.onOpenTask,
+    this.pinnedExpansion,
+    this.onPinChanged,
     super.key,
   });
 
@@ -174,7 +170,8 @@ class GatewaySubagentCard extends StatelessWidget {
     return Card(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       child: ExpansionTile(
-        initiallyExpanded: !complete,
+        initiallyExpanded: pinnedExpansion ?? false,
+        onExpansionChanged: onPinChanged,
         leading: Icon(
           activities.any((task) => task.failed)
               ? Icons.error_outline

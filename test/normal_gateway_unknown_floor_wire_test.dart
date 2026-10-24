@@ -23,7 +23,9 @@ void main() {
   testWidgets(
     'real local create and bind does not duplicate first canonical turn',
     (tester) async {
-      SharedPreferences.setMockInitialValues({'verbose_mode': false});
+      // Keep the wire/source oracle independent of quiet classification: a
+      // saved metadata-free reply is inspectable in Verbose, not proven final.
+      SharedPreferences.setMockInitialValues({'verbose_mode': true});
       const picker = MethodChannel('plugins.flutter.io/image_picker');
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
         picker,

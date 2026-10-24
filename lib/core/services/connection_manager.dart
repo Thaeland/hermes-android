@@ -13,6 +13,7 @@ import 'package:uuid/uuid.dart';
 import '../models/client_certificate.dart';
 import '../models/connection.dart';
 import '../models/session.dart';
+import '../utils/android_prompt_context.dart';
 import 'client_certificate_service.dart';
 import 'connection_mutation_barrier.dart';
 import 'tls_client_factory.dart';
@@ -1530,76 +1531,169 @@ class GatewayChatClient {
     }
 
     final latest = message.trim();
-    final latestContent = imageDataUrl == null
-        ? latest
-        : <Map<String, dynamic>>[
-            if (latest.isNotEmpty) {'type': 'text', 'text': latest},
-            {
-              'type': 'image_url',
-              'image_url': {'url': imageDataUrl},
-            },
-          ];
+    final latestContent = buildUserContent(
+      message: latest,
+      imageDataUrl: imageDataUrl,
+    );
     final alreadyLast =
         imageDataUrl == null &&
         messages.isNotEmpty &&
         messages.last['role'] == 'user' &&
-        messages.last['content'] == latest;
-    if ((latest.isNotEmpty || imageDataUrl != null) && !alreadyLast) {
+        (messages.last['content'] == latest ||
+            messages.last['content'] == latestContent);
+    if (alreadyLast) {
+      messages[messages.length - 1] = {
+        'role': 'user',
+        'content': latestContent,
+      };
+    } else if (latest.isNotEmpty || imageDataUrl != null) {
       messages.add({'role': 'user', 'content': latestContent});
     }
     return messages;
   }
 
-  /// Parse one SSE frame. Returns streamed text token, or null for non-token
-  /// frames. Hermes tool progress frames are delivered via [onToolProgress].
+  /// Exact current-turn model content, also retained by local SSE history.
+  static dynamic buildUserContent({
+    required String message,
+    String? imageDataUrl,
+  }) {
+    final latest = message.trim();
+    if (imageDataUrl == null) return AndroidPromptContext.forModel(latest);
+    return <Map<String, dynamic>>[
+      {'type': 'text', 'text': AndroidPromptContext.forAttachment(latest)},
+      {
+        'type': 'image_url',
+        'image_url': {'url': imageDataUrl},
+      },
+    ];
+  }
+
+  /// Token-only compatibility parser. Non-token, malformed and error frames
+  /// return null; callers must not infer success from that. The streaming send
+  /// uses [_decodeSseFrame] to retain completion and failure authority.
   static String? parseSseFrame(
     String frame, {
     ToolProgressCallback? onToolProgress,
   }) {
-    String eventType = '';
-    final dataLines = <String>[];
+    final parsed = _decodeSseFrame(frame);
+    if (parsed.toolProgress case final progress?) {
+      onToolProgress?.call(progress);
+    }
+    final token = parsed.token;
+    return token != null && token.isNotEmpty ? token : null;
+  }
 
+  static _SseFrame _decodeSseFrame(String frame) {
+    var eventType = '';
+    final dataLines = <String>[];
     for (final rawLine in frame.split('\n')) {
-      final line = rawLine.trimRight();
-      if (line.isEmpty || line.startsWith(':')) continue;
+      final line = rawLine.endsWith('\r')
+          ? rawLine.substring(0, rawLine.length - 1)
+          : rawLine;
       if (line.startsWith('event:')) {
         eventType = line.substring(6).trim();
       } else if (line.startsWith('data:')) {
         dataLines.add(line.substring(5).trimLeft());
       }
     }
-
-    if (dataLines.isEmpty) return null;
     final data = dataLines.join('\n').trim();
-    if (data.isEmpty || data == '[DONE]') return null;
-
-    try {
-      final parsed = jsonDecode(data);
-      if (eventType == 'hermes.tool.progress') {
-        if (parsed is Map<String, dynamic>) onToolProgress?.call(parsed);
-        return null;
+    // event:error is authoritative even without JSON/data (or with [DONE]).
+    if (eventType == 'error') {
+      Object? payload;
+      try {
+        payload = jsonDecode(data);
+      } catch (_) {
+        payload = data == '[DONE]' ? null : data;
       }
-
-      if (parsed is Map<String, dynamic>) {
-        final choices = parsed['choices'] as List?;
-        if (choices != null && choices.isNotEmpty && choices.first is Map) {
-          final first = choices.first as Map;
-          final delta = first['delta'];
-          if (delta is Map) {
-            final content = delta['content'];
-            if (content != null && content.toString().isNotEmpty) {
-              return content.toString();
-            }
-          }
-        }
-      }
-    } catch (_) {
-      return null;
+      return _SseFrame(error: _streamErrorMessage(payload));
     }
-    return null;
+    if (data.isEmpty) return const _SseFrame();
+    if (data == '[DONE]') return const _SseFrame(done: true);
+
+    final Object? parsed;
+    try {
+      parsed = jsonDecode(data);
+    } catch (_) {
+      return const _SseFrame(error: 'Gateway sent a malformed SSE frame.');
+    }
+    if (parsed is! Map<String, dynamic>) {
+      return const _SseFrame(error: 'Gateway sent a malformed SSE frame.');
+    }
+    if (parsed['error'] != null || parsed['type'] == 'error') {
+      return _SseFrame(error: _streamErrorMessage(parsed));
+    }
+    // Current Hermes annotates failed/partial completions as well as emitting
+    // non-stop finish reasons. Neither can be overridden by a later [DONE].
+    final hermes = parsed['hermes'];
+    if (hermes is Map &&
+        (hermes['completed'] == false ||
+            hermes['partial'] == true ||
+            hermes['failed'] == true ||
+            (hermes['error'] != null && hermes['error'] != ''))) {
+      return _SseFrame(error: _streamErrorMessage(hermes));
+    }
+    if (eventType == 'hermes.tool.progress') {
+      return _SseFrame(toolProgress: parsed);
+    }
+    final choices = parsed['choices'];
+    // Usage-only chunks and extension events do not carry completion evidence.
+    if (choices == null || (choices is List && choices.isEmpty)) {
+      return const _SseFrame();
+    }
+    if (choices is! List || choices.first is! Map) {
+      return const _SseFrame(error: 'Gateway sent malformed SSE choices.');
+    }
+    final first = choices.first as Map;
+    final finishReason = first['finish_reason'];
+    if (finishReason != null && finishReason != 'stop') {
+      return _SseFrame(
+        error:
+            'Assistant response did not finish successfully '
+            '(finish_reason: $finishReason).',
+      );
+    }
+    final delta = first['delta'];
+    if (delta != null && delta is! Map) {
+      return const _SseFrame(error: 'Gateway sent a malformed SSE delta.');
+    }
+    final content = delta is Map ? delta['content'] : null;
+    if (content != null && content is! String) {
+      return const _SseFrame(error: 'Gateway sent malformed SSE content.');
+    }
+    return _SseFrame(
+      token: content as String?,
+      successfulFinish: finishReason == 'stop',
+      hasToolCalls:
+          delta is Map &&
+          (delta['tool_calls'] != null || delta['function_call'] != null),
+    );
+  }
+
+  static String _streamErrorMessage(
+    Object? payload, {
+    String fallback = 'Assistant response did not finish successfully.',
+  }) {
+    if (payload is String && payload.trim().isNotEmpty) return payload;
+    if (payload is Map) {
+      final error = payload['error'];
+      if (error != null) {
+        return _streamErrorMessage(error, fallback: fallback);
+      }
+      final message = payload['message'];
+      if (message is String && message.trim().isNotEmpty) return message;
+    }
+    return fallback;
   }
 
   /// Send a message and stream the assistant response token-by-token.
+  ///
+  /// [onDone] means a successfully completed assistant reply, not socket EOF.
+  /// Require non-whitespace assistant content plus a complete `stop` frame or
+  /// `[DONE]`. The latter supports older OpenAI-compatible gateways omitting a
+  /// finish_reason, but never completes tool-call-only, failed or partial output.
+  /// A stop frame is provisional until [DONE]/clean EOF so a trailing error wins.
+  /// Malformed frames, non-stop finishes and EOF without success call [onError]
+  /// exactly once and mute subsequent frames. Cancellation/supersession is silent.
   Future<void> sendMessageStreaming({
     required String message,
     required String sessionId,
@@ -1632,18 +1726,17 @@ class GatewayChatClient {
     // with its OWN state so its callbacks are muted rather than silently
     // drained into the new call's flags.
     if (previous != null) {
-      previous.cancelled = true;
-      if (!previous.cancellation.isCompleted) {
-        previous.cancellation.complete();
-      }
-      final sub = previous.subscription;
-      if (sub != null) {
-        unawaited(sub.cancel());
-      }
-      if (!previous.completion.isCompleted) previous.completion.complete();
+      previous.cancel();
     }
     _liveStream = stream;
     final completion = stream.completion;
+    bool ownsStream() => !stream.cancelled && identical(_liveStream, stream);
+    var callbackDelivered = false;
+    void reportError(String error) {
+      if (!ownsStream() || callbackDelivered) return;
+      callbackDelivered = true;
+      onError(error);
+    }
 
     try {
       final request = http.AbortableRequest(
@@ -1679,78 +1772,123 @@ class GatewayChatClient {
         return;
       }
 
-      if (response.statusCode != 200) {
-        final errorBody = await response.stream.bytesToString();
-        String errorMsg;
-        try {
-          final err = jsonDecode(errorBody);
-          errorMsg =
-              err['error']?['message'] ??
-              err['message'] ??
-              'HTTP ${response.statusCode}';
-        } catch (_) {
-          errorMsg = 'HTTP ${response.statusCode}';
-        }
-        onError(errorMsg);
-        return;
+      var buffer = '';
+      final errorBody = StringBuffer();
+      String? failure;
+      var terminal = false;
+      var assistantTextSeen = false;
+      var successfulFinishSeen = false;
+      var toolCallsSeen = false;
+      void finishBody([String? error]) {
+        if (terminal) return;
+        terminal = true;
+        failure = error;
+        if (!completion.isCompleted) completion.complete();
       }
 
-      String buffer = '';
+      void acceptFrame(String rawFrame) {
+        final frame = _decodeSseFrame(rawFrame);
+        if (frame.error case final error?) {
+          finishBody(error);
+          return;
+        }
+        if (frame.done) {
+          finishBody(
+            !assistantTextSeen || (toolCallsSeen && !successfulFinishSeen)
+                ? 'Stream ended without a completed assistant reply.'
+                : null,
+          );
+          return;
+        }
+        if (frame.toolProgress case final progress?) {
+          onToolProgress?.call(progress);
+        }
+        // A callback can cancel, abort, or synchronously start a newer send.
+        if (!ownsStream()) return;
+        toolCallsSeen |= frame.hasToolCalls;
+        successfulFinishSeen |= frame.successfulFinish;
+        if (frame.token case final token? when token.isNotEmpty) {
+          assistantTextSeen |= token.trim().isNotEmpty;
+          onToken(token);
+        }
+      }
+
       stream.subscription = response.stream
           .transform(utf8.decoder)
           .listen(
             (chunk) {
-              // A superseded or cancelled stream must never deliver tokens
-              // into these callbacks: the UI has moved on (or already
-              // reported the cancellation).
-              if (stream.cancelled || !identical(_liveStream, stream)) return;
+              if (!ownsStream() || terminal) return;
+              if (response.statusCode != 200) {
+                errorBody.write(chunk);
+                return;
+              }
               buffer += chunk;
-              // SSE frames end on a blank line: LF-only or CRLF-only per
-              // the spec. A CRLF-emitting proxy would otherwise never
-              // match and the stream would look frozen until the end.
+              // Keep delimiters buffered across TCP/UTF-8 chunks, including a
+              // split between CR and LF. Never dispatch an unfinished EOF frame.
               var boundary = RegExp(r'\r?\n\r?\n').firstMatch(buffer);
-              while (boundary != null) {
+              while (boundary != null && ownsStream() && !terminal) {
                 final frame = buffer.substring(0, boundary.start);
                 buffer = buffer.substring(boundary.end);
-
-                final token = parseSseFrame(
-                  frame,
-                  onToolProgress: onToolProgress,
-                );
-                if (token != null && token.isNotEmpty) onToken(token);
+                try {
+                  acceptFrame(frame);
+                } catch (error) {
+                  finishBody(error.toString());
+                }
                 boundary = RegExp(r'\r?\n\r?\n').firstMatch(buffer);
               }
             },
             onError: (Object error, StackTrace stackTrace) {
-              if (!completion.isCompleted) {
-                completion.completeError(error, stackTrace);
-              }
+              finishBody(error.toString());
             },
             onDone: () {
-              if (!completion.isCompleted) completion.complete();
+              if (terminal) return;
+              if (response.statusCode != 200) {
+                Object? payload;
+                try {
+                  payload = jsonDecode(errorBody.toString());
+                } catch (_) {
+                  // A proxy may return HTML/plain text rather than JSON.
+                }
+                finishBody(
+                  _streamErrorMessage(
+                    payload,
+                    fallback: 'HTTP ${response.statusCode}',
+                  ),
+                );
+              } else {
+                finishBody(
+                  buffer.trim().isNotEmpty ||
+                          !assistantTextSeen ||
+                          !successfulFinishSeen
+                      ? 'Stream ended before the assistant response completed.'
+                      : null,
+                );
+              }
             },
             cancelOnError: true,
           );
       await completion.future;
-
-      // Per-call flag: a newer send cannot reset this call's cancelled
-      // state, so a cancelled turn never reports onDone.
-      if (!stream.cancelled) onDone();
-    } catch (e) {
-      if (!stream.cancelled) onError(e.toString());
+      // A protocol terminal can arrive before transport EOF. Cancel/join the
+      // body before publishing a result or letting a detached owner close it.
+      await stream.cancelSubscription();
+      if (!ownsStream()) return;
+      if (failure != null) {
+        reportError(failure!);
+      } else {
+        callbackDelivered = true;
+        onDone();
+      }
+    } catch (error) {
+      reportError(error.toString());
     } finally {
-      // Every exit path settles this send, not just the ones that reach the
-      // SSE subscription. A `send()` that fails before the response headers, an
-      // abort that races the response, a non-200 reply, or an exception thrown
-      // while reading one never touch `completion`, yet such a send IS settled
-      // — the socket is finished with. Leaving the completer pending stranded a
-      // detached caller (screen disposal hands the stream to a closer that
-      // awaits exactly this) on the 30-minute backstop, holding the HTTP client
-      // open for a request that was already over.
+      await stream.cancelSubscription();
       if (!completion.isCompleted) completion.complete();
       if (identical(_liveStream, stream)) {
         _liveStream = null;
       }
+      // Distinct from body/protocol termination: this also joins cancellation,
+      // callback dispatch and early exits before response headers arrive.
+      if (!stream.settled.isCompleted) stream.settled.complete();
     }
   }
 
@@ -1769,11 +1907,7 @@ class GatewayChatClient {
   Future<void> whenStreamSettles() async {
     final stream = _liveStream;
     if (stream == null) return;
-    try {
-      await stream.completion.future;
-    } catch (_) {
-      // Settled with an error is settled.
-    }
+    await stream.settled.future;
   }
 
   /// Cancels the current SSE response. The Hermes API server treats the
@@ -1782,40 +1916,69 @@ class GatewayChatClient {
     final stream = _liveStream;
     if (stream == null) return false;
 
-    stream.cancelled = true;
-    if (!stream.cancellation.isCompleted) stream.cancellation.complete();
-    final subscription = stream.subscription;
-    if (subscription != null) {
-      await subscription.cancel();
-    }
-    if (!stream.completion.isCompleted) stream.completion.complete();
+    stream.cancel();
+    await stream.settled.future;
     return true;
   }
 
   void abort() {
-    final stream = _liveStream;
-    if (stream != null) {
-      stream.cancelled = true;
-      if (!stream.cancellation.isCompleted) stream.cancellation.complete();
-      final sub = stream.subscription;
-      if (sub != null) {
-        unawaited(sub.cancel());
-      }
-      if (!stream.completion.isCompleted) stream.completion.complete();
-      _liveStream = null;
-    }
+    _liveStream?.cancel();
     // NOTE: deliberately does NOT close the shared ApiClient's HTTP
     // client — the same ApiClient instance feeds the session list and
     // health checks, and closing it killed every later HTTP call on it.
   }
 }
 
+/// Parsed frame authority, separate from the token-only public compatibility API.
+class _SseFrame {
+  final String? token;
+  final Map<String, dynamic>? toolProgress;
+  final String? error;
+  final bool successfulFinish;
+  final bool hasToolCalls;
+  final bool done;
+
+  const _SseFrame({
+    this.token,
+    this.toolProgress,
+    this.error,
+    this.successfulFinish = false,
+    this.hasToolCalls = false,
+    this.done = false,
+  });
+}
+
 /// Per-call SSE stream state owned by one sendMessageStreaming call.
 class _LiveStream {
+  /// Body/protocol termination wakes the send; [settled] also joins cleanup.
   final Completer<void> completion = Completer<void>();
+  final Completer<void> settled = Completer<void>();
   final Completer<void> cancellation = Completer<void>();
   StreamSubscription<String>? subscription;
+  Future<void>? _subscriptionCancellation;
   bool cancelled = false;
+
+  void cancel() {
+    cancelled = true;
+    if (!cancellation.isCompleted) cancellation.complete();
+    if (!completion.isCompleted) completion.complete();
+    unawaited(cancelSubscription());
+  }
+
+  Future<void> cancelSubscription() {
+    final sub = subscription;
+    if (sub == null) return Future<void>.value();
+    return _subscriptionCancellation ??= _joinCancellation(sub);
+  }
+
+  Future<void> _joinCancellation(StreamSubscription<String> sub) async {
+    try {
+      await sub.cancel();
+    } catch (_) {
+      // Cleanup failure must not strand detached waiters or create a second
+      // terminal callback. The body outcome already owns response authority.
+    }
+  }
 }
 
 /// A non-200 answer from a dashboard API call, carrying the status code so

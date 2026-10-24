@@ -54,8 +54,8 @@ void main() {
                           phase: GatewaySubagentPhase.completed,
                           status: status,
                         ),
-                      // One running task keeps the group initially expanded;
-                      // terminal rows must still retain their own outcomes.
+                      // A mixed group must retain each terminal row's outcome
+                      // after the user expands the collapsed section.
                       const GatewaySubagentActivity(
                         id: 'running',
                         goal: 'Task running',
@@ -68,6 +68,20 @@ void main() {
               ),
             ),
           );
+
+          expect(
+            find.byKey(const ValueKey('delegated-task-running')),
+            findsNothing,
+          );
+          final header = find
+              .descendant(
+                of: find.byType(GatewaySubagentCard),
+                matching: find.byType(ListTile),
+              )
+              .first;
+          await tester.ensureVisible(header);
+          await tester.tap(header);
+          await tester.pump(const Duration(milliseconds: 300));
 
           for (final density in ChatDensity.values) {
             for (final isUser in [true, false]) {

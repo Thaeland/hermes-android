@@ -11,6 +11,7 @@ import 'package:hermes_android/core/services/gateway_turn_application_controller
 import 'package:hermes_android/core/services/normal_gateway_application_session.dart';
 import 'package:hermes_android/core/services/normal_gateway_pending_store.dart';
 import 'package:hermes_android/core/services/ws_client.dart';
+import 'package:hermes_android/core/utils/android_prompt_context.dart';
 import 'package:hermes_android/l10n/app_localizations.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -580,6 +581,80 @@ void main() {
     },
   );
 
+  for (final priorSource in ['saved', 'received']) {
+    for (final stopAndSend in [false, true]) {
+      testWidgets(
+        'cancelling empty SSE keeps the $priorSource final (Stop and send=$stopAndSend)',
+        (tester) async {
+          final client = _RestStreams();
+          if (priorSource == 'saved') {
+            client.historyRows = [
+              {'id': 1, 'role': 'user', 'content': 'Prior question'},
+              {
+                'id': 2,
+                'role': 'assistant',
+                'content': 'Prior successful final',
+                'status': 'completed',
+              },
+            ];
+          }
+          await _pumpChat(tester, httpClient: client);
+          if (priorSource == 'received') {
+            await _start(tester);
+            client.delta(0, 'Prior successful final');
+            client.finish(0);
+            await _pump(tester);
+          }
+          Finder priorFinal() => find.byWidgetPredicate(
+            (widget) =>
+                widget is MessageBubble &&
+                !widget.isUser &&
+                widget.content == 'Prior successful final',
+          );
+          expect(priorFinal(), findsOneWidget);
+          final priorMetadata = Map<String, dynamic>.of(
+            tester.widget<MessageBubble>(priorFinal()).metadata,
+          );
+          await tester.enterText(find.byKey(_composer), 'Cancelled task');
+          await tester.tap(find.byKey(_send));
+          await _pump(tester);
+          final cancelled = client.prompts.length - 1;
+          // No assistant token has arrived for this admission. Removing its
+          // empty scaffold must not lend cancellation to the preceding answer.
+          if (stopAndSend) {
+            await tester.enterText(find.byKey(_composer), 'Replacement task');
+            await tester.tap(find.byKey(_send));
+          } else {
+            await tester.tap(find.byKey(_stop));
+          }
+          await _pump(tester);
+          expect(client.cancelled, contains(cancelled));
+          expect(client.prompts, hasLength(cancelled + (stopAndSend ? 2 : 1)));
+          expect(priorFinal(), findsOneWidget);
+          expect(
+            tester.widget<MessageBubble>(priorFinal()).metadata,
+            priorMetadata,
+          );
+          if (stopAndSend) {
+            client.delta(cancelled + 1, 'Replacement final');
+            client.finish(cancelled + 1);
+            await _pump(tester);
+            expect(priorFinal(), findsOneWidget);
+          }
+          final reads = client.historyReads;
+          await tester.tap(find.byTooltip('Chat actions').hitTestable());
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Refresh').hitTestable());
+          await _pump(tester);
+          expect(client.historyReads, greaterThan(reads));
+          expect(priorFinal(), findsOneWidget);
+          await tester.pumpWidget(const SizedBox.shrink());
+          await _pump(tester);
+        },
+      );
+    }
+  }
+
   testWidgets(
     'REST Stop and send cancels the old stream before one new prompt',
     (tester) async {
@@ -600,11 +675,9 @@ void main() {
       expect(client.order, ['submit:0', 'cancel:0', 'submit:1']);
       expect(client.prompts, hasLength(2));
       final messages = client.prompts.last['messages'] as List;
-      expect(messages.last, {'role': 'user', 'content': 'New direction'});
-      expect(
-        messages.where((r) => r['content'] == 'New direction'),
-        hasLength(1),
-      );
+      final wirePrompt = AndroidPromptContext.forModel('New direction');
+      expect(messages.last, {'role': 'user', 'content': wirePrompt});
+      expect(messages.where((r) => r['content'] == wirePrompt), hasLength(1));
       expect(_text(tester), isEmpty);
       await tester.enterText(find.byKey(_composer), 'Keep next draft');
       client.delta(1, 'New reply');
@@ -673,6 +746,8 @@ class _PendingWriteFault extends InMemorySharedPreferencesStore {
 }
 
 class _RestStreams extends http.BaseClient {
+  List<Map<String, dynamic>> historyRows = [];
+  int historyReads = 0;
   final streams = <StreamController<List<int>>>[];
   final prompts = <Map<String, dynamic>>[];
   final cancelled = <int>[];
@@ -699,8 +774,12 @@ class _RestStreams extends http.BaseClient {
         headers: {'content-type': 'text/event-stream'},
       );
     }
+    final messages = request.url.path.endsWith('/messages');
+    if (messages) historyReads++;
     return http.StreamedResponse(
-      Stream.value(utf8.encode('{"data":[]}')),
+      Stream.value(
+        utf8.encode(jsonEncode({'data': messages ? historyRows : []})),
+      ),
       200,
       headers: {'content-type': 'application/json'},
     );

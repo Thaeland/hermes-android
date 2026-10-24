@@ -1,3 +1,5 @@
+import '../utils/android_prompt_context.dart';
+
 /// How recently a session must have been touched to count as live when the
 /// Gateway does not report `is_active` itself.
 ///
@@ -164,7 +166,7 @@ class Session {
           : (endedAt == null &&
                 (DateTime.now().millisecondsSinceEpoch / 1000.0 - lastActive) <
                     kSessionActiveWindowSeconds),
-      preview: json['preview'] ?? '',
+      preview: AndroidPromptContext.sessionPreview(json['preview'] ?? ''),
       startedAt: startedAt,
       endedAt: endedAt == null ? null : asDouble(endedAt),
       lastActive: lastActive,

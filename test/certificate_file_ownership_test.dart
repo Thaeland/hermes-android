@@ -293,6 +293,25 @@ Future<List<Directory>> _permanentDirectories(Directory support) async {
       .toList();
 }
 
+/// Joins the route's actual release callback, not merely a sibling collector
+/// which can finish before that callback has even entered the saved-list queue.
+class _EditorManager extends ConnectionManager {
+  _EditorManager(
+    super.prefs, {
+    required super.credentialStore,
+    required super.certificateFiles,
+  }) : super(nativePushSupported: true);
+
+  final _editorCleanup = Completer<void>();
+  Future<void> get editorCleanup => _editorCleanup.future;
+
+  @override
+  Future<void> cleanupUnreferencedCertificates() async {
+    await super.cleanupUnreferencedCertificates();
+    if (!_editorCleanup.isCompleted) _editorCleanup.complete();
+  }
+}
+
 class _Editor {
   _Editor(this.tester);
   final WidgetTester tester;
@@ -300,7 +319,7 @@ class _Editor {
   late SharedPreferences prefs;
   late _PhysicalPreferences platform;
   late ClientCertificateService certificates;
-  late ConnectionManager manager;
+  late _EditorManager manager;
   late SavedConnection account;
   late MutualTlsFixture fixture;
   final secrets = _Secrets();
@@ -346,12 +365,13 @@ class _Editor {
     final messenger =
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(_pushChannel, native.call);
-    manager = ConnectionManager(
-      prefs,
-      credentialStore: secrets,
-      certificateFiles: certificates,
-      nativePushSupported: true,
-    );
+    manager = (await tester.runAsync(
+      () async => _EditorManager(
+        prefs,
+        credentialStore: secrets,
+        certificateFiles: certificates,
+      ),
+    ))!;
     addTearDown(() async {
       await manager.finishPendingMobilePushChanges();
       messenger.setMockMethodCallHandler(_pushChannel, null);
@@ -418,6 +438,10 @@ class _Editor {
 
   Future<void> disposeAndCollect() async {
     await tester.pumpWidget(const SizedBox());
+    await tester.runAsync(() => manager.editorCleanup);
+    // Retain the independent collector check, after the route's own callback
+    // is joined. Otherwise its late I/O can retain a dead fake-async zone and
+    // poison the next editor's shared saved-list transaction.
     await tester.runAsync(manager.cleanupUnreferencedCertificates);
     await tester.pumpAndSettle();
   }
@@ -663,6 +687,7 @@ void main() {
         gate.open();
         await saving;
         await editor.manager.finishPendingMobilePushChanges();
+        await editor.manager.editorCleanup;
         await editor.manager.cleanupUnreferencedCertificates();
         final saved =
             (await editor.manager.loadConnectionsWithSecrets()).single;
