@@ -1,0 +1,71 @@
+name: Native Android and Push Server
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    name: Android native regressions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.0'
+          channel: stable
+          cache: true
+      - name: Install Flutter dependencies
+        run: flutter pub get
+      - name: Configure CI SDK locations
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          Path('android/local.properties').write_text(
+              f"flutter.sdk={os.environ['FLUTTER_ROOT']}\n"
+              f"sdk.dir={os.environ['ANDROID_HOME']}\n"
+          )
+          PY
+      - name: Run native lifecycle and push tests
+        working-directory: android
+        run: ./gradlew :app:testDebugUnitTest --no-daemon --stacktrace
+      - name: Preserve native test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-test-reports
+          path: build/app/reports/tests/testDebugUnitTest
+          if-no-files-found: warn
+
+  server:
+    name: Push companion and Dart TCP contract
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.44.0'
+          channel: stable
+          cache: true
+      - name: Install test dependencies
+        run: |
+          python -m pip install -e 'server/mobile-push[test]' uvicorn
+          flutter pub get
+      - name: Run server tests and real Dart HTTP contract
+        env:
+          MOBILE_PUSH_DART_SMOKE: '1'
+        run: python -m pytest -q server/mobile-push/tests
