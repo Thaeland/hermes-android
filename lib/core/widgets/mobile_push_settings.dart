@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/connection_manager.dart';
 import '../services/mobile_push_service.dart';
+import 'markdown_link_handler.dart';
 
 /// Explicit opt-in, deliberately separate from local notification preferences.
 class MobilePushSettings extends StatefulWidget {
@@ -19,6 +20,9 @@ class MobilePushSettings extends StatefulWidget {
 }
 
 class _MobilePushSettingsState extends State<MobilePushSettings> {
+  static const _serverSetupGuide =
+      'https://github.com/rusty4444/hermes-android/blob/main/docs/mobile-push-server.md'
+      '#operator-installation-not-performed-by-this-implementation';
   late final MobilePushService service =
       widget.service ?? MobilePushService.shared;
   List<Map<String, dynamic>> transports = [];
@@ -122,6 +126,14 @@ class _MobilePushSettingsState extends State<MobilePushSettings> {
             Text('Status: ${service.status}'),
             const SizedBox(height: 8),
             const Text(
+              'Background notifications require a separately installed and enabled server-side mobile-push companion. Android cannot install it. Updating the APK alone does not set up the server.',
+            ),
+            TextButton.icon(
+              onPressed: () => openMarkdownWebLink(context, _serverSetupGuide),
+              icon: const Icon(Icons.open_in_new),
+              label: const Text('Server setup guide'),
+            ),
+            const Text(
               'Enable to request Android notification permission and share this installation’s endpoint and encryption keys with this server. Encrypted activity hints contain no chat content. Only sessions authorized by your server login are included.',
             ),
             const SizedBox(height: 8),
@@ -149,6 +161,9 @@ class _MobilePushSettingsState extends State<MobilePushSettings> {
                 onPressed: () => _run(service.disable),
                 child: const Text('Disable and revoke'),
               ),
+            const Text(
+              'Refresh / retry rechecks availability after server setup; it cannot install the companion. Enabling notifications remains a separate choice.',
+            ),
             Wrap(
               spacing: 8,
               children: [
@@ -157,10 +172,13 @@ class _MobilePushSettingsState extends State<MobilePushSettings> {
                       ? null
                       : () => _run(() async {
                           await _load();
+                          if (!mounted) return;
                           if (service.enabled) {
                             await service.retry();
                           } else {
                             await service.refresh();
+                            if (!mounted) return;
+                            await service.checkAvailability(widget.connection);
                           }
                         }),
                   child: const Text('Refresh / retry'),

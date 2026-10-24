@@ -94,6 +94,33 @@ persistent receipt log. After process restart, only server-recorded history
 times are available. This does not change quiet-mode completion requirements,
 saved/received ownership, or RC2's phone-acceptance and publication gates.
 
+## Background notifications: server setup required
+
+Background push requires the paired **mobile-push server companion**, installed
+and enabled separately for the saved connection's Hermes profile. Updating the
+Android APK alone does not install it, and the phone's **Refresh / retry** only
+rechecks availability—it cannot install server software.
+
+The server operator must copy `server/mobile-push` into the profile's plugins,
+generate a private VAPID key, authorise the verified dashboard login in the
+companion's policy, and enable both the plugin and policy. Current Hermes plugin
+enablement prepares its declared Python dependencies through package management.
+Activate it in the dashboard **and** the gateway/turn processes that load its hooks
+and sender worker: use supported live activation/reload, or restart affected
+processes after draining active work when a new managed generation is selected.
+Current host support is limited to the dashboard's launch profile in trusted
+in-process mode; secondary-profile hosts cannot forward the required verified
+login. Verify both the API and worker are active. Follow the
+[server installation runbook](docs/mobile-push-server.md#operator-installation-not-performed-by-this-implementation),
+then enable **Settings → Background notifications** on the phone and grant Android
+notification permission. See the [phone setup guide](docs/mobile-push-android.md).
+
+Built-in Google-backed transport needs working **Google Play Services** on the
+phone, but **no Firebase project**, Firebase credentials or separate distributor
+app. An external UnifiedPush distributor is an optional phone transport, not the
+server companion; Google-free devices need that alternative. Neither transport
+removes the server prerequisite or guarantees background delivery.
+
 ## Navigation changes in the 3.0 candidate
 
 The bottom bar is **Chats → Crons → Projects → Activity → More**. Chats is the

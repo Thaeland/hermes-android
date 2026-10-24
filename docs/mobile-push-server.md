@@ -8,11 +8,15 @@ operator's session database for writing or registers a real push endpoint.
 ## Deployment prerequisites and compatibility
 
 - Python 3.11+; FastAPI, pywebpush, cryptography and dnspython versions within the
-  ranges in `server/mobile-push/pyproject.toml`. Install into the Python environment
-  actually used by **both** the Hermes dashboard and gateway/turn process. Dependency
-  declarations in a Hermes manifest are advisory, not an automatic installer.
+  ranges in `server/mobile-push/pyproject.toml`. Current Hermes plugin enablement
+  submits a package-manager admission transaction that prepares these declared
+  dependencies with the installation's existing requirements in a managed Python
+  generation. Do not mutate the selected environment with raw pip/uv commands.
+  See [Hermes package management][packages]. Both the dashboard and gateway/turn
+  processes must run with the admitted dependencies; restart affected processes
+  when a new generation is selected.
 - A Hermes build providing the current observer hooks and plugin unload ledger.
-  The integration suite was exercised against source revision `d923a5eb`: the real
+  The historical integration suite used source revision `d923a5eb`: the real
   `PluginManager` loads the same physical source in two profile homes, preserves
   worker context, disposes each owner independently and reloads unchanged source.
 - Dashboard mounts must run Hermes' async `_plugin_route_secret_scope` dependency
@@ -27,11 +31,14 @@ operator's session database for writing or registers a real push endpoint.
   a principal. If the installed authentication middleware does not supply that
   verified session for the Android client's credentials, the API returns **401**.
   Provision a compatible trusted authentication provider before enabling push.
-- Use the trusted **in-process** plugin execution mode. In the inspected Hermes
-  build, `plugins.isolation: host` forwards an ASGI request without the verified
-  session object; these routes therefore fail closed with 401. Hosted/multi-tenant
-  isolation is **not compatible** until a separately reviewed core seam forwards a
-  verified principal. Do not forward identity through client headers, disable auth,
+- **Current host compatibility: the dashboard's launch profile only, in trusted
+  `in_process` mode.** Current Hermes forces secondary-profile user plugins into
+  out-of-process hosts. The forwarded request omits the verified session object,
+  so this companion fails closed with 401 there, even if an in-process setting was
+  requested. Hosted/multi-tenant and secondary-profile deployment is **not
+  compatible** until a separately reviewed core seam forwards a verified principal.
+  Earlier cross-profile fixture results below are not current-host acceptance.
+  Do not forward identity through client headers, disable auth, weaken isolation,
   or change a pooled deployment to in-process just to make this plugin work.
 - Lifecycle hooks must load in every process that executes the subscribed turns.
   The dashboard API alone does not run turns or start the sender. Separate dashboard
@@ -52,11 +59,22 @@ The source contract is documented by [observer hooks][hooks] and
 
 [hooks]: https://hermes-agent.nousresearch.com/docs/developer-guide/observer-hooks
 [dashboard]: https://hermes-agent.nousresearch.com/docs/user-guide/features/extending-the-dashboard
+[packages]: https://hermes-agent.nousresearch.com/docs/reference/package-management
 
 ## Operator installation (not performed by this implementation)
 
-Select the intended profile and its current managed interpreter explicitly. The
-following are operator instructions, not commands to run against an unrelated home.
+This is a manual server runbook, not an Android installer. Updating the APK or
+tapping **Refresh / retry** cannot install or enable this companion. The companion
+ships in this repository's `server/mobile-push` subdirectory; do not assume a
+catalogue entry or use `hermes plugins install mobile-push`. An external UnifiedPush
+distributor is a separate phone transport, not this server plugin. After completing
+server setup below, recheck availability from the phone, then explicitly enable
+**Background notifications** and grant Android notification permission. See the
+[phone setup guide](mobile-push-android.md).
+
+Select the dashboard's intended launch profile and its current managed interpreter
+explicitly (see the compatibility restriction above). The following are operator
+instructions, not commands to run against an unrelated home.
 Run them from the Android repository root and replace the absolute placeholders:
 
 ```sh
@@ -69,10 +87,13 @@ chmod 700 "$HERMES_HOME/plugin-data/mobile-push"
 # Refuse/inspect an existing destination instead of blindly overwriting a live plugin.
 test ! -e "$HERMES_HOME/plugins/mobile-push"
 cp -R server/mobile-push "$HERMES_HOME/plugins/mobile-push"
-uv pip install --python "$HERMES_PYTHON" ./server/mobile-push
 "$HERMES_PYTHON" server/mobile-push/generate_vapid.py \
   --output "$HERMES_HOME/plugin-data/mobile-push/vapid-private.pem"
 ```
+
+If the generator's cryptography dependency is absent, leave the policy disabled
+and complete plugin admission below first. Resolve the newly selected managed
+interpreter, then generate the key before enabling the policy.
 
 The generator uses exclusive creation, mode 0600 and never prints private material.
 Keep the private P-256 PEM in a backed-up secret file, not config YAML, source control,
@@ -125,20 +146,31 @@ For a personal-server owner, the principal entry can instead be:
 
 This is an explicit operator decision, not a permission the Android app grants itself.
 
-After review, set this file's `enabled` to true and explicitly enable `mobile-push`
-in the same profile's `plugins.enabled` (for example `hermes --profile default plugins
-enable mobile-push` for the default profile). Plan a normal dashboard and gateway
-restart after draining active work. User-directory plugins are required: Hermes
-refuses automatic backend Python import from an untrusted project directory.
+Run `hermes plugins enable mobile-push` for the selected launch home/profile (or
+`hermes --profile default plugins enable mobile-push` for the default profile).
+This admission step prepares the declared `pyproject.toml` dependencies and only
+publishes the plugin selection if preparation succeeds. Keep the JSON policy
+disabled until the key and ACL are ready. On a dependency conflict, inspect
+`hermes pm status` and correct the requirements; do not bypass admission with a
+manual install. After reviewing the key and ACL, set the JSON policy's `enabled`
+to true. If a new Python generation is selected, restart the affected
+dashboard and gateway/turn processes after draining active work. Otherwise use
+supported live activation/reload, or a planned restart. Verify the API mount,
+lifecycle hooks and sender worker are active; an enabled setting alone does not
+prove process activation. User-directory plugins
+are required: Hermes refuses automatic backend Python import from an untrusted
+project directory.
 `dashboard/manifest.json` declares `api: plugin_api.py`; its router is mounted at
 `/api/plugins/mobile-push`. The tiny hidden dashboard bundle intentionally adds no UI.
 
 The lifecycle runtime captures its profile home immutably at registration. The
 dashboard router is mounted **once**, but resolves an immutable Profile for **each
 verified request**, from the host's vetted secret-scope home (including the launch
-profile). It never derives paths from the raw query, changes process environment,
-or keeps a shared mutable "current profile". Capabilities, durable-session reads,
-registration/confirmation, events and DELETE all use that request's policy and
+profile). This companion-side isolation model does not override the current host's
+launch-profile-only deployment restriction. It never derives paths from the raw
+query, changes process environment, or keeps a shared mutable "current profile".
+Capabilities, durable-session reads, registration/confirmation, events and DELETE
+all use that request's policy and
 `plugin-data/mobile-push/outbox.sqlite3`. There is no router-wide store/worker cache;
 database connections are bounded and closed after each operation. DELETE remains
 available for owned revocations after push is disabled, only in the vetted home.
@@ -151,12 +183,13 @@ held capability and handshake responses if the selected saved profile changes.
 
 ACLs, endpoint exceptions, key path and enabled policy are re-read on operations and before sends;
 update this JSON by an atomic private-file replacement. Enabling after a disabled
-startup requires a lifecycle-process restart to acquire hooks/worker. Disabling the
-JSON policy halts sends but keeps pending bounded state until expiry. Unload stops
-this owner's worker; a forced reload acquires a new owner, never another profile's
-worker. Managed Hermes interpreter replacement may require reinstalling these Python
-dependencies in the newly selected environment; do not assume a one-off pip install
-survives an update.
+startup requires supported lifecycle-process activation/reload or a restart to
+acquire hooks/worker. Disabling the JSON policy halts sends but keeps pending
+bounded state until expiry. Unload stops this owner's worker; a forced reload
+acquires a new owner, never another profile's worker. Managed Hermes interpreter
+replacement must preserve admitted plugin
+dependencies through package management; do not assume a one-off pip install
+survives an update or inject a second site-packages tree into a running process.
 
 ### Optional exact LAN exception
 

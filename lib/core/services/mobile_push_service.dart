@@ -334,6 +334,40 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
     await refresh();
   }
 
+  /// Read-only server check while off: never requests permission or registers.
+  Future<void> checkAvailability(SavedConnection connection) async {
+    if (!supported || _closed || enabled || enabling) return;
+    final epoch = _epoch;
+    final fingerprint = binding(connection);
+    final mutation = ConnectionMutationBarrier.capture(connection.id);
+    bool current() =>
+        !_closed &&
+        epoch == _epoch &&
+        !enabled &&
+        !enabling &&
+        ConnectionMutationBarrier.isCurrent(connection.id, mutation) &&
+        _connection(connection.id) != null &&
+        binding(_connection(connection.id)!) == fingerprint;
+    final client = _clientFactory(connection);
+    try {
+      if (!await _refreshCredentialCache(connection.id) || !current()) return;
+      await MobilePushApi(client).capabilities(authorized: true);
+      if (!current()) return;
+      error = null;
+      status = 'Off; server API ready';
+      notifyListeners();
+    } catch (e) {
+      if (current()) {
+        error = _message(e);
+        status = 'Error';
+        notifyListeners();
+      }
+      rethrow;
+    } finally {
+      client.close();
+    }
+  }
+
   Future<void> retry() async {
     if (!supported || _closed) return;
     final epoch = _epoch;
@@ -762,7 +796,7 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
     }
     if (error is DashboardHttpException) {
       if (error.statusCode == 404) {
-        return 'Optional mobile-push server plugin is not installed.';
+        return 'The server mobile-push companion is unavailable. It may be missing or disabled, or this connection may point to the wrong dashboard. Install or enable the companion on the server, check the dashboard connection, then refresh. See Server setup guide above.';
       }
       if (error.statusCode == 401 || error.statusCode == 403) {
         return 'Server denied mobile push. Ask the operator to authorize this principal and these sessions.';
