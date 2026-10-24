@@ -136,7 +136,14 @@ class _Picker extends FilePicker {
     bool withReadStream = false,
     bool lockParentWindow = false,
     bool readSequential = false,
-  }) async => FilePickerResult([files.removeAt(0)]);
+  }) async {
+    if (allowMultiple) {
+      final picked = List<PlatformFile>.of(files);
+      files.clear();
+      return FilePickerResult(picked);
+    }
+    return FilePickerResult([files.removeAt(0)]);
+  }
 }
 
 class _ObservedCertificates extends ClientCertificateService {
@@ -385,16 +392,15 @@ class _Editor {
         );
       }
     });
-    for (final key in [
-      'connection_client_certificate_pick_cert_pem',
-      'connection_client_certificate_pick_key_pem',
-    ]) {
-      final dynamic callback = tester
-          .widget<OutlinedButton>(find.byKey(Key(key)))
-          .onPressed;
-      await tester.runAsync(() async => await callback());
-      await tester.pumpAndSettle();
-    }
+    // The single picker takes every queued file in one multi-pick: the lone
+    // certificate stages first, then the key pairs with it.
+    final dynamic callback = tester
+        .widget<OutlinedButton>(
+          find.byKey(const Key('connection_client_certificate_pick')),
+        )
+        .onPressed;
+    await tester.runAsync(() async => await callback());
+    await tester.pumpAndSettle();
     expect(find.textContaining('Loaded:'), findsOneWidget);
   }
 

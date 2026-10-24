@@ -4666,23 +4666,11 @@ abstract class AppLocalizations {
   /// **'Client certificates are only used for HTTPS connections.'**
   String get client_certificate_https_only;
 
-  /// No description provided for @choose_p12_pfx.
+  /// No description provided for @choose_certificate.
   ///
   /// In en, this message translates to:
-  /// **'Choose .p12 / .pfx'**
-  String get choose_p12_pfx;
-
-  /// No description provided for @choose_certificate_pem.
-  ///
-  /// In en, this message translates to:
-  /// **'Choose certificate (PEM)'**
-  String get choose_certificate_pem;
-
-  /// No description provided for @choose_private_key_pem.
-  ///
-  /// In en, this message translates to:
-  /// **'Choose private key (PEM)'**
-  String get choose_private_key_pem;
+  /// **'Choose certificate'**
+  String get choose_certificate;
 
   /// No description provided for @certificate_password_optional.
   ///

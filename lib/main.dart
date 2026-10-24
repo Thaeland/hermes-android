@@ -2299,13 +2299,14 @@ class _AddDialogState extends State<_AddDialog> {
   }
 
   /// Extensions the desktop picker offers for certificate material.
-  static const List<String> _pemPickerExtensions = [
+  static const List<String> _certificatePickerExtensions = [
     'pem',
     'crt',
     'cer',
     'key',
+    'p12',
+    'pfx',
   ];
-  static const List<String> _pkcs12PickerExtensions = ['p12', 'pfx'];
 
   /// Certificate identities are a few KiB; anything larger is a mis-pick and is
   /// rejected before it is read into memory.
@@ -2329,113 +2330,106 @@ class _AddDialogState extends State<_AddDialog> {
     TargetPlatform.fuchsia => true,
   };
 
-  Future<PlatformFile?> _pickCertificateFile(List<String> extensions) async {
+  Future<List<PlatformFile>> _pickCertificateFiles() async {
     final filterByExtension = _pickerFiltersByExtension;
     try {
       final result = await FilePicker.platform.pickFiles(
         type: filterByExtension ? FileType.custom : FileType.any,
-        allowedExtensions: filterByExtension ? extensions : null,
-        allowMultiple: false,
+        allowedExtensions: filterByExtension
+            ? _certificatePickerExtensions
+            : null,
+        allowMultiple: true,
         // Read through the cached path instead of loading the whole pick into
         // memory: the size check below has to run before the file is read.
         withData: false,
       );
-      final file = result?.files.firstOrNull;
-      if (file == null) return null;
-      if (file.size > _maxCertificateFileBytes) {
-        if (!mounted) return null;
-        setState(() => _error = context.l10n.certificate_import_failed);
-        return null;
+      final files = result?.files ?? const <PlatformFile>[];
+      for (final file in files) {
+        if (file.size > _maxCertificateFileBytes) {
+          if (!mounted) return const <PlatformFile>[];
+          setState(() => _error = context.l10n.certificate_import_failed);
+          return const <PlatformFile>[];
+        }
       }
-      return file;
+      return files;
     } catch (_) {
-      if (!mounted) return null;
+      if (!mounted) return const <PlatformFile>[];
       setState(() => _error = context.l10n.certificate_import_failed);
-      return null;
+      return const <PlatformFile>[];
     }
   }
 
-  Future<void> _pickPkcs12() async {
-    try {
-      final file = await _pickCertificateFile(_pkcs12PickerExtensions);
-      if (file == null) return;
+  /// Single entry point for the certificate picker: sniffs each picked file
+  /// (PKCS#12 container, combined PEM, or lone certificate/key half) and
+  /// stages a lone certificate across picks until its key arrives.
+  Future<void> _pickCertificateIdentity() async {
+    final files = await _pickCertificateFiles();
+    if (files.isEmpty) return;
+    for (final file in files) {
+      if (!mounted) return;
       final bytes = await _fileBytes(file);
       if (bytes == null) {
         if (!mounted) return;
         setState(() => _error = context.l10n.certificate_import_failed);
         return;
       }
-      await _runCertificateImport(
-        () => _certificateService.importPkcs12(
+      final config = await _runCertificateImport(
+        () => _certificateService.importIdentityDocument(
           bytes: bytes,
           password: _certificatePassword.text,
           label: file.name,
+          stagedCertificateBytes: _pemCertificateBytes,
+          stagedCertificateName: _pemCertificateName,
+          stagedPrivateKeyBytes: _pemPrivateKeyBytes,
         ),
       );
+      if (config == null) {
+        // A lone half: remember it and wait for its counterpart.
+        if (_looksLikeCertificateBytes(bytes)) {
+          _pemCertificateBytes = bytes;
+          _pemCertificateName = file.name;
+        } else if (_looksLikePrivateKeyBytes(bytes)) {
+          _pemPrivateKeyBytes = bytes;
+          _pemPrivateKeyName = file.name;
+        }
+        if (mounted) setState(() {});
+      } else {
+        _pemCertificateBytes = null;
+        _pemCertificateName = null;
+        _pemPrivateKeyBytes = null;
+        _pemPrivateKeyName = null;
+      }
+      if (_clientCertificate != null) return;
+    }
+  }
+
+  static bool _looksLikePrivateKeyBytes(List<int> bytes) {
+    try {
+      final text = String.fromCharCodes(bytes);
+      return text.contains('PRIVATE KEY-----');
     } catch (_) {
-      if (!mounted) return;
-      setState(() => _error = context.l10n.certificate_import_failed);
+      return false;
     }
   }
 
-  Future<void> _pickPemCertificate() async {
-    final file = await _pickPemFile();
-    if (file == null) return;
-    final bytes = await _fileBytes(file);
-    if (bytes == null) {
-      if (!mounted) return;
-      setState(() => _error = context.l10n.certificate_import_failed);
-      return;
+  static bool _looksLikeCertificateBytes(List<int> bytes) {
+    if (bytes.length > 2 && bytes[0] == 0x30 && bytes[1] == 0x82) {
+      return false;
     }
-    _pemCertificateBytes = bytes;
-    _pemCertificateName = file.name;
-    await _importPemPairIfReady();
+    try {
+      final text = String.fromCharCodes(bytes);
+      return text.contains('-----BEGIN CERTIFICATE-----');
+    } catch (_) {
+      return false;
+    }
   }
 
-  Future<void> _pickPemPrivateKey() async {
-    final file = await _pickPemFile();
-    if (file == null) return;
-    final bytes = await _fileBytes(file);
-    if (bytes == null) {
-      if (!mounted) return;
-      setState(() => _error = context.l10n.certificate_import_failed);
-      return;
-    }
-    _pemPrivateKeyBytes = bytes;
-    _pemPrivateKeyName = file.name;
-    await _importPemPairIfReady();
-  }
-
-  Future<PlatformFile?> _pickPemFile() =>
-      _pickCertificateFile(_pemPickerExtensions);
-
-  Future<void> _importPemPairIfReady() async {
-    final certificateBytes = _pemCertificateBytes;
-    final privateKeyBytes = _pemPrivateKeyBytes;
-    if (certificateBytes == null || privateKeyBytes == null) {
-      if (mounted) setState(() {});
-      return;
-    }
-    final label =
-        _pemCertificateName ??
-        _pemPrivateKeyName ??
-        (widget.initialConnection?.label ?? 'Client certificate');
-    await _runCertificateImport(
-      () => _certificateService.importPemPair(
-        certificateBytes: certificateBytes,
-        privateKeyBytes: privateKeyBytes,
-        password: _certificatePassword.text,
-        label: label,
-      ),
-    );
-  }
-
-  Future<void> _runCertificateImport(
-    Future<ClientCertificateConfig> Function() import,
+  Future<ClientCertificateConfig?> _runCertificateImport(
+    Future<ClientCertificateConfig?> Function() import,
   ) => _certificateFileLease.run(() => _importCertificate(import));
 
-  Future<void> _importCertificate(
-    Future<ClientCertificateConfig> Function() import,
+  Future<ClientCertificateConfig?> _importCertificate(
+    Future<ClientCertificateConfig?> Function() import,
   ) async {
     _scheduleCertificateCleanup();
     setState(() {
@@ -2444,10 +2438,17 @@ class _AddDialogState extends State<_AddDialog> {
     });
     try {
       final config = await import();
+      if (config == null) {
+        // A lone certificate half: staged by the caller, waiting for its key.
+        if (mounted) {
+          setState(() => _importingCertificate = false);
+        }
+        return null;
+      }
       if (!mounted) {
         // The dialog closed while parsing: never leave the imported key behind.
         await _certificateService.discard(config);
-        return;
+        return null;
       }
       // Replacing an earlier staged pick must not leave that key on disk.
       final previous = _clientCertificate;
@@ -2457,7 +2458,7 @@ class _AddDialogState extends State<_AddDialog> {
       }
       if (!mounted) {
         await _certificateService.discard(config);
-        return;
+        return null;
       }
       setState(() {
         _clientCertificate = config;
@@ -2469,18 +2470,21 @@ class _AddDialogState extends State<_AddDialog> {
         _pemPrivateKeyName = null;
         _importingCertificate = false;
       });
+      return config;
     } on ClientCertificateImportException catch (e) {
-      if (!mounted) return;
+      if (!mounted) return null;
       setState(() {
         _error = e.message;
         _importingCertificate = false;
       });
+      return null;
     } catch (_) {
-      if (!mounted) return;
+      if (!mounted) return null;
       setState(() {
         _error = context.l10n.certificate_import_failed;
         _importingCertificate = false;
       });
+      return null;
     }
   }
 
@@ -2938,47 +2942,13 @@ class _AddDialogState extends State<_AddDialog> {
                   Align(
                     alignment: Alignment.centerLeft,
                     child: OutlinedButton.icon(
-                      key: const Key('connection_client_certificate_pick_p12'),
+                      key: const Key('connection_client_certificate_pick'),
                       onPressed: _validating || _importingCertificate
                           ? null
-                          : _pickPkcs12,
+                          : _pickCertificateIdentity,
                       icon: const Icon(Icons.upload_file, size: 18),
-                      label: Text(context.l10n.choose_p12_pfx),
+                      label: Text(context.l10n.choose_certificate),
                     ),
-                  ),
-                  const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          key: const Key(
-                            'connection_client_certificate_pick_cert_pem',
-                          ),
-                          onPressed: _validating || _importingCertificate
-                              ? null
-                              : _pickPemCertificate,
-                          child: Text(
-                            context.l10n.choose_certificate_pem,
-                            textAlign: TextAlign.center,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: OutlinedButton(
-                          key: const Key(
-                            'connection_client_certificate_pick_key_pem',
-                          ),
-                          onPressed: _validating || _importingCertificate
-                              ? null
-                              : _pickPemPrivateKey,
-                          child: Text(
-                            context.l10n.choose_private_key_pem,
-                            textAlign: TextAlign.center,
-                          ),
-                        ),
-                      ),
-                    ],
                   ),
                   if (_pemCertificateName != null ||
                       _pemPrivateKeyName != null) ...[

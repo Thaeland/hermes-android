@@ -8,8 +8,19 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// Records what the connection dialog asks `file_picker` for.
 class _FakeFilePicker extends FilePicker {
-  final List<({FileType type, List<String>? allowedExtensions})> calls =
-      <({FileType type, List<String>? allowedExtensions})>[];
+  final List<
+    ({
+      FileType type,
+      List<String>? allowedExtensions,
+      bool allowMultiple,
+    })
+  >
+  calls =
+      <({
+        FileType type,
+        List<String>? allowedExtensions,
+        bool allowMultiple,
+      })>[];
 
   @override
   Future<FilePickerResult?> pickFiles({
@@ -27,7 +38,11 @@ class _FakeFilePicker extends FilePicker {
     bool lockParentWindow = false,
     bool readSequential = false,
   }) async {
-    calls.add((type: type, allowedExtensions: allowedExtensions));
+    calls.add((
+      type: type,
+      allowedExtensions: allowedExtensions,
+      allowMultiple: allowMultiple,
+    ));
     return null;
   }
 }
@@ -65,11 +80,30 @@ Future<_FakeFilePicker> _openClientCertificateSection(
   await tester.scrollUntilVisible(toggle, 200, scrollable: scrollable);
   await tester.tap(toggle);
   await tester.pumpAndSettle();
+
+  // The dialog offers one picker for every certificate format — PKCS#12,
+  // a lone PEM, or the certificate and key as separate files.
+  expect(
+    find.byKey(const Key('connection_client_certificate_pick')),
+    findsOneWidget,
+  );
+  expect(
+    find.byKey(const Key('connection_client_certificate_pick_p12')),
+    findsNothing,
+  );
+  expect(
+    find.byKey(const Key('connection_client_certificate_pick_cert_pem')),
+    findsNothing,
+  );
+  expect(
+    find.byKey(const Key('connection_client_certificate_pick_key_pem')),
+    findsNothing,
+  );
   return picker;
 }
 
-Future<void> _tapPickerButton(WidgetTester tester, Key key) async {
-  final button = find.byKey(key);
+Future<void> _tapPickerButton(WidgetTester tester) async {
+  final button = find.byKey(const Key('connection_client_certificate_pick'));
   final scrollable = find
       .descendant(
         of: find.byType(AlertDialog),
@@ -88,24 +122,12 @@ void main() {
       debugDefaultTargetPlatformOverride = TargetPlatform.android;
 
       final picker = await _openClientCertificateSection(tester);
-      await _tapPickerButton(
-        tester,
-        const Key('connection_client_certificate_pick_cert_pem'),
-      );
-      await _tapPickerButton(
-        tester,
-        const Key('connection_client_certificate_pick_key_pem'),
-      );
-      await _tapPickerButton(
-        tester,
-        const Key('connection_client_certificate_pick_p12'),
-      );
+      await _tapPickerButton(tester);
 
-      expect(picker.calls, hasLength(3));
-      for (final call in picker.calls) {
-        expect(call.type, FileType.any);
-        expect(call.allowedExtensions, isNull);
-      }
+      expect(picker.calls, hasLength(1));
+      expect(picker.calls.single.type, FileType.any);
+      expect(picker.calls.single.allowedExtensions, isNull);
+      expect(picker.calls.single.allowMultiple, isTrue);
 
       // Reset before the test body ends: flutter_test verifies foundation
       // debug variables are unset after every test.
@@ -121,25 +143,19 @@ void main() {
       debugDefaultTargetPlatformOverride = TargetPlatform.linux;
 
       final picker = await _openClientCertificateSection(tester);
-      await _tapPickerButton(
-        tester,
-        const Key('connection_client_certificate_pick_cert_pem'),
-      );
-      await _tapPickerButton(
-        tester,
-        const Key('connection_client_certificate_pick_p12'),
-      );
+      await _tapPickerButton(tester);
 
-      expect(picker.calls, hasLength(2));
-      expect(picker.calls[0].type, FileType.custom);
-      expect(picker.calls[0].allowedExtensions, [
+      expect(picker.calls, hasLength(1));
+      expect(picker.calls.single.type, FileType.custom);
+      expect(picker.calls.single.allowedExtensions, [
         'pem',
         'crt',
         'cer',
         'key',
+        'p12',
+        'pfx',
       ]);
-      expect(picker.calls[1].type, FileType.custom);
-      expect(picker.calls[1].allowedExtensions, ['p12', 'pfx']);
+      expect(picker.calls.single.allowMultiple, isTrue);
 
       // Reset before the test body ends: flutter_test verifies foundation
       // debug variables are unset after every test.

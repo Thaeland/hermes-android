@@ -2687,13 +2687,7 @@ class AppLocalizationsJa extends AppLocalizations {
       'Client certificates are only used for HTTPS connections.';
 
   @override
-  String get choose_p12_pfx => 'Choose .p12 / .pfx';
-
-  @override
-  String get choose_certificate_pem => 'Choose certificate (PEM)';
-
-  @override
-  String get choose_private_key_pem => 'Choose private key (PEM)';
+  String get choose_certificate => 'Choose certificate';
 
   @override
   String get certificate_password_optional => 'Certificate password (optional)';

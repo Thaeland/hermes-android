@@ -197,6 +197,182 @@ class ClientCertificateService implements ClientCertificateFileStore {
     );
   }
 
+  /// Imports a client identity from a single user-picked file, sniffing its
+  /// format from the content rather than the file name.
+  ///
+  /// Accepted inputs: a `.p12`/`.pfx` container; a lone PEM certificate; a
+  /// lone PEM private key; or a single PEM document holding both. A lone
+  /// half without its staged counterpart returns `null`, so the caller can
+  /// stage it and prompt for the missing half. Throws
+  /// [ClientCertificateImportException] when the bytes are none of these.
+  Future<ClientCertificateConfig?> importIdentityDocument({
+    required List<int> bytes,
+    String? password,
+    required String label,
+    List<int>? stagedCertificateBytes,
+    String? stagedCertificateName,
+    List<int>? stagedPrivateKeyBytes,
+  }) async {
+    if (_looksLikePkcs12(bytes)) {
+      return importPkcs12(bytes: bytes, password: password, label: label);
+    }
+    final text = _asPemText(bytes);
+    final certificateBlocks = _pemBlocks(text, 'CERTIFICATE');
+    String? privateKeyBlock = _firstPemBlock(text, [
+      'PRIVATE KEY',
+      'RSA PRIVATE KEY',
+      'EC PRIVATE KEY',
+      'ENCRYPTED PRIVATE KEY',
+      'OPENSSH PRIVATE KEY',
+    ]);
+    // Encrypted traditional OpenSSL keys carry the encryption marker in a
+    // header above the PEM block, not inside it — see _isEncryptedPrivateKey.
+    final privateKeyPem = privateKeyBlock == null
+        ? null
+        : _slicePemDocument(text, privateKeyBlock);
+    if (certificateBlocks.isNotEmpty && privateKeyPem != null) {
+      return _writePair(
+        certificatePem: certificateBlocks.join(),
+        privateKeyPem: privateKeyPem,
+        password: _isEncryptedPrivateKey(privateKeyPem) ? password : null,
+        label: _resolveLabel(label, certificateBlocks.first),
+      );
+    }
+    final stagedCertificate = stagedCertificateBytes == null
+        ? null
+        : _asPemText(stagedCertificateBytes);
+    final stagedCertBlocks = stagedCertificate == null
+        ? <String>[]
+        : _pemBlocks(stagedCertificate, 'CERTIFICATE');
+    final stagedKey = stagedPrivateKeyBytes == null
+        ? null
+        : _asPemText(stagedPrivateKeyBytes);
+    final stagedKeyBlock = stagedKey == null
+        ? null
+        : _firstPemBlock(stagedKey, [
+            'PRIVATE KEY',
+            'RSA PRIVATE KEY',
+            'EC PRIVATE KEY',
+            'ENCRYPTED PRIVATE KEY',
+            'OPENSSH PRIVATE KEY',
+          ]);
+    final stagedKeyPem = stagedKey == null || stagedKeyBlock == null
+        ? null
+        : _slicePemDocument(stagedKey, stagedKeyBlock);
+    if (certificateBlocks.isNotEmpty && stagedKeyPem != null) {
+      return _writePair(
+        certificatePem: certificateBlocks.join(),
+        privateKeyPem: stagedKeyPem,
+        password: _isEncryptedPrivateKey(stagedKeyPem) ? password : null,
+        label: _resolveLabel(
+          label,
+          certificateBlocks.first,
+        ),
+      );
+    }
+    if (privateKeyPem != null && stagedCertBlocks.isNotEmpty) {
+      return _writePair(
+        certificatePem: stagedCertBlocks.join(),
+        privateKeyPem: privateKeyPem,
+        password: _isEncryptedPrivateKey(privateKeyPem) ? password : null,
+        label: _resolveLabel(
+          stagedCertificateName ?? label,
+          stagedCertBlocks.first,
+        ),
+      );
+    }
+    if (certificateBlocks.isNotEmpty || privateKeyPem != null) {
+      // A lone half: the caller stages it and waits for its counterpart.
+      return null;
+    }
+    throw const ClientCertificateImportException(
+      'That file is not a certificate: pick a .p12/.pfx container or PEM certificate and key files.',
+    );
+  }
+
+  /// PKCS#12 is DER: an ASN.1 SEQUENCE at the front. PEM is base64 text, so a
+  /// leading `0x30 0x82` reliably separates the container from PEM material.
+  static bool _looksLikePkcs12(List<int> bytes) =>
+      bytes.length > 2 && bytes[0] == 0x30 && bytes[1] == 0x82;
+
+  /// Extracts the full text of every `BEGIN <label> ... END <label>` block,
+  /// preserving any headers above the first block (e.g. traditional OpenSSL
+  /// `Proc-Type`/`DEK-Info` encryption headers).
+  static List<String> _pemBlocks(String text, String label) {
+    final blocks = <String>[];
+    final begin = '-----BEGIN $label-----';
+    final end = '-----END $label-----';
+    var searchFrom = 0;
+    while (true) {
+      final beginIndex = text.indexOf(begin, searchFrom);
+      if (beginIndex < 0) return blocks;
+      final endIndex = text.indexOf(end, beginIndex + begin.length);
+      if (endIndex < 0) return blocks;
+      var blockStart = beginIndex;
+      // Keep encryption headers that precede the block: walk back over blank
+      // lines and `Name: value` header lines.
+      final headerBoundary = RegExp(r'\n\s*\n').allMatches(
+        text.substring(0, beginIndex),
+      );
+      if (headerBoundary.isNotEmpty) {
+        final candidate = headerBoundary.last.end;
+        final headerText = text.substring(candidate, beginIndex);
+        if (headerText.trim().isNotEmpty &&
+            RegExp(
+              r'^(?:[A-Za-z0-9-]+:[^\n]*\n?)+$',
+            ).hasMatch(headerText)) {
+          blockStart = candidate;
+        }
+      }
+      blocks.add(text.substring(blockStart, endIndex + end.length));
+      searchFrom = endIndex + end.length;
+    }
+  }
+
+  static String? _firstPemBlock(String text, List<String> labels) {
+    String? earliest;
+    var earliestIndex = -1;
+    for (final label in labels) {
+      final begin = '-----BEGIN $label-----';
+      final index = text.indexOf(begin);
+      if (index >= 0 && (earliestIndex < 0 || index < earliestIndex)) {
+        earliestIndex = index;
+        earliest = label;
+      }
+    }
+    if (earliest == null) return null;
+    final begin = '-----BEGIN $earliest-----';
+    final end = '-----END $earliest-----';
+    final endIndex = text.indexOf(end, earliestIndex + begin.length);
+    if (endIndex < 0) return null;
+    return text.substring(earliestIndex, endIndex + end.length);
+  }
+
+  /// Returns the private-key PEM including any traditional-OpenSSL headers
+  /// above its block, mirroring [_pemBlocks].
+  static String _slicePemDocument(String text, String block) {
+    final blockIndex = text.indexOf(block);
+    if (blockIndex < 0) return block;
+    final headerBoundary = RegExp(r'\n\s*\n').allMatches(
+      text.substring(0, blockIndex),
+    );
+    if (headerBoundary.isEmpty) {
+      final prefix = text.substring(0, blockIndex).trim();
+      if (prefix.isEmpty) return block;
+      // The block sits mid-document after other PEM blocks: slice from the
+      // block itself so the certificate half is not duplicated into the key.
+      return block;
+    }
+    final candidate = headerBoundary.last.end;
+    final headerText = text.substring(candidate, blockIndex);
+    if (headerText.trim().isNotEmpty &&
+        RegExp(r'^(?:[A-Za-z0-9-]+:[^\n]*\n?)+$').hasMatch(headerText)) {
+      return text.substring(candidate, blockIndex + block.length);
+    }
+    if (headerText.trim().isEmpty) return block;
+    return block;
+  }
+
   /// Stores an already-PEM certificate/key pair chosen by the user.
   Future<ClientCertificateConfig> importPemPair({
     required List<int> certificateBytes,
