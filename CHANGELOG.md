@@ -22,6 +22,9 @@ shows only the three latest releases.
 
 ### Fixed
 
+- Accept the hosted SDK's observed `V2 Signer:` certificate output in the
+  fail-closed APK publication gate, retaining single-signer production pinning
+  and logging selected SDK tool paths/build-tools revision for diagnosis.
 - Populate Activity from actual app-owned turn observations and honest gateway
   update metadata. Retain compression roots across restart and navigate older
   activity to the current conversation without duplicate continuation rows.
