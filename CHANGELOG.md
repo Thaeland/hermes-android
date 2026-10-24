@@ -35,6 +35,15 @@ promotion or GitLab/F-Droid updates. Base code **3001** produces split codes
 
 ### Fixed
 
+- Preserve the previous completed reply when Stop or Stop and send cancels a
+  new REST response before its first text arrives.
+- Bound actual certificate-file reads to 1 MiB, fence pending picker/import
+  callbacks and clear obsolete password retries when selecting another file.
+- Preserve configured typed voice-stop phrases and literal slash-command text
+  when adding Android attachment guidance. Leave input unchanged if the gateway
+  cannot provide its voice configuration.
+- Keep image-only history free of empty-text placeholders and keep hidden,
+  model-only and replaced physical content out of chat exports.
 - Open chats at the latest visible message without pulling a reader away from
   older history during refreshes, streaming or delegated-task inspection (#186).
 - Make certificate files selectable on Android/iOS and ask for protected-file

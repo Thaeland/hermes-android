@@ -36,7 +36,7 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
 - Previous upstream releases remain available from the
   [Releases](https://github.com/rusty4444/hermes-android/releases) page.
 
-## 3.0 testing release — RC2
+## 3.0 testing release: RC2
 
 The testing candidate is **3.0.0-rc.2** (base build **3001**). It is a GitHub
 prerelease, not the stable release; **2.1.33 remains latest stable**. Back up app
