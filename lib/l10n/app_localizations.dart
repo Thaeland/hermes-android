@@ -144,6 +144,30 @@ abstract class AppLocalizations {
   /// **'Collapse report'**
   String get background_report_collapse;
 
+  /// No description provided for @stop_and_send.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop and send'**
+  String get stop_and_send;
+
+  /// No description provided for @message_queued_for_running_turn.
+  ///
+  /// In en, this message translates to:
+  /// **'Message queued for the current run.'**
+  String get message_queued_for_running_turn;
+
+  /// No description provided for @running_message_not_accepted.
+  ///
+  /// In en, this message translates to:
+  /// **'Hermes could not accept this message. Your draft was kept; stop the response or wait, then send again.'**
+  String get running_message_not_accepted;
+
+  /// No description provided for @running_message_delivery_unknown.
+  ///
+  /// In en, this message translates to:
+  /// **'Message delivery could not be confirmed. Your draft was kept. Check the chat before retrying.'**
+  String get running_message_delivery_unknown;
+
   /// No description provided for @saved_history_heading.
   ///
   /// In en, this message translates to:

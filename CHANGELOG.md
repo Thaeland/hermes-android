@@ -37,6 +37,12 @@ shows only the three latest releases.
 - Verify manual Archive / Unarchive against the exact stored chat. An expired
   Quick Chat is reported restored only after its local retention change is
   durable; failed writes leave the row retryable rather than a phantom success.
+- Keep separate Stop and Send controls while Hermes is responding. Remote
+  Gateway sends guidance through `session.steer` without starting another turn;
+  legacy REST explicitly stops its current response before sending a new one.
+- Preserve newer composer edits while guidance is awaiting acknowledgement.
+  Rejected or unconfirmed guidance keeps the draft, with no automatic resend or
+  interrupt fallback. Both controls retain 48 dp targets on narrow screens.
 - Replace completed archive snapshots independently of pending active history,
   and show incomplete/retry state when expired Quick Chat IDs remain unresolved.
 - Keep newer external chat titles when an older aggregate scan completes,

@@ -208,6 +208,7 @@ class GatewayTurnApplicationController {
   NormalGatewayApplicationSession normalSessionFor(
     SavedConnection connection, {
     NormalGatewayPromptSubmit? submit,
+    NormalGatewaySteer? steer,
     NormalGatewayResume? resume,
     NormalGatewayHistory? history,
     TurnNotificationService? notifications,
@@ -237,6 +238,7 @@ class GatewayTurnApplicationController {
               presentation: presentationFor(connection),
               activityStore: _activityStore,
               submit: submit,
+              steer: steer,
               resume:
                   resume ??
                   ({required localSessionId, required storedSessionId}) async {

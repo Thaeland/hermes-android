@@ -24,6 +24,20 @@ class AppLocalizationsKo extends AppLocalizations {
   String get background_report_collapse => '보고서 접기';
 
   @override
+  String get stop_and_send => '중지 후 보내기';
+
+  @override
+  String get message_queued_for_running_turn => '현재 실행에 메시지를 대기열로 추가했습니다.';
+
+  @override
+  String get running_message_not_accepted =>
+      'Hermes가 이 메시지를 수락하지 못했습니다. 초안은 유지됩니다. 응답을 중지하거나 기다린 후 다시 보내세요.';
+
+  @override
+  String get running_message_delivery_unknown =>
+      '메시지 전달을 확인하지 못했습니다. 초안은 유지됩니다. 다시 시도하기 전에 채팅을 확인하세요.';
+
+  @override
   String get saved_history_heading => 'Saved history';
 
   @override

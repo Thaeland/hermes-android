@@ -24,6 +24,20 @@ class AppLocalizationsZh extends AppLocalizations {
   String get background_report_collapse => '收起报告';
 
   @override
+  String get stop_and_send => '停止并发送';
+
+  @override
+  String get message_queued_for_running_turn => '消息已加入当前运行的队列。';
+
+  @override
+  String get running_message_not_accepted =>
+      'Hermes 无法接受此消息。草稿已保留；请停止回复或等待，然后重新发送。';
+
+  @override
+  String get running_message_delivery_unknown =>
+      '无法确认消息是否送达。草稿已保留。请先检查聊天记录，再重试。';
+
+  @override
   String get saved_history_heading => 'Saved history';
 
   @override
@@ -2960,6 +2974,20 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get background_report_collapse => '收起报告';
+
+  @override
+  String get stop_and_send => '停止并发送';
+
+  @override
+  String get message_queued_for_running_turn => '消息已加入当前运行的队列。';
+
+  @override
+  String get running_message_not_accepted =>
+      'Hermes 无法接受此消息。草稿已保留；请停止回复或等待，然后重新发送。';
+
+  @override
+  String get running_message_delivery_unknown =>
+      '无法确认消息是否送达。草稿已保留。请先检查聊天记录，再重试。';
 
   @override
   String get theme_palette => '颜色主题';

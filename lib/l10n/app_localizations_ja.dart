@@ -24,6 +24,20 @@ class AppLocalizationsJa extends AppLocalizations {
   String get background_report_collapse => 'レポートを折りたたむ';
 
   @override
+  String get stop_and_send => '停止して送信';
+
+  @override
+  String get message_queued_for_running_turn => '現在の実行にメッセージを追加しました。';
+
+  @override
+  String get running_message_not_accepted =>
+      'Hermes はこのメッセージを受け付けられませんでした。下書きは保持されています。応答を停止するか、完了を待ってから再送信してください。';
+
+  @override
+  String get running_message_delivery_unknown =>
+      'メッセージの配信を確認できませんでした。下書きは保持されています。再試行する前にチャットを確認してください。';
+
+  @override
   String get saved_history_heading => 'Saved history';
 
   @override

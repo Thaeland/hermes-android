@@ -33,6 +33,8 @@ typedef NormalGatewayResume =
     });
 typedef NormalGatewayHistory =
     Future<List<Map<String, dynamic>>> Function(String id);
+typedef NormalGatewaySteer =
+    Future<bool> Function({required String sessionId, required String text});
 
 enum NormalGatewayTurnPhase {
   idle,
@@ -70,6 +72,7 @@ class NormalGatewayChatSnapshot {
   final String? storedSessionId;
   final NormalGatewayTurnPhase phase;
   final bool wireEmitted;
+  final bool steering;
   final int? rowFloor;
   final List<Map<String, dynamic>> displayRows;
   final List<Map<String, dynamic>> historyRows;
@@ -90,6 +93,7 @@ class NormalGatewayChatSnapshot {
     required this.storedSessionId,
     required this.phase,
     required this.wireEmitted,
+    this.steering = false,
     required this.rowFloor,
     required this.displayRows,
     required this.historyRows,
@@ -129,6 +133,7 @@ class NormalGatewayApplicationSession {
   final OperationalActivityStore activityStore;
   final int Function() _activityNowEpochMs;
   final NormalGatewayPromptSubmit _submit;
+  final NormalGatewaySteer? _steer;
   final bool _usesClientSubmit;
   final NormalGatewayResume _resume;
   final NormalGatewayHistory _history;
@@ -161,6 +166,7 @@ class NormalGatewayApplicationSession {
     OperationalActivityStore? activityStore,
     int Function()? activityNowEpochMs,
     NormalGatewayPromptSubmit? submit,
+    NormalGatewaySteer? steer,
     NormalGatewayResume? resume,
     NormalGatewayHistory? history,
     TurnNotificationService? notifications,
@@ -176,6 +182,7 @@ class NormalGatewayApplicationSession {
            activityNowEpochMs ?? (() => DateTime.now().millisecondsSinceEpoch),
        notifications = notifications ?? TurnNotificationService.shared,
        _submit = submit ?? client!.submitPrompt,
+       _steer = steer ?? client?.steerPrompt,
        _usesClientSubmit = submit == null,
        _resume = resume ?? client!.resumeSubmittedSession,
        _history =
@@ -733,6 +740,7 @@ class NormalGatewayChatOwner {
   bool _recoveryQueued = false;
   bool _settling = false;
   bool _submissionPending = false;
+  Object? _steerFlight;
   ({bool? completed, String? error, int generation})? _terminalReceipt;
   OperationalActivityRecord? _lastActivityRecord;
   NormalGatewayChatOwner._(
@@ -759,6 +767,7 @@ class NormalGatewayChatOwner {
           storedSessionId: storedSessionId,
           phase: phase,
           wireEmitted: wireEmitted,
+          steering: _steerFlight != null,
           rowFloor: _floor,
           displayRows:
               [
@@ -1150,7 +1159,10 @@ class NormalGatewayChatOwner {
   /// Synchronous admission across duplicate routes and both durable/local ids.
   Object? reserve() {
     if (_redirect != null) return _root.reserve();
-    if (_session._closed || !_session._initialized || snapshot.hasActiveTurn) {
+    if (_session._closed ||
+        !_session._initialized ||
+        snapshot.hasActiveTurn ||
+        _steerFlight != null) {
       return null;
     }
     _generation++;
@@ -1174,6 +1186,64 @@ class NormalGatewayChatOwner {
     _reservation = null;
     phase = NormalGatewayTurnPhase.idle;
     _notify();
+  }
+
+  bool get canSteer => _redirect != null
+      ? _root.canSteer
+      : _session.hasCurrentAccount &&
+            phase == NormalGatewayTurnPhase.running &&
+            wireEmitted &&
+            !_settling &&
+            _terminalReceipt?.generation != _generation &&
+            _steerFlight == null;
+
+  /// One steering flight per app-owned chat, including duplicate routes and
+  /// local/stored aliases. This is guidance for the existing turn, not a new
+  /// prompt reservation, completion receipt or permission to resend.
+  Future<bool> steer(String text) async {
+    if (_redirect != null) return _root.steer(text);
+    final guidance = text.trim();
+    if (!canSteer || guidance.isEmpty) return false;
+    final send = _session._steer;
+    if (send == null) {
+      throw StateError('This gateway does not support steering');
+    }
+    final generation = _generation;
+    final flight = _steerFlight = Object();
+    _notify();
+    try {
+      if (!_current(generation) || !snapshot.hasActiveTurn) return false;
+      final accepted = await send(sessionId: localSessionId, text: guidance);
+      if (!accepted) return false;
+      if (!_current(generation) ||
+          !snapshot.hasActiveTurn ||
+          _settling ||
+          _terminalReceipt?.generation == generation) {
+        // The server queued it, but this ended/replaced run can no longer
+        // confirm a live handoff. Keep the caller's draft; never claim a
+        // rejection or automatically resend an already accepted instruction.
+        // A terminal stays decisive if settlement persistence must retry.
+        throw StateError('The run ended before steering could be confirmed.');
+      }
+      // Place guidance before the live response, but do not make it a new
+      // prompt boundary. A reused preview can later remove that response's
+      // placeholder; ingress still finds the assistant across this row.
+      final assistant = _display.lastIndexWhere(
+        (row) => row['role'] == 'assistant',
+      );
+      _display.insert(assistant < 0 ? _display.length : assistant, {
+        'role': 'user',
+        'display_kind': 'steer',
+        'content': guidance,
+        '_normal_projection_id': const Uuid().v4(),
+      });
+      return true;
+    } finally {
+      if (identical(_steerFlight, flight)) {
+        _steerFlight = null;
+        _notify();
+      }
+    }
   }
 
   /// An interrupt ack is not a terminal receipt. Keep the marker active until
@@ -1518,7 +1588,9 @@ class NormalGatewayChatOwner {
         (event.type == 'message.delta' || event.type.startsWith('tool.'))) {
       phase = NormalGatewayTurnPhase.running;
     }
-    if (_display.isEmpty &&
+    // A restored running turn can receive guidance before assistant activity.
+    // A user-only projection must not prevent its response scaffold.
+    if (!_display.any((row) => row['role'] == 'assistant') &&
         (event.type.startsWith('message.') ||
             event.type.startsWith('tool.') ||
             event.type.startsWith('reasoning.'))) {
@@ -1540,10 +1612,10 @@ class NormalGatewayChatOwner {
         event.type == 'message.complete') {
       _receivedObservation ??= ++_session._presentationObservation;
     }
-    final assistant =
-        _display.isNotEmpty && _display.last['role'] == 'assistant'
-        ? _display.last
-        : null;
+    final assistantIndex = _display.lastIndexWhere(
+      (row) => row['role'] == 'assistant',
+    );
+    final assistant = assistantIndex < 0 ? null : _display[assistantIndex];
     if (reasoning != null && assistant != null) {
       _timeline = _timeline.reasoning(
         assistant['_normal_projection_id']!,
@@ -1727,7 +1799,9 @@ class NormalGatewayChatOwner {
     // bubble prepared for a continuation or distinct interim commentary.
     for (var index = pendingIndex - 1; index >= 0; index--) {
       final candidate = _display[index];
-      if (candidate['role'] == 'user') break;
+      if (candidate['role'] == 'user' && candidate['display_kind'] != 'steer') {
+        break;
+      }
       if (candidate['role'] != 'assistant' ||
           candidate['_gateway_interim'] != true ||
           candidate['content'] != rawCompleteText) {
