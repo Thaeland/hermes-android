@@ -638,21 +638,48 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
         return _loadArchives();
       });
     }
-    if (widget.reloadActive != null) {
-      // Batch requests before the physical read starts. A gesture during that
-      // read queues a trailing fresh one, never just joins its old snapshot.
-      return _queuedActiveRefresh ??=
-          (_activeReadInFlight ?? Future<void>.value()).then<void>((_) {
-            _queuedActiveRefresh = null;
-            return _loadActive();
-          });
-    }
+    if (widget.reloadActive != null) return _refreshActive();
     final pending = _loadInFlight;
     if (pending == null) return _load();
     return _queuedRefresh ??= pending.then<void>((_) {
       _queuedRefresh = null;
       return _load();
     });
+  }
+
+  Future<void> _refreshActive() {
+    // Batch requests before physical start; a later gesture owns a trailing read.
+    return _queuedActiveRefresh ??=
+        (_activeReadInFlight ?? Future<void>.value()).then<void>((_) {
+          _queuedActiveRefresh = null;
+          return _loadActive();
+        });
+  }
+
+  bool _requiresQuickHistory(WorkspaceSessionsData data) {
+    if (data.sessionsKnown) return false;
+    final resolved = <String>{
+      for (final row in [...data.sessions, ...data.archivedSessions]) ...[
+        row.id,
+        ?row.lineageRootId,
+      ],
+    };
+    return data.archivedQuickChatIds.difference(resolved).isNotEmpty;
+  }
+
+  Future<void> _retryScope() {
+    final data = _data;
+    if (_isArchivedSurface &&
+        data != null &&
+        data.archivesKnown &&
+        data.archiveError == null &&
+        _requiresQuickHistory(data) &&
+        widget.reloadActive != null) {
+      // Server archives are already complete: only active history can resolve
+      // the expired device-local identities behind this failure notice.
+      return _refreshActive();
+    }
+    return refresh();
   }
 
   Future<void> _load() {
@@ -1218,16 +1245,7 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
 
   Widget _buildLoaded(WorkspaceSessionsData data) {
     final archiveScope = _isArchivedSurface;
-    final resolvedIds = <String>{
-      for (final row in [...data.sessions, ...data.archivedSessions]) ...[
-        row.id,
-        ?row.lineageRootId,
-      ],
-    };
-    final unresolvedQuick =
-        archiveScope &&
-        data.archivedQuickChatIds.difference(resolvedIds).isNotEmpty &&
-        !data.sessionsKnown;
+    final unresolvedQuick = archiveScope && _requiresQuickHistory(data);
     final scopeLoading = archiveScope
         ? data.archivedIsPartial ||
               (widget.view == WorkspaceSessionView.archivedQuick &&
@@ -1353,7 +1371,7 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
                           ),
                         ),
                         TextButton(
-                          onPressed: () => unawaited(refresh()),
+                          onPressed: () => unawaited(_retryScope()),
                           child: Text(context.l10n.retry),
                         ),
                       ],

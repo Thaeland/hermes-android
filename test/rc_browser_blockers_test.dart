@@ -318,6 +318,56 @@ void main() {
     );
   }
 
+  testWidgets(
+    'Archived Retry resolves unknown Quick history through active authority',
+    (tester) async {
+      var activeReads = 0;
+      var archiveReads = 0;
+      await tester.pumpWidget(
+        app(
+          WorkspaceSessionsScreen(
+            title: 'Chats',
+            view: WorkspaceSessionView.all,
+            embedded: true,
+            load: () async => WorkspaceSessionsData(
+              sessionsKnown: false,
+              sessionsError: StateError('active offline'),
+              archivesKnown: true,
+              archivedQuickChatIds: const {'expired'},
+            ),
+            reloadActive: (_) async {
+              activeReads++;
+              return WorkspaceSessionsData(
+                sessions: [row('Recovered expired chat', id: 'expired')],
+                archivedQuickChatIds: const {'expired'},
+              );
+            },
+            reloadArchives: (_) async {
+              archiveReads++;
+              return [];
+            },
+            onOpenSession: (_) {},
+          ),
+        ),
+      );
+      await frames(tester);
+      await tester.tap(find.widgetWithText(ChoiceChip, 'Archived'));
+      await frames(tester);
+      expect(find.byType(EmptyState), findsNothing);
+      await tester.tap(find.text('Retry'));
+      await frames(tester);
+      expect(activeReads, 1);
+      expect(
+        archiveReads,
+        0,
+        reason: 'the completed server archive cannot resolve local Quick IDs',
+      );
+      expect(find.text('Recovered expired chat'), findsOneWidget);
+      expect(find.text('Retry'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
   for (final archives in [false, true]) {
     testWidgets(
       'old aggregate preserves fresh ${archives ? 'archive' : 'active'} title epoch after local rename',
