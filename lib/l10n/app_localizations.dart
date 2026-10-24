@@ -1062,6 +1062,12 @@ abstract class AppLocalizations {
   /// **'Could not load more chats: {error}'**
   String could_not_load_more_chats(Object error);
 
+  /// No description provided for @could_not_open_link.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not open this link.'**
+  String get could_not_open_link;
+
   /// No description provided for @could_not_open_the_hermes_dashboard.
   ///
   /// In en, this message translates to:

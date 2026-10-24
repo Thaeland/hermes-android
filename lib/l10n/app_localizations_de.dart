@@ -568,6 +568,9 @@ class AppLocalizationsDe extends AppLocalizations {
   }
 
   @override
+  String get could_not_open_link => 'Dieser Link konnte nicht geöffnet werden.';
+
+  @override
   String get could_not_open_the_hermes_dashboard =>
       'Das Hermes-Dashboard konnte nicht geöffnet werden.';
 

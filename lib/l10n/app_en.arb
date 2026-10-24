@@ -161,6 +161,7 @@
   "could_not_load_files": "Could not load files",
   "could_not_load_models_for_this_profile": "Could not load models for this profile: {error}",
   "could_not_load_more_chats": "Could not load more chats: {error}",
+  "could_not_open_link": "Could not open this link.",
   "could_not_open_the_hermes_dashboard": "Could not open the Hermes dashboard.",
   "could_not_open_this_project": "Could not open this project",
   "could_not_preview_file": "Could not preview file",

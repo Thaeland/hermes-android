@@ -152,6 +152,7 @@
   "could_not_load_files": "Não foi possível carregar os arquivos",
   "could_not_load_models_for_this_profile": "Não foi possível carregar os modelos deste perfil: {error}",
   "could_not_load_more_chats": "Não foi possível carregar mais chats: {error}",
+  "could_not_open_link": "Não foi possível abrir este link.",
   "could_not_open_the_hermes_dashboard": "Não foi possível abrir o painel do Hermes.",
   "could_not_open_this_project": "Não foi possível abrir este projeto",
   "could_not_preview_file": "Não foi possível pré-visualizar o arquivo",

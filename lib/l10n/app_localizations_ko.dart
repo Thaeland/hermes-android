@@ -549,6 +549,9 @@ class AppLocalizationsKo extends AppLocalizations {
   }
 
   @override
+  String get could_not_open_link => '이 링크를 열 수 없습니다.';
+
+  @override
   String get could_not_open_the_hermes_dashboard => 'Hermes 대시보드를 열 수 없습니다.';
 
   @override

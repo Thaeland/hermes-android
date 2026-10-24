@@ -152,6 +152,7 @@
   "could_not_load_files": "ファイルを読み込めませんでした",
   "could_not_load_models_for_this_profile": "このプロファイルのモデルを読み込めませんでした: {error}",
   "could_not_load_more_chats": "これ以上チャットを読み込めませんでした: {error}",
+  "could_not_open_link": "このリンクを開けませんでした。",
   "could_not_open_the_hermes_dashboard": "Hermesダッシュボードを開けませんでした。",
   "could_not_open_this_project": "このプロジェクトを開けませんでした",
   "could_not_preview_file": "ファイルをプレビューできませんでした",
