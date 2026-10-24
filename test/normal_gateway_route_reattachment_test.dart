@@ -707,8 +707,13 @@ void main() {
   );
 
   testWidgets(
-    'canonical reopen replaces completed wire presentation after delayed persistence',
+    'canonical reopen preserves independent completed wire output after delayed persistence',
     (tester) async {
+      // End-aligned reopening and collapsed metadata add real row height.
+      // Keep both complete source projections mounted for the order assertion;
+      // lazy eviction in a short viewport is not missing canonical history.
+      await tester.binding.setSurfaceSize(const Size(800, 1400));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
       final controller = GatewayTurnApplicationController();
       addTearDown(controller.close);
       final remote = _Remote();
