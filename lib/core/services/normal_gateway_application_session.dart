@@ -1194,6 +1194,7 @@ class NormalGatewayChatOwner {
             phase == NormalGatewayTurnPhase.running &&
             wireEmitted &&
             !_settling &&
+            _terminalReceipt?.generation != _generation &&
             _steerFlight == null;
 
   /// One steering flight per app-owned chat, including duplicate routes and
@@ -1214,10 +1215,14 @@ class NormalGatewayChatOwner {
       if (!_current(generation) || !snapshot.hasActiveTurn) return false;
       final accepted = await send(sessionId: localSessionId, text: guidance);
       if (!accepted) return false;
-      if (!_current(generation) || !snapshot.hasActiveTurn || _settling) {
+      if (!_current(generation) ||
+          !snapshot.hasActiveTurn ||
+          _settling ||
+          _terminalReceipt?.generation == generation) {
         // The server queued it, but this ended/replaced run can no longer
         // confirm a live handoff. Keep the caller's draft; never claim a
         // rejection or automatically resend an already accepted instruction.
+        // A terminal stays decisive if settlement persistence must retry.
         throw StateError('The run ended before steering could be confirmed.');
       }
       // Place guidance before the live response, but do not make it a new

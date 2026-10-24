@@ -7,13 +7,18 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hermes_android/core/screens/chat_screen.dart';
 import 'package:hermes_android/core/services/composer_draft_store.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
+import 'package:hermes_android/core/services/desktop_gateway_client.dart';
 import 'package:hermes_android/core/services/gateway_turn_application_controller.dart';
 import 'package:hermes_android/core/services/normal_gateway_application_session.dart';
+import 'package:hermes_android/core/services/normal_gateway_pending_store.dart';
 import 'package:hermes_android/core/services/ws_client.dart';
 import 'package:hermes_android/l10n/app_localizations.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+// Existing storage seam; fail the real pending-marker persistence path.
+// ignore: depend_on_referenced_packages
+import 'package:shared_preferences_platform_interface/shared_preferences_platform_interface.dart';
 
 import 'support/fake_voice_composer_adapter.dart';
 
@@ -118,13 +123,19 @@ void main() {
       NormalGatewayChatOwner chat,
     })
   >
-  prepare(WidgetTester tester, {double textScale = 1, bool emit = true}) async {
+  prepare(
+    WidgetTester tester, {
+    double textScale = 1,
+    bool emit = true,
+    NormalGatewayResume? resume,
+  }) async {
     final remote = _Remote(emit: emit);
     final controller = GatewayTurnApplicationController();
     final session = controller.normalSessionFor(
       _connection,
       submit: remote.submit,
       steer: remote.steer,
+      resume: resume,
       history: (_) async => [],
     );
     addTearDown(() async {
@@ -140,6 +151,91 @@ void main() {
     final chat = session.findChat(_session.id)!;
     return (controller: controller, remote: remote, chat: chat);
   }
+
+  testWidgets(
+    'terminal receipt keeps guidance when settlement storage fails before ACK',
+    (tester) async {
+      final previousPreferences = SharedPreferencesStorePlatform.instance;
+      final storage = _PendingWriteFault();
+      SharedPreferencesStorePlatform.instance = storage;
+      addTearDown(
+        () => SharedPreferencesStorePlatform.instance = previousPreferences,
+      );
+      final recoveryEntered = Completer<void>();
+      final recovery = Completer<ResumedGatewaySession>();
+      addTearDown(() {
+        if (!recovery.isCompleted) {
+          recovery.complete(
+            const ResumedGatewaySession(
+              runtimeSessionId: 'runtime',
+              running: false,
+            ),
+          );
+        }
+      });
+      final f = await prepare(
+        tester,
+        resume: ({required localSessionId, required storedSessionId}) {
+          if (!recoveryEntered.isCompleted) recoveryEntered.complete();
+          return recovery.future;
+        },
+      );
+      await _start(tester);
+      f.chat.requestRecovery();
+      await _pump(tester);
+      expect(recoveryEntered.isCompleted, isTrue);
+      await tester.enterText(find.byKey(_composer), 'Keep uncertain guidance');
+      await tester.tap(find.byKey(_send));
+      await _pump(tester);
+      storage.failSettlement = true;
+      f.remote.event('turn.end', {'status': 'completed'});
+      await _pump(tester);
+      expect(storage.failures, 1);
+      expect(f.chat.phase, NormalGatewayTurnPhase.reconciling);
+      expect(f.chat.snapshot.hasActiveTurn, isTrue);
+      final beforeAck = f.chat.snapshot.displayRows;
+      ScaffoldMessenger.of(
+        tester.element(find.byType(ChatScreen)),
+      ).clearSnackBars();
+
+      f.remote.ack.complete(true);
+      await _pump(tester);
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(_text(tester), 'Keep uncertain guidance');
+      expect(f.chat.snapshot.displayRows, beforeAck);
+      expect(f.chat.snapshot.steering, isFalse);
+      expect(f.chat.canSteer, isFalse);
+      expect(f.chat.reserve(), isNull);
+      expect(find.text('Message queued for the current run.'), findsNothing);
+      expect(
+        find.text(
+          'Message delivery could not be confirmed. Your draft was kept. Check the chat before retrying.',
+        ),
+        findsOneWidget,
+      );
+      expect(f.remote.prompts, ['Original task']);
+      expect(f.remote.guidance, [('stored-chat', 'Keep uncertain guidance')]);
+      f.remote.turn.complete();
+      recovery.complete(
+        const ResumedGatewaySession(
+          runtimeSessionId: 'runtime',
+          running: false,
+        ),
+      );
+      await _pump(tester);
+      expect(f.chat.snapshot.hasActiveTurn, isFalse);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await f.controller.close();
+      await _pump(tester);
+      expect(
+        await ComposerDraftStore.read(
+          connectionId: _connection.id,
+          sessionId: _session.id,
+        ),
+        'Keep uncertain guidance',
+      );
+    },
+  );
 
   for (final stopFirst in [false, true]) {
     testWidgets(
@@ -554,6 +650,27 @@ class _Remote {
 
   void event(String type, Map<String, dynamic> data) =>
       onEvent?.call(StreamEvent(type: type, data: data, turnId: 'wire-turn'));
+}
+
+class _PendingWriteFault extends InMemorySharedPreferencesStore {
+  _PendingWriteFault() : super.empty();
+  bool failSettlement = false;
+  int failures = 0;
+
+  @override
+  Future<bool> setValue(String type, String key, Object value) async {
+    if (failSettlement &&
+        key == 'flutter.${NormalGatewayPendingStore.preferenceKey}' &&
+        value is String &&
+        (jsonDecode(value) as List).whereType<Map>().any(
+          (marker) => marker['phase'] == 'settled',
+        )) {
+      failSettlement = false;
+      failures++;
+      throw StateError('Synthetic settlement storage outage');
+    }
+    return super.setValue(type, key, value);
+  }
 }
 
 class _RestStreams extends http.BaseClient {
