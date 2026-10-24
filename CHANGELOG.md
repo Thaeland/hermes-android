@@ -36,9 +36,6 @@ shows only the three latest releases.
   guidance through existing chat protocols, including reused TUI sessions;
   no backend patch or Android companion is required. User-facing message text
   remains clean while raw server history retains the app-added context.
-- Accept the hosted SDK's observed `V2 Signer:` certificate output in the
-  fail-closed APK publication gate, retaining single-signer production pinning
-  and logging selected SDK tool paths/build-tools revision for diagnosis.
 - Populate Activity from actual app-owned turn observations and honest gateway
   update metadata. Retain compression roots across restart and navigate older
   activity to the current conversation without duplicate continuation rows.
@@ -59,6 +56,9 @@ shows only the three latest releases.
 - Keep newer external chat titles when an older aggregate scan completes,
   reconcile standalone renames into retained Chats, and hydrate supplied local
   pins without waiting for unrelated archive/history reads.
+- Accept the hosted SDK's observed `V2 Signer:` certificate output in the
+  fail-closed APK publication gate, retaining single-signer production pinning
+  and logging selected SDK tool paths/build-tools revision for diagnosis.
 
 ### Added
 
