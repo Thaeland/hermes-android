@@ -46,9 +46,10 @@ streaming. Oversized files can be downloaded through the authenticated Dashboard
 instead. Opening a file uses the gateway host's path, never a same-named local
 phone file. Shared files use the app's temporary share cache.
 
-## Organisation entries
+## Organisation features
 
-The separate **Pin, batch and undo** and **AI-assisted filing** entries still
+The unused Organisation section and its **Pin, batch and undo** and
+**AI-assisted filing** placeholders have been removed from More. These features
 require backend functionality that does not exist as a complete contract.
 Device-only pins and individual Project moves already work from the Chats menu;
 they do not provide shared pin ordering, atomic batches, universal move undo or

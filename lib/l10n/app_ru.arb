@@ -86,7 +86,7 @@
   "attachment_drafts": "Черновики вложений",
   "attachment_of": "Вложение {index} из {total}",
   "auto_device_default": "Автоматически (по умолчанию устройства)",
-  "automation": "Автоматизация",
+  "agent": "Агент",
   "autonomous_agents": "Автономные агенты",
   "background_recovery_unavailable_legacy_transport": "Восстановление в фоне недоступно — устаревший транспорт",
   "background_task_completed": "Фоновая задача завершена",

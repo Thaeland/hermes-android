@@ -322,7 +322,7 @@ class AppLocalizationsRu extends AppLocalizations {
   String get auto_device_default => 'Автоматически (по умолчанию устройства)';
 
   @override
-  String get automation => 'Автоматизация';
+  String get agent => 'Агент';
 
   @override
   String get autonomous_agents => 'Автономные агенты';

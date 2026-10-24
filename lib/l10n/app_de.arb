@@ -86,7 +86,7 @@
   "attachment_drafts": "Anhangsentwürfe",
   "attachment_of": "Anhang {index} von {total}",
   "auto_device_default": "Automatisch (Gerätestandard)",
-  "automation": "Automatisierung",
+  "agent": "Agent",
   "autonomous_agents": "Autonome Agenten",
   "background_recovery_unavailable_legacy_transport": "Hintergrund-Wiederherstellung nicht verfügbar — Legacy-Transport",
   "background_task_completed": "Hintergrundaufgabe abgeschlossen",

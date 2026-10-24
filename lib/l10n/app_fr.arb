@@ -86,7 +86,7 @@
   "attachment_drafts": "Brouillons de pièces jointes",
   "attachment_of": "Pièce jointe {index} sur {total}",
   "auto_device_default": "Automatique (par défaut de l'appareil)",
-  "automation": "Automatisation",
+  "agent": "Agent",
   "autonomous_agents": "Agents autonomes",
   "background_recovery_unavailable_legacy_transport": "Récupération en arrière-plan indisponible — transport hérité",
   "background_task_completed": "Tâche en arrière-plan terminée",
