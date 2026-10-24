@@ -387,6 +387,7 @@ class _HeldOwner extends GatewayTurnApplicationController {
   NormalGatewayApplicationSession normalSessionFor(
     SavedConnection c, {
     NormalGatewayPromptSubmit? submit,
+    NormalGatewaySteer? steer,
     NormalGatewayResume? resume,
     NormalGatewayHistory? history,
     TurnNotificationService? notifications,

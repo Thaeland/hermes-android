@@ -80,6 +80,10 @@ rows and offers Retry rather than claiming the archive is empty.
 
 ## Unreleased development
 
+- **Send while Hermes is working:** the composer keeps separate **Stop** and
+  **Send** buttons. Remote Gateway sends text as guidance for the current run
+  without interrupting it. Legacy REST uses an explicitly labelled **Stop and
+  send** action instead. See [Sending while Hermes is working](docs/sending-while-working.md).
 - **More → Assets** browses generated files explicitly shared in saved Hermes
   replies. Search found filenames or source chats, filter by file type, preview
   images and download/share files. History scans are incremental and downloads

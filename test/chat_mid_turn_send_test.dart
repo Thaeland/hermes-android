@@ -1,0 +1,477 @@
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:hermes_android/core/screens/chat_screen.dart';
+import 'package:hermes_android/core/services/composer_draft_store.dart';
+import 'package:hermes_android/core/services/connection_manager.dart';
+import 'package:hermes_android/core/services/gateway_turn_application_controller.dart';
+import 'package:hermes_android/core/services/normal_gateway_application_session.dart';
+import 'package:hermes_android/core/services/ws_client.dart';
+import 'package:hermes_android/l10n/app_localizations.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'support/fake_voice_composer_adapter.dart';
+
+const _composer = Key('chat-message-composer');
+const _send = Key('chat-send-message');
+const _stop = Key('chat-stop-response');
+final _connection = SavedConnection(
+  id: 'mid-turn',
+  label: 'Fixture',
+  host: 'fixture.invalid',
+  port: 8642,
+  apiKey: 'fixture-key',
+);
+const _session = Session(
+  id: 'stored-chat',
+  title: 'Chat',
+  model: 'fixture',
+  source: 'test',
+  messageCount: 0,
+  isActive: true,
+  preview: '',
+  startedAt: 1,
+);
+
+String _text(WidgetTester tester) =>
+    tester.widget<TextField>(find.byKey(_composer)).controller!.text;
+IconButton _button(WidgetTester tester, Key key) =>
+    tester.widget<IconButton>(find.byKey(key));
+
+Future<void> _pumpChat(
+  WidgetTester tester, {
+  _Remote? remote,
+  GatewayTurnApplicationController? controller,
+  http.Client? httpClient,
+  double textScale = 1,
+  String? initialText,
+}) async {
+  await tester.pumpWidget(
+    MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(
+          context,
+        ).copyWith(textScaler: TextScaler.linear(textScale)),
+        child: child!,
+      ),
+      home: ChatScreen(
+        connection: _connection,
+        session: _session,
+        initialComposerText: initialText,
+        turnApplicationController: controller,
+        testRemotePromptSubmit: remote?.submit,
+        testVoiceComposerAdapter: FakeVoiceComposerAdapter(),
+        testApiClient: ApiClient(
+          baseUrl: 'http://fixture.invalid',
+          apiKey: 'fixture-key',
+          httpClient:
+              httpClient ??
+              MockClient((_) async => http.Response('{"data":[]}', 200)),
+        ),
+      ),
+    ),
+  );
+  await _pump(tester);
+}
+
+Future<void> _pump(WidgetTester tester) async {
+  for (var i = 0; i < 5; i++) {
+    await tester.pump();
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+  }
+}
+
+Future<void> _start(WidgetTester tester) async {
+  await tester.enterText(find.byKey(_composer), 'Original task');
+  await tester.tap(find.byKey(_send));
+  await _pump(tester);
+}
+
+void main() {
+  setUp(() {
+    SharedPreferences.setMockInitialValues({'verbose_mode': false});
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('plugins.flutter.io/image_picker'),
+          (_) async => null,
+        );
+  });
+  tearDown(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('plugins.flutter.io/image_picker'),
+          null,
+        );
+  });
+
+  Future<
+    ({
+      GatewayTurnApplicationController controller,
+      _Remote remote,
+      NormalGatewayChatOwner chat,
+    })
+  >
+  prepare(WidgetTester tester, {double textScale = 1, bool emit = true}) async {
+    final remote = _Remote(emit: emit);
+    final controller = GatewayTurnApplicationController();
+    final session = controller.normalSessionFor(
+      _connection,
+      submit: remote.submit,
+      steer: remote.steer,
+      history: (_) async => [],
+    );
+    addTearDown(() async {
+      await controller.close();
+      if (!remote.turn.isCompleted) remote.turn.complete();
+    });
+    await _pumpChat(
+      tester,
+      controller: controller,
+      remote: remote,
+      textScale: textScale,
+    );
+    final chat = session.findChat(_session.id)!;
+    return (controller: controller, remote: remote, chat: chat);
+  }
+
+  testWidgets(
+    'Send and Stop are independent while guidance stays in the active turn',
+    (tester) async {
+      final f = await prepare(tester);
+      expect(find.byKey(_stop), findsNothing);
+      await _start(tester);
+      expect(f.remote.prompts, ['Original task']);
+      expect(find.byKey(_send), findsOneWidget);
+      expect(find.byKey(_stop), findsOneWidget);
+      expect(_button(tester, _send).onPressed, isNotNull);
+      expect(_button(tester, _stop).onPressed, isNotNull);
+      final turn = f.chat.turnId;
+      f.remote.event('message.delta', {'text': 'Before guidance. '});
+      await tester.enterText(find.byKey(_composer), 'Focus on authentication');
+      // Captured callbacks must not bypass synchronous duplicate admission.
+      final send = _button(tester, _send).onPressed!;
+      send();
+      send();
+      await _pump(tester);
+      expect(f.remote.guidance, [('stored-chat', 'Focus on authentication')]);
+      expect(_button(tester, _send).onPressed, isNull);
+      expect(_button(tester, _stop).onPressed, isNotNull);
+      expect(tester.widget<TextField>(find.byKey(_composer)).enabled, isTrue);
+      f.remote.ack.complete(true);
+      await _pump(tester);
+      expect(_text(tester), isEmpty);
+      expect(f.chat.turnId, turn);
+      expect(f.chat.snapshot.hasActiveTurn, isTrue);
+      expect(f.remote.prompts, ['Original task']);
+      expect(
+        f.chat.snapshot.displayRows
+            .where((r) => r['role'] == 'user')
+            .map((r) => r['content']),
+        ['Original task', 'Focus on authentication'],
+      );
+      f.remote.event('message.delta', {'text': 'After guidance.'});
+      await _pump(tester);
+      expect(
+        f.chat.snapshot.displayRows.last['content'],
+        'Before guidance. After guidance.',
+      );
+      expect(find.text('Message queued for the current run.'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await _pump(tester);
+      expect(
+        await ComposerDraftStore.read(
+          connectionId: _connection.id,
+          sessionId: _session.id,
+        ),
+        isNull,
+      );
+    },
+  );
+
+  for (final replacement in ['New draft', '', 'Steer this']) {
+    testWidgets(
+      'a held steering ack preserves newer edit ${jsonEncode(replacement)}',
+      (tester) async {
+        final f = await prepare(tester);
+        await _start(tester);
+        await tester.enterText(find.byKey(_composer), 'Steer this');
+        await tester.tap(find.byKey(_send));
+        await _pump(tester);
+        await tester.enterText(find.byKey(_composer), 'Intervening edit');
+        await tester.enterText(find.byKey(_composer), replacement);
+        f.remote.ack.complete(true);
+        await _pump(tester);
+        expect(_text(tester), replacement);
+        expect(f.remote.prompts, hasLength(1));
+        expect(f.remote.guidance, hasLength(1));
+        await tester.pumpWidget(const SizedBox.shrink());
+        await _pump(tester);
+        expect(
+          await ComposerDraftStore.read(
+            connectionId: _connection.id,
+            sessionId: _session.id,
+          ),
+          replacement.isEmpty ? isNull : replacement,
+        );
+      },
+    );
+  }
+
+  for (final outcome in ['rejected', 'unsupported', 'unknown']) {
+    testWidgets(
+      '$outcome steering keeps the draft and never falls back to prompt.submit',
+      (tester) async {
+        final f = await prepare(tester);
+        await _start(tester);
+        await tester.enterText(find.byKey(_composer), 'Keep this instruction');
+        await tester.tap(find.byKey(_send));
+        await _pump(tester);
+        if (outcome == 'rejected') {
+          f.remote.ack.complete(false);
+        } else {
+          f.remote.ack.completeError(
+            JsonRpcError(
+              'session.steer',
+              outcome,
+              code: outcome == 'unsupported' ? -32601 : null,
+            ),
+          );
+        }
+        await _pump(tester);
+        expect(_text(tester), 'Keep this instruction');
+        expect(f.remote.prompts, ['Original task']);
+        expect(
+          f.chat.snapshot.displayRows.where((r) => r['role'] == 'user'),
+          hasLength(1),
+        );
+        expect(f.chat.snapshot.hasActiveTurn, isTrue);
+        expect(_button(tester, _send).onPressed, isNotNull);
+        expect(_button(tester, _stop).onPressed, isNotNull);
+        expect(
+          find.textContaining(
+            outcome == 'unknown'
+                ? 'delivery could not be confirmed'
+                : 'could not accept this message',
+          ),
+          findsOneWidget,
+        );
+        await tester.pump(const Duration(seconds: 2));
+        expect(
+          f.remote.guidance,
+          hasLength(1),
+          reason: 'No automatic retry after an uncertain acknowledgement',
+        );
+      },
+    );
+  }
+
+  testWidgets(
+    'empty guidance and pre-wire preparation cannot submit a second prompt',
+    (tester) async {
+      final f = await prepare(tester, emit: false);
+      await _start(tester);
+      expect(_button(tester, _send).onPressed, isNull);
+      expect(f.remote.guidance, isEmpty);
+      f.remote.onSent!();
+      await _pump(tester);
+      await tester.enterText(find.byKey(_composer), '  \n  ');
+      await tester.tap(find.byKey(_send));
+      await _pump(tester);
+      expect(f.remote.guidance, isEmpty);
+      expect(f.remote.prompts, hasLength(1));
+    },
+  );
+
+  testWidgets(
+    'a departed route cannot clear its replacement draft on a late ack',
+    (tester) async {
+      final f = await prepare(tester);
+      await _start(tester);
+      await tester.enterText(find.byKey(_composer), 'First route guidance');
+      await tester.tap(find.byKey(_send));
+      await _pump(tester);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await _pump(tester);
+      await _pumpChat(
+        tester,
+        controller: f.controller,
+        remote: f.remote,
+        initialText: 'Replacement draft',
+      );
+      f.remote.ack.complete(true);
+      await _pump(tester);
+      expect(_text(tester), 'Replacement draft');
+      expect(tester.takeException(), isNull);
+      expect(f.remote.prompts, hasLength(1));
+      await tester.pumpWidget(const SizedBox.shrink());
+      await _pump(tester);
+      expect(
+        await ComposerDraftStore.read(
+          connectionId: _connection.id,
+          sessionId: _session.id,
+        ),
+        'Replacement draft',
+      );
+    },
+  );
+
+  testWidgets(
+    'both 48px controls and multiline editor fit a 320px keyboard viewport at 200%',
+    (tester) async {
+      tester.view.physicalSize = const Size(320, 860);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final f = await prepare(tester, textScale: 2);
+      await _start(tester);
+      tester.view.viewInsets = const FakeViewPadding(bottom: 340);
+      await tester.enterText(
+        find.byKey(_composer),
+        'New direction\nSecond line',
+      );
+      await tester.pump(const Duration(milliseconds: 300));
+      await _pump(tester);
+      final send = tester.getRect(find.byKey(_send));
+      final stop = tester.getRect(find.byKey(_stop));
+      expect(send.size, const Size(48, 48));
+      expect(stop.size, const Size(48, 48));
+      expect(send.overlaps(stop), isFalse);
+      expect(send.bottom, lessThanOrEqualTo(520));
+      expect(stop.bottom, lessThanOrEqualTo(520));
+      expect(tester.getSize(find.byKey(_composer)).width, greaterThan(80));
+      expect(tester.takeException(), isNull);
+      await tester.tap(find.byKey(_send));
+      await _pump(tester);
+      expect(f.remote.guidance.single.$2, 'New direction\nSecond line');
+      f.remote.ack.complete(true);
+      await _pump(tester);
+    },
+  );
+
+  testWidgets(
+    'REST Stop and send cancels the old stream before one new prompt',
+    (tester) async {
+      final client = _RestStreams();
+      await _pumpChat(tester, httpClient: client);
+      await _start(tester);
+      expect(client.prompts, hasLength(1));
+      client.delta(0, 'Partial response');
+      await _pump(tester);
+      expect(find.byKey(_stop), findsOneWidget);
+      expect(find.byTooltip('Stop and send'), findsOneWidget);
+      await tester.enterText(find.byKey(_composer), 'New direction');
+      final send = _button(tester, _send).onPressed!;
+      send();
+      send();
+      await _pump(tester);
+      expect(client.cancelled, [0]);
+      expect(client.order, ['submit:0', 'cancel:0', 'submit:1']);
+      expect(client.prompts, hasLength(2));
+      final messages = client.prompts.last['messages'] as List;
+      expect(messages.last, {'role': 'user', 'content': 'New direction'});
+      expect(
+        messages.where((r) => r['content'] == 'New direction'),
+        hasLength(1),
+      );
+      expect(_text(tester), isEmpty);
+      await tester.enterText(find.byKey(_composer), 'Keep next draft');
+      client.delta(1, 'New reply');
+      client.finish(1);
+      await _pump(tester);
+      expect(_text(tester), 'Keep next draft');
+      expect(find.byKey(_stop), findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await _pump(tester);
+    },
+  );
+}
+
+class _Remote {
+  _Remote({this.emit = true});
+  final bool emit;
+  final turn = Completer<void>();
+  final ack = Completer<bool>();
+  final prompts = <String>[];
+  final guidance = <(String, String)>[];
+  StreamCallback? onEvent;
+  void Function()? onSent;
+
+  Future<void> submit({
+    required String sessionId,
+    required String text,
+    required StreamCallback onEvent,
+    required void Function() onSent,
+  }) async {
+    prompts.add(text);
+    this.onEvent = onEvent;
+    this.onSent = onSent;
+    if (emit) onSent();
+    event('message.start', const {});
+    await turn.future;
+  }
+
+  Future<bool> steer({required String sessionId, required String text}) {
+    guidance.add((sessionId, text));
+    return ack.future;
+  }
+
+  void event(String type, Map<String, dynamic> data) =>
+      onEvent?.call(StreamEvent(type: type, data: data, turnId: 'wire-turn'));
+}
+
+class _RestStreams extends http.BaseClient {
+  final streams = <StreamController<List<int>>>[];
+  final prompts = <Map<String, dynamic>>[];
+  final cancelled = <int>[];
+  final order = <String>[];
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    if (request.method == 'POST' &&
+        request.url.path.endsWith('/v1/chat/completions')) {
+      final body = await request.finalize().bytesToString();
+      final index = streams.length;
+      prompts.add(jsonDecode(body) as Map<String, dynamic>);
+      order.add('submit:$index');
+      final stream = StreamController<List<int>>(
+        onCancel: () {
+          cancelled.add(index);
+          order.add('cancel:$index');
+        },
+      );
+      streams.add(stream);
+      return http.StreamedResponse(
+        stream.stream,
+        200,
+        headers: {'content-type': 'text/event-stream'},
+      );
+    }
+    return http.StreamedResponse(
+      Stream.value(utf8.encode('{"data":[]}')),
+      200,
+      headers: {'content-type': 'application/json'},
+    );
+  }
+
+  void delta(int index, String text) => streams[index].add(
+    utf8.encode(
+      'data: ${jsonEncode({
+        'choices': [
+          {
+            'delta': {'content': text},
+          },
+        ],
+      })}\n\n',
+    ),
+  );
+  void finish(int index) {
+    streams[index].add(utf8.encode('data: [DONE]\n\n'));
+    unawaited(streams[index].close());
+  }
+}

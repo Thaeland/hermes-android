@@ -22,6 +22,12 @@ shows only the three latest releases.
 
 ### Fixed
 
+- Keep separate Stop and Send controls while Hermes is responding. Remote
+  Gateway sends guidance through `session.steer` without starting another turn;
+  legacy REST explicitly stops its current response before sending a new one.
+- Preserve newer composer edits while guidance is awaiting acknowledgement.
+  Rejected or unconfirmed guidance keeps the draft, with no automatic resend or
+  interrupt fallback. Both controls retain 48 dp targets on narrow screens.
 - Populate Activity from actual app-owned turn observations and honest gateway
   update metadata. Retain compression roots across restart and navigate older
   activity to the current conversation without duplicate continuation rows.

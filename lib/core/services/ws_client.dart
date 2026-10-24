@@ -1010,6 +1010,33 @@ class WsClient {
     }
   }
 
+  /// Queues guidance at a safe boundary without interrupting the active turn.
+  /// Never retry this RPC automatically: it has no idempotency key.
+  Future<bool> steerSession(String sessionId, String text) async {
+    final guidance = text.trim();
+    if (guidance.isEmpty) return false;
+    final response = await send('session.steer', {
+      'session_id': sessionId,
+      'text': guidance,
+    });
+    final error = response['error'];
+    if (error != null) {
+      throw _gatewayResponseError(
+        'session.steer',
+        error,
+        fallbackMessage: 'Gateway steer failed',
+      );
+    }
+    final result = response['result'];
+    if (result is Map && result['status'] == 'rejected') return false;
+    if (result is! Map ||
+        result['status'] != 'queued' ||
+        result['text'] != guidance) {
+      throw JsonRpcError('session.steer', 'Invalid steering acknowledgement');
+    }
+    return true;
+  }
+
   /// Cooperatively interrupts the active turn for one gateway session.
   Future<void> interruptSession(String sessionId) async {
     final response = await send('session.interrupt', {'session_id': sessionId});

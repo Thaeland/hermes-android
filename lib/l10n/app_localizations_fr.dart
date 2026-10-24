@@ -25,6 +25,21 @@ class AppLocalizationsFr extends AppLocalizations {
   String get background_report_collapse => 'Réduire le rapport';
 
   @override
+  String get stop_and_send => 'Arrêter et envoyer';
+
+  @override
+  String get message_queued_for_running_turn =>
+      'Message mis en attente pour l’exécution en cours.';
+
+  @override
+  String get running_message_not_accepted =>
+      'Hermes n’a pas pu accepter ce message. Votre brouillon est conservé ; arrêtez la réponse ou attendez, puis renvoyez-le.';
+
+  @override
+  String get running_message_delivery_unknown =>
+      'L’envoi n’a pas pu être confirmé. Votre brouillon est conservé. Vérifiez la conversation avant de réessayer.';
+
+  @override
   String get saved_history_heading => 'Saved history';
 
   @override

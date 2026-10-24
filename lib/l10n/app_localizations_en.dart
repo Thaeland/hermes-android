@@ -25,6 +25,21 @@ class AppLocalizationsEn extends AppLocalizations {
   String get background_report_collapse => 'Collapse report';
 
   @override
+  String get stop_and_send => 'Stop and send';
+
+  @override
+  String get message_queued_for_running_turn =>
+      'Message queued for the current run.';
+
+  @override
+  String get running_message_not_accepted =>
+      'Hermes could not accept this message. Your draft was kept; stop the response or wait, then send again.';
+
+  @override
+  String get running_message_delivery_unknown =>
+      'Message delivery could not be confirmed. Your draft was kept. Check the chat before retrying.';
+
+  @override
   String get saved_history_heading => 'Saved history';
 
   @override

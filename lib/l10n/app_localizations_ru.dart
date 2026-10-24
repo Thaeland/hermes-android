@@ -25,6 +25,21 @@ class AppLocalizationsRu extends AppLocalizations {
   String get background_report_collapse => 'Свернуть отчёт';
 
   @override
+  String get stop_and_send => 'Остановить и отправить';
+
+  @override
+  String get message_queued_for_running_turn =>
+      'Сообщение добавлено в очередь текущего запуска.';
+
+  @override
+  String get running_message_not_accepted =>
+      'Hermes не смог принять это сообщение. Черновик сохранён. Остановите ответ или подождите, затем отправьте снова.';
+
+  @override
+  String get running_message_delivery_unknown =>
+      'Не удалось подтвердить доставку. Черновик сохранён. Проверьте чат перед повторной отправкой.';
+
+  @override
   String get saved_history_heading => 'Saved history';
 
   @override
