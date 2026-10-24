@@ -1,17 +1,15 @@
 /// The More destination pane.
 ///
-/// The fourth top-level destination of the validated navigation
-/// (Home / Projects / Activity / More). Phase 0 of
-/// `docs/ANDROID_DAILY_DRIVER_ROADMAP.md` requires the shell to expose every
-/// capability instead of hiding it in a drawer, and requires an embedded
-/// Dashboard fallback entry so no capability is blocked while the native UX
-/// catches up.
+/// The fifth top-level destination (Chats / Crons / Projects / Activity / More).
+/// Groups Workspace, Agent and System capabilities, with a Dashboard fallback
+/// for functionality that does not yet have a native screen. Roadmap-only
+/// organisation placeholders are omitted from the menu.
 ///
 /// Two rules drive this file:
 ///
-/// 1. **Never hide a capability.** A surface that is not built yet is listed
-///    as `Coming next`, and a surface the server cannot serve is listed as
-///    disabled *with a precise reason* — never removed from the list.
+/// 1. **Keep supported capabilities discoverable.** A surface the current
+///    connection cannot serve stays disabled *with a precise reason*.
+///    Capabilities exposed in other destinations need not be duplicated here.
 /// 2. **Explain, do not crash.** Availability is data, so tests can assert it
 ///    without pumping a widget, and the pane simply renders it.
 library;
@@ -102,13 +100,6 @@ List<MoreSection> buildMoreSections({
           icon: Icons.inbox_outlined,
         ),
         MoreEntry(
-          id: 'archived-quick',
-          title: l10n.archived_quick_chats,
-          subtitle:
-              l10n.review_or_promote_quick_chats_past_their_retention_period,
-          icon: Icons.archive_outlined,
-        ),
-        MoreEntry(
           id: 'files',
           title: l10n.files,
           subtitle: l10n.browse_the_miniserver_folders_behind_your_projects,
@@ -127,30 +118,7 @@ List<MoreSection> buildMoreSections({
       ],
     ),
     MoreSection(
-      title: l10n.organization,
-      entries: [
-        MoreEntry(
-          id: 'pin-batch-undo',
-          title: l10n.pin_batch_and_undo,
-          subtitle: l10n.cross_device_ordering_and_reversible_bulk_organization,
-          icon: Icons.push_pin_outlined,
-          availability: MoreEntryAvailability.unavailable,
-          unavailableReason: l10n
-              .needs_durable_pin_ordering_batch_mutation_and_undo_contracts_in,
-        ),
-        MoreEntry(
-          id: 'ai-filing',
-          title: l10n.ai_assisted_filing,
-          subtitle: l10n.suggest_projects_and_learn_from_your_corrections,
-          icon: Icons.auto_fix_high_outlined,
-          availability: MoreEntryAvailability.unavailable,
-          unavailableReason: l10n
-              .needs_a_correction_aware_filing_contract_in_the_hermes_gateway,
-        ),
-      ],
-    ),
-    MoreSection(
-      title: l10n.automation,
+      title: l10n.agent,
       entries: [
         MoreEntry(
           id: 'cron',

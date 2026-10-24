@@ -334,7 +334,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get auto_device_default => 'Auto (device default)';
 
   @override
-  String get automation => 'Automation';
+  String get agent => 'Agent';
 
   @override
   String get autonomous_agents => 'Autonomous agents';

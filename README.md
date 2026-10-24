@@ -65,6 +65,8 @@ default screen; the separate Home tab has been removed.
 - **Chats** lists human conversations with search and All, Recent, Unassigned
   and Archived filters. A compact **Needs you / Running now** section appears
   above the list only when the device has observed relevant work.
+  Use **Chats → Archived** for archived conversations, including expired Quick
+  Chats; the duplicate archive entry has been removed from More.
 - **Crons** lists conversations produced by scheduled jobs, including older
   runs and runs whose job has since been deleted. It has its own search and
   All, Recent and Archived filters. Cron conversations do not appear in Chats.

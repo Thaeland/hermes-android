@@ -8,6 +8,9 @@ shows only the three latest releases.
 
 ### Changed
 
+- Remove the unused Organisation section and its **Pin, batch and undo** and
+  **AI-assisted filing** placeholders from More. Rename **Automation** to
+  **Agent**, which groups Cron, Skills and Memory, across all supported languages.
 - Replace the Home tab with a default Chats destination and a second Crons
   destination: Chats, Crons, Projects, Activity, More.
 - Move actionable Needs you / Running now summaries above the human chat list
@@ -58,7 +61,7 @@ shows only the three latest releases.
 
 - Assets is reconstructed from saved `MEDIA:` references, not a server-owned
   catalogue of all attachments, project files or outputs. Referenced files may
-  have expired or been removed. The Organisation placeholders remain gated:
+  have expired or been removed. Organisation placeholders are not shown:
   durable batch undo and correction-learning AI filing need separate contracts.
 - This development slice was assisted by Hermes Agent; it is not a published
   release and does not change the current stable version.

@@ -326,7 +326,7 @@ class AppLocalizationsZh extends AppLocalizations {
   String get auto_device_default => '自动（设备默认）';
 
   @override
-  String get automation => '自动化';
+  String get agent => '智能体';
 
   @override
   String get autonomous_agents => '自主智能体';
@@ -3254,7 +3254,7 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   String get auto_device_default => '自动（设备默认）';
 
   @override
-  String get automation => '自动化';
+  String get agent => '智能体';
 
   @override
   String get autonomous_agents => '自主智能体';

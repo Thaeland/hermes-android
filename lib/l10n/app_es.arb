@@ -90,7 +90,7 @@
   "attachment_drafts": "Borradores de adjuntos",
   "attachment_of": "Adjunto {index} de {total}",
   "auto_device_default": "Automático (predeterminado del dispositivo)",
-  "automation": "Automatización",
+  "agent": "Agente",
   "autonomous_agents": "Agentes autónomos",
   "background_recovery_unavailable_legacy_transport": "Recuperación en segundo plano no disponible: transporte heredado",
   "background_task_completed": "Tarea en segundo plano completada",

@@ -338,7 +338,7 @@ class AppLocalizationsPt extends AppLocalizations {
   String get auto_device_default => 'Automático (padrão do dispositivo)';
 
   @override
-  String get automation => 'Automação';
+  String get agent => 'Agente';
 
   @override
   String get autonomous_agents => 'Agentes autônomos';
@@ -3374,7 +3374,7 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String get auto_device_default => 'Automático (padrão do dispositivo)';
 
   @override
-  String get automation => 'Automação';
+  String get agent => 'Agente';
 
   @override
   String get autonomous_agents => 'Agentes autônomos';

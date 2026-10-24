@@ -90,7 +90,7 @@
   "attachment_drafts": "Rascunhos de anexos",
   "attachment_of": "Anexo {index} de {total}",
   "auto_device_default": "Automático (padrão do dispositivo)",
-  "automation": "Automação",
+  "agent": "Agente",
   "autonomous_agents": "Agentes autônomos",
   "background_recovery_unavailable_legacy_transport": "Recuperação em segundo plano indisponível — transporte legado",
   "background_task_completed": "Tarefa em segundo plano concluída",
