@@ -141,6 +141,10 @@ abstract final class ComposerDraftStore {
   }) async {
     try {
       await _serialized((prefs) async {
+        // Activity/WAL reloads can roll back the speculative cache during a
+        // draft write. Join draft writes, then read the physical source,
+        // canonical value and clear marker before migrating.
+        await prefs.reload();
         if (isCurrent?.call() == false) return;
         final local = _resolve(prefs, connectionId, localSessionId);
         final stored = _resolve(prefs, connectionId, storedSessionId);
@@ -194,6 +198,9 @@ abstract final class ComposerDraftStore {
   }) async {
     try {
       return await _serialized((prefs) async {
+        // Remount hydration must observe physical drafts, not a process-wide
+        // cache that an older unrelated reload may have replaced during save.
+        await prefs.reload();
         final value = prefs.getString(_resolve(prefs, connectionId, sessionId));
         return (value == null || value.trim().isEmpty) ? null : value;
       });
