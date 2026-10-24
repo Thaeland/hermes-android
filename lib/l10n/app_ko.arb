@@ -152,6 +152,7 @@
   "could_not_load_files": "파일을 불러올 수 없습니다",
   "could_not_load_models_for_this_profile": "이 프로필의 모델을 불러올 수 없습니다: {error}",
   "could_not_load_more_chats": "채팅을 더 불러올 수 없습니다: {error}",
+  "could_not_open_link": "이 링크를 열 수 없습니다.",
   "could_not_open_the_hermes_dashboard": "Hermes 대시보드를 열 수 없습니다.",
   "could_not_open_this_project": "이 프로젝트를 열 수 없습니다",
   "could_not_preview_file": "파일을 미리 볼 수 없습니다",

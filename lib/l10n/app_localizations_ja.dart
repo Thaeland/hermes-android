@@ -552,6 +552,9 @@ class AppLocalizationsJa extends AppLocalizations {
   }
 
   @override
+  String get could_not_open_link => 'このリンクを開けませんでした。';
+
+  @override
   String get could_not_open_the_hermes_dashboard => 'Hermesダッシュボードを開けませんでした。';
 
   @override

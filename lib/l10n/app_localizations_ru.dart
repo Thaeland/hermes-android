@@ -563,6 +563,9 @@ class AppLocalizationsRu extends AppLocalizations {
   }
 
   @override
+  String get could_not_open_link => 'Не удалось открыть эту ссылку.';
+
+  @override
   String get could_not_open_the_hermes_dashboard =>
       'Не удалось открыть панель управления Hermes.';
 

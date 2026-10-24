@@ -63,6 +63,7 @@ import '../widgets/background_report_card.dart';
 import '../widgets/gateway_activity_card.dart';
 import '../widgets/chat_context_header.dart';
 import '../widgets/markdown_code_block.dart';
+import '../widgets/markdown_link_handler.dart';
 import '../widgets/attachment_draft_tile.dart';
 import '../widgets/chat_end_affordance.dart';
 import '../widgets/gateway_approval_dialog.dart';
@@ -6057,6 +6058,8 @@ class MessageBubble extends StatelessWidget {
             child: MarkdownBody(
               data: content,
               selectable: true,
+              onTapLink: (_, href, _) =>
+                  unawaited(_openLink(dialogContext, href)),
               styleSheet: _messageStyleSheet(
                 dialogTheme,
                 HermesTokens.of(dialogContext),
@@ -6074,6 +6077,24 @@ class MessageBubble extends StatelessWidget {
         );
       },
     );
+  }
+
+  Future<void> _openLink(BuildContext context, String? href) async {
+    final path = href == null ? null : mediaPathFromArtifactHref(href);
+    if (path == null) {
+      await openMarkdownWebLink(context, href);
+      return;
+    }
+    final filesClient = !isUser ? mediaFilesClient : null;
+    if (filesClient == null) return;
+    try {
+      await downloadAndShareMediaFile(
+        filesClient: filesClient,
+        ref: MediaTagRef(path: path),
+      );
+    } catch (e) {
+      debugPrint('media link download failed: $e');
+    }
   }
 
   MarkdownStyleSheet _messageStyleSheet(
@@ -6128,13 +6149,13 @@ class MessageBubble extends StatelessWidget {
   /// documentation, not a delivery. Mid-line refs stay in the prose as
   /// markdown links so they never fragment a list item or table row.
   List<Widget> _renderContent(
-    ThemeData theme,
+    BuildContext context,
     HermesTokens tokens,
     bool isUser,
     Color assistantTextColor,
   ) {
     final styleSheet = _messageStyleSheet(
-      theme,
+      Theme.of(context),
       tokens,
       isUser: isUser,
       assistantTextColor: assistantTextColor,
@@ -6144,22 +6165,7 @@ class MessageBubble extends StatelessWidget {
       data: text,
       selectable: false,
       styleSheet: styleSheet,
-      onTapLink: filesClient == null
-          ? null
-          : (linkText, href, title) {
-              final path = href == null
-                  ? null
-                  : mediaPathFromArtifactHref(href);
-              if (path == null) return;
-              unawaited(
-                downloadAndShareMediaFile(
-                  filesClient: filesClient,
-                  ref: MediaTagRef(path: path),
-                ).catchError((Object e) {
-                  debugPrint('media link download failed: $e');
-                }),
-              );
-            },
+      onTapLink: (_, href, _) => unawaited(_openLink(context, href)),
     );
 
     final parseMedia = filesClient != null;
@@ -6412,7 +6418,7 @@ class MessageBubble extends StatelessWidget {
             // language, copy, and wrap controls. User bubbles never parse
             // MEDIA: — the contract is assistant-side delivery, and quoted
             // tags in a prompt must stay verbatim.
-            ..._renderContent(theme, tokens, isUser, assistantTextColor),
+            ..._renderContent(context, tokens, isUser, assistantTextColor),
             SizedBox(height: density.bodyBottomGap),
           ],
         ),

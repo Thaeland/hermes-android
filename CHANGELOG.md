@@ -22,6 +22,9 @@ shows only the three latest releases.
 
 ### Fixed
 
+- Open web links in chat replies, selected message text and delegated-task
+  transcripts in the external browser when tapped. Preserve gateway file
+  downloads and keep code examples and non-web URI schemes inert.
 - Populate Activity from actual app-owned turn observations and honest gateway
   update metadata. Retain compression roots across restart and navigate older
   activity to the current conversation without duplicate continuation rows.

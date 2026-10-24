@@ -566,6 +566,9 @@ class AppLocalizationsPt extends AppLocalizations {
   }
 
   @override
+  String get could_not_open_link => 'Não foi possível abrir este link.';
+
+  @override
   String get could_not_open_the_hermes_dashboard =>
       'Não foi possível abrir o painel do Hermes.';
 
@@ -3583,6 +3586,9 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   String could_not_load_more_chats(Object error) {
     return 'Não foi possível carregar mais chats: $error';
   }
+
+  @override
+  String get could_not_open_link => 'Não foi possível abrir este link.';
 
   @override
   String get could_not_open_the_hermes_dashboard =>

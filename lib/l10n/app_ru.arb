@@ -152,6 +152,7 @@
   "could_not_load_files": "Не удалось загрузить файлы",
   "could_not_load_models_for_this_profile": "Не удалось загрузить модели для этого профиля: {error}",
   "could_not_load_more_chats": "Не удалось загрузить больше чатов: {error}",
+  "could_not_open_link": "Не удалось открыть эту ссылку.",
   "could_not_open_the_hermes_dashboard": "Не удалось открыть панель управления Hermes.",
   "could_not_open_this_project": "Не удалось открыть этот проект",
   "could_not_preview_file": "Не удалось показать предпросмотр файла",

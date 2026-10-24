@@ -7,6 +7,7 @@ import '../controllers/delegated_task_controller.dart';
 import '../services/delegated_task_history.dart';
 import '../l10n/l10n.dart';
 import 'delegated_task_labels.dart';
+import 'markdown_link_handler.dart';
 
 /// A modal route keeps the parent chat, composer and scroll controller mounted.
 Future<void> showDelegatedTaskTimeline(
@@ -274,6 +275,8 @@ class _TranscriptRow extends StatelessWidget {
               MarkdownBody(
                 data: row.text,
                 selectable: true,
+                onTapLink: (_, href, _) =>
+                    unawaited(openMarkdownWebLink(context, href)),
                 sizedImageBuilder: (config) =>
                     Text(config.alt ?? context.l10n.task_image_placeholder),
               ),

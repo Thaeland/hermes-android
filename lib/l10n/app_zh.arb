@@ -152,6 +152,7 @@
   "could_not_load_files": "无法加载文件",
   "could_not_load_models_for_this_profile": "无法为该配置档案加载模型：{error}",
   "could_not_load_more_chats": "无法加载更多聊天：{error}",
+  "could_not_open_link": "无法打开此链接。",
   "could_not_open_the_hermes_dashboard": "无法打开 Hermes 仪表盘。",
   "could_not_open_this_project": "无法打开此项目",
   "could_not_preview_file": "无法预览文件",
