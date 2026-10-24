@@ -2740,8 +2740,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get choose_certificate => 'Choose certificate';
 
   @override
-  String get certificate_password_optional =>
-      'Certificate password (only if the file asks for one)';
+  String get certificate_password => 'Certificate password';
+
+  @override
+  String get this_certificate_is_password_protected =>
+      'This certificate is password-protected. It opens as you type.';
+
+  @override
+  String get enter_the_certificate_password_to_finish_loading_it =>
+      'Enter the certificate password to finish loading the certificate you chose.';
 
   @override
   String get client_certificate_required =>

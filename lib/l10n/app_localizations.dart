@@ -4672,11 +4672,23 @@ abstract class AppLocalizations {
   /// **'Choose certificate'**
   String get choose_certificate;
 
-  /// No description provided for @certificate_password_optional.
+  /// No description provided for @certificate_password.
   ///
   /// In en, this message translates to:
-  /// **'Certificate password (only if the file asks for one)'**
-  String get certificate_password_optional;
+  /// **'Certificate password'**
+  String get certificate_password;
+
+  /// No description provided for @this_certificate_is_password_protected.
+  ///
+  /// In en, this message translates to:
+  /// **'This certificate is password-protected. It opens as you type.'**
+  String get this_certificate_is_password_protected;
+
+  /// No description provided for @enter_the_certificate_password_to_finish_loading_it.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter the certificate password to finish loading the certificate you chose.'**
+  String get enter_the_certificate_password_to_finish_loading_it;
 
   /// No description provided for @client_certificate_required.
   ///

@@ -759,7 +759,9 @@
   "client_certificate_mtls_description": "Present a certificate when an HTTPS proxy requires mutual TLS.",
   "client_certificate_https_only": "Client certificates are only used for HTTPS connections.",
   "choose_certificate": "Choose certificate",
-  "certificate_password_optional": "Certificate password (only if the file asks for one)",
+  "certificate_password": "Certificate password",
+  "this_certificate_is_password_protected": "This certificate is password-protected. It opens as you type.",
+  "enter_the_certificate_password_to_finish_loading_it": "Enter the certificate password to finish loading the certificate you chose.",
   "client_certificate_required": "Load a client certificate or turn off the client certificate option.",
   "client_certificate_loaded": "Loaded: {label}",
   "@client_certificate_loaded": {

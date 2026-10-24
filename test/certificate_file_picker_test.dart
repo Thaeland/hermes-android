@@ -99,6 +99,12 @@ Future<_FakeFilePicker> _openClientCertificateSection(
     find.byKey(const Key('connection_client_certificate_pick_key_pem')),
     findsNothing,
   );
+  // The password field must not appear until a chosen file actually asks for
+  // one: showing it up front implied a password was required before picking.
+  expect(
+    find.byKey(const Key('connection_client_certificate_password')),
+    findsNothing,
+  );
   return picker;
 }
 

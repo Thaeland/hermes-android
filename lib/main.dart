@@ -2531,6 +2531,9 @@ class _AddDialogState extends State<_AddDialog> {
         _pemCertificateName = null;
         _pemPrivateKeyBytes = null;
         _pemPrivateKeyName = null;
+        _pendingCertificateBytes = null;
+        _pendingCertificateName = null;
+        _pendingPasswordBytes = false;
         _importingCertificate = false;
       });
       return config;
@@ -2589,7 +2592,13 @@ class _AddDialogState extends State<_AddDialog> {
     if (_importingCertificate) return;
     final clientCertificate = _useClientCertificate ? _clientCertificate : null;
     if (_useClientCertificate && clientCertificate == null) {
-      setState(() => _error = context.l10n.client_certificate_required);
+      // A file was picked but could not be opened yet. Saying "load a client
+      // certificate" here reads as though the pick was never made.
+      setState(() {
+        _error = _pendingPasswordBytes
+            ? context.l10n.enter_the_certificate_password_to_finish_loading_it
+            : context.l10n.client_certificate_required;
+      });
       return;
     }
 
@@ -2961,6 +2970,9 @@ class _AddDialogState extends State<_AddDialog> {
                             _pemCertificateName = null;
                             _pemPrivateKeyBytes = null;
                             _pemPrivateKeyName = null;
+                            _pendingCertificateBytes = null;
+                            _pendingCertificateName = null;
+                            _pendingPasswordBytes = false;
                           }
                         });
                       },
@@ -2979,26 +2991,44 @@ class _AddDialogState extends State<_AddDialog> {
                       ).colorScheme.primary.withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Row(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(Icons.verified_user_outlined, size: 20),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            context.l10n.client_certificate_loaded(
-                              certificate.label,
+                        Row(
+                          children: [
+                            const Icon(Icons.verified_user_outlined, size: 20),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                context.l10n.client_certificate_loaded(
+                                  certificate.label,
+                                ),
+                                style: const TextStyle(fontSize: 13),
+                              ),
                             ),
-                            style: const TextStyle(fontSize: 13),
-                          ),
+                          ],
                         ),
-                        TextButton(
-                          key: const Key(
-                            'connection_client_certificate_remove',
+                        // Stacked, not side by side: a long label next to the
+                        // button squeezed the file name into an unreadable
+                        // sliver.
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton(
+                            key: const Key(
+                              'connection_client_certificate_remove',
+                            ),
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 4,
+                              ),
+                              minimumSize: const Size(0, 36),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            onPressed: _validating || _importingCertificate
+                                ? null
+                                : _removeClientCertificate,
+                            child: Text(context.l10n.remove_certificate),
                           ),
-                          onPressed: _validating || _importingCertificate
-                              ? null
-                              : _removeClientCertificate,
-                          child: Text(context.l10n.remove_certificate),
                         ),
                       ],
                     ),
@@ -3032,16 +3062,24 @@ class _AddDialogState extends State<_AddDialog> {
                       ),
                     ),
                   ],
-                  const SizedBox(height: 8),
-                  TextField(
-                    key: const Key('connection_client_certificate_password'),
-                    controller: _certificatePassword,
-                    decoration: InputDecoration(
-                      labelText: context.l10n.certificate_password_optional,
+                  // Shown only when the picked file actually asked for a
+                  // password. Rendering it up front implied the password had to
+                  // be supplied before choosing a certificate.
+                  if (_pendingPasswordBytes) ...[
+                    const SizedBox(height: 8),
+                    TextField(
+                      key: const Key('connection_client_certificate_password'),
+                      controller: _certificatePassword,
+                      autofocus: true,
+                      decoration: InputDecoration(
+                        labelText: context.l10n.certificate_password,
+                        helperText: context.l10n.this_certificate_is_password_protected,
+                        helperMaxLines: 2,
+                      ),
+                      obscureText: true,
+                      enabled: !_validating && !_importingCertificate,
                     ),
-                    obscureText: true,
-                    enabled: !_validating && !_importingCertificate,
-                  ),
+                  ],
                 ],
                 if (_importingCertificate) ...[
                   const SizedBox(height: 8),
