@@ -6,8 +6,18 @@ shows only the three latest releases.
 
 ## [Unreleased]
 
+## [3.0.0-rc.2] - 2026-10-24
+
+Testing candidate only. The latest stable release remains **2.1.33**. Back up
+settings before installing; phone acceptance is required before stable 3.0
+promotion or GitLab/F-Droid updates. Base code **3001** produces split codes
+**30011**, **30012** and **30013**, above RC1's **30001–30003**.
+
 ### Changed
 
+- Keep quiet conversation presentation separate from Verbose Mode details.
+  Quiet mode requires source-local reply-completion evidence; expandable
+  verbose details start collapsed and preserve manual choices during a visit.
 - Remove the unused Organisation section and its **Pin, batch and undo** and
   **AI-assisted filing** placeholders from More. Rename **Automation** to
   **Agent**, which groups Cron, Skills and Memory, across all supported languages.
@@ -25,6 +35,8 @@ shows only the three latest releases.
 
 ### Fixed
 
+- Open chats at the latest visible message without pulling a reader away from
+  older history during refreshes, streaming or delegated-task inspection (#186).
 - Make certificate files selectable on Android/iOS and ask for protected-file
   passwords after selection. Retain encrypted PEM retries and certificate-chain
   separators; reject an unusable PEM identity before reporting it loaded (#187).
@@ -88,8 +100,8 @@ shows only the three latest releases.
   catalogue of all attachments, project files or outputs. Referenced files may
   have expired or been removed. Organisation placeholders are not shown:
   durable batch undo and correction-learning AI filing need separate contracts.
-- This development slice was assisted by Hermes Agent; it is not a published
-  release and does not change the current stable version.
+- This testing candidate was assisted by Hermes Agent. Automated verification
+  does not establish phone acceptance, and the current stable version is unchanged.
 
 ### Thanks
 

@@ -36,21 +36,35 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
 - Previous upstream releases remain available from the
   [Releases](https://github.com/rusty4444/hermes-android/releases) page.
 
-## Integrated 3.0 release-candidate hardening
+## 3.0 testing release — RC2
+
+The testing candidate is **3.0.0-rc.2** (base build **3001**). It is a GitHub
+prerelease, not the stable release; **2.1.33 remains latest stable**. Back up app
+settings before installing. RC2 uses the existing production package and signer
+and can upgrade RC1 in place. Its split codes are **30011** (armeabi-v7a),
+**30012** (arm64-v8a) and **30013** (x86_64).
+
+RC2 brings generated-file previews and direct downloads, tappable web links,
+latest-message opening, separate Stop and Send controls, quiet conversation
+presentation, a simpler More menu and improved client-certificate import.
+Download it from the [RC2 testing release](https://github.com/rusty4444/hermes-android/releases/tag/v3.0.0-rc.2).
+Phone acceptance is required before stable 3.0 promotion or GitLab/F-Droid updates.
+
+### Integrated release-candidate hardening
 
 This branch preserves the published v2.1.33 features and adds stricter submission
 observation epochs, confirmed background-policy ownership, targeted notification
 cleanup, canonical draft ownership and paired push registration fences.
 Tool expansion remains per visit: choices survive lazy scrolling and identity
 binding, but a genuinely closed and reopened chat starts collapsed. Covering a
-retained route is not a new visit. This is an unreleased candidate; device acceptance and publication gates remain
-separate.
+retained route is not a new visit. This is a testing candidate; device acceptance
+and stable publication gates remain separate.
 See the [background-work guide](docs/android-background-work.md),
 [Android push guide](docs/mobile-push-android.md) and
 [server companion guide](docs/mobile-push-server.md) for the additional contracts
 and acceptance checks. Upgrade the companion together with the fenced client.
 
-The unreleased integration also preserves main's compact delegated-task labels
+The candidate also preserves main's compact delegated-task labels
 and full read-only task details. With **Verbose Mode off**, chat shows user
 messages and completed Hermes replies; tools, reasoning, task cards, commentary
 and partial replies stay out of the conversation. The existing bottom status bar
@@ -66,7 +80,7 @@ received output remain independent sources, labelled in Verbose mode, with
 possible repetition across them. See [Chat presentation](docs/chat-presentation.md)
 and the [neutral integration and verification](docs/reviews/main-81d-neutral-integration.md).
 
-## Navigation changes (unreleased)
+## Navigation changes in the 3.0 candidate
 
 The bottom bar is **Chats → Crons → Projects → Activity → More**. Chats is the
 default screen; the separate Home tab has been removed.
@@ -89,7 +103,7 @@ Older history is not silently cut off after 2,000 rows. Archived history uses
 the saved dashboard connection and profile; a failed read keeps available
 rows and offers Retry rather than claiming the archive is empty.
 
-## Unreleased development
+## Additional 3.0 testing features
 
 - **Send while Hermes is working:** the composer keeps separate **Stop** and
   **Send** buttons. Remote Gateway sends text as guidance for the current run
