@@ -1899,6 +1899,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         (notification is OverscrollNotification &&
             notification.dragDetails != null);
     if (isDirectUserScroll) {
+      _initialEndFramesRemaining = 0;
       _scrollCoordinator.updateFromUserScroll(
         isNearEnd: _isNearEnd(notification.metrics),
       );
@@ -2000,6 +2001,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       }
       _scheduleNextInitialEndFrame();
     });
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   // Value equality permits harmless SavedConnection rehydration, but fences
@@ -2120,7 +2122,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _messages = messages;
         _error = null;
       });
-      _scheduleInitialEndAlignment();
       if (_normalChat != null) {
         _applyNormalSnapshot(_normalChat!.snapshot, hydrateHistory: false);
       }
@@ -2135,7 +2136,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (errStr.contains('404') || errStr.contains('not found')) {
         if (_pendingReattachResync || _messages.isNotEmpty) return;
         setState(() => _messages = []);
-        _scheduleInitialEndAlignment();
         return;
       }
       setState(() => _error = errStr);
@@ -2273,7 +2273,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (normalSnapshot != null) {
         _applyNormalSnapshot(normalSnapshot, hydrateHistory: false);
       }
-      _scheduleInitialEndAlignment();
     } catch (_) {
       // A stale failure cannot resurrect pending work after a newer success.
       if (_historyReadAttached(read) &&
@@ -5889,6 +5888,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       for (final section in sections)
         if (section.source == ChatDisplaySource.received) ...section.outcomes,
     };
+    // Retained owner content can be visible while the first HTTP read is still
+    // pending, rejected by an active turn, or unavailable. Align that first
+    // actual transcript, not the eventual completion of a network request.
+    if (displayMessages.isNotEmpty &&
+        !_scrollCoordinator.initialEndAlignmentConsumed) {
+      _scheduleInitialEndAlignment();
+    }
     final cellIndices = <Key, int>{
       for (var i = 0; i < cells.length; i++)
         cells[i].key: i + (_historyWindow.hasOlder ? 1 : 0),
@@ -5954,7 +5960,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ),
       ),
     );
-    if (!_loading && _error == null) return list;
+    // Keep the Scrollable mounted when loading/error chrome changes; replacing
+    // its parent would discard the opening alignment or the reader's position.
     return Column(
       children: [
         if (_loading) const LinearProgressIndicator(),

@@ -19,6 +19,7 @@ import 'package:hermes_android/core/services/connection_manager.dart';
 import 'package:hermes_android/core/services/desktop_gateway_client.dart';
 import 'package:hermes_android/core/services/ws_client.dart';
 import 'package:hermes_android/core/services/normal_gateway_application_session.dart';
+import 'package:hermes_android/core/services/gateway_turn_application_controller.dart';
 import 'package:hermes_android/core/utils/chat_history_scroll.dart';
 import 'package:hermes_android/core/widgets/chat_end_affordance.dart';
 import 'package:hermes_android/core/widgets/gateway_insight_card.dart';
@@ -706,6 +707,199 @@ void main() {
       },
     );
 
+    for (final remote in [false, true]) {
+      testWidgets(
+        'opens mixed-height ${remote ? 'Remote' : 'REST'} history at the latest message on a phone',
+        (tester) async {
+          tester.view.devicePixelRatio = 1;
+          tester.view.physicalSize = const Size(360, 720);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          addTearDown(tester.view.resetPhysicalSize);
+          final messages = [
+            for (var index = 0; index < 48; index++)
+              {
+                'id': index + 1,
+                'role': index.isEven ? 'user' : 'assistant',
+                'content': index == 47
+                    ? 'Latest reply'
+                    : 'Message $index\n${List.filled(index < 16 ? 80 : 2, 'History line').join('\n')}',
+              },
+          ];
+          await _pumpChat(
+            tester,
+            client: _ControlledChatHttpClient(messages),
+            connectionId: 'mixed-height-$remote',
+            sessionId: 'mixed-height-$remote',
+            remoteSubmit: remote ? _ControlledRemotePrompt().submit : null,
+          );
+
+          final controller = _chatListController(tester);
+          expect(
+            controller.position.pixels,
+            closeTo(controller.position.maxScrollExtent, 1),
+          );
+          final latest = find.byWidgetPredicate(
+            (widget) =>
+                widget is MessageBubble && widget.content == 'Latest reply',
+          );
+          expect(latest, findsOneWidget);
+          expect(
+            tester.getRect(latest).bottom,
+            lessThanOrEqualTo(
+              tester.getRect(find.byType(ListView).first).bottom,
+            ),
+          );
+          expect(find.bySemanticsLabel('Go to end'), findsNothing);
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox.shrink());
+        },
+      );
+    }
+
+    for (final (status, readHistory) in [
+      (200, false),
+      (200, true),
+      (503, true),
+    ]) {
+      testWidgets(
+        'opens retained Remote history at end before latest read (status=$status, reading=$readHistory)',
+        (tester) async {
+          final controller = GatewayTurnApplicationController();
+          addTearDown(controller.close);
+          final remote = _ControlledRemotePrompt();
+          final historyGate = Completer<void>();
+          addTearDown(() {
+            if (!historyGate.isCompleted) historyGate.complete();
+          });
+          final messages = [
+            for (final (index, row) in _longHistory().indexed)
+              {'id': index + 1, ...row},
+          ];
+          final connection = SavedConnection(
+            id: 'retained-opening',
+            label: 'Fixture',
+            host: 'fixture.example',
+            port: 8642,
+            apiKey: 'synthetic-key',
+          );
+          final session = controller.normalSessionFor(
+            connection,
+            submit: remote.submit,
+          );
+          session
+              .chatFor(
+                'retained-opening',
+                storedSessionId: 'retained-opening',
+                title: 'Fixture chat',
+              )
+              .observeHistory(messages);
+
+          await _pumpChat(
+            tester,
+            client: _ControlledChatHttpClient(
+              messages,
+              historyGate: historyGate,
+              historyStatusCode: status,
+            ),
+            connectionId: 'retained-opening',
+            sessionId: 'retained-opening',
+            savedConnection: connection,
+            remoteSubmit: remote.submit,
+            turnController: controller,
+            settle: false,
+          );
+          for (var frame = 0; frame < 16; frame++) {
+            await tester.pump(const Duration(milliseconds: 16));
+          }
+
+          final scroll = _chatListController(tester);
+          expect(scroll.position.maxScrollExtent, greaterThan(0));
+          expect(
+            scroll.position.pixels,
+            closeTo(scroll.position.maxScrollExtent, 1),
+          );
+          expect(historyGate.isCompleted, isFalse);
+          final position = scroll.position;
+          if (readHistory) {
+            await tester.drag(
+              find.byType(ListView).first,
+              const Offset(0, 400),
+            );
+            scroll.jumpTo(320);
+            await tester.pump();
+          }
+          final readingOffset = scroll.position.pixels;
+          historyGate.complete();
+          await tester.pumpAndSettle();
+          expect(scroll.position, same(position));
+          if (readHistory) {
+            expect(scroll.position.pixels, closeTo(readingOffset, 1));
+          } else {
+            expect(
+              scroll.position.pixels,
+              closeTo(scroll.position.maxScrollExtent, 1),
+            );
+          }
+          expect(
+            find.byType(MaterialBanner),
+            status == 200 ? findsNothing : findsOneWidget,
+          );
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox.shrink());
+        },
+      );
+    }
+
+    testWidgets('an empty first read does not consume opening alignment', (
+      tester,
+    ) async {
+      final client = _ControlledChatHttpClient(const []);
+      await _pumpChat(
+        tester,
+        client: client,
+        connectionId: 'empty-opening',
+        sessionId: 'empty-opening',
+      );
+      client.serverMessages = _longHistory();
+      await tester.tap(find.byTooltip('Chat actions'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Refresh'));
+      await tester.pumpAndSettle();
+
+      final scroll = _chatListController(tester);
+      expect(scroll.position.maxScrollExtent, greaterThan(0));
+      expect(
+        scroll.position.pixels,
+        closeTo(scroll.position.maxScrollExtent, 1),
+      );
+      expect(find.bySemanticsLabel('Go to end'), findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+
+    testWidgets('dragging during opening cancels pending end alignment', (
+      tester,
+    ) async {
+      await _pumpChat(
+        tester,
+        client: _ControlledChatHttpClient(_longHistory()),
+        connectionId: 'opening-drag',
+        sessionId: 'opening-drag',
+        settle: false,
+      );
+      await tester.pump();
+      final scroll = _chatListController(tester);
+      await tester.drag(find.byType(ListView).first, const Offset(0, 300));
+      scroll.jumpTo(320);
+      for (var frame = 0; frame < 16; frame++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+
+      expect(scroll.position.pixels, closeTo(320, 1));
+      expect(find.bySemanticsLabel('Go to end'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+
     testWidgets('reopening ignores an old position and returns to end', (
       tester,
     ) async {
@@ -1268,9 +1462,11 @@ Future<void> _pumpChat(
   required _ControlledChatHttpClient client,
   required String connectionId,
   required String sessionId,
+  SavedConnection? savedConnection,
   double textScale = 1,
   EdgeInsets viewInsets = EdgeInsets.zero,
   TestRemotePromptSubmit? remoteSubmit,
+  GatewayTurnApplicationController? turnController,
   TestDesktopConnectionHook? connectionHook,
   NormalGatewayResume? resume,
   Future<String?> Function()? serverFilePicker,
@@ -1294,13 +1490,15 @@ Future<void> _pumpChat(
         child: child!,
       ),
       home: ChatScreen(
-        connection: SavedConnection(
-          id: connectionId,
-          label: 'Fixture',
-          host: 'fixture.example',
-          port: 8642,
-          apiKey: 'synthetic-test-key',
-        ),
+        connection:
+            savedConnection ??
+            SavedConnection(
+              id: connectionId,
+              label: 'Fixture',
+              host: 'fixture.example',
+              port: 8642,
+              apiKey: 'synthetic-test-key',
+            ),
         session: Session(
           id: sessionId,
           title: 'Fixture chat',
@@ -1313,6 +1511,7 @@ Future<void> _pumpChat(
         ),
         testApiClient: apiClient,
         testRemotePromptSubmit: completedStockTurn(remoteSubmit),
+        turnApplicationController: turnController,
         testDesktopConnectionHook: connectionHook,
         testNormalResume: resume,
         testServerFilePicker: serverFilePicker,
@@ -1426,19 +1625,23 @@ class _ControlledChatHttpClient extends http.BaseClient {
   List<Map<String, dynamic>> serverMessages;
   final Completer<void> postStarted = Completer<void>();
   final Completer<void>? historyGate;
+  final int historyStatusCode;
   StreamController<List<int>>? _completionStream;
   String? lastRequestBody;
 
   _ControlledChatHttpClient(
     List<Map<String, dynamic>> messages, {
     this.historyGate,
+    this.historyStatusCode = 200,
   }) : serverMessages = List<Map<String, dynamic>>.from(messages);
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) async {
     if (request.method == 'GET' && request.url.path.endsWith('/messages')) {
       await historyGate?.future;
-      return _jsonResponse({'data': serverMessages});
+      return _jsonResponse({
+        'data': serverMessages,
+      }, statusCode: historyStatusCode);
     }
     if (request.method == 'POST' &&
         request.url.path.endsWith('/v1/chat/completions')) {
