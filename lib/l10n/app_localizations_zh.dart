@@ -9,6 +9,42 @@ class AppLocalizationsZh extends AppLocalizations {
   AppLocalizationsZh([String locale = 'zh']) : super(locale);
 
   @override
+  String get background_task_report => '后台任务';
+
+  @override
+  String get background_process_report => '后台进程';
+
+  @override
+  String get background_report_issues => '已报告问题，展开查看详情。';
+
+  @override
+  String get background_report_expand => '展开报告';
+
+  @override
+  String get background_report_collapse => '收起报告';
+
+  @override
+  String get saved_history_heading => 'Saved history';
+
+  @override
+  String get received_output_heading =>
+      'Received output — match to saved history unconfirmed';
+
+  @override
+  String get received_output_explanation =>
+      'This may also appear in saved history. The app cannot confirm a match.';
+
+  @override
+  String get local_prompt_context => 'Local prompt context';
+
+  @override
+  String get received_output_badge => 'Received · match unconfirmed';
+
+  @override
+  String get received_output_lifetime =>
+      'Received output is kept temporarily in this app session and may be shortened or removed as limits are reached. It may not be available after the app or connection is closed.';
+
+  @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
       '一次性问题。将在 72 小时后自动归档；任何值得保留的内容都会被记住。';
 
@@ -1847,6 +1883,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get trigger_now => '立即触发';
 
   @override
+  String get received_outcome_unknown => '本轮对话已结束 — 结果未确认';
+
+  @override
   String get turn_completed => '本轮对话已完成';
 
   @override
@@ -2698,6 +2737,21 @@ class AppLocalizationsZh extends AppLocalizations {
 /// The translations for Chinese, using the Han script (`zh_Hans`).
 class AppLocalizationsZhHans extends AppLocalizationsZh {
   AppLocalizationsZhHans() : super('zh_Hans');
+
+  @override
+  String get background_task_report => '后台任务';
+
+  @override
+  String get background_process_report => '后台进程';
+
+  @override
+  String get background_report_issues => '已报告问题，展开查看详情。';
+
+  @override
+  String get background_report_expand => '展开报告';
+
+  @override
+  String get background_report_collapse => '收起报告';
 
   @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
@@ -4530,6 +4584,9 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get trigger_now => '立即触发';
+
+  @override
+  String get received_outcome_unknown => '本轮对话已结束 — 结果未确认';
 
   @override
   String get turn_completed => '本轮对话已完成';

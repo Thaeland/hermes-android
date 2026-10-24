@@ -114,6 +114,72 @@ abstract class AppLocalizations {
     Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
   ];
 
+  /// No description provided for @background_task_report.
+  ///
+  /// In en, this message translates to:
+  /// **'Background task'**
+  String get background_task_report;
+
+  /// No description provided for @background_process_report.
+  ///
+  /// In en, this message translates to:
+  /// **'Background process'**
+  String get background_process_report;
+
+  /// No description provided for @background_report_issues.
+  ///
+  /// In en, this message translates to:
+  /// **'Issues reported — expand for details.'**
+  String get background_report_issues;
+
+  /// No description provided for @background_report_expand.
+  ///
+  /// In en, this message translates to:
+  /// **'Expand report'**
+  String get background_report_expand;
+
+  /// No description provided for @background_report_collapse.
+  ///
+  /// In en, this message translates to:
+  /// **'Collapse report'**
+  String get background_report_collapse;
+
+  /// No description provided for @saved_history_heading.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved history'**
+  String get saved_history_heading;
+
+  /// No description provided for @received_output_heading.
+  ///
+  /// In en, this message translates to:
+  /// **'Received output — match to saved history unconfirmed'**
+  String get received_output_heading;
+
+  /// No description provided for @received_output_explanation.
+  ///
+  /// In en, this message translates to:
+  /// **'This may also appear in saved history. The app cannot confirm a match.'**
+  String get received_output_explanation;
+
+  /// No description provided for @local_prompt_context.
+  ///
+  /// In en, this message translates to:
+  /// **'Local prompt context'**
+  String get local_prompt_context;
+
+  /// No description provided for @received_output_badge.
+  ///
+  /// In en, this message translates to:
+  /// **'Received · match unconfirmed'**
+  String get received_output_badge;
+
+  /// No description provided for @received_output_lifetime.
+  ///
+  /// In en, this message translates to:
+  /// **'Received output is kept temporarily in this app session and may be shortened or removed as limits are reached. It may not be available after the app or connection is closed.'**
+  String get received_output_lifetime;
+
   /// No description provided for @a_one_off_question_archives_itself_after_72_hours_anything.
   ///
   /// In en, this message translates to:
@@ -3327,6 +3393,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Trigger now'**
   String get trigger_now;
+
+  /// No description provided for @received_outcome_unknown.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn ended — outcome unconfirmed'**
+  String get received_outcome_unknown;
 
   /// No description provided for @turn_completed.
   ///

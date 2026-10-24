@@ -29,6 +29,14 @@ class RecordingTurnNotificationSink implements TurnNotificationSink {
   /// When set, [requestPermission] throws it.
   Object? permissionError;
 
+  @override
+  Future<bool?> checkPermission() async {
+    permissionCheckCount++;
+    final error = permissionCheckError;
+    if (error != null) throw error;
+    return permissionResult;
+  }
+
   /// When set, [initialize] throws it — mirroring a platform channel that is
   /// unavailable (test environment, missing plugin registration).
   Object? initializeError;
@@ -38,14 +46,6 @@ class RecordingTurnNotificationSink implements TurnNotificationSink {
     initializeCount++;
     final error = initializeError;
     if (error != null) throw error;
-  }
-
-  @override
-  Future<bool?> checkPermission() async {
-    permissionCheckCount++;
-    final error = permissionCheckError;
-    if (error != null) throw error;
-    return permissionResult;
   }
 
   @override

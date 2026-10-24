@@ -5,7 +5,8 @@ import importlib.util
 import sys
 from pathlib import Path
 
-from hermes_constants import get_hermes_home
+from agent.secret_scope import current_secret_scope_home
+from fastapi import HTTPException
 
 # Load only our private library, not __init__.py (register must remain host-owned).
 # A path-qualified name avoids adopting another installed copy's globals.
@@ -20,8 +21,19 @@ if _name not in sys.modules:
     _spec.loader.exec_module(_package)
 _api = importlib.import_module(_name + ".api")
 _config = importlib.import_module(_name + ".config")
-# Hermes' _plugin_route_secret_scope validates ?profile and binds get_hermes_home
-# in the request context (also copied into sync workers). Do not capture launch
-# home or parse client paths/headers here. API stores and lifecycle workers both
-# use the selected profile's immutable on-disk paths.
-router = _api.create_router(lambda: _config.Profile(Path(get_hermes_home()).resolve()))
+
+
+def request_profile():
+    # The real dashboard mount enters _plugin_route_secret_scope first. Its
+    # secret-scope home is stamped by the host AFTER profile-name validation,
+    # including launch/current requests that do not set a home override. Do not
+    # read the query or fall back to process environment/import-time launch home.
+    home = current_secret_scope_home()
+    if not home:
+        raise HTTPException(503, "Vetted dashboard profile scope required")
+    return _config.Profile(Path(home).resolve())
+
+
+# No resources/workers/cache on import. Each request owns immutable paths; Store
+# opens only bounded context-managed connections and retains none after the call.
+router = _api.create_router(request_profile)

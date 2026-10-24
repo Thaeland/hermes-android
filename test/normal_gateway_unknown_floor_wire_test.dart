@@ -1,3 +1,7 @@
+// UNRECONCILED POLICY (second adaptation layer; original case IDs retained).
+// Raw: p2a-unreconciled-_flkt2h9/raw/base.tar::test/normal_gateway_unknown_floor_wire_test.dart
+// Base 4a53e32 blob b008a01bdd2faf51f20a120326fde3828d32340a; SHA256 af075a452b8e1bcf612b7a1aed63c6ca92c2f00d2ca8a49740a20359dd040f5d.
+// See docs/unreconciled-output/ORACLE_MIGRATION.md; unchanged safety remains binding.
 import 'dart:convert';
 import 'dart:io';
 
@@ -12,6 +16,8 @@ import 'package:hermes_android/l10n/app_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/fake_voice_composer_adapter.dart';
+import 'support/unreconciled_policy.dart';
+import 'package:hermes_android/core/utils/chat_display_items.dart';
 
 void main() {
   testWidgets(
@@ -93,8 +99,28 @@ void main() {
       for (var i = 0; i < 8; i++) {
         await tester.pump();
       }
+      expect(owner.snapshot.historyRows.map((row) => row['content']), [
+        'First prompt',
+        'First answer',
+      ]);
+      expect(
+        tester
+            .widgetList<MessageBubble>(
+              inChatSource(
+                find.byType(MessageBubble),
+                ChatDisplaySource.canonical,
+              ),
+            )
+            .map((b) => b.content),
+        ['First prompt', 'First answer'],
+      );
       final bubbles = tester
-          .widgetList<MessageBubble>(find.byType(MessageBubble))
+          .widgetList<MessageBubble>(
+            inChatSource(
+              find.byType(MessageBubble),
+              ChatDisplaySource.received,
+            ),
+          )
           .map(
             (b) => {
               'role': b.isUser ? 'user' : 'assistant',

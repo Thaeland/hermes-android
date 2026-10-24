@@ -46,10 +46,24 @@ class Fixture {
   late final ConnectionManager manager;
   late final SavedConnection connection;
   int capsStatus = 200;
+  int? registrationFence = 1;
+  bool capsEnabled = true;
+  List<String>? scopeModes = ['explicit', 'authorized'];
   bool permission = true;
+  String? enableFailureCode;
+  List<Map<String, String>> options = [
+    {'id': 'test.distributor', 'label': 'Test distributor'},
+  ];
   bool failRevoke = false;
+  String? failCommand;
+  final connectionFences = <String, String>{};
+  final connectionChanges = <String, Set<String>>{};
+  int fenceSequence = 0;
+  Future<void> Function(String, Map<String, dynamic>)? afterCommand;
   Future<http.Response> Function(http.Request)? onPut;
+  Future<http.Response> Function(http.Request)? onCapabilities;
   Future<http.Response> Function(http.Request)? onConfirm;
+  Future<http.Response> Function(http.Request)? onEvents;
   List<Map<String, dynamic>> feed = [];
   int eventPageSize = 100;
   final int expiry = DateTime.now().millisecondsSinceEpoch ~/ 1000 + 3600;
@@ -67,6 +81,7 @@ class Fixture {
       dashboardPrefix: '/dash',
       dashboardUsername: 'fixture-user',
       dashboardPassword: 'fixture-password',
+      gatewayProfile: 'selected-work-profile',
     );
     connection = manager.getConnections().single;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
@@ -77,26 +92,106 @@ class Fixture {
             throw PlatformException(code: 'process-died-before-persist');
           }
           final args = Map<String, dynamic>.from(call.arguments as Map? ?? {});
+          if (call.method == failCommand) {
+            failCommand = null;
+            throw PlatformException(
+              code: 'fixture-process-died-before-persist',
+            );
+          }
           switch (call.method) {
+            case 'connectionFence':
+              final id = args['connection'] as String;
+              if (connectionChanges.values.any((ids) => ids.contains(id))) {
+                throw PlatformException(code: 'account-change-pending');
+              }
+              return {
+                'connection_fence': connectionFences.putIfAbsent(
+                  id,
+                  () => 'fence-${++fenceSequence}',
+                ),
+              };
+            case 'beginConnectionChange':
+              final ids = Set<String>.from(args['connections'] as List);
+              connectionChanges[args['mutation'] as String] = ids;
+              for (final id in ids) {
+                connectionFences.remove(id);
+              }
+              if (ids.contains(native['connection'])) disableNative();
+              await afterCommand?.call(call.method, args);
+              return clone(native);
+            case 'endConnectionChange':
+              connectionChanges.remove(args['mutation']);
+              await afterCommand?.call(call.method, args);
+              return clone(native);
             case 'permission':
               return permission;
             case 'distributors':
               return ['test.distributor'];
+            case 'transportOptions':
+              return options;
             case 'snapshot':
               return clone(native);
             case 'preferences':
               native.addAll(args);
               return clone(native);
             case 'enable':
+              if (enableFailureCode != null) {
+                throw PlatformException(code: enableFailureCode!);
+              }
+              final id = args['connection'] as String;
+              if (connectionChanges.values.any((ids) => ids.contains(id)) ||
+                  connectionFences[id] == null ||
+                  args['connection_fence'] != connectionFences[id]) {
+                throw PlatformException(code: 'stale-account-consent');
+              }
+              connectionFences.remove(id);
               native.addAll({
                 ...args,
                 'enabled': true,
                 'active': false,
                 'installation': 'fixture-installation',
                 'nonce': 'fixture-nonce',
+                'registration_fence': 1,
                 'revision': 1,
                 'generation': 0,
               });
+              final enabledState = clone(native);
+              await afterCommand?.call(call.method, args);
+              return enabledState;
+            case 'recoverRegistration':
+            case 'beginRegistration':
+            case 'beginConfirmation':
+              if (args['nonce'] != native['nonce'] ||
+                  args['revision'] != native['revision'] ||
+                  args['generation'] != native['generation'] ||
+                  native['active'] == true ||
+                  native['enabled'] != true) {
+                throw PlatformException(code: 'stale');
+              }
+              if (call.method == 'recoverRegistration') {
+                native.addAll({
+                  'nonce': 'recovered-nonce-${native['revision']}',
+                  'revision': (native['revision'] as int) + 1,
+                  'generation': 0,
+                  'active': false,
+                });
+                for (final key in [
+                  'registration_attempt',
+                  'confirmation_attempt',
+                  'pending_until',
+                  'challenges',
+                  'tap',
+                  'seen',
+                  'issued',
+                ]) {
+                  native.remove(key);
+                }
+              } else if (call.method == 'beginRegistration') {
+                native['registration_attempt'] = true;
+                native['pending_until'] = expiry - 3300;
+              } else {
+                native['confirmation_attempt'] = true;
+              }
               return clone(native);
             case 'generation':
               if (args['nonce'] != native['nonce'] ||
@@ -105,6 +200,7 @@ class Fixture {
                 throw PlatformException(code: 'stale');
               }
               native['generation'] = args['generation'];
+              native.remove('registration_attempt');
               return clone(native);
             case 'activate':
               if (args['nonce'] != native['nonce'] ||
@@ -113,25 +209,11 @@ class Fixture {
               }
               native['active'] = true;
               native.remove('challenges');
+              native.remove('confirmation_attempt');
+              native.remove('pending_until');
               return clone(native);
             case 'disable':
-              final revokes = native['revocations'] as List? ?? [];
-              if (native['enabled'] == true) {
-                revokes.add({
-                  'connection': native['connection'],
-                  'installation': native['installation'],
-                  'binding': native['binding'],
-                });
-              }
-              native.addAll({
-                'enabled': false,
-                'active': false,
-                'nonce': '',
-                'generation': 0,
-                'revocations': revokes,
-              });
-              native.remove('challenges');
-              native.remove('tap');
+              disableNative();
               return clone(native);
             case 'revoked':
               native['revocations'] = (native['revocations'] as List)
@@ -155,6 +237,7 @@ class Fixture {
       pathPrefix: c.dashboardPrefix!,
       username: c.dashboardUsername,
       password: c.dashboardPassword,
+      gatewayProfile: c.gatewayProfile,
       httpClient: MockClient((request) async {
         requests.add(request);
         if (request.url.path == '/dash/auth/password-login') {
@@ -173,12 +256,16 @@ class Fixture {
           isTrue,
         );
         expect(request.headers['Cookie'], 'hermes_session_at=fixture-cookie');
+        expect(request.url.queryParameters['profile'], c.gatewayProfile);
         expect(request.headers.containsKey('Authorization'), isFalse);
         if (request.url.path.endsWith('/capabilities')) {
+          if (onCapabilities != null) return onCapabilities!(request);
           return http.Response(
             jsonEncode({
               'schema': 1,
-              'enabled': true,
+              'registration_fence': registrationFence,
+              'session_scope_modes': scopeModes,
+              'enabled': capsEnabled,
               'transports': ['webpush'],
               'vapid_public_key': base64Url
                   .encode([4, ...List<int>.filled(64, 1)])
@@ -199,6 +286,7 @@ class Fixture {
           return http.Response('{}', failRevoke ? 503 : 200);
         }
         if (request.url.path.endsWith('/events')) {
+          if (onEvents != null) return onEvents!(request);
           final after = int.parse(request.url.queryParameters['after']!);
           final page = feed.skip(after).take(eventPageSize).toList();
           final next = after + page.length;
@@ -207,6 +295,11 @@ class Fixture {
               'events': page,
               'next_cursor': next,
               'has_more': next < feed.length,
+              if (native['session_scope'] == 'authorized') ...{
+                'installation_id': native['installation'],
+                'generation': native['generation'],
+                'session_scope': 'authorized',
+              },
             }),
             200,
           );
@@ -215,6 +308,40 @@ class Fixture {
       }),
     );
     createService();
+  }
+
+  void restart() {
+    service.dispose();
+    // Recreate the Dart controller, retaining only the native durable snapshot.
+    createService();
+  }
+
+  void disableNative() {
+    final revokes = native['revocations'] as List? ?? [];
+    if (native['enabled'] == true) {
+      revokes.add({
+        'connection': native['connection'],
+        'installation': native['installation'],
+        'binding': native['binding'],
+      });
+    }
+    native.addAll({
+      'enabled': false,
+      'active': false,
+      'nonce': '',
+      'generation': 0,
+      'revocations': revokes,
+    });
+    for (final key in [
+      'challenges',
+      'tap',
+      'keys',
+      'endpoint',
+      'issued',
+      'seen',
+    ]) {
+      native.remove(key);
+    }
   }
 
   void createService() {
@@ -230,6 +357,7 @@ class Fixture {
       'generation': 7,
       'status': status,
       'registration_nonce': native['nonce'],
+      'registration_revision': native['revision'],
     }),
     200,
   );
@@ -241,6 +369,7 @@ class Fixture {
       'binding': MobilePushService.binding(connection),
       'installation': 'fixture-installation',
       'nonce': 'fixture-nonce',
+      'registration_fence': 1,
       'revision': 1,
       'generation': active ? 7 : 0,
       'sessions': ['durable-session'],
@@ -330,7 +459,7 @@ void main() {
     },
   );
   testWidgets(
-    'settings requires explicit consent, durable IDs and enable before requesting permission',
+    'settings one toggle explicitly enables authorized hints without manual IDs',
     (tester) async {
       await tester.runAsync(() => f.service.initialize(f.manager));
       await tester.pumpWidget(
@@ -352,23 +481,18 @@ void main() {
         await f.service.distributors();
       });
       await tester.pumpAndSettle();
-      expect(find.text('Android UnifiedPush (optional)'), findsOneWidget);
-      expect(find.text('test.distributor'), findsOneWidget);
-      final enable = find.widgetWithText(
-        FilledButton,
-        'Enable for selected sessions',
-      );
-      expect(tester.widget<FilledButton>(enable).onPressed, isNull);
+      expect(find.text('Background notifications'), findsOneWidget);
+      expect(find.byType(TextField), findsNothing);
+      expect(find.byType(Checkbox), findsNothing);
+      final enable = find.byType(Switch);
       expect(f.methods, isNot(contains('permission')));
-      await tester.enterText(find.byType(TextField), 'durable-session');
-      await tester.tap(find.byType(Checkbox));
-      await tester.pumpAndSettle();
-      expect(tester.widget<FilledButton>(enable).onPressed, isNotNull);
       await tester.ensureVisible(enable);
       await tester.tap(enable);
       await tester.pumpAndSettle();
       expect(f.methods, contains('permission'));
-      expect(f.native['sessions'], ['durable-session']);
+      expect(f.native['sessions'], isEmpty);
+      expect(f.native['session_scope'], 'authorized');
+      expect(f.native['distributor'], 'automatic');
       expect(find.text('Disable and revoke'), findsOneWidget);
       await tester.pumpWidget(const SizedBox.shrink());
     },
@@ -415,6 +539,106 @@ void main() {
       );
       expect(f.service.error, contains('denied'));
       expect(f.methods, isNot(contains('enable')));
+    },
+  );
+  test(
+    'unfenced legacy server rejected before permission or native consent',
+    () async {
+      await f.service.initialize(f.manager);
+      f.registrationFence = null;
+      await expectLater(
+        f.service.enable(f.connection, 'test.distributor', ['durable-session']),
+        throwsFormatException,
+      );
+      expect(f.methods, isNot(contains('permission')));
+      expect(f.methods, isNot(contains('enable')));
+      expect(f.requests.where((r) => r.method == 'PUT'), isEmpty);
+    },
+  );
+  test('disabled selected profile gates permission and registration', () async {
+    await f.service.initialize(f.manager);
+    f.capsEnabled = false;
+    await expectLater(
+      f.service.enable(f.connection, 'test.distributor', ['durable-session']),
+      throwsFormatException,
+    );
+    expect(f.methods, isNot(contains('permission')));
+    expect(f.methods, isNot(contains('enable')));
+    expect(f.requests.where((r) => r.method == 'PUT'), isEmpty);
+  });
+  for (final boundary in ['capabilities', 'PUT']) {
+    test('profile edit invalidates held $boundary authority', () async {
+      final entered = Completer<void>();
+      final released = Completer<http.Response>();
+      if (boundary == 'capabilities') {
+        await f.service.initialize(f.manager);
+        f.onCapabilities = (_) {
+          entered.complete();
+          return released.future;
+        };
+      } else {
+        f.seed();
+        f.onPut = (_) {
+          entered.complete();
+          return released.future;
+        };
+      }
+      final flight = boundary == 'capabilities'
+          ? f.service.enable(f.connection, 'test.distributor', [
+              'durable-session',
+            ])
+          : f.service.initialize(f.manager);
+      await entered.future;
+      await f.manager.updateConnection(
+        f.connection.id,
+        f.connection.label,
+        'https://fixture.invalid',
+        443,
+        f.connection.apiKey,
+        gatewayProfile: 'different-selected-profile',
+      );
+      released.complete(
+        boundary == 'capabilities'
+            ? http.Response(
+                jsonEncode({
+                  'schema': 1,
+                  'registration_fence': 1,
+                  'enabled': true,
+                  'transports': ['webpush'],
+                  'vapid_public_key': base64Url
+                      .encode([4, ...List<int>.filled(64, 1)])
+                      .replaceAll('=', ''),
+                }),
+                200,
+              )
+            : f.pending(),
+      );
+      await flight;
+      expect(f.methods, isNot(contains('permission')));
+      expect(f.methods, isNot(contains('enable')));
+      expect(f.methods, isNot(contains('generation')));
+      expect(f.methods, isNot(contains('activate')));
+      expect(f.service.active, isFalse);
+      expect(f.requests.where((r) => r.url.path.endsWith('/events')), isEmpty);
+    });
+  }
+  test(
+    'registration must echo exact durable revision before accepting generation',
+    () async {
+      f.seed();
+      f.onPut = (_) async => http.Response(
+        jsonEncode({
+          'generation': 7,
+          'status': 'pending',
+          'registration_nonce': f.native['nonce'],
+          'registration_revision': 999,
+        }),
+        200,
+      );
+      await f.service.initialize(f.manager);
+      expect(f.service.active, isFalse);
+      expect(f.native['registration_attempt'], isTrue);
+      expect(f.methods, isNot(contains('generation')));
     },
   );
   test('permission denial never grants native consent', () async {
@@ -483,6 +707,7 @@ void main() {
           return http.Response(
             jsonEncode({
               'schema': 1,
+              'registration_fence': 1,
               'enabled': true,
               'transports': ['webpush'],
               'vapid_public_key': base64Url
@@ -512,7 +737,7 @@ void main() {
     },
   );
   test(
-    'lost PUT acknowledgement retries exact nonce and recovers generation',
+    'lost PUT acknowledgement rotates fenced authority and recovers same scope',
     () async {
       f.seed();
       var attempts = 0;
@@ -529,7 +754,16 @@ void main() {
       expect(f.service.active, isTrue);
       final puts = f.requests.where((r) => r.method == 'PUT').toList();
       expect(puts, hasLength(2));
-      expect(puts[0].body, puts[1].body);
+      final before = jsonDecode(puts[0].body) as Map;
+      final after = jsonDecode(puts[1].body) as Map;
+      expect(
+        after['registration_revision'],
+        (before['registration_revision'] as int) + 1,
+      );
+      expect(after['registration_nonce'], isNot(before['registration_nonce']));
+      expect(after['session_ids'], before['session_ids']);
+      expect(after['endpoint'], before['endpoint']);
+      expect(f.methods.where((m) => m == 'enable'), isEmpty);
     },
   );
   for (final method in ['generation', 'activate']) {
@@ -539,8 +773,10 @@ void main() {
         f.seed();
         f.challenge();
         var serverActive = false;
-        f.onPut = (_) async =>
-            f.pending(status: serverActive ? 'active' : 'pending');
+        f.onPut = (_) async {
+          f.challenge(); // New native nonce needs a fresh encrypted proof.
+          return f.pending();
+        };
         f.onConfirm = (_) async {
           serverActive = true;
           return http.Response('{"status":"active","generation":7}', 200);
@@ -563,8 +799,10 @@ void main() {
       f.challenge();
       var attempts = 0;
       var serverActive = false;
-      f.onPut = (_) async =>
-          f.pending(status: serverActive ? 'active' : 'pending');
+      f.onPut = (_) async {
+        f.challenge();
+        return f.pending();
+      };
       f.onConfirm = (_) async {
         serverActive = true;
         if (++attempts == 1) throw http.ClientException('reply lost');
@@ -576,10 +814,11 @@ void main() {
       await f.service.retry();
       expect(f.service.active, isTrue);
       expect(attempts, 2);
+      expect(serverActive, isTrue);
     },
   );
   test(
-    'expired pending challenge retry requests fresh encrypted proof for same generation',
+    'expired pending challenge retry requests fresh encrypted proof for renewed authority',
     () async {
       f.seed();
       f.native['generation'] = 7;
@@ -598,7 +837,7 @@ void main() {
     f.seed();
     f.onPut = (_) async => f.pending(status: 'active');
     await f.service.initialize(f.manager);
-    expect(f.native['generation'], 7);
+    expect(f.native['generation'], 0);
     expect(f.service.active, isFalse);
     expect(f.methods, isNot(contains('activate')));
   });
@@ -610,8 +849,10 @@ void main() {
       var attempts = 0;
       final started = Completer<void>();
       final response = Completer<http.Response>();
-      f.onPut = (_) async =>
-          f.pending(status: attempts == 0 ? 'pending' : 'active');
+      f.onPut = (_) async {
+        f.challenge();
+        return f.pending();
+      };
       f.onConfirm = (_) async {
         if (++attempts == 1) throw http.ClientException('reply lost');
         started.complete();

@@ -1,4 +1,9 @@
 {
+  "background_task_report": "백그라운드 작업",
+  "background_process_report": "백그라운드 프로세스",
+  "background_report_issues": "문제가 보고되었습니다. 펼쳐서 자세히 확인하세요.",
+  "background_report_expand": "보고서 펼치기",
+  "background_report_collapse": "보고서 접기",
   "@@locale": "ko",
   "a_one_off_question_archives_itself_after_72_hours_anything": "일회성 질문입니다. 72시간 후에 자동으로 보관 처리되며, 보관할 가치가 있는 내용은 기억에 유지됩니다.",
   "ai_full_text": "AI + 전문 검색",
@@ -531,6 +536,7 @@
   "titles_previews_and_models": "제목, 미리보기 및 모델",
   "tool_activity": "도구 활동",
   "trigger_now": "지금 트리거",
+  "received_outcome_unknown": "턴 종료 — 결과 미확인",
   "turn_completed": "턴 완료",
   "turn_failed": "턴 실패",
   "turn_failed_description": "백그라운드 턴이 오류로 종료되었습니다.",

@@ -9,6 +9,43 @@ class AppLocalizationsPt extends AppLocalizations {
   AppLocalizationsPt([String locale = 'pt']) : super(locale);
 
   @override
+  String get background_task_report => 'Tarefa em segundo plano';
+
+  @override
+  String get background_process_report => 'Processo em segundo plano';
+
+  @override
+  String get background_report_issues =>
+      'Foram comunicados problemas — expanda para ver os detalhes.';
+
+  @override
+  String get background_report_expand => 'Expandir relatório';
+
+  @override
+  String get background_report_collapse => 'Recolher relatório';
+
+  @override
+  String get saved_history_heading => 'Saved history';
+
+  @override
+  String get received_output_heading =>
+      'Received output — match to saved history unconfirmed';
+
+  @override
+  String get received_output_explanation =>
+      'This may also appear in saved history. The app cannot confirm a match.';
+
+  @override
+  String get local_prompt_context => 'Local prompt context';
+
+  @override
+  String get received_output_badge => 'Received · match unconfirmed';
+
+  @override
+  String get received_output_lifetime =>
+      'Received output is kept temporarily in this app session and may be shortened or removed as limits are reached. It may not be available after the app or connection is closed.';
+
+  @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
       'Uma pergunta pontual. É arquivada automaticamente após 72 horas; o que valer a pena guardar continua na memória.';
 
@@ -1919,6 +1956,10 @@ class AppLocalizationsPt extends AppLocalizations {
   String get trigger_now => 'Acionar agora';
 
   @override
+  String get received_outcome_unknown =>
+      'Turno encerrado — resultado não confirmado';
+
+  @override
   String get turn_completed => 'Turno concluído';
 
   @override
@@ -2792,6 +2833,22 @@ class AppLocalizationsPt extends AppLocalizations {
 /// The translations for Portuguese, as used in Brazil (`pt_BR`).
 class AppLocalizationsPtBr extends AppLocalizationsPt {
   AppLocalizationsPtBr() : super('pt_BR');
+
+  @override
+  String get background_task_report => 'Tarefa em segundo plano';
+
+  @override
+  String get background_process_report => 'Processo em segundo plano';
+
+  @override
+  String get background_report_issues =>
+      'Problemas relatados — expanda para ver os detalhes.';
+
+  @override
+  String get background_report_expand => 'Expandir relatório';
+
+  @override
+  String get background_report_collapse => 'Recolher relatório';
 
   @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
@@ -4696,6 +4753,10 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get trigger_now => 'Acionar agora';
+
+  @override
+  String get received_outcome_unknown =>
+      'Turno encerrado — resultado não confirmado';
 
   @override
   String get turn_completed => 'Turno concluído';

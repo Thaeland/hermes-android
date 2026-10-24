@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/connection_manager.dart';
 import '../services/mobile_push_service.dart';
 
-/// Optional transport settings, deliberately separate from local notifications.
+/// Explicit opt-in, deliberately separate from local notification preferences.
 class MobilePushSettings extends StatefulWidget {
   const MobilePushSettings({
     required this.connection,
@@ -21,11 +21,11 @@ class MobilePushSettings extends StatefulWidget {
 class _MobilePushSettingsState extends State<MobilePushSettings> {
   late final MobilePushService service =
       widget.service ?? MobilePushService.shared;
-  final sessions = TextEditingController();
-  List<String> distributors = [];
+  List<Map<String, dynamic>> transports = [];
   String? distributor;
-  bool consent = false;
+  bool ready = false;
   bool busy = false;
+  int operation = 0;
   String? message;
   @override
   void initState() {
@@ -42,23 +42,24 @@ class _MobilePushSettingsState extends State<MobilePushSettings> {
     try {
       await service.initialize(widget.connectionManager);
       if (!mounted) return;
-      final list = await service.distributors();
+      final options = await service.transportOptions();
       if (!mounted) return;
       setState(() {
-        distributors = list;
-        if (list.length == 1) distributor = list.single;
-        if (service.connectionId == widget.connection.id) {
-          sessions.text = service.sessionIds.join('\n');
-        }
+        transports = options;
+        ready = true;
       });
     } catch (_) {
       if (mounted) {
-        setState(() => message = 'Unable to read Android push availability.');
+        setState(() {
+          ready = true;
+          message = 'Unable to read Android push availability. Retry below.';
+        });
       }
     }
   }
 
   Future<void> _run(Future<void> Function() action) async {
+    final ticket = ++operation;
     setState(() {
       busy = true;
       message = null;
@@ -66,133 +67,156 @@ class _MobilePushSettingsState extends State<MobilePushSettings> {
     try {
       await action();
     } catch (_) {
-      if (mounted) {
+      if (mounted && ticket == operation) {
         setState(
           () => message =
               service.error ??
-              'Push setup failed. Check session IDs, permission and server authorization.',
+              'Push setup failed. Check Android permission, server authorization and transport, then retry.',
         );
       }
     } finally {
-      if (mounted) setState(() => busy = false);
+      if (mounted && ticket == operation) setState(() => busy = false);
     }
   }
 
   @override
   void dispose() {
     service.removeListener(_changed);
-    sessions.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     if (!service.supported) return const SizedBox.shrink();
+    final on = service.enabled || service.enabling;
+    final boundId = service.enabling
+        ? service.pendingConnectionId
+        : service.connectionId;
+    final another = on && boundId != widget.connection.id;
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Android UnifiedPush (optional)',
-              style: Theme.of(context).textTheme.titleMedium,
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Background notifications'),
+              subtitle: Text(
+                'Private server activity for ${widget.connection.label}',
+              ),
+              value: on,
+              // Opt-out stays actionable through capabilities, permission, native
+              // registration and HTTP. It must never wait for _run's old future.
+              onChanged: (!on && (!ready || busy))
+                  ? null
+                  : (value) => _run(
+                      value
+                          ? () => service.enableAutomatic(
+                              widget.connection,
+                              distributor: distributor,
+                            )
+                          : service.disable,
+                    ),
             ),
-            const SizedBox(height: 8),
             Text('Status: ${service.status}'),
+            const SizedBox(height: 8),
             const Text(
-              'No Google push SDK. Install and configure a UnifiedPush distributor yourself. The optional mobile-push server plugin must authorize your dashboard login and selected sessions. Delivery is best-effort; reopen Hermes to reconcile.',
+              'Enable to request Android notification permission and share this installation’s endpoint and encryption keys with this server. Encrypted activity hints contain no chat content. Only sessions authorized by your server login are included.',
             ),
             const SizedBox(height: 8),
-            if (service.enabled) ...[
-              Text(
-                service.connectionId == widget.connection.id
-                    ? 'Bound only to ${widget.connection.label}; ${service.sessionIds.length} selected session(s).'
-                    : 'Bound to another saved connection. Disable it before selecting this connection.',
-              ),
+            const Text(
+              'Built-in delivery uses Google’s push transport and needs Google Play Services, but includes no Firebase SDK. An optional UnifiedPush distributor can be used instead. Delivery is best-effort; reopen Hermes to reconcile.',
+            ),
+            if (another)
               const Text(
-                'Changing sessions/distributor requires disabling and explicitly opting in again.',
+                'Bound to another saved connection. Turn off and revoke that binding before enabling for this connection.',
               ),
-              Wrap(
-                spacing: 8,
-                children: [
-                  OutlinedButton(
-                    onPressed: busy ? null : () => _run(service.retry),
-                    child: const Text('Reconcile / retry'),
-                  ),
-                  // Revocation stays available while a registration request is in flight.
-                  TextButton(
-                    onPressed: () => _run(service.disable),
-                    child: const Text('Disable and revoke'),
-                  ),
-                ],
+            if (service.enabled &&
+                !another &&
+                service.sessionScope == 'explicit')
+              Text(
+                'Legacy subscription: ${service.sessionIds.length} selected session(s) only. It will not expand automatically. Turn off, then on to opt in to server-authorized sessions.',
               ),
-              if (service.events.isNotEmpty)
-                Text(
-                  '${service.events.length} authorized event(s) reconciled. Notification taps open their session; no actions are approved automatically.',
+            if (service.enabled &&
+                !another &&
+                service.sessionScope == 'authorized')
+              const Text(
+                'Bound only to this saved connection and profile. Session access follows current server authorization.',
+              ),
+            if (on)
+              TextButton(
+                onPressed: () => _run(service.disable),
+                child: const Text('Disable and revoke'),
+              ),
+            Wrap(
+              spacing: 8,
+              children: [
+                OutlinedButton(
+                  onPressed: busy || !ready
+                      ? null
+                      : () => _run(() async {
+                          await _load();
+                          if (service.enabled) {
+                            await service.retry();
+                          } else {
+                            await service.refresh();
+                          }
+                        }),
+                  child: const Text('Refresh / retry'),
                 ),
-            ] else ...[
-              if (distributors.isEmpty)
+              ],
+            ),
+            ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              title: const Text('Advanced transport'),
+              children: [
                 const Text(
-                  'No installed distributor detected. Install one, then refresh availability.',
+                  'Automatic preserves an existing distributor choice, otherwise uses built-in Google delivery when available. Disable before changing transport.',
                 ),
-              DropdownButtonFormField<String>(
-                initialValue: distributor,
-                decoration: const InputDecoration(
-                  labelText: 'Installed distributor',
-                ),
-                isExpanded: true,
-                items: distributors
-                    .map(
-                      (d) => DropdownMenuItem(
-                        value: d,
-                        child: Text(d, overflow: TextOverflow.ellipsis),
+                DropdownButtonFormField<String>(
+                  key: ValueKey(distributor),
+                  initialValue: distributor ?? 'automatic',
+                  decoration: const InputDecoration(
+                    labelText: 'Push transport',
+                  ),
+                  isExpanded: true,
+                  items: [
+                    const DropdownMenuItem(
+                      value: 'automatic',
+                      child: Text('Automatic (recommended)'),
+                    ),
+                    if (distributor != null &&
+                        !transports.any(
+                          (option) => option['id'] == distributor,
+                        ))
+                      DropdownMenuItem(
+                        value: distributor,
+                        enabled: false,
+                        child: const Text('Selected distributor (unavailable)'),
                       ),
-                    )
-                    .toList(),
-                onChanged: busy ? null : (d) => setState(() => distributor = d),
-              ),
-              TextField(
-                controller: sessions,
-                enabled: !busy,
-                minLines: 2,
-                maxLines: 5,
-                decoration: const InputDecoration(
-                  labelText: 'Durable session IDs (one per line)',
-                  helperText:
-                      'Copy IDs from the server session browser. Only these IDs; never all chats.',
-                ),
-              ),
-              CheckboxListTile(
-                contentPadding: EdgeInsets.zero,
-                value: consent,
-                onChanged: busy
-                    ? null
-                    : (value) => setState(() => consent = value == true),
-                title: Text(
-                  'Allow private push hints for ${widget.connection.label} and only the session IDs above',
-                ),
-                subtitle: const Text(
-                  'Shares this installation’s endpoint and encryption keys with that server. Notifications contain no chat text. Android permission is requested only after you enable.',
-                ),
-              ),
-              FilledButton(
-                onPressed: busy || !consent || distributor == null
-                    ? null
-                    : () => _run(
-                        () => service.enable(
-                          widget.connection,
-                          distributor!,
-                          sessions.text.split(RegExp(r'[\n,]+')),
+                    for (final option in transports)
+                      DropdownMenuItem(
+                        value: option['id'] as String,
+                        child: Text(
+                          option['label'] as String,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                child: const Text('Enable for selected sessions'),
-              ),
-              TextButton(
-                onPressed: busy ? null : () => _run(_load),
-                child: const Text('Refresh availability / retry revocation'),
-              ),
-            ],
+                  ],
+                  onChanged: on || busy
+                      ? null
+                      : (value) => setState(
+                          () =>
+                              distributor = value == 'automatic' ? null : value,
+                        ),
+                ),
+                if (transports.isEmpty)
+                  const Text(
+                    'No available transport detected. Built-in delivery needs Google Play Services; without it, install and configure a UnifiedPush distributor, then refresh.',
+                  ),
+              ],
+            ),
             if (busy) const LinearProgressIndicator(),
             if (service.pendingRevocations > 0)
               const Text(

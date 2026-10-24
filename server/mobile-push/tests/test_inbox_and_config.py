@@ -54,7 +54,7 @@ def test_inbox_never_adopts_a_reactivated_registration_generation(env):
     }
     env.runtime._queue_inbox(event, env.profile.policy())
     assert env.client.delete(PREFIX + "/registrations/phone").status_code == 200
-    activate(env, registration_nonce="new_generation_0123456789abcdef")
+    activate(env, installation="new-phone", registration_nonce="new_generation_0123456789abcdef")
     sender = RecordingSender()
     env.runtime.sender = sender
     assert not env.runtime.deliver_one()

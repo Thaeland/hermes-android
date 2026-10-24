@@ -34,6 +34,8 @@ def test_capabilities_default_deny_and_explicit_enable(env):
     response = env.client.get(PREFIX + "/capabilities")
     assert response.json() == {
         "schema": 1,
+        "registration_fence": 1,
+        "session_scope_modes": ["explicit", "authorized"],
         "enabled": True,
         "transports": ["webpush"],
         "vapid_public_key": env.profile.policy().public_key(),
@@ -72,6 +74,7 @@ def test_challenge_is_not_revealed_by_events_and_only_correct_proof_activates(en
         "generation": 1,
         "status": "pending",
         "registration_nonce": env.body["registration_nonce"],
+        "registration_revision": env.body["registration_revision"],
     }
     events = env.client.get(PREFIX + "/events").json()
     assert events["events"][0]["kind"] == "challenge"
@@ -98,13 +101,13 @@ def test_challenge_is_not_revealed_by_events_and_only_correct_proof_activates(en
             PREFIX + "/registrations/phone/confirm",
             json={"generation": 1, "challenge": hint["challenge"]},
         ).status_code
-        == 200  # exact confirmation ACK recovery, not reactivation
+        == 409  # consumed proof cannot reactivate; recovery rotates native revision
     )
 
 
 def test_rotation_and_revoke_invalidate_all_old_generations(env):
     first, old = pending(env)
-    assert env.client.put(PREFIX + "/registrations/phone", json=env.body).json() == first
+    assert env.client.put(PREFIX + "/registrations/phone", json=env.body).status_code == 409
     second, new = pending(env, registration_nonce="fresh_nonce_abcdef012345")
     assert second["generation"] == first["generation"] + 1
     assert (
@@ -127,8 +130,21 @@ def test_rotation_and_revoke_invalidate_all_old_generations(env):
     )
     with env.runtime.store.connection() as db:
         assert db.execute("SELECT count(*) FROM outbox").fetchone()[0] == 0
-    third, _ = pending(env, registration_nonce="another_nonce_abcdef012345")
-    assert third["generation"] == 4
+    assert (
+        env.client.put(
+            PREFIX + "/registrations/phone",
+            json={
+                **env.body,
+                "registration_revision": 999,
+                "registration_nonce": "fresh_after_revoke_012345",
+            },
+        ).status_code
+        == 409
+    )
+    third, _ = pending(
+        env, installation="new-phone", registration_nonce="another_nonce_abcdef012345"
+    )
+    assert third["generation"] == 1
 
 
 def test_foreign_principal_and_provider_cannot_read_update_confirm_delete(env):

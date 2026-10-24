@@ -36,6 +36,27 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
 - Previous upstream releases remain available from the
   [Releases](https://github.com/rusty4444/hermes-android/releases) page.
 
+## Unreleased hardening after v2.1.32
+
+This branch preserves the published v2.1.32 features and adds stricter submission
+observation epochs, confirmed background-policy ownership, targeted notification
+cleanup, canonical draft ownership and paired push registration fences.
+Tool expansion remains per visit: choices survive lazy scrolling and identity
+binding, but a genuinely closed and reopened chat starts collapsed. Covering a
+retained route is not a new visit. The release identity above remains unchanged;
+this branch is not a new release or a versioned release candidate.
+See the [background-work guide](docs/android-background-work.md),
+[Android push guide](docs/mobile-push-android.md) and
+[server companion guide](docs/mobile-push-server.md) for the additional contracts
+and acceptance checks. Upgrade the companion together with the fenced client.
+
+The unreleased integration also preserves main's compact delegated-task labels
+and full read-only task details. Reasoning defaults collapsed unless app Verbose
+is selected; manual reasoning choices survive the current visit, not a true
+close/reopen. Saved history and unconfirmed received output remain separate,
+labelled sources, with possible repetition across them. See the
+[neutral integration and verification](docs/reviews/main-81d-neutral-integration.md).
+
 ## Remote Gateway edition highlights
 
 - One Desktop Gateway JSON-RPC session for text, images, and files.
@@ -86,9 +107,10 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
 - Background protection uses one foreground service with a required disclosure
   and quiet per-chat ongoing entries. Notification taps open the relevant chat;
   permission, preferences and Android lifecycle restrictions still apply.
-- Optional native UnifiedPush can notify you without an active app socket. It
-  requires a distributor, a separate server companion, explicit
-  consent and a selected durable-session allowlist. See
+- Background notifications can use built-in Google-backed delivery without a
+  separate app or manual push details. External UnifiedPush remains available.
+  Enable the separate server companion and opt in on the phone; server policy
+  controls which current and future chats are eligible. See
   [Background work and push](#background-work-and-notifications).
 
 ### Gateway transport compatibility
@@ -102,9 +124,11 @@ After an outage, the app keeps recovery pending until it can verify the server's
 state. A proven-idle turn with no recorded terminal outcome becomes inactive
 with an outcome-unknown status. It does not generate a completion alert.
 
-When a received reply has no verified history baseline, the app preserves it
-and known older messages. Unverified saved rows remain cached outside the
-combined transcript. The app does not match turns by message text.
+The app shows the complete loaded saved-history window followed by retained
+received output labelled as an unconfirmed match to saved history. Received
+output is bounded and temporary within the app/connection session, even after a
+successful turn. Repetition across these sources is intentional: an admission
+baseline or matching text cannot establish which saved row is a received reply.
 
 The experimental v2 path adds a separate durable exactly-once recovery contract
 when the gateway advertises support. A legacy-transport capability notice refers
@@ -471,26 +495,34 @@ drop or process restart, the app reconciles pending markers with saved server
 history. An acknowledgement or a lost connection does not prove completion;
 uncertain work remains unresolved and the app does not resubmit its prompt.
 
-For notifications without a live app socket, configure the optional push path:
+For notifications without a live app socket:
 
-1. Install and configure a compatible UnifiedPush distributor on Android.
-2. Ask the server operator to install and enable `server/mobile-push` in the
-   intended Hermes profile, configure its VAPID key and grant your verified
-   dashboard login access to the exact durable session IDs. Installing this APK
-   does not install or enable the companion. Follow
-   [Server companion setup](docs/mobile-push-server.md).
-3. Open the connection's **Settings → Android UnifiedPush (optional)**. Select
-   the installed distributor, enter durable session IDs one per line, check
-   consent, then tap **Enable for selected sessions**. One Android installation
-   binds one saved connection; it does not subscribe all chats or profiles.
-4. Allow notification permission when asked and keep or reopen Hermes until the
-   status is **Active**. The server's encrypted challenge and authenticated
-   confirmation establish registration. **Pending** does not mean active.
-   Use **Reconcile / retry** after a lost reply or connection failure.
-5. Use **Disable and revoke** to withdraw consent. Local delivery stops before
-   server revocation; a failed remote revocation remains pending for retry.
+1. The server operator installs/enables the paired `server/mobile-push` companion
+   and authorises your verified dashboard login. A personal-server owner can be
+   explicitly granted current and future chats with `owner_all_sessions: true`;
+   restricted accounts keep their restrictions. Installing the APK does not set
+   up the server. Follow [Server companion setup](docs/mobile-push-server.md).
+2. In the connection's Settings, enable **Background notifications** and accept
+   Android's notification permission prompt. On Google-enabled phones, the
+   built-in transport needs no separate app, URLs, keys or chat IDs. External
+   UnifiedPush is an optional advanced alternative for Google-free devices.
+3. Keep/reopen Hermes until **Active**. An encrypted challenge and authenticated
+   confirmation establish registration; **Pending** does not mean active. Retry
+   after a connection failure. If no supported transport or server is available,
+   the app explains the prerequisite rather than reporting success.
+4. Disable background notifications to revoke consent. Local delivery stops
+   before server revocation; failed remote revocations remain pending for retry.
 
-The native connector uses no Firebase/FCM SDK. Push hints and notifications omit
+One installation binds one saved connection. Automatic subscriptions cover only
+that login's currently authorised durable chats, including future chats allowed by
+server policy—not other users or profiles. Existing selected-session subscriptions
+are not silently expanded; disable and enable again to choose automatic scope.
+
+The built-in transport uses Google's network and Play Services, but bundles no
+Firebase or proprietary Google messaging SDK. Devices without working Play Services
+need a compatible external distributor. See the [dependency licence notice](third_party/embedded-push-notice.md)
+for the upstream licence discrepancy and pre-release review requirement.
+Push hints and notifications omit
 chat text; a tap resolves its destination through the authenticated server feed.
 Push cannot approve an action or resubmit a prompt. See
 [Android UnifiedPush setup and privacy](docs/mobile-push-android.md).

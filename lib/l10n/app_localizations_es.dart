@@ -9,6 +9,43 @@ class AppLocalizationsEs extends AppLocalizations {
   AppLocalizationsEs([String locale = 'es']) : super(locale);
 
   @override
+  String get background_task_report => 'Tarea en segundo plano';
+
+  @override
+  String get background_process_report => 'Proceso en segundo plano';
+
+  @override
+  String get background_report_issues =>
+      'Se notificaron problemas; expande para ver los detalles.';
+
+  @override
+  String get background_report_expand => 'Expandir informe';
+
+  @override
+  String get background_report_collapse => 'Contraer informe';
+
+  @override
+  String get saved_history_heading => 'Saved history';
+
+  @override
+  String get received_output_heading =>
+      'Received output — match to saved history unconfirmed';
+
+  @override
+  String get received_output_explanation =>
+      'This may also appear in saved history. The app cannot confirm a match.';
+
+  @override
+  String get local_prompt_context => 'Local prompt context';
+
+  @override
+  String get received_output_badge => 'Received · match unconfirmed';
+
+  @override
+  String get received_output_lifetime =>
+      'Received output is kept temporarily in this app session and may be shortened or removed as limits are reached. It may not be available after the app or connection is closed.';
+
+  @override
   String get a_one_off_question_archives_itself_after_72_hours_anything =>
       'Una pregunta puntual. Se archiva sola a las 72 horas; lo que valga la pena conservar seguirá en la memoria.';
 
@@ -1916,6 +1953,10 @@ class AppLocalizationsEs extends AppLocalizations {
 
   @override
   String get trigger_now => 'Ejecutar ahora';
+
+  @override
+  String get received_outcome_unknown =>
+      'Turno finalizado — resultado sin confirmar';
 
   @override
   String get turn_completed => 'Turno completado';
