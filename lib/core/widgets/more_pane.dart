@@ -1,7 +1,7 @@
 /// The More destination pane.
 ///
-/// The fourth top-level destination of the validated navigation
-/// (Home / Projects / Activity / More). Phase 0 of
+/// The fifth top-level destination of the validated navigation
+/// (Chats / Crons / Projects / Activity / More). Phase 0 of
 /// `docs/ANDROID_DAILY_DRIVER_ROADMAP.md` requires the shell to expose every
 /// capability instead of hiding it in a drawer, and requires an embedded
 /// Dashboard fallback entry so no capability is blocked while the native UX
@@ -12,6 +12,7 @@
 /// 1. **Never hide a capability.** A surface that is not built yet is listed
 ///    as `Coming next`, and a surface the server cannot serve is listed as
 ///    disabled *with a precise reason* — never removed from the list.
+///    Capabilities exposed in other destinations need not be duplicated here.
 /// 2. **Explain, do not crash.** Availability is data, so tests can assert it
 ///    without pumping a widget, and the pane simply renders it.
 library;
@@ -100,13 +101,6 @@ List<MoreSection> buildMoreSections({
           title: l10n.unassigned_chats,
           subtitle: l10n.chats_that_are_not_assigned_to_a_project,
           icon: Icons.inbox_outlined,
-        ),
-        MoreEntry(
-          id: 'archived-quick',
-          title: l10n.archived_quick_chats,
-          subtitle:
-              l10n.review_or_promote_quick_chats_past_their_retention_period,
-          icon: Icons.archive_outlined,
         ),
         MoreEntry(
           id: 'files',
