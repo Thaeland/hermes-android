@@ -39,6 +39,9 @@ shows only the three latest releases.
 - Keep newer external chat titles when an older aggregate scan completes,
   reconcile standalone renames into retained Chats, and hydrate supplied local
   pins without waiting for unrelated archive/history reads.
+- Accept the hosted SDK's observed `V2 Signer:` certificate output in the
+  fail-closed APK publication gate, retaining single-signer production pinning
+  and logging selected SDK tool paths/build-tools revision for diagnosis.
 
 ### Added
 

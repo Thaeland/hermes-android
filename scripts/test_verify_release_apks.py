@@ -176,6 +176,7 @@ class ApkPublicationGateTest(unittest.TestCase):
             )
         elif Path(command[0]).name == "java":
             self.assertEqual(command[1:], ["-version"])
+            self.assertIn("build-tools revision:", self.diagnostic_output.getvalue())
             self.events.append(("java", command[0]))
             output = 'openjdk version "17.0.0" (labelled stdout fixture)\n'
         elif Path(command[0]).name == "aapt":
@@ -207,6 +208,7 @@ class ApkPublicationGateTest(unittest.TestCase):
     def invoke(self, error=None):
         self.events.clear()
         self.created_releases.clear()
+        self.diagnostic_output = io.StringIO()
         argv = [
             "publisher",
             "--tag",
@@ -227,16 +229,22 @@ class ApkPublicationGateTest(unittest.TestCase):
             mock.patch.object(
                 publisher, "build_source_bundle", side_effect=self.generate_bundle
             ) as bundle,
+            mock.patch.object(
+                publisher, "release_assets", wraps=publisher.release_assets
+            ) as checksums,
             contextlib.redirect_stdout(io.StringIO()) as output,
+            contextlib.redirect_stderr(self.diagnostic_output) as diagnostics,
         ):
             if error:
                 with self.assertRaisesRegex(SystemExit, error):
                     publisher.main()
                 bundle.assert_not_called()
+                checksums.assert_not_called()
                 self.assertEqual(self.created_releases, [])
                 self.assertFalse((self.directory / "SHA256SUMS").exists())
             else:
                 publisher.main()
+                checksums.assert_called_once_with(self.directory)
                 bundle.assert_called_once_with(
                     self.directory,
                     self.head,
@@ -254,6 +262,84 @@ class ApkPublicationGateTest(unittest.TestCase):
                 self.assertEqual(
                     [apk["verified_assets"] for apk in report["apks"]], [13] * 3
                 )
+
+        self.diagnostics = diagnostics.getvalue()
+
+    def test_observed_v2_output_passes_actual_publisher_for_all_splits(self):
+        # Captured public output, replayed through a mock; NOT SDK execution.
+        observed = (ROOT / "scripts/fixtures/apksigner/run-40062562548-v2.txt").read_text()
+        self.certificates = dict.fromkeys(publisher.APK_NAMES, observed)
+        self.invoke()
+        self.assertEqual(sum(event[0] == "apksigner" for event in self.events), 3)
+
+    def test_legacy_supplementary_metadata_is_not_an_extra_signer(self):
+        for name in publisher.APK_NAMES:
+            self.certificates[name] += (
+                "Number of signers: 1\n"
+                "Signer #1 certificate SHA-1 digest: " + "a" * 40 + "\n"
+                "Signer #1 certificate MD5 digest: " + "a" * 32 + "\n"
+                "Signer #1 key algorithm: RSA\n"
+                "Signer #1 key size (bits): 4096\n"
+                "Signer #1 public key SHA-256 digest: " + "b" * 64 + "\n"
+            )
+        self.invoke()
+
+    def test_v2_pinned_stdout_cannot_bypass_cryptographic_command_failure(self):
+        observed = (ROOT / "scripts/fixtures/apksigner/run-40062562548-v2.txt").read_text()
+        self.certificates = dict.fromkeys(publisher.APK_NAMES, observed)
+        self.tool_errors = {"apksigner"}
+        self.invoke("apksigner verification command failed")
+
+    def test_v2_invalid_or_ambiguous_records_block_all_publisher_writes(self):
+        observed = (ROOT / "scripts/fixtures/apksigner/run-40062562548-v2.txt").read_text()
+        legacy = self.certificates[publisher.APK_NAMES[0]]
+        sha256 = f"V2 Signer: certificate SHA-256 digest: {CERTIFICATE}\n"
+        variants = (
+            observed.replace(CERTIFICATE, "b" * 64),
+            observed.replace(CERTIFICATE, CERTIFICATE[:-1]),
+            observed.replace(CERTIFICATE, CERTIFICATE + "0"),
+            observed.replace(CERTIFICATE, "g" + CERTIFICATE[1:]),
+            observed.replace(CERTIFICATE, CERTIFICATE + " trailing"),
+            observed.replace("V2 Signer:", "V3 Signer:"),
+            observed.replace("V2 Signer:", "Source Stamp Signer:"),
+            observed.replace("certificate SHA-256", "public key SHA-256"),
+            observed.replace("V2 Signer:", "Unrelated:"),
+            observed + observed,
+            observed + sha256,
+            observed + legacy,
+            legacy + observed,
+            observed + "Signer #2 certificate DN: CN=additional signer\n",
+            legacy + "Signer #2 certificate DN: CN=additional signer\n",
+            observed + f"Signer #2 certificate SHA-256 digest: {'b' * 64}\n",
+            observed + "V2 Signer: certificate SHA-256 digest: malformed\n",
+            observed + "V2 Signer: certificate DN: CN=additional signer\n",
+            observed + "V3 Signer: certificate SHA-256 digest: malformed\n",
+            observed + "Number of signers: 2\n",
+            observed + "Number of signers: 1\nNumber of signers: 1\n",
+            observed + f"Unrelated certificate SHA-256 digest: {CERTIFICATE}\n",
+        )
+        for name in publisher.APK_NAMES:
+            for index, output in enumerate(variants):
+                with self.subTest(apk=name, variant=index):
+                    self.reset_apks()
+                    self.certificates[name] = output
+                    self.invoke("signer")
+
+    def test_selected_sdk_diagnostics_precede_verification_without_fallback(self):
+        selected = self.make_build_tools("100.0.0")
+        self.environment["UNRELATED_SECRET"] = "must-not-be-logged"
+        for tool in ("java", "aapt", "apksigner"):
+            with self.subTest(tool=tool):
+                self.tool_errors = {tool}
+                self.invoke("failed")
+                self.assertIn(str((selected / "aapt").resolve()), self.diagnostics)
+                self.assertIn(str((selected / "apksigner").resolve()), self.diagnostics)
+                self.assertIn("100.0.0", self.diagnostics)
+                self.assertNotIn("must-not-be-logged", self.diagnostics)
+                for event in self.events:
+                    if event[0] in ("aapt", "apksigner"):
+                        self.assertEqual(Path(event[2]).parent, selected.resolve())
+                self.assertEqual(sum(event[0] == tool for event in self.events), 1)
 
     def test_valid_labelled_fixtures_verify_all_three_before_source_and_publication(
         self,
