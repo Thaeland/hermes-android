@@ -463,7 +463,12 @@ class ClientCertificateService implements ClientCertificateFileStore {
   }
 
   static bool _isEncryptedPrivateKey(String privateKeyPem) =>
-      privateKeyPem.contains('ENCRYPTED PRIVATE KEY');
+      privateKeyPem.contains('ENCRYPTED PRIVATE KEY') ||
+      // Traditional RSA/EC PEM uses an encryption header, not a PKCS#8 label.
+      RegExp(
+        r'^Proc-Type:[ \t]*4,[ \t]*ENCRYPTED[ \t]*\r?$',
+        multiLine: true,
+      ).hasMatch(privateKeyPem);
 
   /// Uses the caller-supplied label (usually the file name), falling back to
   /// the certificate CN when that label is blank.
