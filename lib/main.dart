@@ -2221,6 +2221,8 @@ class _AddDialogState extends State<_AddDialog> {
   String? _pendingCertificateName;
   bool _pendingPasswordBytes = false;
   Timer? _certificateRetryTimer;
+  bool _pickingCertificate = false;
+  int _certificateSelection = 0;
   bool _importingCertificate = false;
   bool _validating = false;
   String? _error;
@@ -2230,6 +2232,8 @@ class _AddDialogState extends State<_AddDialog> {
   bool _certificateSaved = false;
 
   bool get _isEditing => widget.initialConnection != null;
+
+  bool get _certificateBusy => _pickingCertificate || _importingCertificate;
 
   @override
   void initState() {
@@ -2299,11 +2303,36 @@ class _AddDialogState extends State<_AddDialog> {
   }
 
   Future<List<int>?> _fileBytes(PlatformFile file) async {
+    if (file.size > _maxCertificateFileBytes) {
+      throw const ClientCertificateImportException(
+        'Certificate file too large.',
+      );
+    }
     final bytes = file.bytes;
-    if (bytes != null) return bytes;
+    if (bytes != null) {
+      if (bytes.length > _maxCertificateFileBytes) {
+        throw const ClientCertificateImportException(
+          'Certificate file too large.',
+        );
+      }
+      return bytes;
+    }
     final path = file.path;
     if (path == null) return null;
-    return io.File(path).readAsBytes();
+    // Providers can report an unknown (zero) size, and cached files can change.
+    // Bound the actual read, not just the picker metadata, before parsing.
+    final contents = <int>[];
+    await for (final chunk in io.File(
+      path,
+    ).openRead(0, _maxCertificateFileBytes + 1)) {
+      contents.addAll(chunk);
+      if (contents.length > _maxCertificateFileBytes) {
+        throw const ClientCertificateImportException(
+          'Certificate file too large.',
+        );
+      }
+    }
+    return contents;
   }
 
   /// Extensions the desktop picker offers for certificate material.
@@ -2371,11 +2400,36 @@ class _AddDialogState extends State<_AddDialog> {
   /// (PKCS#12 container, combined PEM, or lone certificate/key half) and
   /// stages a lone certificate across picks until its key arrives.
   Future<void> _pickCertificateIdentity() async {
+    if (!mounted || !_useClientCertificate || _certificateBusy || _validating) {
+      return;
+    }
+    final selection = ++_certificateSelection;
+    _certificateRetryTimer?.cancel();
+    setState(() => _pickingCertificate = true);
+    try {
+      await _certificateFileLease.run(
+        () => _pickCertificateIdentityOwned(selection),
+      );
+    } catch (_) {
+      if (_isCurrentCertificateSelection(selection)) {
+        setState(() => _error = context.l10n.certificate_import_failed);
+      }
+    } finally {
+      if (mounted) setState(() => _pickingCertificate = false);
+    }
+  }
+
+  bool _isCurrentCertificateSelection(int selection) =>
+      mounted && _useClientCertificate && selection == _certificateSelection;
+
+  Future<void> _pickCertificateIdentityOwned(int selection) async {
     final files = await _pickCertificateFiles();
-    if (files.isEmpty) return;
+    if (!_isCurrentCertificateSelection(selection) || files.isEmpty) return;
+    _clearPendingCertificatePick();
     for (final file in files) {
-      if (!mounted) return;
+      if (!_isCurrentCertificateSelection(selection)) return;
       final bytes = await _fileBytes(file);
+      if (!_isCurrentCertificateSelection(selection)) return;
       if (bytes == null) {
         if (!mounted) return;
         setState(() => _error = context.l10n.certificate_import_failed);
@@ -2391,6 +2445,7 @@ class _AddDialogState extends State<_AddDialog> {
           stagedPrivateKeyBytes: _pemPrivateKeyBytes,
         ),
       );
+      if (!_isCurrentCertificateSelection(selection)) return;
       if (config == null) {
         // A lone half: remember it and wait for its counterpart.
         if (_looksLikeCertificateBytes(bytes)) {
@@ -2417,6 +2472,7 @@ class _AddDialogState extends State<_AddDialog> {
   }
 
   void _clearPendingCertificatePick() {
+    _certificateRetryTimer?.cancel();
     _pendingCertificateBytes = null;
     _pendingCertificateName = null;
     _pendingPasswordBytes = false;
@@ -2443,7 +2499,9 @@ class _AddDialogState extends State<_AddDialog> {
     final name = _pendingCertificateName;
     if (bytes == null || name == null) return;
     if (_certificatePassword.text.isEmpty) return;
-    if (_importingCertificate || _validating) return;
+    if (!mounted || !_useClientCertificate || _certificateBusy || _validating) {
+      return;
+    }
 
     final config = await _runCertificateImport(
       () => _certificateService.importIdentityDocument(
@@ -2489,11 +2547,15 @@ class _AddDialogState extends State<_AddDialog> {
 
   Future<ClientCertificateConfig?> _runCertificateImport(
     Future<ClientCertificateConfig?> Function() import,
-  ) => _certificateFileLease.run(() => _importCertificate(import));
+  ) => _certificateFileLease.run(
+    () => _importCertificate(import, _certificateSelection),
+  );
 
   Future<ClientCertificateConfig?> _importCertificate(
     Future<ClientCertificateConfig?> Function() import,
+    int selection,
   ) async {
+    if (!_isCurrentCertificateSelection(selection)) return null;
     _scheduleCertificateCleanup();
     setState(() {
       _importingCertificate = true;
@@ -2508,9 +2570,10 @@ class _AddDialogState extends State<_AddDialog> {
         }
         return null;
       }
-      if (!mounted) {
+      if (!_isCurrentCertificateSelection(selection)) {
         // The dialog closed while parsing: never leave the imported key behind.
         await _certificateService.discard(config);
+        _certificateFileLease.releaseIdentity(config);
         return null;
       }
       // Replacing an earlier staged pick must not leave that key on disk.
@@ -2519,8 +2582,9 @@ class _AddDialogState extends State<_AddDialog> {
         await _certificateService.discard(previous);
         _certificateFileLease.releaseIdentity(previous);
       }
-      if (!mounted) {
+      if (!_isCurrentCertificateSelection(selection)) {
         await _certificateService.discard(config);
+        _certificateFileLease.releaseIdentity(config);
         return null;
       }
       setState(() {
@@ -2556,6 +2620,7 @@ class _AddDialogState extends State<_AddDialog> {
   }
 
   void _removeClientCertificate() {
+    _certificateSelection++;
     final previous = _clientCertificate;
     if (previous != null && !_certificateSaved) {
       // A staged import that was never saved is simply abandoned.
@@ -2589,7 +2654,7 @@ class _AddDialogState extends State<_AddDialog> {
     // A blank Port field means "not supplied": normalizeHostAndPort then infers
     // 8642 for HTTP and 443 for HTTPS.
     if (label.isEmpty || host.isEmpty || (port != null && port <= 0)) return;
-    if (_importingCertificate) return;
+    if (_certificateBusy) return;
     final clientCertificate = _useClientCertificate ? _clientCertificate : null;
     if (_useClientCertificate && clientCertificate == null) {
       // A file was picked but could not be opened yet. Saying "load a client
@@ -2953,7 +3018,7 @@ class _AddDialogState extends State<_AddDialog> {
                       ? context.l10n.client_certificate_mtls_description
                       : context.l10n.client_certificate_https_only,
                 ),
-                onChanged: _validating || _importingCertificate
+                onChanged: _validating || _certificateBusy
                     ? null
                     : (value) {
                         final previous = _clientCertificate;
@@ -2964,6 +3029,8 @@ class _AddDialogState extends State<_AddDialog> {
                         setState(() {
                           _useClientCertificate = value;
                           if (!value) {
+                            _certificateSelection++;
+                            _clearPendingCertificatePick();
                             _certificateSaved = false;
                             _clientCertificate = null;
                             _pemCertificateBytes = null;
@@ -3024,7 +3091,7 @@ class _AddDialogState extends State<_AddDialog> {
                               minimumSize: const Size(0, 36),
                               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                             ),
-                            onPressed: _validating || _importingCertificate
+                            onPressed: _validating || _certificateBusy
                                 ? null
                                 : _removeClientCertificate,
                             child: Text(context.l10n.remove_certificate),
@@ -3038,7 +3105,7 @@ class _AddDialogState extends State<_AddDialog> {
                     alignment: Alignment.centerLeft,
                     child: OutlinedButton.icon(
                       key: const Key('connection_client_certificate_pick'),
-                      onPressed: _validating || _importingCertificate
+                      onPressed: _validating || _certificateBusy
                           ? null
                           : _pickCertificateIdentity,
                       icon: const Icon(Icons.upload_file, size: 18),
@@ -3078,11 +3145,11 @@ class _AddDialogState extends State<_AddDialog> {
                         helperMaxLines: 2,
                       ),
                       obscureText: true,
-                      enabled: !_validating && !_importingCertificate,
+                      enabled: !_validating && !_certificateBusy,
                     ),
                   ],
                 ],
-                if (_importingCertificate) ...[
+                if (_certificateBusy) ...[
                   const SizedBox(height: 8),
                   const LinearProgressIndicator(minHeight: 2),
                 ],
@@ -3097,9 +3164,7 @@ class _AddDialogState extends State<_AddDialog> {
           child: Text(context.l10n.cancel),
         ),
         FilledButton(
-          onPressed: _validating || _importingCertificate
-              ? null
-              : _validateAndSave,
+          onPressed: _validating || _certificateBusy ? null : _validateAndSave,
           child: _validating
               ? SizedBox(
                   width: 18,
@@ -3137,6 +3202,7 @@ class _AddDialogState extends State<_AddDialog> {
 
   @override
   void dispose() {
+    _certificateSelection++;
     unawaited(_certificateFileLease.close());
     _certificateRetryTimer?.cancel();
     _certificatePassword.removeListener(_onCertificatePasswordChanged);
