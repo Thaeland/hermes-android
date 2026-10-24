@@ -28,9 +28,6 @@ shows only the three latest releases.
 - Make certificate files selectable on Android/iOS and ask for protected-file
   passwords after selection. Retain encrypted PEM retries and certificate-chain
   separators; reject an unusable PEM identity before reporting it loaded (#187).
-- Open web links in chat replies, selected message text and delegated-task
-  transcripts in the external browser when tapped. Preserve gateway file
-  downloads and keep code examples and non-web URI schemes inert.
 - Remove the large received-output notice from the chat transcript. Keep its
   explanation under Chat actions → About received output, without changing
   message provenance, recovery or export details.
@@ -51,6 +48,9 @@ shows only the three latest releases.
 - Populate Activity from actual app-owned turn observations and honest gateway
   update metadata. Retain compression roots across restart and navigate older
   activity to the current conversation without duplicate continuation rows.
+- Open web links in chat replies, selected message text and delegated-task
+  transcripts in the external browser when tapped. Preserve gateway file
+  downloads and keep code examples and non-web URI schemes inert.
 - Verify manual Archive / Unarchive against the exact stored chat. An expired
   Quick Chat is reported restored only after its local retention change is
   durable; failed writes leave the row retryable rather than a phantom success.
