@@ -473,12 +473,13 @@ List<dynamic> buildChatDisplayItems({
       continue;
     }
     final runs = anchoredRuns[scope] ?? const <ChatTimelineRun>[];
-    final lastTextRun = runs
-        .where(
-          (run) => run.kind == ChatTimelineKind.text && run.text.isNotEmpty,
-        )
-        .lastOrNull;
     if (role == 'assistant' && liveScopes.contains(scope)) {
+      // Anchored runs share turn chronology, but each message owns its footer.
+      final lastTextRunByScope = <Object, String>{
+        for (final run in runs)
+          if (run.kind == ChatTimelineKind.text && run.text.isNotEmpty)
+            run.scope: run.id,
+      };
       for (final run in runs) {
         if (run.kind == ChatTimelineKind.tool) {
           currentGroupId ??= run.activity!.identity;
@@ -505,7 +506,8 @@ List<dynamic> buildChatDisplayItems({
             ...scopeRows[run.scope]!,
             'role': role,
             '_timeline_id': run.id,
-            '_message_time_continuation': run.id != lastTextRun?.id,
+            '_message_time_continuation':
+                run.id != lastTextRunByScope[run.scope],
             if (conversationOnly) '_quiet_projection_scope': run.scope,
             '_display_content': run.text,
             '_retry_prompt': ?lastUserPrompt,

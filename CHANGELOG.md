@@ -12,7 +12,9 @@ shows only the three latest releases.
   replies in quiet/Verbose Mode and both chat densities (#198). Prefer recorded
   server times; label one-time device send/receipt observations in the tooltip.
   Missing or invalid history times remain absent rather than using fetch or
-  rebuild time. Preserve existing completion, source ownership and release gates.
+  rebuild time. Keep each completed message's footer when an earlier preview
+  completes after later interim commentary. Preserve existing completion,
+  source ownership and release gates.
 
 ## [3.0.0-rc.2] - 2026-10-24
 
