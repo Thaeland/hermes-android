@@ -132,6 +132,10 @@ def unique_json_object(pairs: list[tuple[str, object]]) -> dict:
     return result
 
 
+def reject_json_constant(value: str) -> None:
+    raise ValueError(f"Non-RFC JSON constant: {value}")
+
+
 def committed_assets(root: Path, target: str) -> dict[str, bytes]:
     sources = {
         source: git_blob(root, target, source)
@@ -141,6 +145,7 @@ def committed_assets(root: Path, target: str) -> dict[str, bytes]:
         manifest = json.loads(
             sources[f"{SOURCE_DIRECTORY}/manifest.json"],
             object_pairs_hook=unique_json_object,
+            parse_constant=reject_json_constant,
         )
     except ValueError as error:
         raise ValueError(f"Malformed material manifest: {error}") from error

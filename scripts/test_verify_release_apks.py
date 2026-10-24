@@ -539,6 +539,30 @@ class ApkPublicationGateTest(unittest.TestCase):
                 self.reset_apks()
                 self.invoke("manifest|metadata")
 
+    def test_non_rfc_json_constants_block_publication_before_outputs(self):
+        manifest = self.repository / SOURCE_DIRECTORY / "manifest.json"
+        original = manifest.read_text()
+        for constant in ("NaN", "Infinity", "-Infinity"):
+            for value in (constant, f'{{"nested": [{constant}]}}'):
+                with self.subTest(constant=constant, value=value):
+                    text = re.sub(
+                        r'"coordinate":\s*"[^"]+"',
+                        f'"coordinate": {value}',
+                        original,
+                        count=1,
+                    )
+                    self.assertNotEqual(text, original)
+                    manifest.write_text(text, encoding="utf-8")
+                    self.commit_sources()
+                    self.contents[f"assets/{SOURCE_DIRECTORY}/manifest.json"] = (
+                        text.encode()
+                    )
+                    self.reset_apks()
+                    self.invoke(
+                        "Malformed material manifest: Non-RFC JSON constant: "
+                        + re.escape(constant)
+                    )
+
     def test_standalone_verifier_checks_exact_apk_set(self):
         from scripts.verify_release_apks import verify_release_apks
 
