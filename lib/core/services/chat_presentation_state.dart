@@ -3,6 +3,8 @@ import 'dart:async';
 import 'composer_draft_store.dart';
 import 'tool_activity_group_pins.dart';
 
+/// Null is observed absence; a failed read must throw, never manufacture empty
+/// draft authority. Legacy reader seams share this availability boundary.
 typedef ComposerDraftReader =
     Future<String?> Function({
       required String connectionId,
@@ -281,10 +283,29 @@ class ComposerDraftWriter {
       if (state._text != null) return state._text;
       final binding = state._binding;
       final edit = state._edit;
-      final text = await (reader ?? ComposerDraftStore.read)(
-        connectionId: state._registry.connectionId,
-        sessionId: state._sessionId,
-      );
+      final String? text;
+      try {
+        // Follow this lease's durable alias, not a logical destination whose
+        // migration may have failed. Otherwise a successful read of that
+        // still-absent destination could erase the untouched source on close.
+        // Legacy projection readers continue to receive the logical identity.
+        text = reader == null
+            ? await ComposerDraftStore.read(
+                connectionId: _token.connectionId,
+                sessionId: _token.sessionId,
+              )
+            : await reader(
+                connectionId: state._registry.connectionId,
+                sessionId: state._sessionId,
+              );
+      } catch (_) {
+        if (!isCurrent) return null;
+        if (!identical(state, _root) || binding != state._binding) continue;
+        // Leave unavailable hydration unknown. Retained edit chronology alone
+        // cannot authorize an empty checkpoint/close; a newer explicit edit
+        // may already have supplied its own value while the read was pending.
+        return state._text;
+      }
       if (!isCurrent) return null;
       if (!identical(state, _root) || binding != state._binding) continue;
       if (edit == state._edit) state._text = text ?? '';

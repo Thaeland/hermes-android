@@ -3,6 +3,15 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
+/// An unavailable read is not evidence that a draft is absent. Keep provider
+/// details out of this public error, including paths and stored values.
+class ComposerDraftReadException implements Exception {
+  const ComposerDraftReadException();
+
+  @override
+  String toString() => 'Composer draft is unavailable.';
+}
+
 /// A route's write authority, independent of its composer edit revision. A
 /// replacement route owns later writes; disposing the old route cannot erase
 /// the replacement's draft. This handle contains no widget or callback.
@@ -192,6 +201,8 @@ abstract final class ComposerDraftStore {
     }
   }
 
+  /// Returns null only after successfully observing no nonempty draft. Throws
+  /// [ComposerDraftReadException] if storage or alias resolution is unavailable.
   static Future<String?> read({
     required String connectionId,
     required String sessionId,
@@ -205,7 +216,7 @@ abstract final class ComposerDraftStore {
         return (value == null || value.trim().isEmpty) ? null : value;
       });
     } catch (_) {
-      return null;
+      throw const ComposerDraftReadException();
     }
   }
 

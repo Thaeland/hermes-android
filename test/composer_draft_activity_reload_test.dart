@@ -127,12 +127,12 @@ void main() {
           storedSessionId: 'stored',
         );
       } else {
-        expect(
-          await ComposerDraftStore.read(
+        await expectLater(
+          ComposerDraftStore.read(
             connectionId: 'connection',
             sessionId: 'local',
           ),
-          isNull,
+          throwsA(isA<ComposerDraftReadException>()),
         );
       }
       expect(platform.failRead, isFalse);
