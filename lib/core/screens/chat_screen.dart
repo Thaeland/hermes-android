@@ -1542,6 +1542,34 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  Future<void> _showReceivedOutputDetails() async {
+    // Let the chat-actions popup close before presenting another route.
+    await Future<void>.delayed(kThemeAnimationDuration);
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        scrollable: true,
+        title: Text(context.l10n.received_output_heading),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(context.l10n.received_output_explanation),
+            const SizedBox(height: 12),
+            Text(context.l10n.received_output_lifetime),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(context.l10n.close),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _exportConversation() async {
     final buffer = StringBuffer('# $_sessionTitle\n\n');
     if (_normalChat != null) {
@@ -5137,6 +5165,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   _fetchMessages();
                 }
                 if (action == 'export') _exportConversation();
+                if (action == 'received-output-info') {
+                  unawaited(_showReceivedOutputDetails());
+                }
                 if (action == 'rename') unawaited(_renameSession());
                 if (action == 'archive') unawaited(_setSessionArchived(true));
                 if (action == 'unarchive') {
@@ -5183,6 +5214,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     title: Text(context.l10n.export_share),
                   ),
                 ),
+                if (_hasReceivedOutput)
+                  PopupMenuItem(
+                    value: 'received-output-info',
+                    child: ListTile(
+                      leading: Icon(Icons.info_outline),
+                      title: Text(context.l10n.received_output_details),
+                    ),
+                  ),
               ],
             ),
         ],
@@ -5634,32 +5673,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         verbose: _verboseMode,
       );
 
-  Widget _buildSourceHeading(ChatDisplaySource source) {
-    final received = source == ChatDisplaySource.received;
+  Widget _buildSavedHistoryHeading() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Semantics(
-            header: true,
-            child: Text(
-              received
-                  ? context.l10n.received_output_heading
-                  : context.l10n.saved_history_heading,
-              style: Theme.of(context).textTheme.titleSmall,
-            ),
-          ),
-          if (received) ...[
-            const SizedBox(height: 4),
-            Text(context.l10n.received_output_explanation),
-            const SizedBox(height: 4),
-            Text(
-              context.l10n.received_output_lifetime,
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-          ],
-        ],
+      child: Semantics(
+        header: true,
+        child: Text(
+          context.l10n.saved_history_heading,
+          style: Theme.of(context).textTheme.titleSmall,
+        ),
       ),
     );
   }
@@ -5808,11 +5830,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     );
   }
 
+  bool get _hasReceivedOutput =>
+      _normalSnapshot?.displayRows.isNotEmpty == true ||
+      _normalSnapshot?.timeline.runs.isNotEmpty == true ||
+      _normalSnapshot?.tools.isNotEmpty == true;
+
   Widget _buildBody() {
-    final hasReceived =
-        _normalSnapshot?.displayRows.isNotEmpty == true ||
-        _normalSnapshot?.timeline.runs.isNotEmpty == true ||
-        _normalSnapshot?.tools.isNotEmpty == true;
+    final hasReceived = _hasReceivedOutput;
     if (_loading && _messages.isEmpty && !hasReceived) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -5868,7 +5892,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final cells = <({ChatDisplaySource? source, dynamic item, Key key})>[
       if (normal)
         for (final section in sections) ...[
-          if (section.source != ChatDisplaySource.auxiliary)
+          if (section.source == ChatDisplaySource.canonical)
             (
               source: section.source,
               item: null,
@@ -5935,7 +5959,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             if (cell.item == null) {
               return KeyedSubtree(
                 key: cell.key,
-                child: _buildSourceHeading(cell.source!),
+                child: _buildSavedHistoryHeading(),
               );
             }
             final child = _buildDisplayItem(cell.item, source: cell.source);

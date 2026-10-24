@@ -7,6 +7,7 @@
   "@@locale": "en",
   "saved_history_heading": "Saved history",
   "received_output_heading": "Received output — match to saved history unconfirmed",
+  "received_output_details": "About received output",
   "received_output_explanation": "This may also appear in saved history. The app cannot confirm a match.",
   "local_prompt_context": "Local prompt context",
   "received_output_badge": "Received · match unconfirmed",

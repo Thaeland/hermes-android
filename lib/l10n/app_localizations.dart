@@ -156,6 +156,12 @@ abstract class AppLocalizations {
   /// **'Received output — match to saved history unconfirmed'**
   String get received_output_heading;
 
+  /// No description provided for @received_output_details.
+  ///
+  /// In en, this message translates to:
+  /// **'About received output'**
+  String get received_output_details;
+
   /// No description provided for @received_output_explanation.
   ///
   /// In en, this message translates to:

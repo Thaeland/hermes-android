@@ -1102,6 +1102,14 @@ void main() {
             );
             expect(_reasonExpanded(tester), true);
             expect(tester.widget(_reason()).key, innerReasonKey);
+            // Removing the notice changes lazy viewport/cache boundaries. Reveal
+            // the tool cell explicitly rather than assuming it is built with
+            // the preceding reasoning card.
+            await tester.scrollUntilVisible(
+              _tools(),
+              250,
+              scrollable: find.byType(Scrollable).first,
+            );
             expect(_toolExpanded(tester), true);
             expect(tester.widget(_tools()).key, toolKey);
             // Prior lazy eviction may remount cards; unchanged no-eviction controller is
