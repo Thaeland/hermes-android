@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hermes_android/core/models/session.dart';
 import 'package:hermes_android/core/screens/chat_screen.dart';
 import 'package:hermes_android/core/services/gateway_turn_application_controller.dart';
+import 'package:hermes_android/core/utils/android_prompt_context.dart';
 import 'package:hermes_android/core/widgets/gateway_insight_card.dart';
 import 'package:hermes_android/l10n/app_localizations.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -186,8 +187,8 @@ void main() {
                 .toList();
             expect(source.snapshot.timeline.runs.map((run) => run.id), ids);
             expect(wire.prompts.map((prompt) => prompt['text']), [
-              'Donor prompt',
-              'Current prompt',
+              AndroidPromptContext.forModel('Donor prompt'),
+              AndroidPromptContext.forModel('Current prompt'),
             ]);
           } finally {
             await tester.pumpWidget(const SizedBox.shrink());
