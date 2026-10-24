@@ -46,7 +46,7 @@ void main() {
     l10n = await loadTestL10n();
   });
   group('buildMoreSections', () {
-    test('exposes every roadmap destination exactly once', () {
+    test('exposes the supported More destinations exactly once', () {
       final sections = buildMoreSections(dashboardReachable: true, l10n: l10n);
       final ids = [
         for (final section in sections)
@@ -56,7 +56,7 @@ void main() {
       expect(ids.toSet(), hasLength(ids.length), reason: 'ids must be unique');
       expect(
         ids,
-        containsAll(<String>[
+        unorderedEquals(<String>[
           'files',
           'assets',
           'unassigned',
@@ -147,20 +147,71 @@ void main() {
       );
     });
 
-    test('contract-gated organization stays visible with exact reasons', () {
-      final entries = {
-        for (final section in buildMoreSections(
-          dashboardReachable: true,
-          l10n: l10n,
-        ))
-          for (final entry in section.entries) entry.id: entry,
-      };
+    for (final dashboardReachable in [true, false]) {
+      test(
+        'omits Organisation placeholders (dashboard: $dashboardReachable)',
+        () {
+          final sections = buildMoreSections(
+            dashboardReachable: dashboardReachable,
+            l10n: l10n,
+          );
+          final ids = sections
+              .expand((section) => section.entries)
+              .map((e) => e.id);
 
-      for (final id in ['pin-batch-undo', 'ai-filing']) {
-        expect(entries[id]!.availability, MoreEntryAvailability.unavailable);
-        expect(entries[id]!.unavailableReason, contains('Gateway'));
-      }
-    });
+          expect(sections.map((section) => section.title), [
+            'Workspace',
+            'Agent',
+            'System',
+          ]);
+          expect(ids, isNot(contains('pin-batch-undo')));
+          expect(ids, isNot(contains('ai-filing')));
+        },
+      );
+    }
+
+    test(
+      'groups Cron, Skills and Memory under Agent in every locale',
+      () async {
+        const titles = {
+          'de': 'Agent',
+          'en': 'Agent',
+          'es': 'Agente',
+          'fr': 'Agent',
+          'ja': 'エージェント',
+          'ko': '에이전트',
+          'pt': 'Agente',
+          'pt_BR': 'Agente',
+          'ru': 'Агент',
+          'zh': '智能体',
+          'zh_Hans': '智能体',
+        };
+        expect(
+          titles.keys,
+          unorderedEquals(
+            AppLocalizations.supportedLocales.map((l) => l.toString()),
+          ),
+        );
+
+        for (final locale in AppLocalizations.supportedLocales) {
+          final localized = await loadTestL10n(locale);
+          final sections = buildMoreSections(
+            dashboardReachable: true,
+            l10n: localized,
+          );
+          final agent = sections.singleWhere(
+            (section) => section.entries.any((entry) => entry.id == 'cron'),
+          );
+
+          expect(agent.title, titles[locale.toString()], reason: '$locale');
+          expect(agent.entries.map((entry) => entry.id), [
+            'cron',
+            'skills',
+            'memory',
+          ]);
+        }
+      },
+    );
 
     test(
       'native Smart Views are available and only contract gaps are disabled',
@@ -227,6 +278,50 @@ void main() {
         scrollable: find.byType(Scrollable).first,
       );
       expect(find.text('Settings'), findsOneWidget);
+    });
+
+    for (final dashboardReachable in [true, false]) {
+      testWidgets(
+        'renders Agent without Organisation (dashboard: $dashboardReachable)',
+        (tester) async {
+          await _pumpPane(
+            tester,
+            sections: sections(dashboardReachable: dashboardReachable),
+            size: const Size(360, 2400),
+          );
+
+          expect(find.text('Agent'), findsOneWidget);
+          expect(find.text('Automation'), findsNothing);
+          expect(find.text(l10n.organization), findsNothing);
+          expect(find.text(l10n.pin_batch_and_undo), findsNothing);
+          expect(find.text(l10n.ai_assisted_filing), findsNothing);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+
+    testWidgets('Agent entries retain their selection IDs', (tester) async {
+      final picked = <String>[];
+      final agent = sections().singleWhere(
+        (section) => section.entries.any((entry) => entry.id == 'cron'),
+      );
+      await _pumpPane(
+        tester,
+        sections: sections(),
+        onSelect: (entry) => picked.add(entry.id),
+      );
+
+      for (final entry in agent.entries) {
+        await tester.scrollUntilVisible(
+          find.text(entry.title),
+          160,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.tap(find.text(entry.title));
+        await tester.pumpAndSettle();
+      }
+
+      expect(picked, ['cron', 'skills', 'memory']);
     });
 
     testWidgets('selecting an available entry reports it once', (tester) async {
