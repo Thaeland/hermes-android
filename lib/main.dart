@@ -2442,7 +2442,7 @@ class _AddDialogState extends State<_AddDialog> {
     final bytes = _pendingCertificateBytes;
     final name = _pendingCertificateName;
     if (bytes == null || name == null) return;
-    if (_certificatePassword.text.trim().isEmpty) return;
+    if (_certificatePassword.text.isEmpty) return;
     if (_importingCertificate || _validating) return;
 
     final config = await _runCertificateImport(
@@ -3073,7 +3073,8 @@ class _AddDialogState extends State<_AddDialog> {
                       autofocus: true,
                       decoration: InputDecoration(
                         labelText: context.l10n.certificate_password,
-                        helperText: context.l10n.this_certificate_is_password_protected,
+                        helperText:
+                            context.l10n.this_certificate_is_password_protected,
                         helperMaxLines: 2,
                       ),
                       obscureText: true,

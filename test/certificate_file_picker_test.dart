@@ -1,26 +1,25 @@
+import 'dart:io';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
 import 'package:hermes_android/main.dart';
+// ignore: depend_on_referenced_packages
+import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Records what the connection dialog asks `file_picker` for.
 class _FakeFilePicker extends FilePicker {
+  final files = <PlatformFile>[];
   final List<
-    ({
-      FileType type,
-      List<String>? allowedExtensions,
-      bool allowMultiple,
-    })
+    ({FileType type, List<String>? allowedExtensions, bool allowMultiple})
   >
   calls =
-      <({
-        FileType type,
-        List<String>? allowedExtensions,
-        bool allowMultiple,
-      })>[];
+      <
+        ({FileType type, List<String>? allowedExtensions, bool allowMultiple})
+      >[];
 
   @override
   Future<FilePickerResult?> pickFiles({
@@ -43,8 +42,18 @@ class _FakeFilePicker extends FilePicker {
       allowedExtensions: allowedExtensions,
       allowMultiple: allowMultiple,
     ));
-    return null;
+    if (files.isEmpty) return null;
+    final picked = List<PlatformFile>.of(files);
+    files.clear();
+    return FilePickerResult(picked);
   }
+}
+
+class _Paths extends PathProviderPlatform {
+  _Paths(this.support);
+  final Directory support;
+  @override
+  Future<String?> getApplicationSupportPath() async => support.path;
 }
 
 Future<_FakeFilePicker> _openClientCertificateSection(
@@ -121,7 +130,102 @@ Future<void> _tapPickerButton(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
+/// Let real filesystem work and the password debounce complete between frames.
+Future<void> _waitForImport(
+  WidgetTester tester,
+  bool Function() settled,
+) async {
+  for (var attempt = 0; attempt < 200; attempt++) {
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 10)),
+    );
+    await tester.pump(const Duration(milliseconds: 20));
+    if (settled()) return;
+  }
+  fail('Certificate import did not reach its expected terminal state.');
+}
+
 void main() {
+  for (final keyFormat in ['traditional', 'whitespace']) {
+    for (final mode in ['combined', 'certificate-first', 'key-first']) {
+      testWidgets(
+        'encrypted PEM $keyFormat $mode prompts and retries without repicking',
+        (tester) async {
+          final support = Directory.systemTemp.createTempSync('pem-editor-');
+          final oldPaths = PathProviderPlatform.instance;
+          PathProviderPlatform.instance = _Paths(support);
+          addTearDown(() {
+            PathProviderPlatform.instance = oldPaths;
+            if (support.existsSync()) support.deleteSync(recursive: true);
+          });
+          final picker = await _openClientCertificateSection(tester);
+          final cert = File(
+            'test/fixtures/mtls-client-cert.pem',
+          ).readAsBytesSync();
+          final key = File(
+            'test/fixtures/mtls-client-key-$keyFormat.pem',
+          ).readAsBytesSync();
+          PlatformFile picked(String name, List<int> bytes) => PlatformFile(
+            name: name,
+            size: bytes.length,
+            bytes: Uint8List.fromList(bytes),
+          );
+          if (mode == 'combined') {
+            picker.files.add(picked('combined.pem', [...cert, 10, ...key]));
+          } else {
+            picker.files.addAll(
+              mode == 'certificate-first'
+                  ? [picked('cert.pem', cert), picked('key.pem', key)]
+                  : [picked('key.pem', key), picked('cert.pem', cert)],
+            );
+          }
+          await _tapPickerButton(tester);
+          final password = find.byKey(
+            const Key('connection_client_certificate_password'),
+          );
+          expect(password, findsOneWidget);
+          expect(picker.calls, hasLength(1));
+          expect(support.listSync(recursive: true).whereType<File>(), isEmpty);
+          await tester.runAsync(() async {
+            await tester.enterText(password, 'wrong');
+          });
+          await _waitForImport(
+            tester,
+            () => find
+                .textContaining('password is incorrect')
+                .evaluate()
+                .isNotEmpty,
+          );
+          expect(password, findsOneWidget);
+          await tester.runAsync(() async {
+            await tester.enterText(
+              password,
+              keyFormat == 'traditional'
+                  ? ' exact fixture password\t '
+                  : '  key password \t',
+            );
+          });
+          await _waitForImport(tester, () => password.evaluate().isEmpty);
+          expect(password, findsNothing);
+          expect(picker.calls, hasLength(1));
+          expect(
+            support.listSync(recursive: true).whereType<File>(),
+            hasLength(2),
+          );
+          await tester.runAsync(() async {
+            await tester.tap(find.text('Cancel'));
+          });
+          await _waitForImport(
+            tester,
+            () => support.listSync(recursive: true).whereType<File>().isEmpty,
+          );
+          await tester.pumpAndSettle();
+          expect(support.listSync(recursive: true).whereType<File>(), isEmpty);
+        },
+      );
+    }
+  }
+
   testWidgets(
     'Android picks certificate files unfiltered so PEM files are selectable',
     (tester) async {
@@ -141,31 +245,30 @@ void main() {
     },
   );
 
-  testWidgets(
-    'desktop keeps the extension filter for certificate files',
-    (tester) async {
-      // flutter_test defaults to an Android target, so pin the desktop
-      // platform explicitly for this case.
-      debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+  testWidgets('desktop keeps the extension filter for certificate files', (
+    tester,
+  ) async {
+    // flutter_test defaults to an Android target, so pin the desktop
+    // platform explicitly for this case.
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
 
-      final picker = await _openClientCertificateSection(tester);
-      await _tapPickerButton(tester);
+    final picker = await _openClientCertificateSection(tester);
+    await _tapPickerButton(tester);
 
-      expect(picker.calls, hasLength(1));
-      expect(picker.calls.single.type, FileType.custom);
-      expect(picker.calls.single.allowedExtensions, [
-        'pem',
-        'crt',
-        'cer',
-        'key',
-        'p12',
-        'pfx',
-      ]);
-      expect(picker.calls.single.allowMultiple, isTrue);
+    expect(picker.calls, hasLength(1));
+    expect(picker.calls.single.type, FileType.custom);
+    expect(picker.calls.single.allowedExtensions, [
+      'pem',
+      'crt',
+      'cer',
+      'key',
+      'p12',
+      'pfx',
+    ]);
+    expect(picker.calls.single.allowMultiple, isTrue);
 
-      // Reset before the test body ends: flutter_test verifies foundation
-      // debug variables are unset after every test.
-      debugDefaultTargetPlatformOverride = null;
-    },
-  );
+    // Reset before the test body ends: flutter_test verifies foundation
+    // debug variables are unset after every test.
+    debugDefaultTargetPlatformOverride = null;
+  });
 }
