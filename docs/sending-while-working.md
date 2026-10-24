@@ -21,6 +21,9 @@ Return inserts a newline; tap Send to submit.
 - If delivery cannot be confirmed after a connection failure or timeout, check the
   chat before retrying. The server has no idempotency key for steering, so the app
   never automatically retries it or falls back to a second prompt.
+- If the run ends before its guidance acknowledgement arrives, the draft stays
+  available with an unconfirmed-delivery notice. Check history before retrying:
+  the late acknowledgement does not prove whether that guidance was consumed.
 
 ## Legacy REST and other non-steering transports
 

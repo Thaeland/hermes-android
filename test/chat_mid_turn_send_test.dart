@@ -141,6 +141,137 @@ void main() {
     return (controller: controller, remote: remote, chat: chat);
   }
 
+  for (final stopFirst in [false, true]) {
+    testWidgets(
+      'settlement before steering ACK retains the draft (Stop tapped=$stopFirst)',
+      (tester) async {
+        final f = await prepare(tester);
+        await _start(tester);
+        await tester.enterText(find.byKey(_composer), 'Keep this guidance');
+        await tester.tap(find.byKey(_send));
+        await _pump(tester);
+        if (stopFirst) {
+          expect(_button(tester, _stop).onPressed, isNotNull);
+          await tester.tap(find.byKey(_stop));
+          await _pump(tester);
+        }
+        f.remote.event('turn.end', {'status': 'completed'});
+        f.remote.turn.complete();
+        await _pump(tester);
+        expect(f.chat.snapshot.hasActiveTurn, isFalse);
+        ScaffoldMessenger.of(
+          tester.element(find.byType(ChatScreen)),
+        ).clearSnackBars();
+
+        f.remote.ack.complete(true);
+        await _pump(tester);
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(_text(tester), 'Keep this guidance');
+        expect(find.text('Message queued for the current run.'), findsNothing);
+        expect(
+          find.text(
+            'Message delivery could not be confirmed. Your draft was kept. Check the chat before retrying.',
+          ),
+          findsOneWidget,
+        );
+        expect(f.remote.prompts, ['Original task']);
+        expect(f.remote.guidance, [('stored-chat', 'Keep this guidance')]);
+        await tester.pumpWidget(const SizedBox.shrink());
+        await f.controller.close();
+        await _pump(tester);
+        expect(
+          await ComposerDraftStore.read(
+            connectionId: _connection.id,
+            sessionId: _session.id,
+          ),
+          'Keep this guidance',
+        );
+      },
+    );
+  }
+
+  for (final flag in [
+    'response_previewed',
+    'response_reused',
+    'response_transformed',
+  ]) {
+    testWidgets(
+      'guidance preserves a same-turn $flag completion and later activity',
+      (tester) async {
+        tester.view.devicePixelRatio = 1;
+        tester.view.physicalSize = const Size(1000, 1800);
+        addTearDown(tester.view.reset);
+        SharedPreferences.setMockInitialValues({'verbose_mode': true});
+        final f = await prepare(tester);
+        await _start(tester);
+        f.remote.event('message.delta', {'text': 'Previewed answer'});
+        f.remote.event('message.interim', {
+          'text': 'Previewed answer',
+          'already_streamed': true,
+        });
+        f.remote.event('tool.start', {'tool': 'read_file', 'tool_id': 't1'});
+        f.remote.event('message.delta', {'text': 'Later commentary'});
+        f.remote.event('message.interim', {
+          'text': 'Later commentary',
+          'already_streamed': true,
+        });
+        f.remote.event('reasoning.delta', {'text': 'Before guidance'});
+        await _pump(tester);
+        await tester.enterText(find.byKey(_composer), 'Keep the preview');
+        await tester.tap(find.byKey(_send));
+        await _pump(tester);
+        f.remote.ack.complete(true);
+        await _pump(tester);
+        f.remote.event('tool.start', {'tool': 'read_file', 'tool_id': 't2'});
+        f.remote.event('reasoning.delta', {'text': 'After guidance'});
+        f.remote.event('message.complete', {
+          'text': 'Previewed answer',
+          flag: true,
+        });
+        await _pump(tester);
+
+        expect(
+          f.chat.snapshot.displayRows.where(
+            (row) => row['content'] == 'Previewed answer',
+          ),
+          hasLength(1),
+        );
+        expect(
+          find.text('Previewed answer', findRichText: true),
+          findsOneWidget,
+        );
+        expect(
+          f.chat.snapshot.timeline.runs.map(
+            (run) => run.activity?.toolId ?? run.text,
+          ),
+          [
+            'Previewed answer',
+            't1',
+            'Later commentary',
+            'Before guidance',
+            't2',
+            'After guidance',
+          ],
+        );
+        // Reusing an earlier preview must not leave a trailing guidance row
+        // that disconnects later reasoning/tools from the live assistant.
+        f.remote.event('reasoning.delta', {'text': 'Still working'});
+        f.remote.event('tool.start', {'tool': 'read_file', 'tool_id': 't3'});
+        await _pump(tester);
+        expect(f.chat.snapshot.timeline.runs.last.activity?.toolId, 't3');
+        expect(
+          f.chat.snapshot.timeline.runs.map((run) => run.text),
+          contains('Still working'),
+        );
+        expect(f.remote.prompts, ['Original task']);
+        expect(f.remote.guidance, [('stored-chat', 'Keep the preview')]);
+        await tester.pumpWidget(const SizedBox.shrink());
+        await f.controller.close();
+        await _pump(tester);
+      },
+    );
+  }
+
   testWidgets(
     'Send and Stop are independent while guidance stays in the active turn',
     (tester) async {

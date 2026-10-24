@@ -184,7 +184,7 @@ void main() {
         reason: 'An unacknowledged steer still owns admission',
       );
       gateway.releaseSteerAck!();
-      expect(await steering, isTrue);
+      await expectLater(steering, throwsStateError);
       expect(chat.snapshot.displayRows, settled);
       expect(chat.reserve(), isNotNull);
     },

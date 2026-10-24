@@ -1213,22 +1213,26 @@ class NormalGatewayChatOwner {
     try {
       if (!_current(generation) || !snapshot.hasActiveTurn) return false;
       final accepted = await send(sessionId: localSessionId, text: guidance);
-      if (accepted &&
-          _current(generation) &&
-          snapshot.hasActiveTurn &&
-          !_settling) {
-        // Keep the live assistant last so deltas/tools continue updating the
-        // original response. Canonical history remains server-owned.
-        final assistant = _display.lastIndexWhere(
-          (row) => row['role'] == 'assistant',
-        );
-        _display.insert(assistant < 0 ? _display.length : assistant, {
-          'role': 'user',
-          'content': guidance,
-          '_normal_projection_id': const Uuid().v4(),
-        });
+      if (!accepted) return false;
+      if (!_current(generation) || !snapshot.hasActiveTurn || _settling) {
+        // The server queued it, but this ended/replaced run can no longer
+        // confirm a live handoff. Keep the caller's draft; never claim a
+        // rejection or automatically resend an already accepted instruction.
+        throw StateError('The run ended before steering could be confirmed.');
       }
-      return accepted;
+      // Place guidance before the live response, but do not make it a new
+      // prompt boundary. A reused preview can later remove that response's
+      // placeholder; ingress still finds the assistant across this row.
+      final assistant = _display.lastIndexWhere(
+        (row) => row['role'] == 'assistant',
+      );
+      _display.insert(assistant < 0 ? _display.length : assistant, {
+        'role': 'user',
+        'display_kind': 'steer',
+        'content': guidance,
+        '_normal_projection_id': const Uuid().v4(),
+      });
+      return true;
     } finally {
       if (identical(_steerFlight, flight)) {
         _steerFlight = null;
@@ -1601,10 +1605,10 @@ class NormalGatewayChatOwner {
         event.type == 'message.complete') {
       _receivedObservation ??= ++_session._presentationObservation;
     }
-    final assistant =
-        _display.isNotEmpty && _display.last['role'] == 'assistant'
-        ? _display.last
-        : null;
+    final assistantIndex = _display.lastIndexWhere(
+      (row) => row['role'] == 'assistant',
+    );
+    final assistant = assistantIndex < 0 ? null : _display[assistantIndex];
     if (reasoning != null && assistant != null) {
       _timeline = _timeline.reasoning(
         assistant['_normal_projection_id']!,
@@ -1788,7 +1792,9 @@ class NormalGatewayChatOwner {
     // bubble prepared for a continuation or distinct interim commentary.
     for (var index = pendingIndex - 1; index >= 0; index--) {
       final candidate = _display[index];
-      if (candidate['role'] == 'user') break;
+      if (candidate['role'] == 'user' && candidate['display_kind'] != 'steer') {
+        break;
+      }
       if (candidate['role'] != 'assistant' ||
           candidate['_gateway_interim'] != true ||
           candidate['content'] != rawCompleteText) {
