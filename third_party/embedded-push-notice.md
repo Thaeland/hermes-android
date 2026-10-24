@@ -8,11 +8,13 @@ Services transport. No Firebase or Google Play Services client SDK is bundled by
 this dependency. Google infrastructure and a working Play Services runtime are
 still required for that transport; external UnifiedPush remains supported.
 
-## Licence basis: LGPL-2.1, not Apache-only
+## Licence basis: LGPL-2.1-or-later, not Apache-only
 
 The exact upstream tag `3.1.0`, commit
 `d618c7aceb5c9f139c8c21c2ae6116a7e44e1d2d`, supplies the GNU Lesser General
-Public License, version 2.1. **Treat that licence as authoritative for RC
+Public License, version 2.1, with the upstream notice permitting version 2.1
+or (at your option) any later version. Copyright (C) 2022 Simon Gougeon.
+**Treat that licence as authoritative for RC
 packaging and distribution.** The Maven POM's Apache-2.0 declaration conflicts
 with that source licence. It is retained as provenance, not treated as a
 permissive or dual-licence grant. No upstream clarification, legal clearance or
@@ -61,6 +63,9 @@ engineering for debugging such modifications, must not be restricted by an EULA
 or other distribution terms. This notice does not relicense unrelated application
 code or certify that all distribution obligations or application/contributor
 permissions have been satisfied. The distributor must review those obligations
-before publication; the absence of a top-level application licence in the
-inspected source is not an invented grant. Source/relink materials are provided
-as a concrete compliance aid, not a legal approval.
+before publication. The application's existing README declared MIT before
+these materials were added; the root `LICENSE` now records those terms in full.
+The earlier absence of a canonical file was not absence of that declaration,
+and this Library notice does not create or replace the application grant.
+Source/relink materials are provided as a concrete compliance aid, not a legal
+approval.

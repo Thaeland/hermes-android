@@ -73,3 +73,8 @@ flutter:
         - asset: assets/fonts/Cinzel-Variable.ttf
   assets:
     - assets/
+    - LICENSE
+    - assets/fonts/OFL.txt
+    - third_party/embedded-push-notice.md
+    - third_party/embedded-push-relink.md
+    - third_party/licenses/embedded-fcm-distributor-LGPL-2.1.txt

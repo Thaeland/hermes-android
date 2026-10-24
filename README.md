@@ -838,4 +838,24 @@ the checks performed.
 
 ## License
 
-MIT
+Application code is distributed under the [MIT License](LICENSE), as previously
+declared in this README. Copyright (c) 2026 Sam Russell and contributors. The
+canonical file records those existing terms, not a relicensing of third-party
+code or assets. Contributor attribution and source history are preserved.
+
+Third-party components retain their separate terms:
+
+- **Cinzel font:** [SIL Open Font License 1.1](assets/fonts/OFL.txt), copyright
+  2020 The Cinzel Project Authors.
+- **Embedded FCM distributor 3.1.0:** the retained upstream
+  [LGPL-2.1-or-later licence](third_party/licenses/embedded-fcm-distributor-LGPL-2.1.txt),
+  copyright 2022 Simon Gougeon. See the [Library notice](third_party/embedded-push-notice.md)
+  for the POM/source licence discrepancy and the
+  [local source/relink instructions](third_party/embedded-push-relink.md).
+- Other dependencies retain their own copyright and licence notices.
+
+The full application, Cinzel and embedded Library notices, including the local
+Library source/relink instructions, are available offline in **Settings → About
+→ Licences** (the label follows the device language). That page also includes
+Flutter's dependency notices. See [NOTICE.md](NOTICE.md) for attribution and
+community-edition status.

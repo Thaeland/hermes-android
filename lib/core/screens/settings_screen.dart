@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/app_licenses.dart';
 import '../services/config_backup_io.dart';
 import '../services/config_backup_service.dart';
 import '../services/connection_manager.dart';
@@ -659,6 +660,19 @@ class _AboutCardState extends State<_AboutCard> {
               style: TextStyle(color: HermesTokens.of(context).muted),
             ),
             const Divider(height: 24),
+            ListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text(MaterialLocalizations.of(context).licensesPageTitle),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () {
+                registerAppLicenses();
+                showLicensePage(
+                  context: context,
+                  applicationName: context.l10n.hermes_agent_for_android,
+                  applicationVersion: _version,
+                );
+              },
+            ),
             ListTile(
               contentPadding: EdgeInsets.zero,
               title: Text(context.l10n.check_for_updates),
