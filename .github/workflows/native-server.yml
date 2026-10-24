@@ -31,10 +31,20 @@ jobs:
         run: |
           python3 - <<'PY'
           import os
+          import re
           from pathlib import Path
+          version = re.search(
+              r'^version:\s*([^\s+]+)\+(\d+)\s*$',
+              Path('pubspec.yaml').read_text(), re.MULTILINE,
+          )
+          if version is None:
+              raise SystemExit('pubspec.yaml must declare versionName+versionCode')
           Path('android/local.properties').write_text(
               f"flutter.sdk={os.environ['FLUTTER_ROOT']}\n"
               f"sdk.dir={os.environ['ANDROID_HOME']}\n"
+              f"flutter.versionName={version.group(1)}\n"
+              f"flutter.versionCode={version.group(2)}\n"
+              "flutter.buildMode=debug\n"
           )
           PY
       - name: Run native lifecycle and push tests

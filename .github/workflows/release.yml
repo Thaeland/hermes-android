@@ -30,7 +30,7 @@ jobs:
 
       - name: Verify release scripts and README release window
         run: |
-          python3 -m unittest scripts.test_check_readme_release_window scripts.test_publish_github_release
+          python3 -m unittest scripts.test_check_readme_release_window scripts.test_publish_github_release scripts.test_native_ci_config
           python3 scripts/check_readme_release_window.py
 
       - name: Set up Java
