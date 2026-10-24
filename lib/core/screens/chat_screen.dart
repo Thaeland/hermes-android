@@ -948,10 +948,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             return;
           }
           setState(() {
-            if (snapshot.turnId == null || !_hasSuccessfulHistoryRead) {
-              // App-owner rows can paint a reopened chat before its physical
-              // cold scan finishes. They must not mark that scan initialised
-              // and prevent it finding the prompt beyond a tool-heavy page.
+            if (snapshot.turnId == null) {
               _historyWindow.mergeObservedRows(snapshot.historyRows);
               _historyWindowRevision++;
               _extractToolMessages(_historyWindow.rows);
@@ -2225,6 +2222,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           return rows;
         },
         shouldContinue: () => _canApplyHistoryRead(read),
+        forceColdScan: !_hasSuccessfulHistoryRead,
         needsContext: (rows) =>
             read.owner?.persistedTurnContextKey(rows) != null,
       );

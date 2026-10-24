@@ -42,13 +42,16 @@ class ChatHistoryWindow {
   Future<ChatHistoryPageBatch> fetchRecent(
     MessagePageFetcher fetch, {
     bool Function()? shouldContinue,
+    bool forceColdScan = false,
     bool Function(List<Map<String, dynamic>> rows)? needsContext,
   }) async {
     final first = await fetch(0);
     final pages = <List<Map<String, dynamic>>>[first];
     var count = first.length;
     var hasMore = first.length == pageSize;
-    if (!_initialized || needsContext?.call(first) == true) {
+    // An owner seed can already offer a valid Load more cursor while the
+    // route's first physical read still owes its bounded cold-open scan.
+    if (!_initialized || forceColdScan || needsContext?.call(first) == true) {
       while (hasMore && pages.length < initialPageBudget) {
         if (shouldContinue != null && !shouldContinue()) break;
         final combined = pages.reversed.expand((page) => page).toList();
