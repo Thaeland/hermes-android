@@ -116,15 +116,12 @@ class _ConnectionCredentials {
         throw const FormatException();
       }
       final password = (dashboardPassword as String?)?.trim();
-      final keyPassword = (clientKeyPassword as String?)?.trim();
       return _ConnectionCredentials(
         apiKey: (apiKey as String?) ?? '',
         dashboardPassword: password == null || password.isEmpty
             ? null
             : password,
-        clientKeyPassword: keyPassword == null || keyPassword.isEmpty
-            ? null
-            : keyPassword,
+        clientKeyPassword: clientKeyPassword as String?,
       );
     } catch (_) {
       throw const CredentialStorageException(
@@ -135,14 +132,11 @@ class _ConnectionCredentials {
 
   static _ConnectionCredentials fromConnection(SavedConnection connection) {
     final password = connection.dashboardPassword?.trim();
-    final keyPassword = connection.clientCertificate?.privateKeyPassword
-        ?.trim();
+
     return _ConnectionCredentials(
       apiKey: connection.apiKey,
       dashboardPassword: password == null || password.isEmpty ? null : password,
-      clientKeyPassword: keyPassword == null || keyPassword.isEmpty
-          ? null
-          : keyPassword,
+      clientKeyPassword: connection.clientCertificate?.privateKeyPassword,
     );
   }
 }
@@ -197,9 +191,30 @@ class ConnectionManager {
     );
     try {
       for (final connection in connections) {
-        final credentials = _ConnectionCredentials.fromConnection(connection);
-        if (!credentials.isEmpty) {
-          await _writeAndVerifyCredentials(connection.id, credentials);
+        final legacy = _ConnectionCredentials.fromConnection(connection);
+        if (!legacy.isEmpty) {
+          // An earlier release already moved API/dashboard credentials into the
+          // secure store while leaving only the PEM password in preferences.
+          // Secure values win over stale legacy fields on a migration retry.
+          final encoded = await _credentialStore.read(
+            _credentialKey(connection.id),
+          );
+          final existing = encoded == null
+              ? const _ConnectionCredentials(
+                  apiKey: '',
+                  dashboardPassword: null,
+                )
+              : _ConnectionCredentials.decode(encoded);
+          await _writeAndVerifyCredentials(
+            connection.id,
+            _ConnectionCredentials(
+              apiKey: existing.apiKey.isEmpty ? legacy.apiKey : existing.apiKey,
+              dashboardPassword:
+                  existing.dashboardPassword ?? legacy.dashboardPassword,
+              clientKeyPassword:
+                  existing.clientKeyPassword ?? legacy.clientKeyPassword,
+            ),
+          );
         }
       }
 
@@ -263,6 +278,7 @@ class ConnectionManager {
     List<SavedConnection> incoming, {
     required bool replaceExisting,
   }) async {
+    final previousMetadata = prefs.getStringList(_key);
     final current = _connectionsFromMaps(_readConnectionMaps());
 
     final ordered = List<SavedConnection>.of(incoming);
@@ -286,20 +302,61 @@ class ConnectionManager {
     for (final connection in [...ordered, ...removed]) {
       await _invalidateMobilePushAuthority(connection.id);
     }
-    for (final connection in ordered) {
-      await _writeAndVerifyCredentials(
-        connection.id,
-        _ConnectionCredentials.fromConnection(connection),
+    final previousCredentials = <String, String?>{};
+    final attemptedIds = <String>{};
+    var metadataAttempted = false;
+    try {
+      // Capture every physical bundle before the first write, including absent
+      // entries. Restoring raw bundles preserves all secrets and exact bytes.
+      for (final connection in [...ordered, ...removed]) {
+        if (previousCredentials.containsKey(connection.id)) continue;
+        final encoded = await _credentialStore.read(
+          _credentialKey(connection.id),
+        );
+        if (encoded != null) _ConnectionCredentials.decode(encoded);
+        previousCredentials[connection.id] = encoded;
+      }
+      for (final connection in ordered) {
+        attemptedIds.add(connection.id); // a failed ACK may follow a real write
+        await _writeAndVerifyCredentials(
+          connection.id,
+          _ConnectionCredentials.fromConnection(connection),
+        );
+      }
+      for (final connection in removed) {
+        attemptedIds.add(connection.id);
+        await _writeAndVerifyCredentials(
+          connection.id,
+          const _ConnectionCredentials(apiKey: '', dashboardPassword: null),
+        );
+      }
+      metadataAttempted = true;
+      await _saveAll(next);
+    } catch (_) {
+      var restored = true;
+      for (final id in attemptedIds.toList().reversed) {
+        try {
+          await _writeAndVerifyEncodedCredentials(id, previousCredentials[id]);
+        } catch (_) {
+          restored = false;
+        }
+      }
+      if (metadataAttempted) {
+        try {
+          final saved = previousMetadata == null
+              ? await prefs.remove(_key)
+              : await prefs.setStringList(_key, previousMetadata);
+          if (!saved) restored = false;
+        } catch (_) {
+          restored = false;
+        }
+      }
+      throw CredentialStorageException(
+        restored
+            ? 'Connection import could not be saved safely. Previous configuration was preserved.'
+            : 'Connection import failed and the previous configuration could not be fully restored. Retry after checking secure storage.',
       );
     }
-    for (final connection in removed) {
-      await _writeAndVerifyCredentials(
-        connection.id,
-        const _ConnectionCredentials(apiKey: '', dashboardPassword: null),
-      );
-    }
-
-    await _saveAll(next);
     await _deleteUnreferencedCertificates(current, next);
   }
 
@@ -640,16 +697,23 @@ class ConnectionManager {
   static bool _hasLegacyCertificatePassword(Map<String, dynamic> map) {
     final certificate = map['client_certificate'];
     if (certificate is! Map) return false;
-    final password = certificate['private_key_password'];
-    return password is String && password.isNotEmpty;
+    return certificate.containsKey('private_key_password');
   }
 
   Future<void> _writeAndVerifyCredentials(
     String connectionId,
     _ConnectionCredentials credentials,
+  ) => _writeAndVerifyEncodedCredentials(
+    connectionId,
+    credentials.isEmpty ? null : credentials.encode(),
+  );
+
+  Future<void> _writeAndVerifyEncodedCredentials(
+    String connectionId,
+    String? encoded,
   ) async {
     final key = _credentialKey(connectionId);
-    if (credentials.isEmpty) {
+    if (encoded == null) {
       await _credentialStore.delete(key);
       final readBack = await _credentialStore.read(key);
       if (readBack != null) {
@@ -660,7 +724,6 @@ class ConnectionManager {
       return;
     }
 
-    final encoded = credentials.encode();
     await _credentialStore.write(key, encoded);
     final readBack = await _credentialStore.read(key);
     if (readBack != encoded) {

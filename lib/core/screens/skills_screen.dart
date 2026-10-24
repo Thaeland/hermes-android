@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/connection_manager.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
+
 class SkillsScreen extends StatefulWidget {
   final SavedConnection connection;
   const SkillsScreen({required this.connection, super.key});

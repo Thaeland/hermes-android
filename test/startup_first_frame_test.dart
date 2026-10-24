@@ -16,6 +16,7 @@ class _PendingCredentialStore implements CredentialStore {
   final cache = <String, String>{};
   int reads = 0;
   int deletes = 0;
+  bool holdVerification = false;
 
   @override
   String? readCached(String key) => cache[key];
@@ -23,6 +24,9 @@ class _PendingCredentialStore implements CredentialStore {
   @override
   Future<String?> read(String key) async {
     reads++;
+    // Migration reads the existing bundle before writing. Let that prerequisite
+    // succeed when this fixture specifically targets the post-write read-back.
+    if (holdVerification && reads == 1) return null;
     final value = await readResult.future;
     if (value != null) cache[key] = value;
     return value;
@@ -108,61 +112,66 @@ void main() {
     expect(home.connManager.getConnections().single.apiKey, 'test-credential');
   });
 
-  testWidgets(
-    'failed credential migration shows recovery and reset can retry',
-    (tester) async {
-      final original = _savedConnection(legacy: true);
-      SharedPreferences.setMockInitialValues({
-        'saved_connections': [original],
-        'unrelated_preference': 'keep',
-      });
-      final credentials = _PendingCredentialStore();
-      var attempts = 0;
-      await tester.pumpWidget(
-        StartupApp(
-          createConnectionManager: (prefs) {
-            attempts++;
-            if (attempts == 2) throw StateError('retry unavailable');
-            return ConnectionManager.create(
-              prefs,
-              credentialStore: credentials,
-            );
-          },
-        ),
-      );
-      expect(find.byType(CircularProgressIndicator), findsOneWidget);
-      await tester.pump();
-      expect(credentials.reads, 1);
-      credentials.readResult.completeError(StateError('Keystore unavailable'));
-      await tester.pumpAndSettle();
+  for (final failVerification in [false, true]) {
+    testWidgets(
+      'failed credential migration shows recovery and reset can retry (verification=$failVerification)',
+      (tester) async {
+        final original = _savedConnection(legacy: true);
+        SharedPreferences.setMockInitialValues({
+          'saved_connections': [original],
+          'unrelated_preference': 'keep',
+        });
+        final credentials = _PendingCredentialStore()
+          ..holdVerification = failVerification;
+        var attempts = 0;
+        await tester.pumpWidget(
+          StartupApp(
+            createConnectionManager: (prefs) {
+              attempts++;
+              if (attempts == 2) throw StateError('retry unavailable');
+              return ConnectionManager.create(
+                prefs,
+                credentialStore: credentials,
+              );
+            },
+          ),
+        );
+        expect(find.byType(CircularProgressIndicator), findsOneWidget);
+        await tester.pump();
+        expect(credentials.reads, failVerification ? 2 : 1);
+        credentials.readResult.completeError(
+          StateError('Keystore unavailable'),
+        );
+        await tester.pumpAndSettle();
 
-      expect(find.byType(HermesApp), findsNothing);
-      expect(find.text('Reset saved connections'), findsOneWidget);
-      final prefs = await SharedPreferences.getInstance();
-      expect(prefs.getStringList('saved_connections'), [original]);
-      expect(credentials.values, hasLength(1));
+        expect(find.byType(HermesApp), findsNothing);
+        expect(find.text('Reset saved connections'), findsOneWidget);
+        final prefs = await SharedPreferences.getInstance();
+        expect(prefs.getStringList('saved_connections'), [original]);
+        expect(credentials.values, failVerification ? hasLength(1) : isEmpty);
 
-      await tester.tap(find.text('Reset saved connections'));
-      await tester.pumpAndSettle();
-      expect(find.text('Reset saved connections'), findsOneWidget);
-      expect(find.byType(SnackBar), findsOneWidget);
+        await tester.tap(find.text('Reset saved connections'));
+        await tester.pumpAndSettle();
+        expect(find.text('Reset saved connections'), findsOneWidget);
+        expect(find.byType(SnackBar), findsOneWidget);
 
-      await tester.tap(find.text('Reset saved connections'));
-      await tester.pumpAndSettle();
-      expect(attempts, 3);
-      expect(find.byType(HermesApp), findsOneWidget);
-      expect(
-        tester
-            .widget<HomeScreen>(find.byType(HomeScreen))
-            .connManager
-            .getConnections(),
-        isEmpty,
-      );
-      expect(prefs.getStringList('saved_connections'), isNull);
-      expect(prefs.getString('unrelated_preference'), 'keep');
-      expect(credentials.deletes, 0);
-    },
-  );
+        await tester.tap(find.text('Reset saved connections'));
+        await tester.pumpAndSettle();
+        expect(attempts, 3);
+        expect(find.byType(HermesApp), findsOneWidget);
+        expect(
+          tester
+              .widget<HomeScreen>(find.byType(HomeScreen))
+              .connManager
+              .getConnections(),
+          isEmpty,
+        );
+        expect(prefs.getStringList('saved_connections'), isNull);
+        expect(prefs.getString('unrelated_preference'), 'keep');
+        expect(credentials.deletes, 0);
+      },
+    );
+  }
 
   testWidgets('cold-start intents are collected before Home mounts', (
     tester,

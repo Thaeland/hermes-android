@@ -29,6 +29,7 @@ class MemoryRepository {
         proxied: connection.dashboardProxied,
         username: connection.dashboardUsername,
         password: connection.dashboardPassword,
+        clientCertificate: connection.clientCertificate,
         httpClient: httpClient,
       ),
       profile == null || profile.isEmpty ? null : profile,

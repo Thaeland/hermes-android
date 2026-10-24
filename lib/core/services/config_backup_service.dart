@@ -250,7 +250,25 @@ class ConfigBackupService {
   Future<void> _deleteCertificates(
     List<ClientCertificateConfig> certificates,
   ) async {
+    if (certificates.isEmpty) return;
+    final Set<String> referenced;
+    try {
+      // A metadata write can commit physically before its ACK is lost, and a
+      // persistent storage outage can also prevent rollback. Refresh the real
+      // list: the preference cache may already contain the attempted rollback.
+      await _preferences.reload();
+      referenced = {
+        for (final connection in _connectionManager.getConnections())
+          if (connection.clientCertificate case final certificate?)
+            certificate.directoryPath,
+      };
+    } catch (_) {
+      // Unknown reachability is not proof that a key is unreferenced. Keep it
+      // until a later successful connection commit can safely collect it.
+      return;
+    }
     for (final certificate in certificates) {
+      if (referenced.contains(certificate.directoryPath)) continue;
       try {
         await _certificates.delete(certificate);
       } catch (_) {

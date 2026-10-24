@@ -8,6 +8,8 @@ import 'package:hermes_android/core/services/session_search_client.dart';
 import 'package:hermes_android/core/services/tls_client_factory.dart';
 import 'package:http/io_client.dart';
 
+import 'support/mtls_fixture.dart';
+
 /// A real loopback HTTPS server that only answers requests presenting a client
 /// certificate signed by `mtls-ca-cert.pem`.
 ///
@@ -102,7 +104,13 @@ void main() {
 
         await expectLater(
           client.search('tls'),
-          throwsA(isA<SessionSearchException>()),
+          throwsA(
+            isA<SessionSearchException>().having(
+              (e) => e.message,
+              'message',
+              contains('dashboard rejected'),
+            ),
+          ),
         );
       } finally {
         HttpOverrides.global = savedOverrides;
@@ -137,6 +145,78 @@ void main() {
         HttpOverrides.global = savedOverrides;
         await server.close(force: true);
       }
+    },
+  );
+
+  test('anonymous rewriting is rejected after server trust succeeds', () async {
+    final fixture = MutualTlsFixture();
+    await fixture.start((request) async {
+      fixture.json(request, {'query': 'rewritten query'});
+      await request.response.close();
+    });
+    addTearDown(fixture.close);
+    await withLoopbackTrust(() async {
+      final client = AiSearchQueryRewriter(
+        baseUrl: fixture.origin,
+        apiKey: 'fixture',
+      );
+      addTearDown(client.close);
+      await expectLater(
+        client.rewrite(query: 'question', provider: 'p', model: 'm'),
+        throwsA(isA<AiSearchRewriteException>()),
+      );
+      expect(fixture.anonymousRequests, 1);
+      expect(fixture.requests, isEmpty);
+    });
+  });
+
+  test(
+    'production server trust still rejects the untrusted fixture CA',
+    () async {
+      final fixture = MutualTlsFixture();
+      await fixture.start((request) async => request.response.close());
+      addTearDown(fixture.close);
+      await withPlatformTrust(() async {
+        final client = const TlsClientFactory().createRestClient(
+          loopbackIdentity,
+        );
+        addTearDown(client.close);
+        await expectLater(
+          client.get(Uri.parse(fixture.origin)),
+          throwsA(
+            predicate(
+              (e) => e.toString().contains('CERTIFICATE_VERIFY_FAILED'),
+            ),
+          ),
+        );
+        expect(fixture.requests, isEmpty);
+        expect(fixture.anonymousRequests, 0);
+      });
+    },
+  );
+
+  test(
+    'explicit fixture CA trust does not bypass hostname verification',
+    () async {
+      final fixture = MutualTlsFixture();
+      await fixture.start((request) async => request.response.close());
+      addTearDown(fixture.close);
+      await withLoopbackTrust(() async {
+        final client = const TlsClientFactory().createRestClient(
+          loopbackIdentity,
+        );
+        addTearDown(client.close);
+        await expectLater(
+          client.get(Uri.parse('https://localhost:${fixture.server.port}')),
+          throwsA(
+            predicate(
+              (e) => e.toString().contains('CERTIFICATE_VERIFY_FAILED'),
+            ),
+          ),
+        );
+        expect(fixture.requests, isEmpty);
+        expect(fixture.anonymousRequests, 0);
+      });
     },
   );
 }

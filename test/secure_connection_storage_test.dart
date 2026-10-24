@@ -182,7 +182,9 @@ void main() {
       'saved_connections': legacy,
     });
     final prefs = await SharedPreferences.getInstance();
-    final store = _FaultInjectingCredentialStore()..failReadNumber = 2;
+    // Migration now reads the existing bundle before each write. Fail the
+    // second profile's verification, not the new prerequisite read.
+    final store = _FaultInjectingCredentialStore()..failReadNumber = 4;
     final manager = ConnectionManager(prefs, credentialStore: store);
 
     Object? migrationError;

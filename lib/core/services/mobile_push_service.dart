@@ -71,6 +71,7 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
     username: c.dashboardUsername,
     password: c.dashboardPassword,
     gatewayProfile: c.gatewayProfile,
+    clientCertificate: c.clientCertificate,
   );
   static String binding(SavedConnection c) => sha256
       .convert(
@@ -79,6 +80,8 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
             ...c.toMap(),
             'api_key': c.apiKey,
             'dashboard_password': c.dashboardPassword,
+            if (c.clientCertificate != null)
+              'client_key_password': c.clientCertificate!.privateKeyPassword,
           }),
         ),
       )

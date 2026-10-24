@@ -46,12 +46,12 @@ class ClientCertificateBackup {
   };
 
   factory ClientCertificateBackup.fromJson(Map<String, dynamic> json) {
-    final password = (json['private_key_password'] as String?)?.trim();
+    final password = json['private_key_password'] as String?;
     return ClientCertificateBackup(
       label: json['label'] as String,
       certificatePem: json['certificate_pem'] as String,
       privateKeyPem: json['private_key_pem'] as String,
-      password: password == null || password.isEmpty ? null : password,
+      password: password,
     );
   }
 }
