@@ -54,7 +54,7 @@ List<ChatDisplaySection> buildNormalChatDisplaySections({
     ChatDisplaySection(
       source: ChatDisplaySource.canonical,
       items: conversationOnly
-          ? buildConversationDisplayItems(messages: canonicalRows)
+          ? buildConversationAttachmentItems(messages: canonicalRows)
           : buildChatDisplayItems(
               messages: canonicalRows,
               toolActivities: canonicalTools,
@@ -64,8 +64,9 @@ List<ChatDisplaySection> buildNormalChatDisplaySections({
     ChatDisplaySection(
       source: ChatDisplaySource.received,
       items: conversationOnly
-          ? buildConversationDisplayItems(
+          ? buildConversationAttachmentItems(
               messages: receivedRows,
+              toolActivities: receivedTools,
               timeline: receivedTimeline,
               received: true,
             )
@@ -140,6 +141,21 @@ Object chatDisplayItemIdentity(dynamic item) {
         identityHashCode(row),
   );
 }
+
+/// Quiet replies retain delivered files, not diagnostic tool cards. Both
+/// sources reuse the same audited extractor and source-local deduplication.
+List<dynamic> buildConversationAttachmentItems({
+  required List<Map<String, dynamic>> messages,
+  List<GatewayToolActivity> toolActivities = const [],
+  ChatTimeline? timeline,
+  bool received = false,
+}) => buildChatDisplayItems(
+  messages: messages,
+  toolActivities: toolActivities,
+  timeline: timeline,
+  conversationOnly: true,
+  received: received,
+);
 
 /// Assistant reasoning rendered as its own collapsible item in the chat list.
 class ChatReasoningItem {
@@ -216,6 +232,8 @@ List<dynamic> buildChatDisplayItems({
   List<GatewayNotice> notices = const [],
   bool verbose = false,
   ChatTimeline? timeline,
+  bool conversationOnly = false,
+  bool received = false,
 }) {
   final toolNamesById = generatedMediaToolCallNames(messages);
   final storedResults =
@@ -256,6 +274,36 @@ List<dynamic> buildChatDisplayItems({
   final scopeRows = <Object, Map<String, dynamic>>{};
   Object scopeFor(Map<String, dynamic> row) =>
       row['_normal_projection_id'] ?? row;
+  final quietRows = <Object, Map<String, dynamic>>{};
+  final quietDeliveryScopes = <Object>{};
+  if (conversationOnly) {
+    var pendingTools = <Object>[];
+    String? prompt;
+    for (final row in messages) {
+      final scope = scopeFor(row);
+      if (row['role'] == 'user') pendingTools = [];
+      if (row['role'] == 'tool') pendingTools.add(scope);
+      final selected = buildConversationDisplayItems(
+        messages: [row],
+        timeline: timeline,
+        received: received,
+      );
+      if (selected.isEmpty) continue;
+      final item = selected.single;
+      if (item['role'] == 'user') {
+        prompt = item['_display_content'] as String;
+      } else {
+        // A received sibling final cannot lend authority to this scope.
+        quietDeliveryScopes.add(scope);
+        if (!received) quietDeliveryScopes.addAll(pendingTools);
+        pendingTools = [];
+      }
+      quietRows[scope] = {
+        ...item,
+        if (item['role'] == 'assistant') '_retry_prompt': ?prompt,
+      };
+    }
+  }
   var turn = 0;
   for (final message in messages) {
     if (message['role'] == 'user') turn++;
@@ -411,6 +459,7 @@ List<dynamic> buildChatDisplayItems({
                     ? 'tool:$callId'
                     : 'message:${rowId ?? identityHashCode(msg)}'),
             activity: activity,
+            scope: scopeFor(msg),
           );
         }
       }
@@ -451,6 +500,7 @@ List<dynamic> buildChatDisplayItems({
             ...scopeRows[run.scope]!,
             'role': role,
             '_timeline_id': run.id,
+            if (conversationOnly) '_quiet_projection_scope': run.scope,
             '_display_content': run.text,
             '_retry_prompt': ?lastUserPrompt,
           });
@@ -494,6 +544,7 @@ List<dynamic> buildChatDisplayItems({
         ...msg,
         'role': role,
         '_display_content': content,
+        if (conversationOnly) '_quiet_projection_scope': scope,
         if (role == 'assistant' && lastUserPrompt != null)
           '_retry_prompt': lastUserPrompt,
       });
@@ -520,6 +571,26 @@ List<dynamic> buildChatDisplayItems({
     displayItems.add(List<GatewaySubagentActivity>.from(subagentActivities));
   }
   displayItems.addAll(notices);
+
+  // Filter before echo suppression so hidden commentary cannot swallow a
+  // completed delivery. Reuse the public projection for prose and producer
+  // hints; never reinterpret hidden physical content or cross saved/received.
+  if (conversationOnly) {
+    final emittedScopes = <Object>{};
+    final quietItems = <dynamic>[
+      for (final item in displayItems)
+        if (item is ChatAttachmentItem &&
+            quietDeliveryScopes.contains(item.scope))
+          item
+        else if (item is Map<String, dynamic>)
+          if (quietRows.containsKey(item['_quiet_projection_scope']) &&
+              emittedScopes.add(item['_quiet_projection_scope']))
+            quietRows[item['_quiet_projection_scope']]!,
+    ];
+    displayItems
+      ..clear()
+      ..addAll(quietItems);
+  }
 
   // Prefer an explicit public assistant delivery over its tool-result echo.
   // Inspect only actual projected text, never reasoning or evicted prose. Each

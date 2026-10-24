@@ -6157,8 +6157,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final displayMessages = normal
         ? [for (final section in sections) ...section.items]
         : !_verboseMode
-        ? buildConversationDisplayItems(
+        ? buildConversationAttachmentItems(
             messages: _messages,
+            toolActivities: _toolActivities,
             timeline: _timeline,
           )
         : buildChatDisplayItems(
@@ -6363,6 +6364,9 @@ class MessageBubble extends StatelessWidget {
   /// bubble; the text is selectable with the platform handles, which keeps the
   /// long-press actions on the bubble itself untouched.
   Future<void> _showSelectTextDialog(BuildContext context) async {
+    // Capture the bubble's owner before crossing the modal boundary. The
+    // dialog is not its descendant, and the bubble may later be deactivated.
+    final previewOwner = InlineMediaPreviewScope.ownerOf(context);
     await showDialog<void>(
       context: context,
       builder: (dialogContext) {
@@ -6382,8 +6386,9 @@ class MessageBubble extends StatelessWidget {
               selectable: true,
               sizedImageBuilder: (image) =>
                   Text(image.alt ?? image.title ?? ''),
-              onTapLink: (_, href, _) =>
-                  unawaited(_openLink(dialogContext, href)),
+              onTapLink: (_, href, _) => unawaited(
+                _openLink(dialogContext, href, previewOwner: previewOwner),
+              ),
               styleSheet: _messageStyleSheet(
                 dialogTheme,
                 HermesTokens.of(dialogContext),
@@ -6403,13 +6408,17 @@ class MessageBubble extends StatelessWidget {
     );
   }
 
-  Future<void> _openLink(BuildContext context, String? href) async {
+  Future<void> _openLink(
+    BuildContext context,
+    String? href, {
+    InlineMediaPreviewOwner? previewOwner,
+  }) async {
     final path = href == null ? null : deliveredFilePathFromHref(href);
     if (path == null) {
       await openMarkdownWebLink(context, href);
       return;
     }
-    _openDeliveredLink(context, href);
+    _openDeliveredLink(context, href, previewOwner: previewOwner);
   }
 
   MediaTagRef _deliveryRef(MediaTagRef ref) {
@@ -6425,7 +6434,11 @@ class MessageBubble extends StatelessWidget {
     );
   }
 
-  void _openDeliveredLink(BuildContext context, String? href) {
+  void _openDeliveredLink(
+    BuildContext context,
+    String? href, {
+    InlineMediaPreviewOwner? previewOwner,
+  }) {
     final filesClient = !isUser ? mediaFilesClient : null;
     final path = href == null ? null : deliveredFilePathFromHref(href);
     if (filesClient == null || path == null || !context.mounted) return;
@@ -6440,6 +6453,7 @@ class MessageBubble extends StatelessWidget {
         filesClient: filesClient,
         ref: _deliveryRef(MediaTagRef(path: path)),
         sourceIdentity: mediaSourceIdentity,
+        owner: previewOwner,
       ).catchError((Object error) {
         debugPrint('media preview failed: $error');
       }),
