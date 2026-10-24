@@ -15,6 +15,7 @@ import '../utils/relative_time.dart';
 import 'chat_screen.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
+
 class CronScreen extends StatefulWidget {
   final SavedConnection connection;
 
@@ -59,6 +60,7 @@ class _CronScreenState extends State<CronScreen> {
       username: widget.connection.dashboardUsername,
       password: widget.connection.dashboardPassword,
       gatewayProfile: widget.connection.gatewayProfile,
+      clientCertificate: widget.connection.clientCertificate,
     );
     _loadJobs();
   }
@@ -140,13 +142,20 @@ class _CronScreenState extends State<CronScreen> {
       if (mounted) {
         setState(() {});
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(paused ? context.l10n.job_resumed : context.l10n.job_paused)),
+          SnackBar(
+            content: Text(
+              paused ? context.l10n.job_resumed : context.l10n.job_paused,
+            ),
+          ),
         );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(context.l10n.failed(e)), backgroundColor: Colors.orange),
+          SnackBar(
+            content: Text(context.l10n.failed(e)),
+            backgroundColor: Colors.orange,
+          ),
         );
       }
     }
@@ -211,7 +220,10 @@ class _CronScreenState extends State<CronScreen> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(context.l10n.failed(e)), backgroundColor: Colors.orange),
+          SnackBar(
+            content: Text(context.l10n.failed(e)),
+            backgroundColor: Colors.orange,
+          ),
         );
       }
     }
@@ -569,7 +581,10 @@ class _CronScreenState extends State<CronScreen> {
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 24),
-              ElevatedButton(onPressed: _loadJobs, child: Text(context.l10n.retry)),
+              ElevatedButton(
+                onPressed: _loadJobs,
+                child: Text(context.l10n.retry),
+              ),
             ],
           ),
         ),
@@ -583,7 +598,10 @@ class _CronScreenState extends State<CronScreen> {
           children: [
             Icon(Icons.schedule, size: 48, color: Colors.grey[600]),
             const SizedBox(height: 16),
-            Text(context.l10n.no_cron_jobs, style: Theme.of(context).textTheme.titleLarge),
+            Text(
+              context.l10n.no_cron_jobs,
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
           ],
         ),
       );

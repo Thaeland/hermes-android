@@ -1,3 +1,5 @@
+import 'client_certificate.dart';
+
 /// Connection model for remote Hermes Gateway API Server.
 class NormalizedConnectionHost {
   final String host;
@@ -50,6 +52,11 @@ class SavedConnection {
   /// where the server already knows its profile.
   final String? gatewayProfile;
 
+  /// Optional client certificate for reverse proxies that enforce mutual TLS.
+  /// Only meaningful together with [useHttps]; null means no client
+  /// certificate is presented.
+  final ClientCertificateConfig? clientCertificate;
+
   SavedConnection({
     required this.id,
     required this.label,
@@ -65,6 +72,7 @@ class SavedConnection {
     this.dashboardUsername,
     this.dashboardPassword,
     this.gatewayProfile,
+    this.clientCertificate,
   });
 
   String get baseUrl {
@@ -167,6 +175,9 @@ class SavedConnection {
     if (gatewayProfile != null && gatewayProfile!.isNotEmpty) {
       m['gateway_profile'] = gatewayProfile;
     }
+    if (clientCertificate != null) {
+      m['client_certificate'] = clientCertificate!.toJson();
+    }
     return m;
   }
 
@@ -193,6 +204,12 @@ class SavedConnection {
       dashboardUsername: nonEmpty(map['dashboard_username']),
       dashboardPassword: nonEmpty(map['dashboard_password']),
       gatewayProfile: nonEmpty(map['gateway_profile']),
+      clientCertificate: switch (map['client_certificate']) {
+        final Map<dynamic, dynamic> value => ClientCertificateConfig.fromJson(
+          Map<String, dynamic>.from(value),
+        ),
+        _ => null,
+      },
     );
   }
 
@@ -213,6 +230,7 @@ class SavedConnection {
     String? dashboardUsername,
     String? dashboardPassword,
     String? gatewayProfile,
+    ClientCertificateConfig? clientCertificate,
     bool clearGatewayPrefix = false,
     bool clearDashboardPrefix = false,
     bool clearDashboardPort = false,
@@ -220,6 +238,7 @@ class SavedConnection {
     bool clearDashboardPassword = false,
     bool clearDesktopGatewayUrl = false,
     bool clearGatewayProfile = false,
+    bool clearClientCertificate = false,
   }) {
     return SavedConnection(
       id: id,
@@ -250,6 +269,9 @@ class SavedConnection {
       gatewayProfile: clearGatewayProfile
           ? null
           : (gatewayProfile ?? this.gatewayProfile),
+      clientCertificate: clearClientCertificate
+          ? null
+          : (clientCertificate ?? this.clientCertificate),
     );
   }
 }

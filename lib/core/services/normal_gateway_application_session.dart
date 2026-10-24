@@ -212,6 +212,7 @@ class NormalGatewayApplicationSession {
         baseUrl: connection.baseUrl,
         apiKey: connection.apiKey,
         pathPrefix: connection.gatewayPrefix ?? '',
+        clientCertificate: connection.clientCertificate,
       ),
       onActivityChanged: onActivityChanged,
     );

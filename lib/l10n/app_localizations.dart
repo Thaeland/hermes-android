@@ -4414,6 +4414,72 @@ abstract class AppLocalizations {
   String
   get compact_removes_the_you_and_hermes_labels_and_trims_bubble_padding_spacing_and_side_margins;
 
+  /// No description provided for @client_certificate_mtls.
+  ///
+  /// In en, this message translates to:
+  /// **'Client certificate (mTLS)'**
+  String get client_certificate_mtls;
+
+  /// No description provided for @client_certificate_mtls_description.
+  ///
+  /// In en, this message translates to:
+  /// **'Present a certificate when an HTTPS proxy requires mutual TLS.'**
+  String get client_certificate_mtls_description;
+
+  /// No description provided for @client_certificate_https_only.
+  ///
+  /// In en, this message translates to:
+  /// **'Client certificates are only used for HTTPS connections.'**
+  String get client_certificate_https_only;
+
+  /// No description provided for @choose_p12_pfx.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose .p12 / .pfx'**
+  String get choose_p12_pfx;
+
+  /// No description provided for @choose_certificate_pem.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose certificate (PEM)'**
+  String get choose_certificate_pem;
+
+  /// No description provided for @choose_private_key_pem.
+  ///
+  /// In en, this message translates to:
+  /// **'Choose private key (PEM)'**
+  String get choose_private_key_pem;
+
+  /// No description provided for @certificate_password_optional.
+  ///
+  /// In en, this message translates to:
+  /// **'Certificate password (optional)'**
+  String get certificate_password_optional;
+
+  /// No description provided for @client_certificate_required.
+  ///
+  /// In en, this message translates to:
+  /// **'Load a client certificate or turn off the client certificate option.'**
+  String get client_certificate_required;
+
+  /// No description provided for @client_certificate_loaded.
+  ///
+  /// In en, this message translates to:
+  /// **'Loaded: {label}'**
+  String client_certificate_loaded(String label);
+
+  /// No description provided for @remove_certificate.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove certificate'**
+  String get remove_certificate;
+
+  /// No description provided for @certificate_import_failed.
+  ///
+  /// In en, this message translates to:
+  /// **'That certificate could not be loaded.'**
+  String get certificate_import_failed;
+
   /// No description provided for @background_work.
   ///
   /// In en, this message translates to:

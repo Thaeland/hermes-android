@@ -7,12 +7,14 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
-import 'package:http/io_client.dart' show IOClient;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
+import '../models/client_certificate.dart';
 import '../models/connection.dart';
 import '../models/session.dart';
+import 'client_certificate_service.dart';
 import 'connection_mutation_barrier.dart';
+import 'tls_client_factory.dart';
 
 // Re-export for convenience
 export '../models/connection.dart';
@@ -86,16 +88,23 @@ class _ConnectionCredentials {
   final String apiKey;
   final String? dashboardPassword;
 
+  /// Password for an encrypted PEM client key. Persisted here (the platform
+  /// secure store) rather than in the connection metadata preferences.
+  final String? clientKeyPassword;
+
   const _ConnectionCredentials({
     required this.apiKey,
     required this.dashboardPassword,
+    this.clientKeyPassword,
   });
 
-  bool get isEmpty => apiKey.isEmpty && dashboardPassword == null;
+  bool get isEmpty =>
+      apiKey.isEmpty && dashboardPassword == null && clientKeyPassword == null;
 
   String encode() => jsonEncode(<String, String>{
     if (apiKey.isNotEmpty) 'api_key': apiKey,
     'dashboard_password': ?dashboardPassword,
+    'client_key_password': ?clientKeyPassword,
   });
 
   static _ConnectionCredentials decode(String encoded) {
@@ -103,8 +112,10 @@ class _ConnectionCredentials {
       final map = jsonDecode(encoded) as Map<String, dynamic>;
       final apiKey = map['api_key'];
       final dashboardPassword = map['dashboard_password'];
+      final clientKeyPassword = map['client_key_password'];
       if (apiKey != null && apiKey is! String ||
-          dashboardPassword != null && dashboardPassword is! String) {
+          dashboardPassword != null && dashboardPassword is! String ||
+          clientKeyPassword != null && clientKeyPassword is! String) {
         throw const FormatException();
       }
       final password = (dashboardPassword as String?)?.trim();
@@ -113,6 +124,7 @@ class _ConnectionCredentials {
         dashboardPassword: password == null || password.isEmpty
             ? null
             : password,
+        clientKeyPassword: clientKeyPassword as String?,
       );
     } catch (_) {
       throw const CredentialStorageException(
@@ -123,9 +135,11 @@ class _ConnectionCredentials {
 
   static _ConnectionCredentials fromConnection(SavedConnection connection) {
     final password = connection.dashboardPassword?.trim();
+
     return _ConnectionCredentials(
       apiKey: connection.apiKey,
       dashboardPassword: password == null || password.isEmpty ? null : password,
+      clientKeyPassword: connection.clientCertificate?.privateKeyPassword,
     );
   }
 }
@@ -152,20 +166,28 @@ class ConnectionManager {
   final SharedPreferences prefs;
   final CredentialStore _credentialStore;
   final bool _nativePushSupported;
+  final ClientCertificateFileStore _certificateFiles;
 
   ConnectionManager(
     this.prefs, {
     CredentialStore? credentialStore,
+    ClientCertificateFileStore? certificateFiles,
     bool? nativePushSupported,
   }) : _credentialStore = credentialStore ?? _sharedCredentialStore,
+       _certificateFiles = certificateFiles ?? ClientCertificateService(),
        _nativePushSupported =
            nativePushSupported ?? (!kIsWeb && Platform.isAndroid);
 
   static Future<ConnectionManager> create(
     SharedPreferences prefs, {
     CredentialStore? credentialStore,
+    ClientCertificateFileStore? certificateFiles,
   }) async {
-    final manager = ConnectionManager(prefs, credentialStore: credentialStore);
+    final manager = ConnectionManager(
+      prefs,
+      credentialStore: credentialStore,
+      certificateFiles: certificateFiles,
+    );
     await manager.initialize();
     return manager;
   }
@@ -180,15 +202,40 @@ class ConnectionManager {
     final connections = _connectionsFromMaps(maps);
     final hasLegacyFields = maps.any(
       (map) =>
-          map.containsKey('api_key') || map.containsKey('dashboard_password'),
+          map.containsKey('api_key') ||
+          map.containsKey('dashboard_password') ||
+          _hasLegacyCertificatePassword(map),
     );
 
     Future<void> migrateAndHydrate() async {
       try {
         for (final connection in connections) {
-          final credentials = _ConnectionCredentials.fromConnection(connection);
-          if (!credentials.isEmpty) {
-            await _writeAndVerifyCredentials(connection.id, credentials);
+          final legacy = _ConnectionCredentials.fromConnection(connection);
+          if (!legacy.isEmpty) {
+            // An earlier release already moved API/dashboard credentials into the
+            // secure store while leaving only the PEM password in preferences.
+            // Secure values win over stale legacy fields on a migration retry.
+            final encoded = await _credentialStore.read(
+              _credentialKey(connection.id),
+            );
+            final existing = encoded == null
+                ? const _ConnectionCredentials(
+                    apiKey: '',
+                    dashboardPassword: null,
+                  )
+                : _ConnectionCredentials.decode(encoded);
+            await _writeAndVerifyCredentials(
+              connection.id,
+              _ConnectionCredentials(
+                apiKey: existing.apiKey.isEmpty
+                    ? legacy.apiKey
+                    : existing.apiKey,
+                dashboardPassword:
+                    existing.dashboardPassword ?? legacy.dashboardPassword,
+                clientKeyPassword:
+                    existing.clientKeyPassword ?? legacy.clientKeyPassword,
+              ),
+            );
           }
         }
 
@@ -250,13 +297,7 @@ class ConnectionManager {
         continue;
       }
       final credentials = _ConnectionCredentials.decode(encoded);
-      hydrated.add(
-        connection.copyWith(
-          apiKey: credentials.apiKey,
-          dashboardPassword: credentials.dashboardPassword,
-          clearDashboardPassword: credentials.dashboardPassword == null,
-        ),
-      );
+      hydrated.add(_applyCredentials(connection, credentials));
     }
     return hydrated;
   }
@@ -323,6 +364,7 @@ class ConnectionManager {
     final ordered = List<SavedConnection>.of(incoming);
     return _withSavedListTransaction(ordered.map((c) => c.id), () async {
       final current = await _loadConnectionsWithSecrets();
+      final previousMetadata = prefs.getStringList(_key);
 
       final List<SavedConnection> next;
       final removed = <SavedConnection>[];
@@ -345,27 +387,29 @@ class ConnectionManager {
       await _withConnectionMutation(
         [...ordered, ...removed].map((connection) => connection.id),
         () async {
-          final previous = <String, _ConnectionCredentials>{};
+          final previousCredentials = <String, String?>{};
+          final attemptedIds = <String>{};
+          var metadataAttempted = false;
+          // Capture every physical bundle before the first write, including absent
+          // entries. Restoring raw bundles preserves all secrets and exact bytes.
           for (final connection in [...ordered, ...removed]) {
+            if (previousCredentials.containsKey(connection.id)) continue;
             final encoded = await _readEncodedCredentials(connection.id);
-            previous[connection.id] = encoded == null
-                ? _ConnectionCredentials.fromConnection(
-                    current.where((c) => c.id == connection.id).firstOrNull ??
-                        connection.copyWith(
-                          apiKey: '',
-                          clearDashboardPassword: true,
-                        ),
-                  )
-                : _ConnectionCredentials.decode(encoded);
+            if (encoded != null) _ConnectionCredentials.decode(encoded);
+            previousCredentials[connection.id] = encoded;
           }
           try {
             for (final connection in ordered) {
+              attemptedIds.add(
+                connection.id,
+              ); // a failed ACK may follow a real write
               await _writeAndVerifyCredentials(
                 connection.id,
                 _ConnectionCredentials.fromConnection(connection),
               );
             }
             for (final connection in removed) {
+              attemptedIds.add(connection.id);
               await _writeAndVerifyCredentials(
                 connection.id,
                 const _ConnectionCredentials(
@@ -374,21 +418,39 @@ class ConnectionManager {
                 ),
               );
             }
+            metadataAttempted = true;
             await _saveAll(next);
           } catch (_) {
-            for (final entry in previous.entries) {
+            var restored = true;
+            for (final id in attemptedIds.toList().reversed) {
               try {
-                await _writeAndVerifyCredentials(entry.key, entry.value);
+                await _writeAndVerifyEncodedCredentials(
+                  id,
+                  previousCredentials[id],
+                );
               } catch (_) {
-                // Keep native authority revoked if rollback is unavailable.
+                restored = false;
               }
             }
-            throw const CredentialStorageException(
-              'Imported connection credentials could not be saved safely.',
+            if (metadataAttempted) {
+              try {
+                final saved = previousMetadata == null
+                    ? await prefs.remove(_key)
+                    : await prefs.setStringList(_key, previousMetadata);
+                if (!saved) restored = false;
+              } catch (_) {
+                restored = false;
+              }
+            }
+            throw CredentialStorageException(
+              restored
+                  ? 'Connection import could not be saved safely. Previous configuration was preserved.'
+                  : 'Connection import failed and the previous configuration could not be fully restored. Retry after checking secure storage.',
             );
           }
         },
       );
+      await _deleteUnreferencedCertificates(current, next);
     });
   }
 
@@ -405,6 +467,7 @@ class ConnectionManager {
     String? dashboardUsername,
     String? dashboardPassword,
     String? gatewayProfile,
+    ClientCertificateConfig? clientCertificate,
   }) => _withSavedListTransaction([], () async {
     final normalized = SavedConnection.normalizeHostAndPort(host, port);
     final profile = gatewayProfile?.trim();
@@ -423,8 +486,10 @@ class ConnectionManager {
       dashboardUsername: dashboardUsername,
       dashboardPassword: dashboardPassword,
       gatewayProfile: profile == null || profile.isEmpty ? null : profile,
+      clientCertificate: clientCertificate,
     );
     final current = await _loadConnectionsWithSecrets();
+    final previousConnections = List<SavedConnection>.of(current);
     current.insert(0, conn);
     await _commitCredentialAndMetadata(
       connectionId: conn.id,
@@ -434,6 +499,7 @@ class ConnectionManager {
       ),
       nextCredentials: _ConnectionCredentials.fromConnection(conn),
       connections: current,
+      previousConnections: previousConnections,
     );
   });
 
@@ -453,6 +519,8 @@ class ConnectionManager {
     String? dashboardUsername,
     String? dashboardPassword,
     String? gatewayProfile,
+    ClientCertificateConfig? clientCertificate,
+    bool clearClientCertificate = false,
   }) => _withSavedListTransaction([connId], () async {
     final current = await _loadConnectionsWithSecrets();
     final idx = current.indexWhere((c) => c.id == connId);
@@ -461,6 +529,7 @@ class ConnectionManager {
     final previousCredentials = _ConnectionCredentials.fromConnection(
       current[idx],
     );
+    final previousConnections = List<SavedConnection>.of(current);
 
     final normalized = SavedConnection.normalizeHostAndPort(host, port);
     final gateway = gatewayPrefix?.trim();
@@ -495,12 +564,15 @@ class ConnectionManager {
       clearDashboardPassword: dashPass != null && dashPass.isEmpty,
       gatewayProfile: profile == null || profile.isEmpty ? null : profile,
       clearGatewayProfile: profile != null && profile.isEmpty,
+      clientCertificate: clientCertificate,
+      clearClientCertificate: clearClientCertificate,
     );
     await _commitCredentialAndMetadata(
       connectionId: connId,
       previousCredentials: previousCredentials,
       nextCredentials: _ConnectionCredentials.fromConnection(current[idx]),
       connections: current,
+      previousConnections: previousConnections,
     );
   });
 
@@ -521,6 +593,7 @@ class ConnectionManager {
     final previousCredentials = _ConnectionCredentials.fromConnection(
       current[idx],
     );
+    final previousConnections = List<SavedConnection>.of(current);
     final u = username.trim();
     final p = password.trim();
     final gateway = gatewayPrefix?.trim();
@@ -545,6 +618,7 @@ class ConnectionManager {
       previousCredentials: previousCredentials,
       nextCredentials: _ConnectionCredentials.fromConnection(current[idx]),
       connections: current,
+      previousConnections: previousConnections,
     );
   });
 
@@ -556,12 +630,14 @@ class ConnectionManager {
         final previousCredentials = _ConnectionCredentials.fromConnection(
           current[idx],
         );
+        final previousConnections = List<SavedConnection>.of(current);
         current[idx] = current[idx].copyWith(apiKey: apiKey);
         await _commitCredentialAndMetadata(
           connectionId: connId,
           previousCredentials: previousCredentials,
           nextCredentials: _ConnectionCredentials.fromConnection(current[idx]),
           connections: current,
+          previousConnections: previousConnections,
         );
       });
 
@@ -573,6 +649,7 @@ class ConnectionManager {
         final previousCredentials = _ConnectionCredentials.fromConnection(
           current[index],
         );
+        final previousConnections = List<SavedConnection>.of(current);
         current.removeWhere((c) => c.id == id);
         await _commitCredentialAndMetadata(
           connectionId: id,
@@ -582,6 +659,7 @@ class ConnectionManager {
             dashboardPassword: null,
           ),
           connections: current,
+          previousConnections: previousConnections,
         );
       });
 
@@ -675,11 +753,29 @@ class ConnectionManager {
   SavedConnection _hydrateFromCachedCredentials(SavedConnection connection) {
     final encoded = _credentialStore.readCached(_credentialKey(connection.id));
     if (encoded == null) return connection;
-    final credentials = _ConnectionCredentials.decode(encoded);
+    return _applyCredentials(
+      connection,
+      _ConnectionCredentials.decode(encoded),
+    );
+  }
+
+  /// Attaches secrets held in the secure store to [connection].
+  ///
+  /// The client-key password is runtime-only for [ClientCertificateConfig]'s
+  /// serializer, so it must be re-attached on every read.
+  SavedConnection _applyCredentials(
+    SavedConnection connection,
+    _ConnectionCredentials credentials,
+  ) {
+    final certificate = connection.clientCertificate;
     return connection.copyWith(
       apiKey: credentials.apiKey,
       dashboardPassword: credentials.dashboardPassword,
       clearDashboardPassword: credentials.dashboardPassword == null,
+      clientCertificate: certificate?.copyWith(
+        privateKeyPassword: credentials.clientKeyPassword,
+        clearPrivateKeyPassword: credentials.clientKeyPassword == null,
+      ),
     );
   }
 
@@ -748,6 +844,7 @@ class ConnectionManager {
     required _ConnectionCredentials previousCredentials,
     required _ConnectionCredentials nextCredentials,
     required List<SavedConnection> connections,
+    required List<SavedConnection> previousConnections,
   }) async {
     await _withConnectionMutation([connectionId], () async {
       try {
@@ -764,14 +861,63 @@ class ConnectionManager {
         );
       }
     });
+    // Only now that the metadata is committed is an old identity provably
+    // unreferenced. A failed save above leaves every existing key file in
+    // place, preserving the still-referenced identity.
+    await _deleteUnreferencedCertificates(previousConnections, connections);
+  }
+
+  /// Removes certificate/key files no longer referenced by any connection.
+  ///
+  /// Runs only after a successful commit and is best-effort: storage cleanup
+  /// must never turn a saved connection into a reported failure.
+  Future<void> _deleteUnreferencedCertificates(
+    List<SavedConnection> before,
+    List<SavedConnection> after,
+  ) async {
+    final beforeDirs = _certificateDirectories(before);
+    final afterDirs = _certificateDirectories(after);
+    if (beforeDirs.length == afterDirs.length &&
+        beforeDirs.containsAll(afterDirs)) {
+      return;
+    }
+    try {
+      await _certificateFiles.deleteUnreferenced(afterDirs);
+    } catch (_) {
+      // Leftover files are harmless; the connection change already succeeded.
+    }
+  }
+
+  static Set<String> _certificateDirectories(
+    List<SavedConnection> connections,
+  ) {
+    return <String>{
+      for (final connection in connections)
+        if (connection.clientCertificate case final certificate?)
+          certificate.directoryPath,
+    };
+  }
+
+  static bool _hasLegacyCertificatePassword(Map<String, dynamic> map) {
+    final certificate = map['client_certificate'];
+    if (certificate is! Map) return false;
+    return certificate.containsKey('private_key_password');
   }
 
   Future<void> _writeAndVerifyCredentials(
     String connectionId,
     _ConnectionCredentials credentials,
+  ) => _writeAndVerifyEncodedCredentials(
+    connectionId,
+    credentials.isEmpty ? null : credentials.encode(),
+  );
+
+  Future<void> _writeAndVerifyEncodedCredentials(
+    String connectionId,
+    String? encoded,
   ) async {
     final key = _credentialKey(connectionId);
-    if (credentials.isEmpty) {
+    if (encoded == null) {
       await _credentialStore.delete(key);
       final readBack = await _credentialStore.read(key);
       if (readBack != null) {
@@ -782,7 +928,6 @@ class ConnectionManager {
       return;
     }
 
-    final encoded = credentials.encode();
     await _credentialStore.write(key, encoded);
     final readBack = await _credentialStore.read(key);
     if (readBack != encoded) {
@@ -908,10 +1053,11 @@ class ApiClient {
     required String baseUrl,
     required String apiKey,
     String pathPrefix = '',
+    ClientCertificateConfig? clientCertificate,
     http.Client? httpClient,
   }) : _apiKey = apiKey,
        baseUrl = SavedConnection.joinBaseUrl(baseUrl, pathPrefix),
-       _http = httpClient ?? _freshClient();
+       _http = httpClient ?? _freshClient(clientCertificate);
 
   /// Builds a client that does not pool keep-alive sockets.
   ///
@@ -920,9 +1066,8 @@ class ApiClient {
   /// then hangs). Home/tablet/LAN gateways are cheap to reconnect to, so a
   /// fresh TCP connection per request is a fair price for never wedging the
   /// session list on a stale socket.
-  static http.Client _freshClient() {
-    final io = HttpClient()..idleTimeout = Duration.zero;
-    return IOClient(io);
+  static http.Client _freshClient(ClientCertificateConfig? clientCertificate) {
+    return const TlsClientFactory().createRestClient(clientCertificate);
   }
 
   Map<String, String> get _headers => {
@@ -1650,6 +1795,8 @@ class DashboardClient {
     String? username,
     String? password,
     String? gatewayProfile,
+    ClientCertificateConfig? clientCertificate,
+    TlsClientFactory tlsClientFactory = const TlsClientFactory(),
     http.Client? httpClient,
   }) : _proxied = proxied,
        _username = username,
@@ -1661,7 +1808,8 @@ class DashboardClient {
          '${useHttps ? 'https' : 'http'}://$host:$port',
          pathPrefix,
        ),
-       _http = httpClient ?? http.Client();
+       _http =
+           httpClient ?? tlsClientFactory.createRestClient(clientCertificate);
 
   /// Clears cached auth only when the failed request used the current auth
   /// generation. Concurrent stale 401s therefore cannot invalidate a newer

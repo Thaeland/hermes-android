@@ -102,6 +102,7 @@ class RemoteFilesClient implements RemoteFilesDataSource {
         username: connection.dashboardUsername,
         password: connection.dashboardPassword,
         gatewayProfile: connection.gatewayProfile,
+        clientCertificate: connection.clientCertificate,
         httpClient: httpClient,
       ),
       profile: connection.gatewayProfile,

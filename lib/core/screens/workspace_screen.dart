@@ -321,6 +321,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
       baseUrl: connection.baseUrl,
       apiKey: connection.apiKey,
       pathPrefix: connection.gatewayPrefix ?? '',
+      clientCertificate: connection.clientCertificate,
       httpClient: widget.testSessionsHttpClient,
     );
   }
@@ -1449,6 +1450,7 @@ class _WorkspaceScreenState extends State<WorkspaceScreen> {
           proxied: widget.connection.dashboardProxied,
           username: widget.connection.dashboardUsername,
           password: widget.connection.dashboardPassword,
+          clientCertificate: widget.connection.clientCertificate,
         );
         archivedSessions = await dashboard
             .getArchivedSessions(

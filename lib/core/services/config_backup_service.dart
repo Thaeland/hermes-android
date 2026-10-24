@@ -2,9 +2,11 @@
 
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'config_backup.dart';
+import '../models/client_certificate.dart';
 import 'app_update_service.dart';
 import 'chat_density_preference.dart';
+import 'client_certificate_service.dart';
+import 'config_backup.dart';
 import 'connection_manager.dart';
 import 'local_chat_pin_store.dart';
 
@@ -76,12 +78,15 @@ class ConfigBackupService {
 
   final ConnectionManager _connectionManager;
   final SharedPreferences _preferences;
+  final ClientCertificateService _certificates;
 
   ConfigBackupService({
     required ConnectionManager connectionManager,
     required SharedPreferences preferences,
+    ClientCertificateService? certificates,
   }) : _connectionManager = connectionManager,
-       _preferences = preferences;
+       _preferences = preferences,
+       _certificates = certificates ?? ClientCertificateService();
 
   static bool isBackedUpKey(String key) {
     if (exactPreferenceKeys.contains(key)) return true;
@@ -90,6 +95,29 @@ class ConfigBackupService {
 
   Future<ConfigBackup> export({required String appVersion}) async {
     final connections = await _connectionManager.loadConnectionsWithSecrets();
+
+    final certificates = <String, ClientCertificateBackup>{};
+    for (final connection in connections) {
+      final certificate = connection.clientCertificate;
+      if (certificate == null) continue;
+      try {
+        final pair = await _certificates.readPair(certificate);
+        certificates[connection.id] = ClientCertificateBackup(
+          label: certificate.label,
+          certificatePem: pair.certificatePem,
+          privateKeyPem: pair.privateKeyPem,
+          password: certificate.privateKeyPassword,
+        );
+      } on ClientCertificateImportException catch (error) {
+        // Never emit a backup that claims a complete restore while dropping an
+        // mTLS identity: the user would only discover the loss on the new
+        // device, with no way to authenticate.
+        throw ConfigBackupException(
+          'The client certificate for "${connection.label}" could not be '
+          'included in this backup: ${error.message}',
+        );
+      }
+    }
 
     final preferences = <String, Object>{};
     for (final key in _preferences.getKeys()) {
@@ -109,6 +137,7 @@ class ConfigBackupService {
       createdAt: DateTime.now().toUtc(),
       appVersion: appVersion,
       connections: connections,
+      clientCertificates: certificates,
       preferences: preferences,
     );
   }
@@ -139,13 +168,43 @@ class ConfigBackupService {
               .length
         : 0;
 
+    // Re-materialise every bundled identity into app-private storage before the
+    // connections are committed, so an imported mTLS profile works immediately
+    // and a failure cannot leave a connection pointing at missing files.
+    final restoredConnections = <SavedConnection>[];
+    final createdCertificates = <ClientCertificateConfig>[];
     try {
+      for (final connection in backup.connections) {
+        final certificate = backup.clientCertificates[connection.id];
+        if (certificate == null) {
+          restoredConnections.add(connection);
+          continue;
+        }
+        final restored = await _certificates.restore(
+          certificatePem: certificate.certificatePem,
+          privateKeyPem: certificate.privateKeyPem,
+          label: certificate.label,
+          password: certificate.password,
+        );
+        createdCertificates.add(restored);
+        restoredConnections.add(
+          connection.copyWith(clientCertificate: restored),
+        );
+      }
+
       await _connectionManager.importConnections(
-        backup.connections,
+        restoredConnections,
         replaceExisting: mode == ConfigImportMode.replace,
       );
-    } on CredentialStorageException catch (error) {
+    } on ClientCertificateImportException catch (error) {
+      await _deleteCertificates(createdCertificates);
       throw ConfigBackupException(error.message);
+    } on CredentialStorageException catch (error) {
+      await _deleteCertificates(createdCertificates);
+      throw ConfigBackupException(error.message);
+    } catch (_) {
+      await _deleteCertificates(createdCertificates);
+      rethrow;
     }
 
     var applied = 0;
@@ -185,5 +244,36 @@ class ConfigBackupService {
       preferencesApplied: applied,
       preferencesSkipped: skipped,
     );
+  }
+
+  /// Best-effort removal of identities materialised by a failed import.
+  Future<void> _deleteCertificates(
+    List<ClientCertificateConfig> certificates,
+  ) async {
+    if (certificates.isEmpty) return;
+    final Set<String> referenced;
+    try {
+      // A metadata write can commit physically before its ACK is lost, and a
+      // persistent storage outage can also prevent rollback. Refresh the real
+      // list: the preference cache may already contain the attempted rollback.
+      await _preferences.reload();
+      referenced = {
+        for (final connection in _connectionManager.getConnections())
+          if (connection.clientCertificate case final certificate?)
+            certificate.directoryPath,
+      };
+    } catch (_) {
+      // Unknown reachability is not proof that a key is unreferenced. Keep it
+      // until a later successful connection commit can safely collect it.
+      return;
+    }
+    for (final certificate in certificates) {
+      if (referenced.contains(certificate.directoryPath)) continue;
+      try {
+        await _certificates.delete(certificate);
+      } catch (_) {
+        // A leftover file is harmless; the import failure is what matters.
+      }
+    }
   }
 }

@@ -651,10 +651,18 @@ class _ApplicationAsyncEventRegistration {
 }
 
 String _connectionScopeKey(SavedConnection connection) {
+  final certificate = connection.clientCertificate;
   final credentialDigest = sha256
       .convert(
         utf8.encode(
-          '${connection.apiKey}\u0000${connection.dashboardPassword ?? ''}',
+          // Preserve existing non-mTLS receipt namespaces across this upgrade.
+          certificate == null
+              ? '${connection.apiKey}\u0000${connection.dashboardPassword ?? ''}'
+              : jsonEncode([
+                  connection.apiKey,
+                  connection.dashboardPassword,
+                  certificate.privateKeyPassword,
+                ]),
         ),
       )
       .toString();
@@ -673,6 +681,7 @@ String _connectionScopeKey(SavedConnection connection) {
             'dashboard_prefix': connection.dashboardPrefix,
             'dashboard_port': connection.dashboardPort,
             'dashboard_proxied': connection.dashboardProxied,
+            if (certificate != null) 'client_certificate': certificate.toJson(),
             'credential_digest': credentialDigest,
           }),
         ),

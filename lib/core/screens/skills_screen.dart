@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../services/connection_manager.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
+
 class SkillsScreen extends StatefulWidget {
   final SavedConnection connection;
   const SkillsScreen({required this.connection, super.key});
@@ -28,6 +29,7 @@ class _SkillsScreenState extends State<SkillsScreen> {
       useHttps: widget.connection.useHttps,
       username: widget.connection.dashboardUsername,
       password: widget.connection.dashboardPassword,
+      clientCertificate: widget.connection.clientCertificate,
     );
     _load();
   }
