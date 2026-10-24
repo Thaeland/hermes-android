@@ -21,7 +21,18 @@ Future<void> openMarkdownWebLink(BuildContext context, String? href) async {
     // Missing browser/plugin and rejected platform intents have the same UI.
   }
   if (opened || !context.mounted) return;
-  ScaffoldMessenger.of(context)
-    ..hideCurrentSnackBar()
-    ..showSnackBar(SnackBar(content: Text(context.l10n.could_not_open_link)));
+  // A parent Scaffold's snackbar can sit behind a task sheet or selection
+  // dialog. Keep failure feedback on top of the active route instead.
+  await showDialog<void>(
+    context: context,
+    builder: (dialogContext) => AlertDialog(
+      content: Text(dialogContext.l10n.could_not_open_link),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(dialogContext).pop(),
+          child: Text(dialogContext.l10n.close),
+        ),
+      ],
+    ),
+  );
 }

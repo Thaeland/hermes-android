@@ -6,6 +6,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hermes_android/core/controllers/delegated_task_controller.dart';
 import 'package:hermes_android/core/screens/chat_screen.dart';
+import 'package:hermes_android/core/services/remote_files_client.dart';
 import 'package:hermes_android/core/theme/hermes_theme.dart';
 import 'package:hermes_android/core/widgets/delegated_task_timeline.dart';
 import 'package:hermes_android/l10n/app_localizations.dart';
@@ -26,6 +27,34 @@ Widget _app(Widget child, {Brightness brightness = Brightness.light}) =>
       supportedLocales: AppLocalizations.supportedLocales,
       home: Scaffold(body: child),
     );
+
+Widget _taskOpener(DelegatedTaskController controller) => Builder(
+  builder: (context) => TextButton(
+    onPressed: () => unawaited(showDelegatedTaskTimeline(context, controller)),
+    child: const Text('Open task'),
+  ),
+);
+
+class _DownloadProbe implements RemoteFilesDataSource {
+  final paths = <String>[];
+
+  @override
+  Future<RemoteFileDownload> download(String path) async {
+    paths.add(path);
+    // Stop at the gateway boundary; sharing is covered by the media tests.
+    throw StateError('Download rejected by test gateway.');
+  }
+
+  @override
+  Future<RemoteDirectory> defaultDirectory() => throw UnimplementedError();
+
+  @override
+  Future<List<RemoteFileEntry>> listDirectory(String path) =>
+      throw UnimplementedError();
+
+  @override
+  Future<RemoteTextPreview> readText(String path) => throw UnimplementedError();
+}
 
 void main() {
   final launches = <MethodCall>[];
@@ -143,6 +172,32 @@ void main() {
     }
   });
 
+  testWidgets('mixed web and MEDIA links retain separate destinations', (
+    tester,
+  ) async {
+    final files = _DownloadProbe();
+    await tester.pumpWidget(
+      _app(
+        MessageBubble(
+          content:
+              '- [Release page]($_releaseUrl)\n'
+              '- MEDIA:"/srv/my report.pdf"',
+          isUser: false,
+          mediaFilesClient: () => files,
+        ),
+      ),
+    );
+    await tester.tap(find.text('Release page', findRichText: true));
+    await tester.pump();
+    expect(launches.single.arguments['url'], _releaseUrl);
+    expect(files.paths, isEmpty);
+    await tester.tap(find.text('my report.pdf', findRichText: true));
+    await tester.pump();
+    expect(files.paths, ['/srv/my report.pdf']);
+    expect(launches, hasLength(1));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('links still work after selecting message text', (tester) async {
     await tester.pumpWidget(
       _app(
@@ -213,6 +268,7 @@ void main() {
     result.complete(false);
     await tester.pump();
     expect(find.byType(SnackBar), findsNothing);
+    expect(find.byType(AlertDialog), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -261,6 +317,107 @@ void main() {
       await tester.tap(find.textContaining('Release page', findRichText: true));
       await tester.pump();
       expect(launches, isEmpty);
+    });
+  }
+
+  for (final width in [430.0, 1000.0]) {
+    for (final throws in [false, true]) {
+      testWidgets(
+        'failure stays visible above the $width task modal ($throws)',
+        (tester) async {
+          tester.view.devicePixelRatio = 1;
+          tester.view.physicalSize = Size(width, 800);
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          launch = () async {
+            if (throws) throw PlatformException(code: 'NO_BROWSER');
+            return false;
+          };
+          final history = FakeHistory()
+            ..data = [
+              {
+                'id': 1,
+                'role': 'assistant',
+                'content': '[Release page]($_releaseUrl)',
+              },
+            ];
+          final controller = DelegatedTaskController(
+            task: task,
+            history: history,
+          );
+          await tester.pumpWidget(_app(_taskOpener(controller)));
+          await tester.tap(find.text('Open task'));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Release page'));
+          await tester.pumpAndSettle();
+
+          expect(
+            find.text('Could not open this link.').hitTestable(),
+            findsOneWidget,
+          );
+          expect(find.byType(DelegatedTaskTimeline), findsOneWidget);
+          expect(launches.single.arguments['url'], _releaseUrl);
+          await tester.tap(
+            find.descendant(
+              of: find.byType(AlertDialog),
+              matching: find.text('Close'),
+            ),
+          );
+          await tester.pumpAndSettle();
+          expect(find.text('Release page').hitTestable(), findsOneWidget);
+          await tester.tap(find.text('Close'));
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+  }
+
+  for (final surface in ['selection', 'task']) {
+    testWidgets('closing $surface before launch fails shows no stale dialog', (
+      tester,
+    ) async {
+      final result = Completer<bool>();
+      launch = () => result.future;
+      if (surface == 'selection') {
+        await tester.pumpWidget(
+          _app(
+            const MessageBubble(
+              content: '[Release page]($_releaseUrl)',
+              isUser: false,
+            ),
+          ),
+        );
+        await tester.longPress(find.byKey(const Key('message-bubble')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('Select text'));
+      } else {
+        final history = FakeHistory()
+          ..data = [
+            {
+              'id': 1,
+              'role': 'assistant',
+              'content': '[Release page]($_releaseUrl)',
+            },
+          ];
+        final controller = DelegatedTaskController(
+          task: task,
+          history: history,
+        );
+        await tester.pumpWidget(_app(_taskOpener(controller)));
+        await tester.tap(find.text('Open task'));
+      }
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Release page').hitTestable());
+      await tester.pump();
+      expect(launches, hasLength(1));
+      await tester.tap(find.text('Close').hitTestable());
+      await tester.pumpAndSettle();
+      result.complete(false);
+      await tester.pumpAndSettle();
+      expect(find.text('Could not open this link.'), findsNothing);
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(tester.takeException(), isNull);
     });
   }
 
