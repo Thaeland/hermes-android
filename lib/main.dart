@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io' as io;
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -2297,15 +2298,66 @@ class _AddDialogState extends State<_AddDialog> {
     return io.File(path).readAsBytes();
   }
 
-  Future<void> _pickPkcs12() async {
+  /// Extensions the desktop picker offers for certificate material.
+  static const List<String> _pemPickerExtensions = [
+    'pem',
+    'crt',
+    'cer',
+    'key',
+  ];
+  static const List<String> _pkcs12PickerExtensions = ['p12', 'pfx'];
+
+  /// Certificate identities are a few KiB; anything larger is a mis-pick and is
+  /// rejected before it is read into memory.
+  static const int _maxCertificateFileBytes = 1024 * 1024;
+
+  /// Whether the platform's document picker can filter by file extension.
+  ///
+  /// Android's Storage Access Framework filters on MIME type, and neither `pem`
+  /// nor `key` has a `MimeTypeMap` entry while content providers commonly label
+  /// PEM files `application/octet-stream` — so an extension filter greys out the
+  /// very files the user is trying to import (iOS document types behave the
+  /// same). Those platforms pick unfiltered and let
+  /// [ClientCertificateService] reject anything that is not certificate
+  /// material; desktop pickers match the extension itself, where the filter
+  /// still helps.
+  bool get _pickerFiltersByExtension => switch (defaultTargetPlatform) {
+    TargetPlatform.android || TargetPlatform.iOS => false,
+    TargetPlatform.linux ||
+    TargetPlatform.macOS ||
+    TargetPlatform.windows ||
+    TargetPlatform.fuchsia => true,
+  };
+
+  Future<PlatformFile?> _pickCertificateFile(List<String> extensions) async {
+    final filterByExtension = _pickerFiltersByExtension;
     try {
       final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: const ['p12', 'pfx'],
+        type: filterByExtension ? FileType.custom : FileType.any,
+        allowedExtensions: filterByExtension ? extensions : null,
         allowMultiple: false,
-        withData: true,
+        // Read through the cached path instead of loading the whole pick into
+        // memory: the size check below has to run before the file is read.
+        withData: false,
       );
       final file = result?.files.firstOrNull;
+      if (file == null) return null;
+      if (file.size > _maxCertificateFileBytes) {
+        if (!mounted) return null;
+        setState(() => _error = context.l10n.certificate_import_failed);
+        return null;
+      }
+      return file;
+    } catch (_) {
+      if (!mounted) return null;
+      setState(() => _error = context.l10n.certificate_import_failed);
+      return null;
+    }
+  }
+
+  Future<void> _pickPkcs12() async {
+    try {
+      final file = await _pickCertificateFile(_pkcs12PickerExtensions);
       if (file == null) return;
       final bytes = await _fileBytes(file);
       if (bytes == null) {
@@ -2354,21 +2406,8 @@ class _AddDialogState extends State<_AddDialog> {
     await _importPemPairIfReady();
   }
 
-  Future<PlatformFile?> _pickPemFile() async {
-    try {
-      final result = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: const ['pem', 'crt', 'cer', 'key'],
-        allowMultiple: false,
-        withData: true,
-      );
-      return result?.files.firstOrNull;
-    } catch (_) {
-      if (!mounted) return null;
-      setState(() => _error = context.l10n.certificate_import_failed);
-      return null;
-    }
-  }
+  Future<PlatformFile?> _pickPemFile() =>
+      _pickCertificateFile(_pemPickerExtensions);
 
   Future<void> _importPemPairIfReady() async {
     final certificateBytes = _pemCertificateBytes;
