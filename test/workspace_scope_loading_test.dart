@@ -7,7 +7,6 @@ import 'package:hermes_android/core/models/connection.dart';
 import 'package:hermes_android/core/models/session.dart';
 import 'package:hermes_android/core/services/projects_repository.dart';
 import 'package:hermes_android/core/services/projects_gateway_client.dart';
-import 'package:hermes_android/core/widgets/home_pane.dart';
 import 'package:hermes_android/core/screens/workspace_screen.dart';
 import 'package:hermes_android/core/screens/workspace_sessions_screen.dart';
 import 'package:hermes_android/core/theme/hermes_theme.dart';
@@ -269,13 +268,13 @@ void main() {
   );
 
   testWidgets(
-    'post-rename refresh does not join an older Home authority epoch',
+    'post-rename refresh does not join an older aggregate authority epoch',
     (tester) async {
       final staleLater = Completer<http.Response>();
+      final freshFull = Completer<http.Response>();
       var title = 'Original title';
-      var holdingHome = false;
-      var heldOnce = false;
       var fullReads = 0;
+      var heldOnce = false;
       Map<String, Object?> currentRow() => {...row(0), 'title': title};
       await mount(
         tester,
@@ -288,10 +287,10 @@ void main() {
             return livePage([currentRow()]);
           }
           if (request.url.queryParameters['offset'] == '0') {
-            fullReads++;
+            if (++fullReads == 2) return freshFull.future;
             return livePage([currentRow()]);
           }
-          if (holdingHome && !heldOnce) {
+          if (!heldOnce) {
             heldOnce = true;
             return staleLater.future;
           }
@@ -299,16 +298,10 @@ void main() {
         }),
         archive: MockClient((_) async => archivePage(0, 0, 0)),
       );
-      await tester.pumpAndSettle();
-      holdingHome = true;
-      final heldAt = tester.binding.clock.now();
-      unawaited(tester.state<HomePaneState>(find.byType(HomePane)).refresh());
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 1));
-      expect(heldOnce, isTrue);
-      await tester.tap(find.text('Chats').last);
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
+      expect(heldOnce, isTrue);
+      final heldAt = tester.binding.clock.now();
       final browser = tester.widget<WorkspaceSessionsScreen>(
         find.byType(WorkspaceSessionsScreen),
       );
@@ -318,33 +311,36 @@ void main() {
       );
       final readsBeforeRefresh = fullReads;
       var refreshSettled = false;
-      unawaited(
-        tester
-            .state<WorkspaceSessionsScreenState>(
-              find.byType(WorkspaceSessionsScreen),
-            )
-            .refresh()
-            .then((_) => refreshSettled = true),
+      final refresh = tester
+          .state<WorkspaceSessionsScreenState>(
+            find.byType(WorkspaceSessionsScreen),
+          )
+          .refresh()
+          .then((_) => refreshSettled = true);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(
+        fullReads,
+        greaterThan(readsBeforeRefresh),
+        reason: 'fresh loader must not join the pre-save physical read',
       );
+      expect(refreshSettled, isFalse);
+      staleLater.complete(livePage([]));
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 400));
       expect(
         refreshSettled,
-        isTrue,
-        reason: 'fresh refresh must finish before old Home response',
+        isFalse,
+        reason: 'old completion cannot satisfy the post-rename refresh',
       );
+      freshFull.complete(livePage([currentRow()]));
+      await tester.pumpAndSettle();
+      await refresh;
+      expect(refreshSettled, isTrue);
       expect(
         tester.binding.clock.now().difference(heldAt).inMilliseconds,
         lessThan(20000),
       );
-      expect(
-        fullReads,
-        greaterThan(readsBeforeRefresh),
-        reason: 'fresh loader must not join pre-save Home read',
-      );
-      expect(find.text('Confirmed new title'), findsOneWidget);
-      staleLater.complete(livePage([]));
-      await tester.pumpAndSettle();
       expect(find.text('Confirmed new title'), findsOneWidget);
       expect(find.text('Original title'), findsNothing);
     },

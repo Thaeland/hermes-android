@@ -23,7 +23,7 @@ class ActivitySessionCache {
   void merge(Iterable<Session> sessions, {required int read}) {
     final rows = sessions.toList(growable: false);
     for (final row in rows) {
-      _rootsById.putIfAbsent(row.id, () => row.lineageRootId ?? row.id);
+      _rootsById[row.id] = row.lineageRootId ?? _rootsById[row.id] ?? row.id;
     }
     for (final entry in _canonicalSessions(rows).entries) {
       final previous = _lineages[entry.key];
@@ -43,6 +43,11 @@ class ActivitySessionCache {
   }
 
   Iterable<Session> get sessions => _lineages.values.map((row) => row.session);
+
+  Map<String, String> get lineageRoots => Map.unmodifiable({
+    for (final entry in _rootsById.entries)
+      if (entry.key != entry.value) entry.key: entry.value,
+  });
 
   Session? operator [](String id) => _lineages[_rootsById[id] ?? id]?.session;
 
@@ -152,9 +157,14 @@ ActivityFeed buildOperationalActivityFeed({
     }.contains(record.state);
     if (!unresolved && record.updatedAtEpochMs < floor) continue;
     final session =
-        resolve(record.storedSessionId) ?? resolve(record.localSessionId);
+        resolve(record.storedSessionId) ??
+        resolve(record.lineageRootId) ??
+        resolve(record.localSessionId);
     final sessionId =
-        session?.id ?? record.storedSessionId ?? record.localSessionId;
+        session?.id ??
+        record.lineageRootId ??
+        record.storedSessionId ??
+        record.localSessionId;
     knownSessions.addAll([
       sessionId,
       record.localSessionId,

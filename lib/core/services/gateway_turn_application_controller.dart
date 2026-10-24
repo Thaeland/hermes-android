@@ -224,8 +224,12 @@ class GatewayTurnApplicationController {
   /// Uses exactly the owner's credential-inclusive configuration scope, but
   /// does not create sockets, recovery coordinators or normal chat owners.
   Future<List<OperationalActivityRecord>> readActivityRecords(
-    SavedConnection connection,
-  ) => _activityStore.load(_connectionScopeKey(connection));
+    SavedConnection connection, {
+    Map<String, String> sessionRoots = const {},
+  }) => _activityStore.load(
+    _connectionScopeKey(connection),
+    sessionRoots: sessionRoots,
+  );
 
   void setLifecycle({required bool background, bool? backgroundWorkEnabled}) {
     _background = background;

@@ -9,7 +9,7 @@ import 'package:hermes_android/core/models/session.dart';
 import 'package:hermes_android/core/screens/workspace_screen.dart';
 import 'package:hermes_android/core/services/gateway_turn_application_controller.dart';
 import 'package:hermes_android/core/theme/hermes_theme.dart';
-import 'package:hermes_android/core/widgets/home_pane.dart';
+import 'package:hermes_android/core/screens/workspace_sessions_screen.dart';
 import 'package:hermes_android/core/widgets/activity_pane.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -124,7 +124,9 @@ void main() {
         await tester.pump();
         expect(reads, 3);
         await tester
-            .state<HomePaneState>(find.byType(HomePane, skipOffstage: false))
+            .state<WorkspaceSessionsScreenState>(
+              find.byType(WorkspaceSessionsScreen, skipOffstage: false),
+            )
             .refresh();
         await tester.pumpAndSettle();
         expect(reads, 4);

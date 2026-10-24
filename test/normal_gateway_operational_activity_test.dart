@@ -30,6 +30,42 @@ void main() {
     },
   );
 
+  test(
+    'actual turn persists compression root before any Activity read',
+    () async {
+      final f = _Fixture();
+      addTearDown(f.close);
+      await f.ready();
+      f.owner = f.session.chatFor(
+        'local',
+        storedSessionId: 'stored',
+        title: 'private-title',
+        lineageRootId: 'root',
+      );
+      f.begin();
+      await f.sent.future;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.reload();
+      final persisted =
+          jsonDecode(prefs.getString(OperationalActivityStore.preferenceKey)!)
+              as List;
+      expect((persisted.single as Map)['lineageRootId'], 'root');
+      expect((persisted.single as Map).keys.toSet(), {
+        'scope',
+        'localSessionId',
+        'storedSessionId',
+        'lineageRootId',
+        'turnId',
+        'state',
+        'updatedAtEpochMs',
+      });
+      final reopened = (await OperationalActivityStore().load('scope')).single;
+      expect(reopened.lineageRootId, 'root');
+      expect(reopened.storedSessionId, 'stored');
+      expect(reopened.state, OperationalActivityState.running);
+    },
+  );
+
   test('submitted is recorded before wire emission', () async {
     final pending = _HeldPendingStore(heldPhase: 'write_ahead');
     final f = _Fixture(pending: pending);

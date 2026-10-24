@@ -732,6 +732,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 widget.testStoredSessionKey?.call(widget.session.id) ??
                 widget.session.id,
       title: _sessionTitle,
+      lineageRootId: widget.session.lineageRootId,
       workingDirectory: widget.projectWorkingDirectory,
     );
     if (_textController.text.isNotEmpty || widget.initialComposerText != null) {

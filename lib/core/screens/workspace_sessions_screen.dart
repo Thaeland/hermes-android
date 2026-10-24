@@ -7,15 +7,30 @@ import '../services/local_chat_pin_store.dart';
 import '../services/session_archive_ledger.dart';
 import '../theme/hermes_theme.dart';
 import '../utils/relative_time.dart';
+import '../utils/session_sources.dart';
+import '../widgets/chat_attention_section.dart';
 import '../widgets/hermes_components.dart';
 import '../widgets/hermes_shell.dart';
 import '../widgets/session_name_dialog.dart';
 
 import 'package:hermes_android/core/l10n/l10n.dart';
 
+export '../utils/session_sources.dart';
+
 const kWorkspaceSessionSearchKey = Key('workspace-session-search');
 
 enum WorkspaceSessionView { all, unassigned, archivedQuick, search }
+
+/// Source separation applies before search, pins, date groups, and filters.
+enum WorkspaceSessionKind {
+  chats,
+  crons;
+
+  bool includes(Session session) => switch (this) {
+    WorkspaceSessionKind.chats => !isMachineSession(session),
+    WorkspaceSessionKind.crons => isCronSession(session),
+  };
+}
 
 /// The chip filters the Chats browser offers (decision #4 of the final UI
 /// spec): every conversation, recent activity, unassigned, and archived.
@@ -55,19 +70,6 @@ enum ChatDateBucket {
 /// How long "Recent" means in the Chats browser.
 const Duration kRecentChatsWindow = Duration(days: 7);
 
-/// Machine-generated session sources. The server's `projects.tree`
-/// deliberately never claims these (`_PROJECT_TREE_EXCLUDED_SOURCES` in
-/// tui_gateway/methods_projects.py), and `filing.suggest` skips them too —
-/// automated runs carry no human filing intent. The Unassigned view must
-/// mirror that exclusion or every cron run shows up as "unfiled" noise the
-/// filing engine can never answer for. The Chats browser excludes them from
-/// every chip (desktop parity): cron runs are browsed per-job from the
-/// Cron screen's run list, not as chat-list entries.
-const Set<String> kMachineSessionSources = {'cron', 'kanban', 'oneshot'};
-
-bool isMachineSession(Session session) =>
-    kMachineSessionSources.contains(session.source);
-
 /// Assigns a conversation to its date bucket, by calendar day.
 ChatDateBucket chatDateBucket(DateTime now, double lastActiveSeconds) {
   final activity = DateTime.fromMillisecondsSinceEpoch(
@@ -90,6 +92,7 @@ ChatDateBucket chatDateBucket(DateTime now, double lastActiveSeconds) {
 List<Session> filterChats({
   required List<Session> sessions,
   required WorkspaceChatsFilter filter,
+  WorkspaceSessionKind kind = WorkspaceSessionKind.chats,
   Set<String> claimedSessionIds = const {},
   Set<String> archivedQuickChatIds = const {},
   String query = '',
@@ -103,19 +106,11 @@ List<Session> filterChats({
 
   final filtered = [
     for (final session in sessions)
-      if (switch (filter) {
-            // Machine-generated runs (cron/kanban/oneshot) never enter the
-            // chat browser at all — the desktop's sidebar applies the same
-            // exclusion (SIDEBAR_EXCLUDED_SOURCES in
-            // use-session-list-actions.ts). Cron runs live in the Cron
-            // screen's per-job run list instead, so the scheduler's
-            // always-newest sessions can't crowd human chats out.
-            WorkspaceChatsFilter.all =>
-              !session.archived && !isMachineSession(session),
+      if (kind.includes(session) &&
+          switch (filter) {
+            WorkspaceChatsFilter.all => !session.archived,
             WorkspaceChatsFilter.recent =>
-              !session.archived &&
-                  !isMachineSession(session) &&
-                  session.lastActive >= recentCutoff,
+              !session.archived && session.lastActive >= recentCutoff,
             WorkspaceChatsFilter.unassigned =>
               // When the claim map is unknown (projects.tree timed out),
               // every chat would pass as 'unassigned' — a lie that turns
@@ -123,16 +118,9 @@ List<Session> filterChats({
               // the UI surfaces the read failure.
               projectsKnown &&
                   !session.archived &&
-                  !isMachineSession(session) &&
                   !claimedSessionIds.contains(session.id),
             WorkspaceChatsFilter.archived =>
-              // Machine runs stay excluded even once archived — an archived
-              // cron run is still cron noise, and its home is the Cron
-              // screen's run drill-down. Quick-chat archives are human
-              // rows and stay.
-              !isMachineSession(session) &&
-                  (session.archived ||
-                      archivedQuickChatIds.contains(session.id)),
+              session.archived || archivedQuickChatIds.contains(session.id),
           } &&
           (normalized.isEmpty ||
               session.title.toLowerCase().contains(normalized) ||
@@ -170,6 +158,10 @@ class WorkspaceSessionsData {
 
   /// A provisional list while a complete scan or additive metadata loads.
   final bool isPartial;
+  final bool archivedIsPartial;
+  final bool projectsLoading;
+  final Object? sessionsError;
+  final Object? archiveError;
   final Set<String> claimedSessionIds;
   final Set<String> archivedQuickChatIds;
 
@@ -200,51 +192,119 @@ class WorkspaceSessionsData {
     this.sessions = const [],
     bool? sessionsKnown,
     this.isPartial = false,
+    this.archivedIsPartial = false,
+    this.projectsLoading = false,
+    this.sessionsError,
+    this.archiveError,
     this.claimedSessionIds = const {},
     this.archivedQuickChatIds = const {},
     this.archivedSessions = const [],
     bool? archivesKnown,
     this.projectLabels = const {},
     this.projectsKnown = true,
-  }) : sessionsKnown = sessionsKnown ?? !isPartial,
-       archivesKnown = archivesKnown ?? !isPartial;
+  }) : sessionsKnown = sessionsKnown ?? (!isPartial && sessionsError == null),
+       archivesKnown =
+           archivesKnown ?? (!archivedIsPartial && archiveError == null);
+
+  WorkspaceSessionsData withArchives({
+    required List<Session> rows,
+    bool loading = false,
+    Object? error,
+  }) => WorkspaceSessionsData(
+    sessions: sessions,
+    sessionsKnown: sessionsKnown,
+    archivesKnown: !loading && error == null,
+    isPartial: isPartial,
+    sessionsError: sessionsError,
+    archivedSessions: rows,
+    archivedIsPartial: loading,
+    archiveError: error,
+    claimedSessionIds: claimedSessionIds,
+    archivedQuickChatIds: archivedQuickChatIds,
+    projectLabels: projectLabels,
+    projectsKnown: projectsKnown,
+    projectsLoading: projectsLoading,
+  );
+
+  /// Active refresh also owns Project/Quick metadata, but never server archives.
+  WorkspaceSessionsData withActive(WorkspaceSessionsData active) =>
+      WorkspaceSessionsData(
+        sessions: active.sessions,
+        sessionsKnown: active.sessionsKnown,
+        archivesKnown: archivesKnown,
+        isPartial: active.isPartial,
+        sessionsError: active.sessionsError,
+        archivedSessions: archivedSessions,
+        archivedIsPartial: archivedIsPartial,
+        archiveError: archiveError,
+        claimedSessionIds: active.claimedSessionIds,
+        archivedQuickChatIds: active.archivedQuickChatIds,
+        projectLabels: active.projectLabels,
+        projectsKnown: active.projectsKnown,
+        projectsLoading: active.projectsLoading,
+      );
+
+  WorkspaceSessionsData copyWith({
+    List<Session>? sessions,
+    List<Session>? archivedSessions,
+    Set<String>? claimedSessionIds,
+    Set<String>? archivedQuickChatIds,
+    Map<String, String>? projectLabels,
+  }) => WorkspaceSessionsData(
+    sessions: sessions ?? this.sessions,
+    sessionsKnown: sessionsKnown,
+    archivesKnown: archivesKnown,
+    archivedSessions: archivedSessions ?? this.archivedSessions,
+    claimedSessionIds: claimedSessionIds ?? this.claimedSessionIds,
+    archivedQuickChatIds: archivedQuickChatIds ?? this.archivedQuickChatIds,
+    projectLabels: projectLabels ?? this.projectLabels,
+    isPartial: isPartial,
+    archivedIsPartial: archivedIsPartial,
+    projectsLoading: projectsLoading,
+    sessionsError: sessionsError,
+    archiveError: archiveError,
+    projectsKnown: projectsKnown,
+  );
 }
 
 /// Reconcile only mutations newer than a snapshot's physical request epoch.
 WorkspaceSessionsData applySessionArchiveChanges(
   WorkspaceSessionsData data,
   SessionArchiveLedger ledger,
-  int observedRevision,
-) {
-  // Keep these authorities independent. A successful empty archive read must
-  // not be repopulated from rows retained after an active-list failure.
+  int observedRevision, {
+  int? archivedObservedRevision,
+}) {
+  final archiveRevision = archivedObservedRevision ?? observedRevision;
+  // Each complete authority replaces itself; the sibling's carried rows keep
+  // their own mutation epoch, not the aggregate request's earlier authority.
   final active = ledger
       .apply(data.sessions, observedRevision)
       .where((row) => !row.archived)
       .toList();
   final archived = ledger
-      .apply(data.archivedSessions, observedRevision)
+      .apply(data.archivedSessions, archiveRevision)
       .where((row) => row.archived)
       .toList();
-  final changes = ledger.changesSince(observedRevision).toList();
-  if (changes.isNotEmpty) {
-    final richRows = ledger.apply(
-      [...data.sessions, ...data.archivedSessions],
-      observedRevision,
-      includeMissing: true,
-    );
-    for (final change in changes) {
-      final row = richRows
+  void reconcile(List<Session> target, int revision, bool archiveTarget) {
+    for (final change in ledger.changesSince(revision)) {
+      final row = ledger
+          .apply(
+            [...data.sessions, ...data.archivedSessions],
+            revision,
+            includeMissing: true,
+          )
           .firstWhere(
             (row) => ledger.sameConversation(row, change.session),
             orElse: () => change.session,
           )
           .withArchived(change.archived);
-      active.removeWhere((old) => ledger.sameConversation(old, row));
-      archived.removeWhere((old) => ledger.sameConversation(old, row));
-      (change.archived ? archived : active).add(row);
+      target.removeWhere((old) => ledger.sameConversation(old, row));
+      if (change.archived == archiveTarget) target.add(row);
     }
   }
+
+  reconcile(active, observedRevision, false);
+  reconcile(archived, archiveRevision, true);
   final restored = <String>{
     for (final change in ledger.changesSince(observedRevision))
       if (!change.archived) ...[
@@ -262,6 +322,10 @@ WorkspaceSessionsData applySessionArchiveChanges(
     archivedQuickChatIds: data.archivedQuickChatIds.difference(restored),
     projectLabels: data.projectLabels,
     projectsKnown: data.projectsKnown,
+    archivedIsPartial: data.archivedIsPartial,
+    projectsLoading: data.projectsLoading,
+    sessionsError: data.sessionsError,
+    archiveError: data.archiveError,
   );
 }
 
@@ -269,6 +333,14 @@ typedef WorkspaceSessionArchiver =
     Future<bool> Function(Session session, bool archived);
 
 typedef WorkspaceSessionsLoader = Future<WorkspaceSessionsData> Function();
+typedef WorkspaceArchivesLoader =
+    Future<List<Session>> Function(
+      void Function(List<Session> rows) onProgress,
+    );
+typedef WorkspaceSessionsProgressiveLoader =
+    Future<WorkspaceSessionsData> Function(
+      void Function(WorkspaceSessionsData data) onProgress,
+    );
 
 /// Emits cumulative provisional snapshots and returns the final snapshot.
 /// The screen ignores emissions after this future settles or it is disposed.
@@ -294,6 +366,7 @@ class QuickChatPromotionCancelled implements Exception {
 List<Session> filterWorkspaceSessions({
   required List<Session> sessions,
   required WorkspaceSessionView view,
+  WorkspaceSessionKind kind = WorkspaceSessionKind.chats,
   Set<String> claimedSessionIds = const {},
   Set<String> archivedQuickChatIds = const {},
   String query = '',
@@ -302,7 +375,8 @@ List<Session> filterWorkspaceSessions({
   final normalized = query.trim().toLowerCase();
   return [
     for (final session in sessions)
-      if (switch (view) {
+      if (kind.includes(session) &&
+          switch (view) {
             // Same contract as filterChats' unassigned chip: an unknown
             // claim map (projects.tree timed out) must not render every
             // chat as unfiled, and machine-source runs (cron/kanban/
@@ -312,16 +386,15 @@ List<Session> filterWorkspaceSessions({
             WorkspaceSessionView.unassigned =>
               projectsKnown &&
                   !session.archived &&
-                  !isMachineSession(session) &&
                   !claimedSessionIds.contains(session.id),
-            WorkspaceSessionView.archivedQuick =>
-              !isMachineSession(session) &&
-                  archivedQuickChatIds.contains(session.id),
+            WorkspaceSessionView.archivedQuick => archivedQuickChatIds.contains(
+              session.id,
+            ),
             // Machine sessions stay out of every human-facing list, the
             // archived view included — an archived cron run is still
             // cron noise. Quick-chat archives are human rows and stay.
-            WorkspaceSessionView.all || WorkspaceSessionView.search =>
-              !session.archived && !isMachineSession(session),
+            WorkspaceSessionView.all ||
+            WorkspaceSessionView.search => !session.archived,
           } &&
           (normalized.isEmpty ||
               session.title.toLowerCase().contains(normalized) ||
@@ -335,8 +408,15 @@ List<Session> filterWorkspaceSessions({
 class WorkspaceSessionsScreen extends StatefulWidget {
   final String title;
   final WorkspaceSessionView view;
+  final WorkspaceSessionKind kind;
   final WorkspaceSessionsLoader load;
-  final WorkspaceProgressiveSessionsLoader? loadProgressively;
+  final WorkspaceSessionsProgressiveLoader? loadProgressively;
+
+  /// Refreshes active history and its metadata independently of server archives.
+  final WorkspaceSessionsProgressiveLoader? reloadActive;
+
+  /// Retries the archive authority without waiting for unrelated active scans.
+  final WorkspaceArchivesLoader? reloadArchives;
   final WorkspaceSessionsData? initialData;
   final ValueChanged<Session> onOpenSession;
   final WorkspaceSessionPromoter? onPromote;
@@ -344,6 +424,9 @@ class WorkspaceSessionsScreen extends StatefulWidget {
   final WorkspaceSessionArchiver? onArchive;
   final LocalChatPinStore? pinStore;
   final bool embedded;
+  final Map<String, String> attention;
+  final Set<String> running;
+  final VoidCallback? onOpenActivity;
 
   /// Clock injection for deterministic filter/date tests. When null the
   /// screen uses `DateTime.now()`.
@@ -357,8 +440,11 @@ class WorkspaceSessionsScreen extends StatefulWidget {
   const WorkspaceSessionsScreen({
     required this.title,
     required this.view,
+    this.kind = WorkspaceSessionKind.chats,
     required this.load,
     this.loadProgressively,
+    this.reloadActive,
+    this.reloadArchives,
     this.initialData,
     required this.onOpenSession,
     this.onPromote,
@@ -366,6 +452,9 @@ class WorkspaceSessionsScreen extends StatefulWidget {
     this.onArchive,
     this.pinStore,
     this.embedded = false,
+    this.attention = const {},
+    this.running = const {},
+    this.onOpenActivity,
     this.now,
     this.refreshInterval,
     super.key,
@@ -378,6 +467,8 @@ class WorkspaceSessionsScreen extends StatefulWidget {
 class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
     with WidgetsBindingObserver {
   WorkspaceSessionsData? _data;
+  bool _activeFullyLoaded = false;
+  bool _archivesFullyLoaded = false;
   Object? _error;
   String _query = '';
   final Set<String> _promoting = {};
@@ -391,6 +482,11 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
   /// Only reads started before a successful rename need their title patched.
   /// Keep the rest of each response, including unrelated rows and metadata.
   int _titleRevision = 0;
+  int _activeTitleRevision = 0;
+  int _archiveTitleRevision = 0;
+  int _activeProjectRevision = 0;
+  int _activeArchiveRevision = 0;
+  int _archivedArchiveRevision = 0;
   final _savedTitles = <String, ({int revision, String title})>{};
   final Set<String> _pinChanges = {};
   List<String> _pinnedIds = const [];
@@ -406,14 +502,14 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
   Future<void>? _loadInFlight;
   Future<void>? _queuedRefresh;
   int _loadGeneration = 0;
-  bool _loading = false;
   bool _hasLoaderData = false;
-  bool _hasSettledLoad = false;
-  bool _coldPreview = true;
-
-  /// Keep refresh rows until a complete read replaces them. Unknown metadata
-  /// may reuse *only* previously classified rows, never classify new ones.
   WorkspaceSessionsData? _retainedData;
+  Future<void>? _activeReadInFlight;
+  Future<void>? _queuedActiveRefresh;
+  int _activeReadRevision = 0;
+  Future<void>? _archiveReadInFlight;
+  Future<void>? _queuedArchiveRefresh;
+  int _archiveReadRevision = 0;
 
   /// The active chip filter in the embedded Chats browser.
   WorkspaceChatsFilter _filter = WorkspaceChatsFilter.all;
@@ -435,14 +531,21 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
   void initState() {
     super.initState();
     _data = widget.initialData;
-    _coldPreview = _data == null || _data!.isPartial;
+    _activeFullyLoaded = _data != null && !_data!.isPartial;
+    _archivesFullyLoaded = _data != null && !_data!.archivedIsPartial;
     WidgetsBinding.instance.addObserver(this);
+    unawaited(_refreshPins());
     unawaited(_load());
   }
 
   @override
   void didUpdateWidget(covariant WorkspaceSessionsScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // The default Chats pane can mount before the root hydrates preferences.
+    if (oldWidget.pinStore != widget.pinStore) {
+      _pinnedIds = const [];
+      unawaited(_refreshPins());
+    }
     // Home can deliver its first five (or more human rows from the first
     // background page) after Chats has already mounted. Never replace a
     // completed metadata read with provisional data from a parent rebuild.
@@ -460,7 +563,7 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
             entry.key: entry.value.label,
         },
       );
-      if (!_data!.isPartial) _coldPreview = false;
+      if (!_data!.isPartial) _activeFullyLoaded = true;
     }
   }
 
@@ -506,7 +609,9 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
     if (store == null) return;
     try {
       final pins = await store.load();
-      if (mounted) setState(() => _pinnedIds = pins);
+      if (mounted && identical(store, widget.pinStore)) {
+        setState(() => _pinnedIds = pins);
+      }
     } catch (_) {
       // A failed pin read must not hide conversations on a visible pane.
     }
@@ -523,6 +628,25 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
   /// Completes after a read started at or after this refresh request.
   Future<void> refresh() {
     if (!mounted) return Future<void>.value();
+    if (widget.embedded &&
+        _filter == WorkspaceChatsFilter.archived &&
+        widget.reloadArchives != null) {
+      final pending = _archiveReadInFlight;
+      if (pending == null) return _loadArchives();
+      return _queuedArchiveRefresh ??= pending.then<void>((_) {
+        _queuedArchiveRefresh = null;
+        return _loadArchives();
+      });
+    }
+    if (widget.reloadActive != null) {
+      // Batch requests before the physical read starts. A gesture during that
+      // read queues a trailing fresh one, never just joins its old snapshot.
+      return _queuedActiveRefresh ??=
+          (_activeReadInFlight ?? Future<void>.value()).then<void>((_) {
+            _queuedActiveRefresh = null;
+            return _loadActive();
+          });
+    }
     final pending = _loadInFlight;
     if (pending == null) return _load();
     return _queuedRefresh ??= pending.then<void>((_) {
@@ -533,122 +657,289 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
 
   Future<void> _load() {
     if (!mounted) return Future<void>.value();
+    // Passive ticks must not compete with a selected authority's refresh.
+    final scoped = _activeReadInFlight ?? _archiveReadInFlight;
+    if (scoped != null) return scoped;
     return _loadInFlight ??= _loadOnce().whenComplete(() {
       _loadInFlight = null;
     });
+  }
+
+  Future<void> _loadActive() {
+    if (!mounted) return Future<void>.value();
+    return _activeReadInFlight ??= _loadActiveOnce().whenComplete(() {
+      _activeReadInFlight = null;
+    });
+  }
+
+  Future<void> _loadActiveOnce() async {
+    final revision = ++_activeReadRevision;
+    final titleRevision = _titleRevision;
+    final projectRevision = _projectRevision;
+    final mutationRevision = _archiveChanges.revision;
+    var acceptingProgress = true;
+    void apply(WorkspaceSessionsData data) {
+      if (!mounted || revision != _activeReadRevision) return;
+      _applyData(
+        (_data ?? const WorkspaceSessionsData()).withActive(data),
+        titleRevision: titleRevision,
+        archiveTitleRevision: _archiveTitleRevision,
+        archiveRevision: mutationRevision,
+        archivedArchiveRevision: _archivedArchiveRevision,
+        projectRevision: projectRevision,
+      );
+    }
+
+    final previous = _data ?? const WorkspaceSessionsData();
+    apply(
+      WorkspaceSessionsData(
+        sessions: previous.sessions,
+        isPartial: true,
+        claimedSessionIds: previous.claimedSessionIds,
+        archivedQuickChatIds: previous.archivedQuickChatIds,
+        projectLabels: previous.projectLabels,
+        projectsKnown: previous.projectsKnown,
+        projectsLoading: previous.projectsLoading,
+      ),
+    );
+    try {
+      final data = await widget.reloadActive!((data) {
+        if (acceptingProgress) apply(data);
+      });
+      acceptingProgress = false;
+      apply(data);
+      await _refreshPins();
+    } catch (error) {
+      acceptingProgress = false;
+      final current = _data ?? previous;
+      apply(
+        WorkspaceSessionsData(
+          sessions: current.sessions,
+          sessionsError: error,
+          claimedSessionIds: current.claimedSessionIds,
+          archivedQuickChatIds: current.archivedQuickChatIds,
+          projectLabels: current.projectLabels,
+          projectsKnown: current.projectsKnown,
+          projectsLoading: current.projectsLoading,
+        ),
+      );
+    }
+  }
+
+  Future<void> _loadArchives() =>
+      _archiveReadInFlight ??= _loadArchivesOnce().whenComplete(() {
+        _archiveReadInFlight = null;
+      });
+
+  Future<void> _loadArchivesOnce() async {
+    if (!mounted || _data == null) return;
+    final revision = ++_archiveReadRevision;
+    final mutationRevision = _archiveChanges.revision;
+    final titleRevision = _titleRevision;
+    var acceptingProgress = true;
+    void apply(List<Session> rows, {bool loading = false, Object? error}) {
+      if (!mounted || revision != _archiveReadRevision) return;
+      final previous = _data!;
+      final seen = rows.map((row) => row.id).toSet();
+      final retained = loading || error != null
+          ? [
+              ...rows,
+              ...previous.archivedSessions.where(
+                (row) => !seen.contains(row.id),
+              ),
+            ]
+          : rows;
+      setState(() {
+        final incoming = applySessionArchiveChanges(
+          previous.withArchives(rows: retained, loading: loading, error: error),
+          _archiveChanges,
+          _activeArchiveRevision,
+          archivedObservedRevision: mutationRevision,
+        );
+        _data = _withReadTitles(
+          incoming,
+          activeRevision: _activeTitleRevision,
+          archiveRevision: titleRevision,
+        );
+        _archiveTitleRevision = _titleRevision;
+        _archivedArchiveRevision = _archiveChanges.revision;
+        _error = null;
+        if (!loading && error == null) _archivesFullyLoaded = true;
+      });
+    }
+
+    apply(_data!.archivedSessions, loading: true);
+    try {
+      final rows = await widget.reloadArchives!((rows) {
+        if (acceptingProgress) apply(rows, loading: true);
+      });
+      acceptingProgress = false;
+      apply(rows);
+    } catch (error) {
+      acceptingProgress = false;
+      apply(const [], error: error);
+    }
   }
 
   Future<void> _loadOnce() async {
     final generation = ++_loadGeneration;
     final titleRevision = _titleRevision;
     final projectRevision = _projectRevision;
-    final archiveRevision = _archiveChanges.revision;
-    if (_hasSettledLoad && _data != null) _coldPreview = false;
-    _retainedData = _coldPreview
-        ? null
-        : (_data!.projectsKnown ? _data : (_retainedData ?? _data));
-    var settled = false;
-    bool ownsLoad() => mounted && generation == _loadGeneration;
-
-    WorkspaceSessionsData guarded(WorkspaceSessionsData data) =>
-        _withProjectMoves(
-          _withSessionTitles(
-            applySessionArchiveChanges(data, _archiveChanges, archiveRevision),
-            {
-              for (final entry in _savedTitles.entries)
-                if (entry.value.revision > titleRevision)
-                  entry.key: entry.value.title,
-            },
-          ),
-          {
-            for (final entry in _movedProjects.entries)
-              if (entry.value.revision > projectRevision)
-                entry.key: entry.value.label,
-          },
+    final activeRevision = _activeReadRevision;
+    final archiveRevision = _archiveReadRevision;
+    final mutationRevision = _archiveChanges.revision;
+    var acceptingProgress = true;
+    void apply(WorkspaceSessionsData data) {
+      if (!mounted || generation != _loadGeneration) return;
+      // An older aggregate load cannot undo a newer archive-only retry.
+      if (archiveRevision != _archiveReadRevision && _data != null) {
+        data = data.withArchives(
+          rows: _data!.archivedSessions,
+          loading: _data!.archivedIsPartial,
+          error: _data!.archiveError,
         );
-
-    void progress(WorkspaceSessionsData data) {
-      if (settled || !ownsLoad()) return;
-      setState(() {
-        _hasLoaderData = true;
-        _data = guarded(_mergeLoadingData(data, partial: true));
-        _error = null;
-      });
+      }
+      if (activeRevision != _activeReadRevision && _data != null) {
+        data = data.withActive(_data!);
+      }
+      _applyData(
+        data,
+        titleRevision: activeRevision != _activeReadRevision
+            ? _activeTitleRevision
+            : titleRevision,
+        archiveTitleRevision: archiveRevision != _archiveReadRevision
+            ? _archiveTitleRevision
+            : titleRevision,
+        archiveRevision: activeRevision != _activeReadRevision
+            ? _activeArchiveRevision
+            : mutationRevision,
+        archivedArchiveRevision: archiveRevision != _archiveReadRevision
+            ? _archivedArchiveRevision
+            : mutationRevision,
+        projectRevision: activeRevision != _activeReadRevision
+            ? _activeProjectRevision
+            : projectRevision,
+      );
     }
 
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
     try {
       final progressive = widget.loadProgressively;
       final data = await (progressive == null
           ? widget.load()
-          : progressive(progress));
-      settled = true;
-      if (!ownsLoad()) return;
-      final pins = await widget.pinStore?.load() ?? const <String>[];
-      if (ownsLoad()) {
-        setState(() {
-          _hasLoaderData = true;
-          _data = guarded(_mergeLoadingData(data, partial: data.isPartial));
-          if (!data.isPartial) _coldPreview = false;
-          _pinnedIds = pins;
-          _error = null;
-        });
-      }
+          : progressive((data) {
+              if (acceptingProgress) apply(data);
+            }));
+      acceptingProgress = false;
+      if (!mounted) return;
+      apply(data);
+      await _refreshPins();
     } catch (error) {
+      acceptingProgress = false;
       debugPrint('[workspace-sessions] load failed: $error');
-      if (ownsLoad()) setState(() => _error = error);
-    } finally {
-      settled = true;
-      if (ownsLoad()) {
-        setState(() {
-          _loading = false;
-          _hasSettledLoad = true;
-        });
+      if (mounted &&
+          activeRevision == _activeReadRevision &&
+          archiveRevision == _archiveReadRevision) {
+        setState(() => _error = error);
       }
     }
   }
 
-  WorkspaceSessionsData _mergeLoadingData(
-    WorkspaceSessionsData incoming, {
-    required bool partial,
+  void _applyData(
+    WorkspaceSessionsData data, {
+    required int titleRevision,
+    int? archiveTitleRevision,
+    required int archiveRevision,
+    int? archivedArchiveRevision,
+    required int projectRevision,
   }) {
-    final previous = _data;
-    final retainRows = partial && _retainedData != null;
-    List<Session> merge(List<Session> oldRows, List<Session> newRows) => {
-      for (final session in oldRows) session.id: session,
-      for (final session in newRows) session.id: session,
-    }.values.toList();
-
-    return WorkspaceSessionsData(
-      sessionsKnown: incoming.sessionsKnown,
-      sessions: retainRows || !incoming.sessionsKnown
-          ? merge(previous?.sessions ?? const [], incoming.sessions)
-          : incoming.sessions,
-      isPartial: partial,
-      claimedSessionIds: incoming.projectsKnown
-          ? incoming.claimedSessionIds
-          : {...?previous?.claimedSessionIds, ...incoming.claimedSessionIds},
-      archivedQuickChatIds: retainRows || !incoming.archivesKnown
-          ? {
-              ...?previous?.archivedQuickChatIds,
-              ...incoming.archivedQuickChatIds,
-            }
-          : incoming.archivedQuickChatIds,
-      archivedSessions: retainRows || !incoming.archivesKnown
-          ? merge(
-              previous?.archivedSessions ?? const [],
-              incoming.archivedSessions,
-            )
-          : incoming.archivedSessions,
-      archivesKnown: incoming.archivesKnown,
-      projectLabels: incoming.projectsKnown
-          ? incoming.projectLabels
-          : {...?previous?.projectLabels, ...incoming.projectLabels},
-      projectsKnown: incoming.projectsKnown,
+    if (!mounted) return;
+    _hasLoaderData = true;
+    data = applySessionArchiveChanges(
+      data,
+      _archiveChanges,
+      archiveRevision,
+      archivedObservedRevision: archivedArchiveRevision,
     );
+    if (!data.isPartial && data.sessionsError == null) {
+      _activeFullyLoaded = true;
+    }
+    if (!data.archivedIsPartial && data.archiveError == null) {
+      _archivesFullyLoaded = true;
+    }
+    // A partial refresh must not erase already visible older/blocked work.
+    // A completed authority replaces only its own collection.
+    final previous = _data;
+    List<Session> retained(List<Session> old, List<Session> fresh) {
+      final freshIds = fresh.map((row) => row.id).toSet();
+      return [...fresh, ...old.where((row) => !freshIds.contains(row.id))];
+    }
+
+    if (previous != null) {
+      data = data.copyWith(
+        sessions:
+            !data.sessionsKnown || data.isPartial || data.sessionsError != null
+            ? retained(previous.sessions, data.sessions)
+            : data.sessions,
+        archivedSessions:
+            !data.archivesKnown ||
+                data.archivedIsPartial ||
+                data.archiveError != null
+            ? retained(previous.archivedSessions, data.archivedSessions)
+            : data.archivedSessions,
+      );
+    }
+    setState(() {
+      _data = _withProjectMoves(
+        _withReadTitles(
+          data,
+          activeRevision: titleRevision,
+          archiveRevision: archiveTitleRevision ?? titleRevision,
+        ),
+        {
+          for (final entry in _movedProjects.entries)
+            if (entry.value.revision > projectRevision)
+              entry.key: entry.value.label,
+        },
+      );
+      _activeTitleRevision = _titleRevision;
+      _archiveTitleRevision = _titleRevision;
+      _activeProjectRevision = _projectRevision;
+      _activeArchiveRevision = _archiveChanges.revision;
+      _archivedArchiveRevision = _archiveChanges.revision;
+      if (data.projectsKnown && !data.projectsLoading && data.sessionsKnown) {
+        _retainedData = _data;
+      }
+      _error = null;
+    });
+  }
+
+  WorkspaceSessionsData _withReadTitles(
+    WorkspaceSessionsData data, {
+    required int activeRevision,
+    required int archiveRevision,
+  }) {
+    List<Session> patch(List<Session> rows, int revision) => [
+      for (final row in rows)
+        if (_savedTitles[row.id] case final saved?
+            when saved.revision > revision)
+          row.withTitle(saved.title)
+        else
+          row,
+    ];
+    return data.copyWith(
+      sessions: patch(data.sessions, activeRevision),
+      archivedSessions: patch(data.archivedSessions, archiveRevision),
+    );
+  }
+
+  void reconcileTitle(Session session, String title) {
+    if (!mounted) return;
+    setState(() {
+      _savedTitles[session.id] = (revision: ++_titleRevision, title: title);
+      if (_data case final data?) {
+        _data = _withSessionTitles(data, {session.id: title});
+      }
+    });
   }
 
   WorkspaceSessionsData _withSessionTitles(
@@ -661,16 +952,9 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
       return title == null ? session : session.withTitle(title);
     }
 
-    return WorkspaceSessionsData(
+    return data.copyWith(
       sessions: data.sessions.map(renamed).toList(),
-      sessionsKnown: data.sessionsKnown,
       archivedSessions: data.archivedSessions.map(renamed).toList(),
-      archivesKnown: data.archivesKnown,
-      isPartial: data.isPartial,
-      claimedSessionIds: data.claimedSessionIds,
-      archivedQuickChatIds: data.archivedQuickChatIds,
-      projectLabels: data.projectLabels,
-      projectsKnown: data.projectsKnown,
     );
   }
 
@@ -747,18 +1031,12 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
     Map<String, String> moves,
   ) {
     if (moves.isEmpty) return data;
-    return WorkspaceSessionsData(
-      sessions: data.sessions,
-      sessionsKnown: data.sessionsKnown,
-      archivedSessions: data.archivedSessions,
-      archivesKnown: data.archivesKnown,
-      isPartial: data.isPartial,
+    return data.copyWith(
       claimedSessionIds: {...data.claimedSessionIds, ...moves.keys},
       archivedQuickChatIds: data.archivedQuickChatIds.difference(
         moves.keys.toSet(),
       ),
       projectLabels: {...data.projectLabels, ...moves},
-      projectsKnown: data.projectsKnown,
     );
   }
 
@@ -809,6 +1087,24 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
       _promoting.remove(session.id);
       if (mounted) setState(() {});
     }
+  }
+
+  void reconcileArchive(Session session, bool archived) {
+    if (!mounted) return;
+    final before = _archiveChanges.revision;
+    _archiveChanges.record(session, archived);
+    setState(() {
+      if (_data case final data?) {
+        _data = applySessionArchiveChanges(data, _archiveChanges, before);
+      }
+      if (_retainedData case final data?) {
+        _retainedData = applySessionArchiveChanges(
+          data,
+          _archiveChanges,
+          before,
+        );
+      }
+    });
   }
 
   Future<void> _setArchived(Session session, bool archived) async {
@@ -921,6 +1217,35 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
   }
 
   Widget _buildLoaded(WorkspaceSessionsData data) {
+    final archiveScope = _isArchivedSurface;
+    final resolvedIds = <String>{
+      for (final row in [...data.sessions, ...data.archivedSessions]) ...[
+        row.id,
+        ?row.lineageRootId,
+      ],
+    };
+    final unresolvedQuick =
+        archiveScope &&
+        data.archivedQuickChatIds.difference(resolvedIds).isNotEmpty &&
+        !data.sessionsKnown;
+    final scopeLoading = archiveScope
+        ? data.archivedIsPartial ||
+              (widget.view == WorkspaceSessionView.archivedQuick &&
+                  data.isPartial) ||
+              (unresolvedQuick && data.isPartial)
+        : data.isPartial || (_isUnassignedSurface && data.projectsLoading);
+    final scopeError =
+        _error ??
+        (archiveScope ? data.archiveError : data.sessionsError) ??
+        (archiveScope && !data.archivesKnown && !data.archivedIsPartial
+            ? StateError('Archived history unavailable')
+            : null) ??
+        (unresolvedQuick && !data.isPartial
+            ? data.sessionsError ?? StateError('Quick Chat history unavailable')
+            : null) ??
+        (_isUnassignedSurface && !data.projectsKnown && !data.projectsLoading
+            ? StateError('Project ownership unavailable')
+            : null);
     // The embedded browser filters over the union of the gateway's active
     // list and the dashboard's archived list: the Archived chip needs the
     // archived rows, and every other chip explicitly excludes
@@ -943,10 +1268,11 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
     List<Session> classified(List<Session> rows) => reuseClaims
         ? rows.where((s) => retainedIds.contains(s.id)).toList()
         : rows;
-    final sessions = widget.embedded
+    final filteredSessions = widget.embedded
         ? filterChats(
             sessions: classified(unionSessions),
             filter: _filter,
+            kind: widget.kind,
             claimedSessionIds: data.claimedSessionIds,
             archivedQuickChatIds: data.archivedQuickChatIds,
             query: _query,
@@ -956,41 +1282,21 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
         : filterWorkspaceSessions(
             sessions: classified(unionSessions),
             view: widget.view,
+            kind: widget.kind,
             claimedSessionIds: data.claimedSessionIds,
             archivedQuickChatIds: data.archivedQuickChatIds,
             query: _query,
             projectsKnown: data.projectsKnown || reuseClaims,
           );
 
-    final matching = orderLocalPinnedChats(sessions, _pinnedIds);
-    // Cap *after* chip, search, metadata and local-pin ordering. A first
-    // machine-only or claimed page must not consume the human-chat preview.
-    // A refresh never shrinks a previously rendered complete list to five.
-    final scopeComplete = widget.embedded && _isArchivedSurface
-        ? data.archivesKnown
-        : data.sessionsKnown &&
-              (!_isUnassignedSurface || data.projectsKnown) &&
-              (widget.view != WorkspaceSessionView.archivedQuick ||
-                  !data.isPartial);
-    final scopePartial = data.isPartial && !scopeComplete;
-    final ordered = _coldPreview && scopePartial
-        ? matching.take(5).toList()
-        : matching;
-    final needsActiveSessions =
-        !_isArchivedSurface ||
-        widget.view == WorkspaceSessionView.archivedQuick;
-    final metadataUnknown =
-        (needsActiveSessions && !data.sessionsKnown) ||
-        (_isUnassignedSurface && !data.projectsKnown) ||
-        (_isArchivedSurface && !data.archivesKnown);
-    // Legacy periodic refreshes stay silent over a complete, usable list.
-    final showLoading =
-        _error == null &&
-        (scopePartial ||
-            (_loading &&
-                !scopeComplete &&
-                (widget.loadProgressively != null || metadataUnknown)));
-    final showError = _error != null || (metadataUnknown && !showLoading);
+    final previouslyLoaded =
+        archiveScope && widget.view != WorkspaceSessionView.archivedQuick
+        ? _archivesFullyLoaded
+        : _activeFullyLoaded;
+    final sessions = scopeLoading && !previouslyLoaded
+        ? filteredSessions.take(5).toList()
+        : filteredSessions;
+    final ordered = orderLocalPinnedChats(sessions, _pinnedIds);
     final pinnedSessions = ordered
         .where((session) => localPinIdForSession(session, _pinnedIds) != null)
         .toList();
@@ -1009,6 +1315,7 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
     return RefreshIndicator(
       onRefresh: refresh,
       child: ListView(
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.fromLTRB(
           HermesSpacing.lg,
           HermesSpacing.md,
@@ -1016,10 +1323,21 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
           HermesSpacing.xl,
         ),
         children: [
-          if (showLoading || showError)
+          if (widget.embedded &&
+              widget.kind == WorkspaceSessionKind.chats &&
+              _filter == WorkspaceChatsFilter.all &&
+              _query.isEmpty)
+            ChatAttentionSection(
+              sessions: unionSessions.where(widget.kind.includes).toList(),
+              attention: widget.attention,
+              running: widget.running,
+              onOpenSession: widget.onOpenSession,
+              onOpenActivity: widget.onOpenActivity,
+            ),
+          if (scopeLoading || scopeError != null)
             Padding(
               padding: const EdgeInsets.only(bottom: HermesSpacing.md),
-              child: !showError
+              child: scopeError == null
                   ? Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
@@ -1045,7 +1363,9 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
             key: kWorkspaceSessionSearchKey,
             autofocus: widget.view == WorkspaceSessionView.search,
             decoration: InputDecoration(
-              hintText: context.l10n.search_conversations,
+              hintText: widget.kind == WorkspaceSessionKind.crons
+                  ? context.l10n.search_cron_conversations
+                  : context.l10n.search_conversations,
               prefixIcon: const Icon(Icons.search),
               suffixIcon: _query.isEmpty
                   ? null
@@ -1062,11 +1382,7 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
             _buildChips(),
           ],
           const SizedBox(height: HermesSpacing.lg),
-          if (sessions.isEmpty &&
-              !_loading &&
-              !showLoading &&
-              !showError &&
-              !metadataUnknown)
+          if (sessions.isEmpty && !scopeLoading && scopeError == null)
             EmptyState(
               icon: _emptyIcon,
               title: _query.isEmpty
@@ -1124,16 +1440,18 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
       child: Row(
         children: [
           for (final filter in WorkspaceChatsFilter.values)
-            Padding(
-              padding: const EdgeInsets.only(right: HermesSpacing.sm),
-              child: ChoiceChip(
-                label: Text(filter.label(context.l10n)),
-                selected: _filter == filter,
-                onSelected: (_) => setState(() {
-                  _filter = filter;
-                }),
+            if (widget.kind != WorkspaceSessionKind.crons ||
+                filter != WorkspaceChatsFilter.unassigned)
+              Padding(
+                padding: const EdgeInsets.only(right: HermesSpacing.sm),
+                child: ChoiceChip(
+                  label: Text(filter.label(context.l10n)),
+                  selected: _filter == filter,
+                  onSelected: (_) => setState(() {
+                    _filter = filter;
+                  }),
+                ),
               ),
-            ),
         ],
       ),
     );
@@ -1212,7 +1530,8 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
                         label: projectLabel,
                         icon: Icons.folder_outlined,
                       )
-                    else if (data.projectsKnown)
+                    else if (data.projectsKnown &&
+                        widget.kind == WorkspaceSessionKind.chats)
                       _MetaChip(
                         label: context.l10n.unassigned,
                         icon: Icons.inbox_outlined,
@@ -1322,6 +1641,11 @@ class WorkspaceSessionsScreenState extends State<WorkspaceSessionsScreen>
   }
 
   String get _emptyMessage {
+    if (widget.kind == WorkspaceSessionKind.crons &&
+        _filter == WorkspaceChatsFilter.all &&
+        _query.isEmpty) {
+      return context.l10n.cron_conversations_empty;
+    }
     if (widget.embedded) {
       return switch (_filter) {
         WorkspaceChatsFilter.unassigned =>

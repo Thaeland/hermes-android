@@ -957,6 +957,24 @@ abstract class AppLocalizations {
   /// **'Cron'**
   String get cron;
 
+  /// No description provided for @crons.
+  ///
+  /// In en, this message translates to:
+  /// **'Crons'**
+  String get crons;
+
+  /// No description provided for @cron_conversations_empty.
+  ///
+  /// In en, this message translates to:
+  /// **'Conversations from scheduled jobs appear here, including older runs.'**
+  String get cron_conversations_empty;
+
+  /// No description provided for @search_cron_conversations.
+  ///
+  /// In en, this message translates to:
+  /// **'Search cron conversations'**
+  String get search_cron_conversations;
+
   /// No description provided for @cron_jobs.
   ///
   /// In en, this message translates to:

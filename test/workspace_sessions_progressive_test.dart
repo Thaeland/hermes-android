@@ -205,6 +205,7 @@ void main() {
             : const [],
         claimedSessionIds: const {'filed-noise'},
         isPartial: true,
+        archivedIsPartial: filter == WorkspaceChatsFilter.archived,
       );
       var legacyLoads = 0;
       await tester.pumpWidget(
@@ -337,6 +338,8 @@ void main() {
           WorkspaceSessionsData unknown({required bool partial}) =>
               WorkspaceSessionsData(
                 isPartial: partial,
+                archivedIsPartial: archived && partial,
+                projectsLoading: !archived && partial,
                 projectsKnown: archived,
                 archivesKnown: !archived,
               );
@@ -529,6 +532,7 @@ void main() {
         WorkspaceSessionsData(
           archivedSessions: [fresh],
           archivesKnown: false,
+          archivedIsPartial: true,
           isPartial: true,
         ),
       );

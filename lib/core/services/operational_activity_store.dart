@@ -20,6 +20,7 @@ class OperationalActivityRecord {
   final String scope;
   final String localSessionId;
   final String? storedSessionId;
+  final String? lineageRootId;
   final String turnId;
   final OperationalActivityState state;
   final int updatedAtEpochMs;
@@ -28,6 +29,7 @@ class OperationalActivityRecord {
     required this.scope,
     required this.localSessionId,
     required this.storedSessionId,
+    this.lineageRootId,
     required this.turnId,
     required this.state,
     required this.updatedAtEpochMs,
@@ -44,10 +46,22 @@ class OperationalActivityRecord {
     _ => true,
   };
 
+  OperationalActivityRecord withLineageRoot(String root) =>
+      OperationalActivityRecord(
+        scope: scope,
+        localSessionId: localSessionId,
+        storedSessionId: storedSessionId,
+        lineageRootId: root,
+        turnId: turnId,
+        state: state,
+        updatedAtEpochMs: updatedAtEpochMs,
+      );
+
   Map<String, Object?> toJson() => {
     'scope': scope,
     'localSessionId': localSessionId,
     'storedSessionId': storedSessionId,
+    if (lineageRootId != null) 'lineageRootId': lineageRootId,
     'turnId': turnId,
     'state': state.name,
     'updatedAtEpochMs': updatedAtEpochMs,
@@ -65,6 +79,7 @@ class OperationalActivityRecord {
     final scope = id('scope');
     final local = id('localSessionId');
     final stored = id('storedSessionId');
+    final root = id('lineageRootId');
     final turn = id('turnId');
     final updated = raw['updatedAtEpochMs'];
     final state = OperationalActivityState.values
@@ -73,6 +88,7 @@ class OperationalActivityRecord {
     if (scope == null ||
         local == null ||
         (raw['storedSessionId'] != null && stored == null) ||
+        (raw['lineageRootId'] != null && root == null) ||
         turn == null ||
         state == null ||
         updated is! int ||
@@ -83,6 +99,7 @@ class OperationalActivityRecord {
       scope: scope,
       localSessionId: local,
       storedSessionId: stored,
+      lineageRootId: root,
       turnId: turn,
       state: state,
       updatedAtEpochMs: updated,
@@ -163,11 +180,33 @@ class OperationalActivityStore {
   }
 
   /// Returns newest first, without creating a gateway transport or chat owner.
-  Future<List<OperationalActivityRecord>> load(String scope) => _serialized(
-    (prefs) async => List.unmodifiable(
-      _retained(_read(prefs)).where((record) => record.scope == scope),
-    ),
-  );
+  Future<List<OperationalActivityRecord>> load(
+    String scope, {
+    Map<String, String> sessionRoots = const {},
+  }) => _serialized((prefs) async {
+    final rows = _retained(_read(prefs));
+    var changed = false;
+    final resolved = <OperationalActivityRecord>[];
+    for (final record in rows) {
+      final root =
+          sessionRoots[record.storedSessionId] ??
+          sessionRoots[record.localSessionId];
+      if (record.scope == scope &&
+          root != null &&
+          root.isNotEmpty &&
+          root.length <= 512 &&
+          root != record.lineageRootId) {
+        resolved.add(record.withLineageRoot(root));
+        changed = true;
+      } else {
+        resolved.add(record);
+      }
+    }
+    // Persist only aliases belonging to retained turns, never an unbounded
+    // session catalogue or any title/transcript content.
+    if (changed) await _write(prefs, resolved);
+    return List.unmodifiable(resolved.where((record) => record.scope == scope));
+  });
 
   Future<void> put(OperationalActivityRecord record) => putAll([record]);
 
@@ -183,7 +222,8 @@ class OperationalActivityStore {
       }
       final rows = {for (final row in _read(prefs)) row.key: row};
       for (final record in accepted) {
-        rows[record.key] = record;
+        final root = record.lineageRootId ?? rows[record.key]?.lineageRootId;
+        rows[record.key] = root == null ? record : record.withLineageRoot(root);
       }
       await _write(prefs, _retained(rows.values));
     });

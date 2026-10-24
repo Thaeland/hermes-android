@@ -70,6 +70,46 @@ void main() {
     expect(rows.last.localSessionId, 'stored-alias');
   });
 
+  test(
+    'learned roots survive old-owner observations, restart and scope isolation',
+    () async {
+      final store = OperationalActivityStore(nowEpochMs: () => now);
+      OperationalActivityRecord record(
+        String scope,
+        OperationalActivityState state,
+      ) => OperationalActivityRecord(
+        scope: scope,
+        localSessionId: 'local',
+        storedSessionId: 'tip-1',
+        turnId: 'same-turn',
+        state: state,
+        updatedAtEpochMs: now,
+      );
+      await store.put(record('scope', OperationalActivityState.running));
+      await store.put(record('other', OperationalActivityState.running));
+      final original = await store.load(
+        'scope',
+        sessionRoots: {'tip-1': 'root'},
+      );
+      expect(original.single.lineageRootId, 'root');
+      // A retained owner created before the alias was learned still emits sparse
+      // lifecycle observations. It must not erase durable identity metadata.
+      await store.put(record('scope', OperationalActivityState.completed));
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.reload();
+      final reopened = OperationalActivityStore(nowEpochMs: () => now);
+      expect((await reopened.load('scope')).single.lineageRootId, 'root');
+      expect(
+        (await reopened.load('scope')).single.state,
+        OperationalActivityState.completed,
+      );
+      expect((await reopened.load('other')).single.lineageRootId, isNull);
+      await store.clearScope('scope');
+      expect(await reopened.load('scope'), isEmpty);
+      expect(await reopened.load('other'), hasLength(1));
+    },
+  );
+
   test('scope isolation and clear preserve sibling work', () async {
     final store = OperationalActivityStore(nowEpochMs: () => now);
     await store.put(_record('same-turn', updated: now));

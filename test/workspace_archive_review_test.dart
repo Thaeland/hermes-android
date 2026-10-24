@@ -11,7 +11,6 @@ import 'package:hermes_android/core/services/session_archive_ledger.dart';
 import 'package:hermes_android/core/theme/hermes_theme.dart';
 import 'package:hermes_android/core/utils/home_turn_signals.dart';
 import 'package:hermes_android/core/widgets/hermes_components.dart';
-import 'package:hermes_android/core/widgets/home_pane.dart';
 import 'package:hermes_android/l10n/app_localizations.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -365,7 +364,11 @@ void main() {
         expect(fullReads, 1);
         if (!restoring) {
           // Capture a second first page ahead of the original held full scan.
-          await tester.state<HomePaneState>(find.byType(HomePane)).refresh();
+          await tester
+              .state<WorkspaceSessionsScreenState>(
+                find.byType(WorkspaceSessionsScreen),
+              )
+              .refresh();
           await _tick(tester);
         }
         await tester.tap(find.text('Chats').last);
@@ -388,14 +391,14 @@ void main() {
         messenger.clearSnackBars();
         messenger.removeCurrentSnackBar();
         await _tick(tester);
-        await tester.tap(find.text('Home').last);
+        await tester.tap(find.text('Chats').last);
         await _tick(tester);
         await tester.tap(find.byTooltip('Search all chats'));
         await _tick(tester);
         expect(
           fullReads,
-          readsBeforeSearch,
-          reason: 'new subscriber reused the completed Home cache',
+          greaterThan(readsBeforeSearch),
+          reason: 'new subscriber starts a post-mutation physical scan',
         );
         expect(find.text(_title), restoring ? findsOneWidget : findsNothing);
         expect(tester.takeException(), isNull);

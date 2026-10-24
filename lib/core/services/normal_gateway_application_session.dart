@@ -257,6 +257,7 @@ class NormalGatewayApplicationSession {
   NormalGatewayChatOwner chatFor(
     String localSessionId, {
     String? storedSessionId,
+    String? lineageRootId,
     required String title,
     String? workingDirectory,
   }) {
@@ -269,6 +270,7 @@ class NormalGatewayApplicationSession {
         NormalGatewayChatOwner._(this, localSessionId, title, workingDirectory);
     _aliases[localSessionId] = owner;
     owner.title = title;
+    owner._lineageRootId = lineageRootId ?? owner._lineageRootId;
     if (storedSessionId != null) {
       _bind(owner, storedSessionId, localAlias: localSessionId);
     }
@@ -510,6 +512,7 @@ class NormalGatewayChatOwner {
   final NormalGatewayApplicationSession _session;
   final String localSessionId;
   String? storedSessionId;
+  String? _lineageRootId;
   String title;
   final String? workingDirectory;
   String? turnId;
@@ -684,6 +687,7 @@ class NormalGatewayChatOwner {
         previous.turnId == id &&
         previous.localSessionId == local &&
         previous.storedSessionId == storedSessionId &&
+        previous.lineageRootId == _lineageRootId &&
         previous.state == effectiveState;
     final now = _session._activityNowEpochMs();
     final heartbeat =
@@ -702,6 +706,7 @@ class NormalGatewayChatOwner {
       scope: _session.scope,
       localSessionId: local,
       storedSessionId: storedSessionId,
+      lineageRootId: _lineageRootId,
       turnId: id,
       state: effectiveState,
       updatedAtEpochMs:
