@@ -65,7 +65,11 @@ jobs:
         run: |
           python -m pip install -e 'server/mobile-push[test]' uvicorn
           flutter pub get
-      - name: Run server tests and real Dart HTTP contract
+      - name: Run server regressions
+        run: >-
+          python -m pytest -q -ra server/mobile-push/tests
+          --ignore=server/mobile-push/tests/test_dart_contract_smoke.py
+      - name: Run required real Dart HTTP contract
         env:
           MOBILE_PUSH_DART_SMOKE: '1'
-        run: python -m pytest -q server/mobile-push/tests
+        run: python -m pytest -q -ra server/mobile-push/tests/test_dart_contract_smoke.py

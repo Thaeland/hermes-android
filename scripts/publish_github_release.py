@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -28,17 +30,55 @@ def release_flags(tag: str) -> list[str]:
     return ["--prerelease=false", "--latest=true"]
 
 
-def release_command(tag: str, target: str, assets: list[Path]) -> list[str]:
+def release_command(
+    tag: str, target: str, assets: list[Path], repository: str = ""
+) -> list[str]:
     flags = release_flags(tag)
     if re.fullmatch(r"[0-9a-f]{40}", target) is None:
         raise ValueError("Release target must be a full 40-character commit SHA")
-    return [
+    command = [
         "gh", "release", "create", tag,
         "--verify-tag", "--target", target,
         "--title", f"Hermes Android {tag}",
         "--generate-notes", "--draft=false", *flags,
         *(str(path) for path in assets),
     ]
+    if repository:
+        command.extend(["--repo", repository])
+    return command
+
+
+def remote_tag_commit(repository: str, tag: str) -> str:
+    """Resolve GitHub's exact ref, peeling annotated tags without trusting local tags."""
+    release_flags(tag)
+
+    def get_json(endpoint: str) -> dict:
+        value = json.loads(subprocess.check_output(["gh", "api", endpoint], text=True))
+        if not isinstance(value, dict):
+            raise ValueError("GitHub returned an invalid tag response")
+        return value
+
+    reference = get_json(f"repos/{repository}/git/ref/tags/{tag}")
+    if reference.get("ref") != f"refs/tags/{tag}":
+        raise ValueError("GitHub returned a different tag ref")
+    obj = reference.get("object")
+    seen = set()
+    for _ in range(8):
+        if not isinstance(obj, dict):
+            raise ValueError("Tag has no valid Git object")
+        sha = obj.get("sha")
+        if not isinstance(sha, str) or re.fullmatch(r"[0-9a-f]{40}", sha) is None:
+            raise ValueError("Tag has an invalid object SHA")
+        if obj.get("type") == "commit":
+            return sha
+        if obj.get("type") != "tag" or sha in seen:
+            raise ValueError("Tag does not resolve to a commit")
+        seen.add(sha)
+        annotated = get_json(f"repos/{repository}/git/tags/{sha}")
+        if annotated.get("sha") != sha:
+            raise ValueError("GitHub returned a different tag object")
+        obj = annotated.get("object")
+    raise ValueError("Annotated tag chain exceeds the resolution limit")
 
 
 def release_assets(directory: Path) -> list[Path]:
@@ -77,7 +117,19 @@ def main() -> None:
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     if args.target != head:
         raise SystemExit("Release target must match the verified checkout HEAD")
-    command = release_command(args.tag, args.target, release_assets(args.assets_dir))
+    repository = os.environ.get("GITHUB_REPOSITORY") or subprocess.check_output(
+        ["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"],
+        text=True,
+    ).strip()
+    try:
+        tag_commit = remote_tag_commit(repository, args.tag)
+    except (ValueError, KeyError, TypeError) as error:
+        raise SystemExit(f"Invalid remote release tag: {error}") from error
+    if tag_commit != head:
+        raise SystemExit("Remote release tag must match the verified checkout HEAD")
+    command = release_command(
+        args.tag, args.target, release_assets(args.assets_dir), repository=repository
+    )
     # Create-only: a rerun must not silently overwrite an already published APK.
     subprocess.run(command, check=True)
 
