@@ -5080,6 +5080,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     final transport = _activeResponseTransport;
     final activeClientTurnId = _activeClientTurnId;
+    // Capture the cancelled admission before its empty scaffold is removed.
+    // Looking up the last assistant after cancellation can select an older
+    // successful reply and incorrectly revoke its quiet-mode completion.
+    final stoppedAssistant = _lastAssistantMessage();
     _stopResponseInFlight = true;
     ++_responseGeneration;
     _scrollCoordinator.cancelStreaming();
@@ -5135,11 +5139,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _applyGatewayTurnState(interruptedTurnState);
       } else if (interrupted) {
         setState(() {
-          final assistant = _lastAssistantMessage();
-          if (assistant != null) {
-            assistant['_gateway_pending_response'] = false;
-            assistant['_chat_response_complete'] = false;
-          }
+          stoppedAssistant?['_gateway_pending_response'] = false;
+          stoppedAssistant?['_chat_response_complete'] = false;
         });
       }
       if (!mounted) return false;
