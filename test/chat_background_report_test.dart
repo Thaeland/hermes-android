@@ -51,7 +51,12 @@ void main() {
               ..clear()
               ..addAll([
                 {'id': 1, 'role': 'user', 'content': 'Real user prompt'},
-                {'id': 2, 'role': 'assistant', 'content': 'Ordinary answer'},
+                {
+                  'id': 2,
+                  'role': 'assistant',
+                  'content': 'Ordinary answer',
+                  'finish_reason': 'stop',
+                },
                 if (!arrivesOnRefresh) {...snapshot, 'id': 3},
               ]);
             final controller = GatewayTurnApplicationController();
