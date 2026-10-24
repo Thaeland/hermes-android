@@ -5561,7 +5561,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildInputBar({required double availableHeight}) {
-    final tokens = HermesTokens.of(context);
     final sendEnabled =
         !_transcriptLoadBlocksComposer &&
         !_archiving &&
@@ -5958,6 +5957,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _detailExpansions.remove(_detailExpansions.keys.first);
     }
   }
+
   RemoteFilesDataSource _newMediaFilesClient() =>
       widget.testMediaFilesClient?.call(_storedSessionKey) ??
       RemoteFilesClient.fromConnection(
@@ -6370,7 +6370,8 @@ class MessageBubble extends StatelessWidget {
                     )
                   : content,
               selectable: true,
-              sizedImageBuilder: (image) => Text(image.alt ?? image.title ?? ''),
+              sizedImageBuilder: (image) =>
+                  Text(image.alt ?? image.title ?? ''),
               onTapLink: (_, href, _) =>
                   unawaited(_openLink(dialogContext, href)),
               styleSheet: _messageStyleSheet(
