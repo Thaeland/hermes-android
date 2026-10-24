@@ -1820,7 +1820,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get show_tool_calls_thinking_and_message_metadata =>
-      'Show tool calls, thinking, and message metadata';
+      'Show tools, reasoning, tasks and message details in collapsed sections. Off shows only the conversation.';
 
   @override
   String get signal_messages => 'Signal messages';
@@ -2188,6 +2188,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get verbose_mode => 'Verbose Mode';
+
+  @override
+  String get message_metadata => 'Message details';
 
   @override
   String get voice => 'Voice';

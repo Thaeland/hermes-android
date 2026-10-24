@@ -224,7 +224,7 @@ class GatewayToolActivity {
       toolId: update.toolId ?? toolId,
       identity: identity,
       name: update.name == 'tool' && name != 'tool' ? name : update.name,
-      phase: update.phase,
+      phase: isTerminal && !update.isTerminal ? phase : update.phase,
       detail: update.detail ?? detail,
       durationSeconds: update.durationSeconds ?? durationSeconds,
       emoji: update.emoji ?? emoji,
@@ -309,6 +309,16 @@ class GatewayTurnStatus {
   final String text;
 
   const GatewayTurnStatus({required this.kind, required this.text});
+
+  /// The caller supplies only this turn's live activities, never saved tools.
+  static GatewayTurnStatus? forRunningTool(
+    Iterable<GatewayToolActivity> activities,
+  ) {
+    final tool = activities.where((tool) => !tool.isTerminal).lastOrNull;
+    return tool == null
+        ? null
+        : GatewayTurnStatus(kind: 'tool', text: tool.displayName);
+  }
 
   static GatewayTurnStatus? fromGatewayEvent(
     String eventType,

@@ -20,7 +20,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   HttpOverrides? previous;
   setUp(() {
-    SharedPreferences.setMockInitialValues({'verbose_mode': false});
+    SharedPreferences.setMockInitialValues({'verbose_mode': true});
     previous = HttpOverrides.current;
     HttpOverrides.global = null;
   });

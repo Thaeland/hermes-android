@@ -66,7 +66,9 @@ class _GatewayActivityCardState extends State<GatewayActivityCard> {
   bool get _hasRunningActivity =>
       widget.activities.any((activity) => !activity.isTerminal);
 
-  bool get _autoExpanded => widget.verbose;
+  // Verbose controls visibility, never automatic expansion. In-flight tools
+  // and gateway hints must not open a section the reader has not requested.
+  bool get _autoExpanded => false;
 
   GatewayToolActivity? get _previewActivity {
     // Prefer work still in flight, even when a parallel call finished later.

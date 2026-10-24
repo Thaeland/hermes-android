@@ -2146,6 +2146,9 @@ class AppLocalizationsJa extends AppLocalizations {
   String get verbose_mode => '詳細モード';
 
   @override
+  String get message_metadata => 'Message details';
+
+  @override
   String get voice => '音声';
 
   @override

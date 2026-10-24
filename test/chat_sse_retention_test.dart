@@ -14,9 +14,11 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/fake_voice_composer_adapter.dart';
+import 'support/pump_chat_updates.dart';
 
 void main() {
-  setUp(() => SharedPreferences.setMockInitialValues({'verbose_mode': false}));
+  setUp(mockChatImageRecovery);
+  setUp(() => SharedPreferences.setMockInitialValues({'verbose_mode': true}));
 
   testWidgets('QUALITY SSE retained presentation obeys 1024-run bound', (
     tester,
@@ -202,7 +204,7 @@ Future<void> _finish(WidgetTester tester, _SseClient client) async {
   client.stream
     ..add(utf8.encode('data: [DONE]\n\n'))
     ..close();
-  await tester.pump();
+  await pumpChatUpdates(tester);
   expect(client.requests, 1);
 }
 

@@ -9,6 +9,8 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'support/completed_stock_turn.dart';
+import 'support/pump_chat_updates.dart';
+import 'support/fake_voice_composer_adapter.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -28,7 +30,8 @@ import 'package:hermes_android/l10n/app_localizations.dart';
 
 void main() {
   setUp(() {
-    SharedPreferences.setMockInitialValues({'verbose_mode': false});
+    SharedPreferences.setMockInitialValues({'verbose_mode': true});
+    mockChatImageRecovery();
   });
 
   group('REST history', () {
@@ -200,11 +203,32 @@ void main() {
               .toList();
           final states = tester.stateList(cards).toList();
           // Pin the two cards in opposite states before their scopes merge.
-          await tester.tap(find.text('Reasoning').first);
+          await tester.tap(
+            find
+                .descendant(
+                  of: find.byType(GatewayReasoningCard),
+                  matching: find.text('Reasoning'),
+                )
+                .first,
+          );
           await tester.pump(const Duration(milliseconds: 300));
-          await tester.tap(find.text('Reasoning').last);
+          await tester.tap(
+            find
+                .descendant(
+                  of: find.byType(GatewayReasoningCard),
+                  matching: find.text('Reasoning'),
+                )
+                .last,
+          );
           await tester.pump(const Duration(milliseconds: 300));
-          await tester.tap(find.text('Reasoning').last);
+          await tester.tap(
+            find
+                .descendant(
+                  of: find.byType(GatewayReasoningCard),
+                  matching: find.text('Reasoning'),
+                )
+                .last,
+          );
           await tester.pump(const Duration(milliseconds: 300));
           expect(find.text('R1'), findsOneWidget);
           expect(find.text('R2'), findsNothing);
@@ -311,8 +335,7 @@ void main() {
             },
             {'id': 7, 'role': 'assistant', 'content': 'C'},
           ]);
-          await tester.pump(const Duration(milliseconds: 300));
-          await tester.pump(const Duration(milliseconds: 300));
+          await pumpChatUpdates(tester);
           expect(_timelineLabels(tester), [
             'SSE order',
             'A 🐈',
@@ -323,6 +346,7 @@ void main() {
           ]);
           expect(find.byType(GatewayReasoningCard), findsNothing);
           await tester.pumpWidget(const SizedBox.shrink());
+          await pumpChatUpdates(tester);
         },
       );
     }
@@ -585,10 +609,20 @@ void main() {
       final reasoningKey = tester
           .widget<GatewayReasoningCard>(find.byType(GatewayReasoningCard))
           .key;
-      await tester.tap(find.text('Reasoning'));
+      await tester.tap(
+        find.descendant(
+          of: find.byType(GatewayReasoningCard),
+          matching: find.text('Reasoning'),
+        ),
+      );
       await tester.pump(const Duration(milliseconds: 300));
       expect(find.text('R'), findsOneWidget);
-      await tester.tap(find.text('Reasoning'));
+      await tester.tap(
+        find.descendant(
+          of: find.byType(GatewayReasoningCard),
+          matching: find.text('Reasoning'),
+        ),
+      );
       await tester.tap(find.text('Tool activity').first);
       await tester.pump(const Duration(milliseconds: 300));
       await tester.tap(find.text('Tool activity').first);
@@ -698,7 +732,7 @@ void main() {
         expect(find.byType(ListView), findsNothing);
 
         historyGate.complete();
-        await tester.pumpAndSettle();
+        await pumpChatUpdates(tester);
 
         final controller = _chatListController(tester);
         expect(controller.position.maxScrollExtent, greaterThan(0));
@@ -988,7 +1022,7 @@ void main() {
         {'role': 'user', 'content': 'current question'},
         {'role': 'assistant', 'content': 'final answer'},
       ]);
-      await tester.pumpAndSettle();
+      await pumpChatUpdates(tester);
     });
 
     testWidgets(
@@ -1009,9 +1043,9 @@ void main() {
         controller.jumpTo(80);
         await tester.pump();
         await tester.tap(find.byTooltip('Chat actions'));
-        await tester.pumpAndSettle();
+        await pumpChatUpdates(tester);
         await tester.tap(find.text('Refresh'));
-        await tester.pumpAndSettle();
+        await pumpChatUpdates(tester);
         expect(controller.position.pixels, closeTo(80, 0.01));
 
         await tester.enterText(find.byType(TextField), 'stay in history');
@@ -1041,12 +1075,12 @@ void main() {
                 'first materialized delta and a second delta of the same message',
           },
         ]);
-        await tester.pumpAndSettle();
+        await pumpChatUpdates(tester);
         expect(controller.position.pixels, closeTo(historyPosition, 0.01));
         expect(_indicatorText(tester), '1 new');
 
         await tester.tap(find.bySemanticsLabel('Go to end'));
-        await tester.pumpAndSettle();
+        await pumpChatUpdates(tester);
         expect(controller.position.pixels, controller.position.maxScrollExtent);
         expect(find.bySemanticsLabel('Go to end'), findsNothing);
       },
@@ -1081,7 +1115,7 @@ void main() {
           {'role': 'user', 'content': 'follow this'},
           {'role': 'assistant', 'content': 'done'},
         ]);
-        await tester.pumpAndSettle();
+        await pumpChatUpdates(tester);
         expect(controller.position.pixels, controller.position.maxScrollExtent);
       },
     );
@@ -1130,7 +1164,7 @@ void main() {
 
         remote.emit('message.complete', {'rendered': 'second message final'});
         remote.finish();
-        await tester.pumpAndSettle();
+        await pumpChatUpdates(tester);
         expect(controller.position.pixels, closeTo(historyPosition, 0.01));
         expect(_indicatorText(tester), '2 new');
 
@@ -1178,7 +1212,7 @@ void main() {
             'status': 'complete',
           });
           remote.finish();
-          await tester.pumpAndSettle();
+          await pumpChatUpdates(tester);
 
           expect(find.text('7', findRichText: true), findsNWidgets(turn));
           expect(
@@ -1193,6 +1227,8 @@ void main() {
     testWidgets(
       'Remote distinct transformed completion preserves commentary and a new message stays distinct',
       (tester) async {
+        await tester.binding.setSurfaceSize(const Size(1000, 2400));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
         final remote = _ControlledRemotePrompt();
         await _pumpChat(
           tester,
@@ -1223,7 +1259,7 @@ void main() {
         expect(find.text('Final answer', findRichText: true), findsOneWidget);
 
         remote.finish();
-        await tester.pumpAndSettle();
+        await pumpChatUpdates(tester);
         remote.started = Completer<void>();
         await tester.enterText(find.byType(TextField), 'A separate reply');
         await tester.tap(find.byTooltip('Send'));
@@ -1240,7 +1276,7 @@ void main() {
           'response_previewed': true,
         });
         remote.finish();
-        await tester.pumpAndSettle();
+        await pumpChatUpdates(tester);
         expect(find.text('Final answer', findRichText: true), findsOneWidget);
         expect(
           find.text('Earlier interim', findRichText: true),
@@ -1264,7 +1300,7 @@ void main() {
           'response_reused': true,
         });
         remote.finish();
-        await tester.pumpAndSettle();
+        await pumpChatUpdates(tester);
         expect(
           find.text('Repeated reply', findRichText: true),
           findsNWidgets(2),
@@ -1306,7 +1342,7 @@ void main() {
           'response_previewed': true,
         });
         remote.finish();
-        await tester.pumpAndSettle();
+        await pumpChatUpdates(tester);
         expect(find.text('First answer', findRichText: true), findsOneWidget);
         expect(
           find.text('Later commentary', findRichText: true),
@@ -1341,7 +1377,7 @@ void main() {
           'response_previewed': true,
         });
         remote.finish();
-        await tester.pumpAndSettle();
+        await pumpChatUpdates(tester);
         expect(find.text('Raw answer', findRichText: true), findsNothing);
         expect(
           find.text('Rendered answer', findRichText: true),
@@ -1391,7 +1427,7 @@ void main() {
             'response_previewed': true,
           });
           remote.finish();
-          await tester.pumpAndSettle();
+          await pumpChatUpdates(tester);
           final completedCards = tester
               .widgetList<GatewayReasoningCard>(
                 find.byType(GatewayReasoningCard),
@@ -1407,10 +1443,17 @@ void main() {
             completedCards.map((card) => card.initiallyExpanded),
             everyElement(isFalse),
           );
-          for (final header in find.text('Reasoning').evaluate().toList()) {
+          for (final header
+              in find
+                  .descendant(
+                    of: find.byType(GatewayReasoningCard),
+                    matching: find.text('Reasoning'),
+                  )
+                  .evaluate()
+                  .toList()) {
             await tester.tap(find.byWidget(header.widget));
           }
-          await tester.pumpAndSettle();
+          await pumpChatUpdates(tester);
           expect(find.text('Reasoning for $event'), findsOneWidget);
           expect(
             find.text('Partial reasoning. '),
@@ -1442,7 +1485,7 @@ void main() {
         );
         final controller = _chatListController(tester);
         controller.jumpTo(0);
-        await tester.pumpAndSettle();
+        await pumpChatUpdates(tester);
 
         final button = find.byKey(ChatEndAffordance.buttonKey);
         final inputBar = find.byKey(const Key('chat-input-bar'));
@@ -1468,11 +1511,11 @@ void main() {
         );
 
         await tester.tap(find.bySemanticsLabel('Add attachment'));
-        await tester.pumpAndSettle();
+        await pumpChatUpdates(tester);
         expect(find.text('Browse server files'), findsOneWidget);
 
         await tester.tap(find.text('Browse server files'));
-        await tester.pumpAndSettle();
+        await pumpChatUpdates(tester);
 
         final composer = tester.widget<TextField>(find.byType(TextField));
         expect(composer.controller!.text, '@file /srv/project/README.md ');
@@ -1540,10 +1583,11 @@ Future<void> _pumpChat(
         testNormalResume: resume,
         testServerFilePicker: serverFilePicker,
         testInitialAttachmentDrafts: initialDrafts,
+        testVoiceComposerAdapter: FakeVoiceComposerAdapter(),
       ),
     ),
   );
-  if (settle) await tester.pumpAndSettle();
+  if (settle) await pumpChatUpdates(tester);
 }
 
 List<String> _timelineLabels(WidgetTester tester) => tester
@@ -1588,7 +1632,7 @@ Future<void> _dragToEnd(
     attempt++
   ) {
     await tester.drag(find.byType(ListView).first, const Offset(0, -600));
-    await tester.pumpAndSettle();
+    await pumpChatUpdates(tester);
   }
 }
 

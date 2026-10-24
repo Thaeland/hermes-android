@@ -776,7 +776,12 @@ void main() {
         return http.Response(
           jsonEncode({
             'data': [
-              {'role': 'assistant', 'content': 'MEDIA:/srv/result.pdf'},
+              // The delivered artifact belongs to this completed answer.
+              {
+                'role': 'assistant',
+                'content': 'MEDIA:/srv/result.pdf',
+                'completed': true,
+              },
             ],
           }),
           200,

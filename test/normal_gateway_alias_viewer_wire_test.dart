@@ -26,7 +26,7 @@ void main() {
     testWidgets(
       'already-open real task viewer survives idle alias convergence and parent hydration ($width)',
       (tester) async {
-        SharedPreferences.setMockInitialValues({'verbose_mode': false});
+        SharedPreferences.setMockInitialValues({'verbose_mode': true});
         final previous = HttpOverrides.current;
         HttpOverrides.global = null;
         addTearDown(() => HttpOverrides.global = previous);

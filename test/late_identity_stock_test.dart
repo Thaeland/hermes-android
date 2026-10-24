@@ -22,9 +22,13 @@ import 'support/fake_voice_composer_adapter.dart';
 import 'support/unreconciled_policy.dart';
 import 'package:hermes_android/core/utils/chat_display_items.dart';
 import 'support/completed_stock_turn.dart';
+import 'support/pump_chat_updates.dart';
 
 void main() {
-  setUp(() => SharedPreferences.setMockInitialValues({'verbose_mode': false}));
+  setUp(() {
+    SharedPreferences.setMockInitialValues({'verbose_mode': true});
+    mockChatImageRecovery();
+  });
   testWidgets('SPEC known late-ID tool must not resurrect after receipt eviction', (
     tester,
   ) async {
@@ -305,7 +309,10 @@ void main() {
       await tester.pump();
       remote.event('tool.start', {'tool': 'terminal'});
       await tester.pump();
-      await tester.tap(find.text('Tool activity'));
+      await tester.ensureVisible(find.text('Tool activity'));
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(find.text('Tool activity').hitTestable());
+      await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
       remote.event('message.delta', {'text': 'separate calls'});
       remote.event('tool.start', {'tool': 'terminal', 'tool_id': 'other-call'});

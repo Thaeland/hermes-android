@@ -709,7 +709,7 @@ void main() {
   HttpOverrides? previous;
   setUp(() {
     SharedPreferences.setMockInitialValues({
-      'verbose_mode': false,
+      'verbose_mode': true,
       BackgroundWorkPrefsStore.storageKey: true,
     });
     backgroundWorkEnabled.value = true;
@@ -778,6 +778,15 @@ void main() {
               'tool': 'terminal',
               'detail': 'Received tool detail',
             }, turnId: 'wire-1');
+            await widgetUntil(tester, () => owner.snapshot.tools.isNotEmpty);
+            // Verbose message metadata and source headings take real sliver
+            // space; reveal the received detail through the actual list.
+            await tester.scrollUntilVisible(
+              _reason(),
+              500,
+              scrollable: find.byType(Scrollable).first,
+            );
+            await tester.pump(const Duration(milliseconds: 350));
             await widgetUntil(
               tester,
               () =>
@@ -836,6 +845,30 @@ void main() {
               find.byType(GatewaySubagentCard),
             );
             expect(taskCard.activities.single.goal, goal);
+            final taskSection = find.descendant(
+              of: find.byType(GatewaySubagentCard),
+              matching: find.byType(ExpansionTile),
+            );
+            bool taskExpanded() => tester
+                .widget<Expansible>(
+                  find.descendant(
+                    of: taskSection,
+                    matching: find.byType(Expansible),
+                  ),
+                )
+                .controller
+                .isExpanded;
+            expect(taskExpanded(), false);
+            await tester.ensureVisible(taskSection);
+            await tester.tap(taskSection);
+            await tester.pump(const Duration(milliseconds: 350));
+            await tester.scrollUntilVisible(
+              taskSection,
+              250,
+              scrollable: find.byType(Scrollable).first,
+            );
+            await tester.pump(const Duration(milliseconds: 350));
+            expect(taskExpanded(), true);
             final tile = find.byKey(
               const ValueKey('delegated-task-root78-child'),
             );

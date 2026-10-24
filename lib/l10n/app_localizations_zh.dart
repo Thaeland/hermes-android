@@ -2125,6 +2125,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get verbose_mode => '详细模式';
 
   @override
+  String get message_metadata => 'Message details';
+
+  @override
   String get voice => '语音';
 
   @override

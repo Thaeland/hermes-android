@@ -10,6 +10,7 @@ import 'package:hermes_android/core/screens/chat_screen.dart';
 import 'package:hermes_android/core/services/composer_draft_store.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
 import 'package:hermes_android/l10n/app_localizations.dart';
+import 'support/pump_chat_updates.dart';
 
 /// Answers the chat screen's initial reads with empty payloads.
 class _EmptyChatHttpClient extends http.BaseClient {
@@ -118,6 +119,7 @@ Future<void> _pumpChat(
 }
 
 void main() {
+  setUp(mockChatImageRecovery);
   setUp(() {
     SharedPreferences.setMockInitialValues({'verbose_mode': false});
   });
@@ -264,6 +266,8 @@ void main() {
 
     expect(tester.widget<TextField>(composer).controller!.text, isEmpty);
     expect(find.text('accepted prompt'), findsOneWidget);
+    await pumpChatUpdates(tester);
+    expect(find.text('accepted reply'), findsOneWidget);
     expect(
       await ComposerDraftStore.read(
         connectionId: _fixtureConnectionId,

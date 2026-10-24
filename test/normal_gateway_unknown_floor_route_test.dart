@@ -22,7 +22,9 @@ import 'support/unreconciled_policy.dart';
 import 'package:hermes_android/core/utils/chat_display_items.dart';
 
 void main() {
-  setUp(() => SharedPreferences.setMockInitialValues({'verbose_mode': false}));
+  // These assertions concern independent source/admission authority. Verbose
+  // exposes metadata-free saved rows without claiming quiet final evidence.
+  setUp(() => SharedPreferences.setMockInitialValues({'verbose_mode': true}));
 
   for (final mode in [
     'stored-held-initial',

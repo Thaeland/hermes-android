@@ -10,8 +10,10 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/fake_voice_composer_adapter.dart';
+import 'support/pump_chat_updates.dart';
 
 void main() {
+  setUp(mockChatImageRecovery);
   setUp(() {
     SharedPreferences.setMockInitialValues({'verbose_mode': false});
   });
@@ -115,7 +117,7 @@ void main() {
           ),
         ),
       );
-      await tester.pumpAndSettle();
+      await pumpChatUpdates(tester);
 
       await tester.tap(find.bySemanticsLabel('Choose chat model'));
       // The picker button intentionally keeps a progress spinner active while
@@ -150,7 +152,7 @@ void main() {
           .removeCurrentSnackBar();
       await tester.pump();
       await tester.tap(find.byTooltip('Send'));
-      await tester.pumpAndSettle();
+      await pumpChatUpdates(tester);
 
       final lockIndex = requests.indexWhere(
         (request) =>
@@ -271,7 +273,7 @@ void main() {
         .removeCurrentSnackBar();
     await tester.pump();
     await tester.tap(find.byTooltip('Send'));
-    await tester.pumpAndSettle();
+    await pumpChatUpdates(tester);
 
     final createIndex = requests.indexWhere(
       (request) =>
@@ -398,5 +400,5 @@ Future<void> _pumpApiOnlyChat(
       ),
     ),
   );
-  await tester.pumpAndSettle();
+  await pumpChatUpdates(tester);
 }

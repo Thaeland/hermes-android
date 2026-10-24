@@ -4,6 +4,7 @@ import '../models/received_scope_outcome.dart';
 import '../models/gateway_activity.dart';
 import '../models/gateway_insight.dart';
 import 'message_content.dart';
+import 'chat_conversation_projection.dart';
 
 /// UI provenance only. These sections never enter history, wire payloads or WAL.
 enum ChatDisplaySource { canonical, received, auxiliary }
@@ -41,31 +42,40 @@ List<ChatDisplaySection> buildNormalChatDisplaySections({
   List<GatewaySubagentActivity> subagentActivities = const [],
   List<GatewayNotice> notices = const [],
   bool verbose = false,
+  bool conversationOnly = false,
 }) => List<ChatDisplaySection>.unmodifiable([
   for (final section in [
     ChatDisplaySection(
       source: ChatDisplaySource.canonical,
-      items: buildChatDisplayItems(
-        messages: canonicalRows,
-        toolActivities: canonicalTools,
-        verbose: verbose,
-      ),
+      items: conversationOnly
+          ? buildConversationDisplayItems(messages: canonicalRows)
+          : buildChatDisplayItems(
+              messages: canonicalRows,
+              toolActivities: canonicalTools,
+              verbose: verbose,
+            ),
     ),
     ChatDisplaySection(
       source: ChatDisplaySource.received,
-      items: buildChatDisplayItems(
-        messages: receivedRows,
-        toolActivities: receivedTools,
-        timeline: receivedTimeline,
-        verbose: verbose,
-      ),
+      items: conversationOnly
+          ? buildConversationDisplayItems(
+              messages: receivedRows,
+              timeline: receivedTimeline,
+              received: true,
+            )
+          : buildChatDisplayItems(
+              messages: receivedRows,
+              toolActivities: receivedTools,
+              timeline: receivedTimeline,
+              verbose: verbose,
+            ),
     ).withReceivedOutcomes(receivedTimeline, receivedOutcomes),
     ChatDisplaySection(
       source: ChatDisplaySource.auxiliary,
       items: [
-        if (subagentActivities.isNotEmpty)
+        if (!conversationOnly && subagentActivities.isNotEmpty)
           List<GatewaySubagentActivity>.unmodifiable(subagentActivities),
-        ...notices,
+        if (!conversationOnly) ...notices,
       ],
     ),
   ])
@@ -287,7 +297,7 @@ List<dynamic> buildChatDisplayItems({
         }
         flushToolGroup();
         if (run.kind == ChatTimelineKind.reasoning) {
-          displayItems.add(ChatReasoningItem(run.text, verbose, id: run.id));
+          displayItems.add(ChatReasoningItem(run.text, false, id: run.id));
         } else if (run.text.isNotEmpty) {
           displayItems.add({
             ...scopeRows[run.scope]!,
@@ -312,9 +322,8 @@ List<dynamic> buildChatDisplayItems({
       displayItems.add(
         ChatReasoningItem(
           reasoning,
-          // Only the app's explicit verbose setting opens reasoning by
-          // default. Gateway metadata must not reopen it on updates/reentry.
-          verbose,
+          // Detailed mode exposes reasoning, but never opens it automatically.
+          false,
           id: 'reasoning:${msg['id'] ?? msg['message_id'] ?? identityHashCode(msg)}',
         ),
       );

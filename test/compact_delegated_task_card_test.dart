@@ -64,9 +64,9 @@ void main() {
             );
 
             await tester.pumpWidget(card('Inspect', null));
-            if (completed) {
-              await tester.tap(find.byType(ExpansionTile));
-            }
+            expect(row, findsNothing);
+            await tester.tap(find.byType(ExpansionTile));
+            await tester.pump();
             await tester.pump(const Duration(milliseconds: 300));
             final shortHeight = tester.getSize(row).height;
 
@@ -135,7 +135,13 @@ void main() {
         ),
       );
       expect(find.text(task.detail!), findsNothing);
-      await tester.tap(find.byKey(const ValueKey('delegated-task-child')));
+      expect(find.byKey(const ValueKey('delegated-task-child')), findsNothing);
+      await tester.tap(find.byType(ExpansionTile));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(
+        find.byKey(const ValueKey('delegated-task-child')).hitTestable(),
+      );
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 350));
       expect(opened, same(task));
@@ -190,6 +196,10 @@ void main() {
     );
     await tester.pumpWidget(card(task));
     final row = find.byKey(const ValueKey('delegated-task-child'));
+    expect(row, findsNothing);
+    await tester.tap(find.byType(ExpansionTile));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
     final runningHeight = tester.getSize(row).height;
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
     await tester.pumpWidget(card(finished));

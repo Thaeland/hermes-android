@@ -2213,6 +2213,9 @@ class AppLocalizationsFr extends AppLocalizations {
   String get verbose_mode => 'Mode détaillé';
 
   @override
+  String get message_metadata => 'Message details';
+
+  @override
   String get voice => 'Voix';
 
   @override

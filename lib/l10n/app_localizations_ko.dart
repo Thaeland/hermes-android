@@ -2147,6 +2147,9 @@ class AppLocalizationsKo extends AppLocalizations {
   String get verbose_mode => '상세 모드';
 
   @override
+  String get message_metadata => 'Message details';
+
+  @override
   String get voice => '음성';
 
   @override

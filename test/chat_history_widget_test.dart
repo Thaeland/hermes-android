@@ -16,6 +16,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/fake_voice_composer_adapter.dart';
+import 'support/pump_chat_updates.dart';
 import 'support/completed_stock_turn.dart';
 
 class _HistoryHttpClient extends http.BaseClient {
@@ -135,20 +136,21 @@ Widget _chat(
 );
 
 void main() {
-  setUp(() => SharedPreferences.setMockInitialValues({'verbose_mode': false}));
+  setUp(mockChatImageRecovery);
+  setUp(() => SharedPreferences.setMockInitialValues({'verbose_mode': true}));
 
   testWidgets('tool-heavy reopen restores earlier bubbles; sliding refresh '
       'retains them and adds the completed reply', (tester) async {
     final client = _HistoryHttpClient(_toolHeavyRows(124));
     await tester.pumpWidget(_chat(client, key: const ValueKey('first-open')));
-    await tester.pumpAndSettle();
+    await pumpChatUpdates(tester);
     expect(client.offsets, [0, 50, 100]);
     expect(find.text('Earlier question'), findsOneWidget);
     expect(find.text('Earlier answer'), findsOneWidget);
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpWidget(_chat(client, key: const ValueKey('reopen')));
-    await tester.pumpAndSettle();
+    await pumpChatUpdates(tester);
     expect(client.offsets, [0, 50, 100, 0, 50, 100]);
     expect(find.text('Earlier question'), findsOneWidget);
 
@@ -165,12 +167,20 @@ void main() {
       {'id': 185, 'role': 'assistant', 'content': 'Completed answer'},
     ];
     await tester.tap(find.byTooltip('Chat actions'));
-    await tester.pumpAndSettle();
+    await pumpChatUpdates(tester);
     await tester.tap(find.text('Refresh'));
-    await tester.pumpAndSettle();
+    await pumpChatUpdates(tester);
     expect(client.offsets.last, 0);
     expect(find.text('Earlier question'), findsOneWidget);
     expect(find.text('Earlier answer'), findsOneWidget);
+    // Source labels and collapsed metadata change the visible row heights.
+    // Verify the retained final row through the real lazy list, not a viewport
+    // assumption that every bubble fits at once.
+    await tester.scrollUntilVisible(
+      find.text('Completed answer'),
+      250,
+      scrollable: find.byType(Scrollable).first,
+    );
     expect(find.text('Completed answer'), findsOneWidget);
   });
 
@@ -182,12 +192,12 @@ void main() {
       {'id': 2, 'role': 'assistant', 'content': 'Keep this answer'},
     ]);
     await tester.pumpWidget(_chat(client));
-    await tester.pumpAndSettle();
+    await pumpChatUpdates(tester);
     expect(find.text('Keep this question'), findsOneWidget);
 
     final gate = client.responseGate = Completer<void>();
     await tester.tap(find.byTooltip('Chat actions'));
-    await tester.pumpAndSettle();
+    await pumpChatUpdates(tester);
     await tester.tap(find.text('Refresh'));
     await tester.pump();
     expect(find.text('Keep this question'), findsOneWidget);
@@ -195,7 +205,7 @@ void main() {
 
     client.failNextRequest = true;
     gate.complete();
-    await tester.pumpAndSettle();
+    await pumpChatUpdates(tester);
     expect(find.text('Keep this question'), findsOneWidget);
     expect(find.text('Keep this answer'), findsOneWidget);
     expect(find.text('Failed to load messages'), findsOneWidget);
@@ -207,7 +217,7 @@ void main() {
   ) async {
     final client = _HistoryHttpClient(_toolHeavyRows(612));
     await tester.pumpWidget(_chat(client));
-    await tester.pumpAndSettle();
+    await pumpChatUpdates(tester);
     expect(client.offsets, [
       for (var offset = 0; offset < 600; offset += 50) offset,
     ]);
@@ -220,7 +230,7 @@ void main() {
       scrollable: find.byType(Scrollable).first,
     );
     await tester.tap(olderButton);
-    await tester.pumpAndSettle();
+    await pumpChatUpdates(tester);
     expect(client.offsets.last, 600);
     expect(find.text('Earlier question'), findsOneWidget);
     expect(find.text('Earlier answer'), findsOneWidget);
@@ -252,7 +262,7 @@ void main() {
             },
       ),
     );
-    await tester.pumpAndSettle();
+    await pumpChatUpdates(tester);
     expect(find.text('Earlier question'), findsOneWidget);
     expect(ensures, 0);
 
@@ -275,7 +285,7 @@ void main() {
     submitted.completeError(
       JsonRpcError('prompt.submit', 'Desktop gateway connection closed'),
     );
-    await tester.pumpAndSettle();
+    await pumpChatUpdates(tester);
     expect(ensures, 0);
 
     client.rows = [
@@ -294,7 +304,7 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
     await tester.pump(const Duration(milliseconds: 100));
-    await tester.pumpAndSettle();
+    await pumpChatUpdates(tester);
     await tester.pump(const Duration(milliseconds: 100));
     expect(ensures, greaterThan(0), reason: 'socket rebind ran');
     expect(

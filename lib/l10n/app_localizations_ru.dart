@@ -2203,6 +2203,9 @@ class AppLocalizationsRu extends AppLocalizations {
   String get verbose_mode => 'Подробный режим';
 
   @override
+  String get message_metadata => 'Message details';
+
+  @override
   String get voice => 'Голос';
 
   @override

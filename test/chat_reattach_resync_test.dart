@@ -28,7 +28,9 @@ import 'package:hermes_android/l10n/app_localizations.dart';
 
 void main() {
   setUp(() {
-    SharedPreferences.setMockInitialValues({'verbose_mode': false});
+    // Reattach/admission watermarks are not row-local completion evidence.
+    // Inspect the unchanged metadata-free history in Verbose Mode instead.
+    SharedPreferences.setMockInitialValues({'verbose_mode': true});
   });
 
   testWidgets(

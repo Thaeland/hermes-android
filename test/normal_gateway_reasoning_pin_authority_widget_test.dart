@@ -19,7 +19,7 @@ void main() {
   HttpOverrides? previous;
   const picker = MethodChannel('plugins.flutter.io/image_picker');
   setUp(() {
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({'verbose_mode': true});
     previous = HttpOverrides.current;
     HttpOverrides.global = null;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger

@@ -25,7 +25,7 @@ void main() {
   final messenger =
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
   setUp(() {
-    SharedPreferences.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({'verbose_mode': true});
     old = HttpOverrides.current;
     HttpOverrides.global = null;
     exports.clear();

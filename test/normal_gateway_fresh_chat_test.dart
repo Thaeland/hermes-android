@@ -27,7 +27,9 @@ void main() {
     (tester) async {
       await tester.binding.setSurfaceSize(const Size(1000, 1600));
       addTearDown(() => tester.binding.setSurfaceSize(null));
-      SharedPreferences.setMockInitialValues({'verbose_mode': false});
+      // Exercise independent saved/received sources, not quiet completion
+      // classification: the saved stock rows have no row-local final evidence.
+      SharedPreferences.setMockInitialValues({'verbose_mode': true});
       final connection = SavedConnection(
         id: 'new-stock-probe',
         label: 'Fixture',

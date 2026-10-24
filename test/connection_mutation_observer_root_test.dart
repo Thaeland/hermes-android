@@ -16,7 +16,7 @@ void main() {
   HttpOverrides? previous;
   setUp(() {
     SharedPreferences.setMockInitialValues({
-      'verbose_mode': false,
+      'verbose_mode': true,
       BackgroundWorkPrefsStore.storageKey: true,
     });
     backgroundWorkEnabled.value = true;

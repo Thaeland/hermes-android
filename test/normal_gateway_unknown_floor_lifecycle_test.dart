@@ -33,7 +33,9 @@ void main() {
     testWidgets('real $mode renders the received and canonical turn once', (
       tester,
     ) async {
-      SharedPreferences.setMockInitialValues({'verbose_mode': false});
+      // Unknown admission floors do not prove saved-row completion. Verbose
+      // keeps both independent sources inspectable without relabelling rows.
+      SharedPreferences.setMockInitialValues({'verbose_mode': true});
       const picker = MethodChannel('plugins.flutter.io/image_picker');
       tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
         picker,

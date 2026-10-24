@@ -22,6 +22,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'support/fake_voice_composer_adapter.dart';
+import 'support/pump_chat_updates.dart';
 import 'delegated_task_history_test.dart' show FakeHistory, rows, task;
 
 Widget app(Widget home) => MaterialApp(
@@ -31,7 +32,10 @@ Widget app(Widget home) => MaterialApp(
   home: home,
 );
 void main() {
-  setUp(() => SharedPreferences.setMockInitialValues({}));
+  setUp(() {
+    SharedPreferences.setMockInitialValues({'verbose_mode': true});
+    mockChatImageRecovery();
+  });
 
   test(
     'every shipped locale resolves task labels and typed failures',
@@ -137,6 +141,8 @@ void main() {
     testWidgets(
       'ChatScreen hydrate $action ACK preserves live child until real completion',
       (tester) async {
+        await tester.binding.setSurfaceSize(const Size(800, 1400));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
         final hook = TestDesktopAsyncEventHook();
         final history = FakeHistory();
         var persistedAck = false;
@@ -228,9 +234,32 @@ void main() {
         );
         expect(card.activities, hasLength(1));
         expect(card.activities.single.isComplete, isFalse);
+        final taskSection = find.descendant(
+          of: find.byType(GatewaySubagentCard),
+          matching: find.byType(ExpansionTile),
+        );
+        bool taskExpanded() => tester
+            .widget<Expansible>(
+              find.descendant(
+                of: taskSection,
+                matching: find.byType(Expansible),
+              ),
+            )
+            .controller
+            .isExpanded;
+        expect(taskExpanded(), isFalse);
+        await tester.ensureVisible(taskSection);
+        await tester.tap(taskSection);
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(taskExpanded(), isTrue);
         final row = find.byKey(const ValueKey('delegated-task-runtime'));
-        await tester.ensureVisible(row);
-        await tester.tap(row);
+        await tester.scrollUntilVisible(
+          row.hitTestable(),
+          100,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.tap(row.hitTestable());
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 350));
         final count = history.offsets.length;
@@ -623,6 +652,24 @@ void main() {
         );
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 300));
+        final taskSection = find.descendant(
+          of: find.byType(GatewaySubagentCard),
+          matching: find.byType(ExpansionTile),
+        );
+        bool taskExpanded() => tester
+            .widget<Expansible>(
+              find.descendant(
+                of: taskSection,
+                matching: find.byType(Expansible),
+              ),
+            )
+            .controller
+            .isExpanded;
+        expect(taskExpanded(), isFalse);
+        await tester.ensureVisible(taskSection);
+        await tester.tap(taskSection);
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(taskExpanded(), isTrue);
         final row = find.byKey(const ValueKey('delegated-task-runtime'));
         await tester.ensureVisible(row);
         await tester.pump();
@@ -639,10 +686,14 @@ void main() {
             .position;
         // Programmatic positioning must not change the sticky follow intent.
         // The parent is near the end but not at it when inspection opens.
-        position.jumpTo(position.maxScrollExtent - 10);
-        await tester.pump();
+        // Expanded verbose cards update lazy extent estimates after layout.
+        for (var i = 0; i < 3; i++) {
+          position.jumpTo(position.maxScrollExtent - 10);
+          await tester.pump(const Duration(milliseconds: 300));
+        }
         final offset = position.pixels;
         expect(offset, lessThan(position.maxScrollExtent));
+        expect(row.hitTestable(), findsOneWidget);
         final requestsBefore = requests.length;
         const queuedText = 'Queued parent text\n\n';
         // Hold the real stream's scheduled post-frame follow until AFTER the
@@ -650,7 +701,7 @@ void main() {
         parentEvent(
           StreamEvent(type: 'message.delta', data: {'text': queuedText}),
         );
-        await tester.tap(row);
+        await tester.tap(row.hitTestable());
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 350));
         expect(find.text('Task timeline'), findsOneWidget);
@@ -754,8 +805,18 @@ void main() {
             StreamEvent(type: 'message.complete', data: {'text': finalText}),
           );
           submit.complete();
-          await tester.pumpAndSettle();
+          await pumpChatUpdates(tester);
           expect(position.pixels, greaterThan(offset));
+          // An unsettled owner keeps its activity bar animating. Wait for
+          // the actual follow target, not global animation idleness.
+          for (
+            var i = 0;
+            i < 20 && (position.pixels - position.maxScrollExtent).abs() > 1;
+            i++
+          ) {
+            await tester.pump(const Duration(milliseconds: 50));
+            await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+          }
           expect(position.pixels, closeTo(position.maxScrollExtent, 1));
         }
         // Only scroll application was suppressed, never stream content.
@@ -783,6 +844,11 @@ void main() {
               .join(),
           endsWith('Parent completed while inspecting'),
         );
+        await tester.scrollUntilVisible(
+          find.byType(GatewayReasoningCard),
+          -200,
+          scrollable: find.byType(Scrollable).first,
+        );
         expect(
           tester
               .widgetList<GatewayReasoningCard>(
@@ -790,6 +856,11 @@ void main() {
               )
               .map((card) => card.text),
           contains('Parent exposed reasoning while inspecting'),
+        );
+        await tester.scrollUntilVisible(
+          find.byType(GatewayActivityCard),
+          200,
+          scrollable: find.byType(Scrollable).first,
         );
         expect(find.byType(GatewayActivityCard), findsOneWidget);
         final parentTool = tester
@@ -807,6 +878,11 @@ void main() {
           ),
         );
         await tester.pump();
+        await tester.scrollUntilVisible(
+          find.byType(GatewaySubagentCard),
+          200,
+          scrollable: find.byType(Scrollable).first,
+        );
         expect(
           tester
               .widget<GatewaySubagentCard>(find.byType(GatewaySubagentCard))
