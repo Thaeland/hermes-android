@@ -146,6 +146,12 @@ class PublisherMainTest(unittest.TestCase):
                 "scripts.publish_github_release.subprocess.check_output",
                 side_effect=self.read_command,
             ),
+            # Explicit verifier seam for the legacy tag/flag tests' non-APK
+            # bytes. The real gate is exercised by test_verify_release_apks.
+            mock.patch(
+                "scripts.publish_github_release.verify_release_apks",
+                return_value={"qualification": "labelled legacy verifier fixture"},
+            ) as verify_apks,
             mock.patch(
                 "scripts.publish_github_release.build_source_bundle",
                 return_value=self.directory / "hermes-android-source-relink.zip",
@@ -153,6 +159,7 @@ class PublisherMainTest(unittest.TestCase):
             mock.patch("scripts.publish_github_release.subprocess.run") as publish,
         ):
             main()
+            verify_apks.assert_called_once_with(self.directory, self.target)
             bundle.assert_called_once_with(
                 self.directory,
                 self.target,

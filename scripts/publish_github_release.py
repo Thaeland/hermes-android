@@ -11,15 +11,15 @@ import subprocess
 import sys
 from pathlib import Path
 
+if __package__:
+    from .verify_release_apks import APK_NAMES, verify_release_apks
+else:
+    from verify_release_apks import APK_NAMES, verify_release_apks
+
 
 VERSION = re.compile(
     r"(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)"
     r"(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
-)
-APK_NAMES = (
-    "app-armeabi-v7a-release.apk",
-    "app-arm64-v8a-release.apk",
-    "app-x86_64-release.apk",
 )
 
 
@@ -156,6 +156,11 @@ def main() -> None:
         raise SystemExit(f"Invalid remote release tag: {error}") from error
     if tag_commit != head:
         raise SystemExit("Remote release tag must match the verified checkout HEAD")
+    try:
+        report = verify_release_apks(args.assets_dir, args.target)
+    except (ValueError, OSError, subprocess.SubprocessError) as error:
+        raise SystemExit(f"APK pre-publication verification failed: {error}") from error
+    print(json.dumps(report, indent=2))
     assets = release_assets(args.assets_dir)
     bundle = build_source_bundle(args.assets_dir, args.target, assets[:-1])
     command = release_command(
