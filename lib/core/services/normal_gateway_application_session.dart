@@ -8,6 +8,7 @@ import '../models/chat_timeline.dart';
 import '../models/received_scope_outcome.dart';
 import '../models/gateway_activity.dart';
 import '../models/gateway_insight.dart';
+import '../models/normal_gateway_persisted_turn.dart';
 import '../utils/chat_conversation_projection.dart';
 import '../utils/android_prompt_context.dart';
 import 'connection_manager.dart';
@@ -369,6 +370,7 @@ class NormalGatewayApplicationSession {
     loser._tools.clear();
     loser._subagents.clear();
     loser._observedSubagents.clear();
+    loser._historyConfirmationRows = [];
     final settledIds = {
       ...loser._settledWireTurnIds,
       ...winner._settledWireTurnIds,
@@ -717,8 +719,10 @@ class NormalGatewayChatOwner {
   final List<Map<String, dynamic>> _priorDisplay = [];
   final List<_SettledGatewayPresentation> _settledPresentation = [];
   final List<ReceivedScopeOutcome> _receivedOutcomes = [];
+  final Map<String, _ReceivedTurnPersistence> _persistedTurns = {};
   int? _receivedObservation;
   List<Map<String, dynamic>> _history = [];
+  List<Map<String, dynamic>> _historyConfirmationRows = [];
   bool _historyKnown = false;
   int _historyObservation = 0;
   String? _createdEmptySessionId;
@@ -869,16 +873,29 @@ class NormalGatewayChatOwner {
   /// Tokenless calls remain a TRUSTED external-observation compatibility seam:
   /// they assert freshness at ingress, not physical request-start freshness.
   /// Production physical readers must supply their pre-I/O [read].
+  /// [confirmedRows], when supplied, is raw context fetched under that same
+  /// fence (including [rows]), never an accumulated/older paging window. It
+  /// confirms receipt coverage only; [rows] alone remains latest authority.
   bool observeHistory(
     List<Map<String, dynamic>> rows, {
     NormalGatewayHistoryRead? read,
+    List<Map<String, dynamic>>? confirmedRows,
   }) {
-    if (_redirect != null) return _root.observeHistory(rows, read: read);
+    if (_redirect != null) {
+      return _root.observeHistory(
+        rows,
+        read: read,
+        confirmedRows: confirmedRows,
+      );
+    }
     if (_session._closed || snapshot.hasActiveTurn) return false;
     final captured =
         read ?? beginHistoryRead(storedSessionId ?? localSessionId);
     if (!identical(captured._owner, this) ||
-        !_acceptHistory(_GatewayHistoryObservation(rows, captured))) {
+        !_acceptHistory(
+          _GatewayHistoryObservation(rows, captured),
+          confirmedRows: confirmedRows,
+        )) {
       return false;
     }
     _cleanCompletedEmptySubmission(rows);
@@ -892,18 +909,156 @@ class NormalGatewayChatOwner {
     return _GatewayHistoryObservation(rows, read);
   }
 
-  bool _acceptHistory(_GatewayHistoryObservation fresh) {
+  bool _acceptHistory(
+    _GatewayHistoryObservation fresh, {
+    List<Map<String, dynamic>>? confirmedRows,
+  }) {
     if (!identical(fresh.read._owner, this) || !fresh.read.isCurrent) {
       return false;
     }
     _history = fresh.rows.map((row) => Map<String, dynamic>.from(row)).toList();
+    // Optional context is the same fenced physical read's complete raw batch,
+    // not a retained paging window or a new latest/admission observation.
+    // Latest rows still win if the context repeats an address: a typed older
+    // body must never override the latest row's explicit partial/failure veto.
+    final latestById = {
+      for (final row in _history)
+        if (row['id'] is int) row['id']: row,
+    };
+    _historyConfirmationRows = (confirmedRows ?? fresh.rows)
+        .map((row) => Map<String, dynamic>.from(latestById[row['id']] ?? row))
+        .toList();
     _historyKnown = true;
     _historyObservation = fresh.observation;
+    _reconcilePersistedTurns();
     _boundSettledPresentation();
     return true;
   }
 
+  /// An explicit receipt can require context beyond the latest raw page. The
+  /// key is only a bounded-fetch hint, never permission to retire presentation.
+  String? persistedTurnContextKey(List<Map<String, dynamic>> rows) {
+    if (_redirect != null) return _root.persistedTurnContextKey(rows);
+    final present = {
+      for (final row in rows)
+        if (row['id'] is int) row['id'],
+    };
+    final pending = [
+      for (final entry in _persistedTurns.entries)
+        if (entry.value.settled &&
+            present.contains(entry.value.receipt.finalAssistantRowId) &&
+            entry.value.receipt.rowIds.any((id) => !present.contains(id)))
+          entry.key,
+    ];
+    return pending.isEmpty ? null : pending.join(':');
+  }
+
+  void _capturePersistedTurn(Map<String, dynamic> data) {
+    final id = turnId;
+    if (id == null) return;
+    // A later invalid completion cannot retain an earlier claim for this turn.
+    _persistedTurns.remove(id);
+    if (!isSuccessfulResponseReceipt(data)) return;
+    final receipt = NormalGatewayPersistedTurn.fromWire(data['persisted_turn']);
+    if (receipt == null ||
+        _display.where((row) => row['role'] == 'user').length > 1) {
+      return;
+    }
+    final scopes = _display
+        .map((row) => row['_normal_projection_id'])
+        .whereType<String>()
+        .toSet();
+    if (scopes.isEmpty || scopes.length != _display.length) return;
+    _persistedTurns[id] = _ReceivedTurnPersistence(
+      receipt: receipt,
+      scopes: scopes,
+      tools: _tools,
+      afterObservation: _historyObservation,
+    );
+  }
+
+  void _reconcilePersistedTurns() {
+    final covered = _persistedTurns.entries
+        .where(
+          (entry) =>
+              entry.value.settled &&
+              _historyObservation > entry.value.afterObservation &&
+              entry.value.receipt.isConfirmedBy(_historyConfirmationRows),
+        )
+        .toList(growable: false);
+    if (covered.isEmpty) return;
+    final scopes = {for (final entry in covered) ...entry.value.scopes};
+    final tools = Set<GatewayToolActivity>.identity();
+    for (final entry in covered) {
+      tools.addAll(entry.value.tools);
+      _persistedTurns.remove(entry.key);
+    }
+    bool coveredRow(Map<String, dynamic> row) =>
+        scopes.contains(row['_normal_projection_id']);
+    ChatTimeline withoutCoveredScopes(ChatTimeline timeline) {
+      if (!timeline.scopes.any(scopes.contains)) return timeline;
+      final retained = timeline.scopes.where(
+        (scope) => !scopes.contains(scope),
+      );
+      return retained.isEmpty
+          ? timeline.clear()
+          : timeline.retainScopes(retained);
+    }
+
+    // One synchronous presentation transition. No listener can see a saved
+    // handoff with its old local prompt/reply or a fallback tool left behind.
+    _display.removeWhere(coveredRow);
+    _priorDisplay.removeWhere(coveredRow);
+    _timeline = withoutCoveredScopes(_timeline);
+    _tools.removeWhere(tools.contains);
+    final outcomes = _uncoveredOutcomes(_receivedOutcomes, scopes);
+    _receivedOutcomes
+      ..clear()
+      ..addAll(outcomes);
+    for (var i = _settledPresentation.length - 1; i >= 0; i--) {
+      final previous = _settledPresentation[i];
+      if (!previous.rows.any(coveredRow) &&
+          !previous.timeline.scopes.any(scopes.contains)) {
+        continue;
+      }
+      final rows = previous.rows.where((row) => !coveredRow(row)).toList();
+      final timeline = withoutCoveredScopes(previous.timeline);
+      final retainedTools = previous.tools
+          .where((tool) => !tools.contains(tool))
+          .toList();
+      if (rows.isEmpty && timeline.runs.isEmpty && retainedTools.isEmpty) {
+        _settledPresentation.removeAt(i);
+      } else {
+        _settledPresentation[i] = _SettledGatewayPresentation(
+          observation: previous.observation,
+          rows: rows,
+          tools: retainedTools,
+          timeline: timeline,
+          outcomes: _uncoveredOutcomes(previous.outcomes, scopes),
+        );
+      }
+    }
+  }
+
+  List<ReceivedScopeOutcome> _uncoveredOutcomes(
+    List<ReceivedScopeOutcome> outcomes,
+    Set<String> covered,
+  ) => [
+    for (final fact in outcomes)
+      if (fact.scopes.any((scope) => !covered.contains(scope)))
+        if (!fact.scopes.any(covered.contains))
+          fact
+        else
+          ReceivedScopeOutcome(
+            id: fact.id,
+            scopes: fact.scopes.where((scope) => !covered.contains(scope)),
+            outcome: fact.outcome,
+          ),
+  ];
+
   void _adoptSettledPresentation(NormalGatewayChatOwner other) {
+    _persistedTurns.addAll(other._persistedTurns);
+    other._persistedTurns.clear();
     _settledPresentation.addAll(other._settledPresentation);
     if (other._hasReceivedPresentation) {
       final retainedRows = [
@@ -928,6 +1083,7 @@ class NormalGatewayChatOwner {
     other._settledPresentation.clear();
     other._receivedOutcomes.clear();
     _settledPresentation.sort((a, b) => a.observation.compareTo(b.observation));
+    _reconcilePersistedTurns();
     _boundSettledPresentation();
   }
 
@@ -971,6 +1127,28 @@ class NormalGatewayChatOwner {
         if (row['_normal_projection_id'] != null) row['_normal_projection_id']!,
       for (final run in _timeline.runs) run.scope,
     };
+    final allRetained = <Object>{
+      ...retained,
+      for (final settled in _settledPresentation) ...[
+        for (final row in settled.rows)
+          if (row['_normal_projection_id'] != null)
+            row['_normal_projection_id']!,
+        for (final run in settled.timeline.runs) run.scope,
+      ],
+    };
+    _persistedTurns.removeWhere(
+      (_, claim) => !claim.scopes.any(allRetained.contains),
+    );
+    // Bound address/tool metadata as well as body anchors. Dropping an optional
+    // claim leaves received output intact; it never grants reconciliation.
+    var addressCount = _persistedTurns.values.fold<int>(
+      0,
+      (sum, claim) => sum + claim.receipt.rowIds.length,
+    );
+    while (addressCount > NormalGatewayPersistedTurn.maxRowIds) {
+      final first = _persistedTurns.keys.first;
+      addressCount -= _persistedTurns.remove(first)!.receipt.rowIds.length;
+    }
     for (var i = _receivedOutcomes.length - 1; i >= 0; i--) {
       final fact = _receivedOutcomes[i];
       final scopes = fact.scopes.where(retained.contains).toSet();
@@ -998,9 +1176,13 @@ class NormalGatewayChatOwner {
       return;
     }
     _history = other._history.map(Map<String, dynamic>.from).toList();
+    _historyConfirmationRows = other._historyConfirmationRows
+        .map(Map<String, dynamic>.from)
+        .toList();
     _historyKnown = true;
     _historyObservation = other._historyObservation;
     _createdEmptySessionId = null;
+    _reconcilePersistedTurns();
     _boundSettledPresentation();
   }
 
@@ -1645,6 +1827,10 @@ class NormalGatewayChatOwner {
         (event.type.startsWith('message.') ||
             event.type.startsWith('tool.') ||
             event.type.startsWith('reasoning.'))) {
+      // New body activity after a completion is not covered by that earlier
+      // persistence proof. A subsequent valid completion may establish a new
+      // exact scope claim; lifecycle/status-only updates do not revoke it.
+      _persistedTurns.remove(turnId);
       _sawResponseActivity = true;
     }
     if (phase == NormalGatewayTurnPhase.reconciling &&
@@ -1775,6 +1961,7 @@ class NormalGatewayChatOwner {
         target['_gateway_pending_response'] = false;
         target['_chat_response_complete'] =
             ownsResponse && isSuccessfulResponseReceipt(event.data);
+        _capturePersistedTurn(event.data);
       }
     } else if (event.type.startsWith('tool.')) {
       final update = GatewayToolActivity.fromGatewayEvent(
@@ -2095,6 +2282,7 @@ class NormalGatewayChatOwner {
     final marker = _marker;
     try {
       if (completed == false) {
+        _persistedTurns.remove(settledTurnId);
         // The owned failure already disproves these responses. Do not wait for
         // tombstone I/O to hide them, or let a retry revive their final markers.
         for (final row in _display) {
@@ -2185,6 +2373,14 @@ class NormalGatewayChatOwner {
         row['_gateway_pending_response'] = false;
         if (completed == false) row['_chat_response_complete'] = false;
       }
+      if (completed != false) {
+        final claim = _persistedTurns[settledTurnId];
+        if (claim != null) {
+          _persistedTurns[settledTurnId!] = claim.asSettled();
+        }
+      }
+      _reconcilePersistedTurns();
+      _boundSettledPresentation();
       _marker = null;
       _additionalRestoredMarkers.clear();
       _terminalReceipt = null;
@@ -2404,6 +2600,8 @@ class NormalGatewayChatOwner {
     _priorDisplay.clear();
     _settledPresentation.clear();
     _receivedOutcomes.clear();
+    _persistedTurns.clear();
+    _historyConfirmationRows = [];
     _timeline = _timeline.clear();
     _tools.clear();
     _subagents.clear();
@@ -2480,6 +2678,33 @@ class _SettledGatewayPresentation {
   final List<GatewayToolActivity> tools;
   final ChatTimeline timeline;
   final List<ReceivedScopeOutcome> outcomes;
+}
+
+/// Immutable received anchors owned by one positive persistence receipt. The
+/// lifecycle settlement bit grants presentation cleanup only, never admission.
+class _ReceivedTurnPersistence {
+  _ReceivedTurnPersistence({
+    required this.receipt,
+    required Set<String> scopes,
+    required List<GatewayToolActivity> tools,
+    required this.afterObservation,
+    this.settled = false,
+  }) : scopes = Set<String>.unmodifiable(scopes),
+       tools = List<GatewayToolActivity>.unmodifiable(tools);
+
+  final NormalGatewayPersistedTurn receipt;
+  final Set<String> scopes;
+  final List<GatewayToolActivity> tools;
+  final int afterObservation;
+  final bool settled;
+
+  _ReceivedTurnPersistence asSettled() => _ReceivedTurnPersistence(
+    receipt: receipt,
+    scopes: scopes,
+    tools: tools,
+    afterObservation: afterObservation,
+    settled: true,
+  );
 }
 
 bool _interactive(String type) => const {

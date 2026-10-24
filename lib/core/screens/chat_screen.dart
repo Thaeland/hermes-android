@@ -539,6 +539,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   int _responseGeneration = 0;
   bool _deferredHistoryRefreshPending = false;
   bool _deferredHistoryRefreshing = false;
+  String? _persistedHistoryContextRequested;
   bool _stopResponseInFlight = false;
   bool _approvalDialogOpen = false;
   bool _approvalRouteOpen = false;
@@ -947,7 +948,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             return;
           }
           setState(() {
-            if (snapshot.turnId == null) {
+            if (snapshot.turnId == null || !_hasSuccessfulHistoryRead) {
+              // App-owner rows can paint a reopened chat before its physical
+              // cold scan finishes. They must not mark that scan initialised
+              // and prevent it finding the prompt beyond a tool-heavy page.
               _historyWindow.mergeObservedRows(snapshot.historyRows);
               _historyWindowRevision++;
               _extractToolMessages(_historyWindow.rows);
@@ -968,6 +972,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       // replacing a route cannot discard receipt chronology.
       _timeline = snapshot.timeline;
     });
+    _queuePersistedHistoryContext(snapshot);
     if (followStream) {
       if (snapshot.hasActiveTurn) {
         _scheduleStreamingFollow();
@@ -1006,6 +1011,30 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _handleDesktopGatewayEvent(event, _responseGeneration);
         }
       }
+    });
+  }
+
+  void _queuePersistedHistoryContext(NormalGatewayChatSnapshot snapshot) {
+    final owner = _normalChat;
+    if (owner == null || snapshot.hasActiveTurn || _loading) return;
+    final key = owner.persistedTurnContextKey(snapshot.historyRows);
+    if (key == null || key == _persistedHistoryContextRequested) return;
+    // One automatic bounded scan per receipt set. Incomplete/failed context
+    // remains retryable through Refresh, without a background retry loop.
+    _persistedHistoryContextRequested = key;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !identical(owner, _normalChat)) return;
+      if (_sending ||
+          _streaming ||
+          _stopResponseInFlight ||
+          _pendingReattachResync) {
+        _persistedHistoryContextRequested = null;
+        return;
+      }
+      if (owner.persistedTurnContextKey(owner.snapshot.historyRows) != key) {
+        return;
+      }
+      unawaited(_fetchMessages());
     });
   }
 
@@ -2124,11 +2153,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   bool _acceptHistoryRead(
     _ChatHistoryRead read,
-    List<Map<String, dynamic>> latest,
-  ) {
+    List<Map<String, dynamic>> latest, {
+    List<Map<String, dynamic>>? confirmedRows,
+  }) {
     if (!_canApplyHistoryRead(read)) return false;
     if (read.owner != null &&
-        !read.owner!.observeHistory(latest, read: read.authority)) {
+        !read.owner!.observeHistory(
+          latest,
+          read: read.authority,
+          confirmedRows: confirmedRows,
+        )) {
       return false;
     }
     // Owner delivery invokes arbitrary subscribers synchronously. A new turn,
@@ -2177,24 +2211,31 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
     List<Map<String, dynamic>>? latest;
     try {
-      final batch = await _historyWindow.fetchRecent((offset) async {
-        final rows = await _client.getMessages(
-          read.sessionId,
-          limit: ChatHistoryWindow.pageSize,
-          offset: offset,
-          latest: true,
-        );
-        // Only offset zero carries latest authority. Additional cold pages
-        // are context, never a new read-start sequence or admission snapshot.
-        if (offset == 0) latest = rows;
-        return rows;
-      }, shouldContinue: () => _canApplyHistoryRead(read));
+      final batch = await _historyWindow.fetchRecent(
+        (offset) async {
+          final rows = await _client.getMessages(
+            read.sessionId,
+            limit: ChatHistoryWindow.pageSize,
+            offset: offset,
+            latest: true,
+          );
+          // Only offset zero carries latest authority. Additional cold pages
+          // are context, never a new read-start sequence or admission snapshot.
+          if (offset == 0) latest = rows;
+          return rows;
+        },
+        shouldContinue: () => _canApplyHistoryRead(read),
+        needsContext: (rows) =>
+            read.owner?.persistedTurnContextKey(rows) != null,
+      );
       if (!_historyReadAttached(read)) return;
       if (read.responseGeneration != _responseGeneration) {
         _deferHistoryRefresh();
         return;
       }
-      if (!_acceptHistoryRead(read, latest!)) return;
+      // Context fetched by this read can confirm a long receipt; retained
+      // rows from earlier paging cannot lend this request fresh authority.
+      if (!_acceptHistoryRead(read, latest!, confirmedRows: batch.rows)) return;
       _historyWindow.acceptRecent(batch);
       _historyWindowRevision++;
       final messages = _restHistoryForPresentation();

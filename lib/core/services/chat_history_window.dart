@@ -35,17 +35,20 @@ class ChatHistoryWindow {
 
   /// Fetch at most twelve raw pages on a cold open, stopping as soon as both
   /// sides of the conversation are visible or the server reaches its end.
-  /// Subsequent refreshes only need the first page: already loaded older rows
-  /// remain in [rows]. A failed *additional* page keeps the usable first page.
+  /// Subsequent refreshes usually need only the first page. An explicit
+  /// persistence receipt may request additional fresh context, within the same
+  /// page budget; already retained rows are never fresh confirmation context.
+  /// A failed additional page keeps the usable first page.
   Future<ChatHistoryPageBatch> fetchRecent(
     MessagePageFetcher fetch, {
     bool Function()? shouldContinue,
+    bool Function(List<Map<String, dynamic>> rows)? needsContext,
   }) async {
     final first = await fetch(0);
     final pages = <List<Map<String, dynamic>>>[first];
     var count = first.length;
     var hasMore = first.length == pageSize;
-    if (!_initialized) {
+    if (!_initialized || needsContext?.call(first) == true) {
       while (hasMore && pages.length < initialPageBudget) {
         if (shouldContinue != null && !shouldContinue()) break;
         final combined = pages.reversed.expand((page) => page).toList();
@@ -53,7 +56,8 @@ class ChatHistoryWindow {
           messages: combined,
         ).whereType<Map<String, dynamic>>();
         if (bubbles.any((row) => row['role'] == 'user') &&
-            bubbles.any((row) => row['role'] == 'assistant')) {
+            bubbles.any((row) => row['role'] == 'assistant') &&
+            needsContext?.call(combined) != true) {
           break;
         }
         try {
