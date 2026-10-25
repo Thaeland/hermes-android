@@ -68,6 +68,7 @@ void main() {
     expect(releaseWorkflow, contains('if certs != {expected_cert}:'));
     expect(qualityWorkflow, contains("MINIMUM_INSTALLED_VERSION_CODE: '2127'"));
     expect(qualityWorkflow, contains("REQUIRED_BASE_VERSION_CODE: '3002'"));
+    expect(qualityWorkflow, contains('scripts.test_verify_release_apks'));
   });
 
   test('Store notes cover the base and every exact ABI split code', () {

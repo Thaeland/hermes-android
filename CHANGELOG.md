@@ -19,9 +19,13 @@ testing is approved. Base code **3002** produces **30021**, **30022** and
   with Verbose Mode off, without adding partial replies to quiet chat (#200).
 - Present recognised internal notices as neutral background tasks, preserving
   genuine human input, hidden/model-only exclusions and retry ownership (#201).
+  Human follow-ups merged into a notice remain editable human messages and
+  retain the reply's retry target, including delegated-task history.
 - Replace saved/live duplicate presentation only when an exact committed-turn
   receipt and fresh complete history prove the handover. Share replacement
   context with retained chat routes and retry superseded context reads (#202).
+  A held refresh cannot revive an answer vetoed by a newer alias observation;
+  lagging history and uncertain outcomes never become inferred completion.
 - Explain the separate mobile-push server prerequisite, link its installation
   guide and make off-state availability checks read-only and Settings-scoped
   without enabling notifications or clearing consent errors (#203).
@@ -41,20 +45,6 @@ testing is approved. Base code **3002** produces **30021**, **30022** and
   rebuild time. Keep each completed message's footer when an earlier preview
   completes after later interim commentary. Preserve existing completion,
   source ownership and release gates.
-
-### Fixed
-
-- Present machine-authored model/provider and personality changes, automatic
-  recovery, internal notifications and recognised legacy automation messages as
-  collapsed background cards instead of user messages, including delegated-task
-  history. Keep them out of quiet chat and retry prompts without modifying the
-  saved transcript or hiding real user controls and quoted examples.
-- Avoid duplicate prompts and Hermes replies when Remote Gateway history catches
-  up with a live response. Use the gateway's explicit committed-message receipt
-  and confirm its exact saved rows before retiring that turn's live copy,
-  including its interim text and tool timeline. Keep replies through lagging or
-  failed history reads; never guess correspondence from identical text or
-  change an uncertain turn outcome into a successful one.
 
 ## [3.0.0-rc.2] - 2026-10-24
 
