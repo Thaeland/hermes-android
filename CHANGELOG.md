@@ -6,6 +6,32 @@ shows only the three latest releases.
 
 ## [Unreleased]
 
+## [3.0.0-rc.3] - 2026-10-25
+
+Testing candidate only. **2.1.33 remains latest stable.** Back up settings before
+installing; stable 3.0 and GitLab/F-Droid updates remain on hold until phone
+testing is approved. Base code **3002** produces **30021**, **30022** and
+**30023**, above RC2's **30011–30013**, with the existing production signer.
+
+### Fixed
+
+- Show current tool, reasoning and delegated work in the responding bar even
+  with Verbose Mode off, without adding partial replies to quiet chat (#200).
+- Present recognised internal notices as neutral background tasks, preserving
+  genuine human input, hidden/model-only exclusions and retry ownership (#201).
+- Replace saved/live duplicate presentation only when an exact committed-turn
+  receipt and fresh complete history prove the handover. Share replacement
+  context with retained chat routes and retry superseded context reads (#202).
+- Explain the separate mobile-push server prerequisite, link its installation
+  guide and make off-state availability checks read-only and Settings-scoped
+  without enabling notifications or clearing consent errors (#203).
+
+### Changed
+
+- Run the actual-APK verifier regressions during PR quality checks as well as
+  tagged releases; publication still verifies all three signed splits and the
+  corresponding source/relink materials before creating a release.
+
 ### Added
 
 - Message-level local-time footers for user messages and completed Hermes

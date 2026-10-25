@@ -36,18 +36,19 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
 - Previous upstream releases remain available from the
   [Releases](https://github.com/rusty4444/hermes-android/releases) page.
 
-## 3.0 testing release: RC2
+## 3.0 testing release: RC3
 
-The testing candidate is **3.0.0-rc.2** (base build **3001**). It is a GitHub
+The testing candidate is **3.0.0-rc.3** (base build **3002**). It is a GitHub
 prerelease, not the stable release; **2.1.33 remains latest stable**. Back up app
-settings before installing. RC2 uses the existing production package and signer
-and can upgrade RC1 in place. Its split codes are **30011** (armeabi-v7a),
-**30012** (arm64-v8a) and **30013** (x86_64).
+settings before installing. RC3 uses the existing production package and signer
+and can upgrade RC2 in place. Its split codes are **30021** (armeabi-v7a),
+**30022** (arm64-v8a) and **30023** (x86_64).
 
-RC2 brings generated-file previews and direct downloads, tappable web links,
-latest-message opening, separate Stop and Send controls, quiet conversation
-presentation, a simpler More menu and improved client-certificate import.
-Download it from the [RC2 testing release](https://github.com/rusty4444/hermes-android/releases/tag/v3.0.0-rc.2).
+RC3 adds message times, live work in the responding bar, neutral internal-notice
+cards, proven saved/live duplicate handover and clearer push-server setup.
+It retains RC2's file previews/downloads, web links, latest-message opening,
+Stop/Send controls, quiet presentation and client-certificate improvements.
+Download it from the [RC3 testing release](https://github.com/rusty4444/hermes-android/releases/tag/v3.0.0-rc.3).
 Phone acceptance is required before stable 3.0 promotion or GitLab/F-Droid updates.
 
 ### Integrated release-candidate hardening
@@ -80,7 +81,7 @@ received output remain independent sources, labelled in Verbose mode, with
 possible repetition across them. See [Chat presentation](docs/chat-presentation.md)
 and the [neutral integration and verification](docs/reviews/main-81d-neutral-integration.md).
 
-### Message times (unreleased)
+### Message times in RC3
 
 User messages and completed Hermes replies show a local-time footer in both
 quiet and Verbose Mode, including compact density. The device's locale and
@@ -92,7 +93,7 @@ recorded time stays untimed; recovery replay never fabricates a receipt time.
 Device observations follow the existing presentation lifetime, not a new
 persistent receipt log. After process restart, only server-recorded history
 times are available. This does not change quiet-mode completion requirements,
-saved/received ownership, or RC2's phone-acceptance and publication gates.
+saved/received ownership, or RC3's phone-acceptance and publication gates.
 
 ## Background notifications: server setup required
 
