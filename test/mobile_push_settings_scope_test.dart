@@ -56,7 +56,7 @@ void main() {
       expect(f.methods, isNot(contains('enable')));
       expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
       expect(
-        find.textContaining(failure == 'missing' ? 'not installed' : 'server'),
+        find.textContaining(failure == 'missing' ? 'unavailable' : 'server'),
         findsWidgets,
       );
       await tester.pumpWidget(const SizedBox.shrink());

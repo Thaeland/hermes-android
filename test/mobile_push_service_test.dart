@@ -531,13 +531,14 @@ void main() {
         f.service.enable(f.connection, 'test.distributor', ['durable-session']),
         throwsA(isA<DashboardHttpException>()),
       );
-      expect(f.service.error, contains('not installed'));
+      expect(f.service.error, contains('may be missing or disabled'));
       f.capsStatus = 403;
       await expectLater(
         f.service.enable(f.connection, 'test.distributor', ['durable-session']),
         throwsA(isA<DashboardHttpException>()),
       );
       expect(f.service.error, contains('denied'));
+      expect(f.methods, isNot(contains('permission')));
       expect(f.methods, isNot(contains('enable')));
     },
   );
