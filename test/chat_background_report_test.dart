@@ -36,6 +36,94 @@ void main() {
   });
 
   final internalFixtures = internalBackgroundMessageFixtures();
+  for (final entry in mergedInternalBackgroundMessageFixtures().entries) {
+    for (final verbose in [false, true]) {
+      testWidgets(
+        'merged ${entry.key} keeps real human edit and retry verbose=$verbose',
+        (tester) async {
+          SharedPreferences.setMockInitialValues({'verbose_mode': verbose});
+          await tester.binding.setSurfaceSize(const Size(1000, 1800));
+          addTearDown(() => tester.binding.setSurfaceSize(null));
+          final row = Map<String, dynamic>.from(entry.value['api'] as Map)
+            ..['id'] = 2;
+          final body = row['content'] as String;
+          final fixture = _History();
+          fixture.rows
+            ..clear()
+            ..addAll([
+              {'id': 1, 'role': 'user', 'content': 'Unrelated older question'},
+              row,
+              {
+                'id': 3,
+                'role': 'assistant',
+                'content': 'Answer',
+                'finish_reason': 'stop',
+              },
+            ]);
+          final controller = GatewayTurnApplicationController();
+          try {
+            await tester.pumpWidget(_app(fixture, controller));
+            await tester.pumpAndSettle();
+            expect(find.byType(BackgroundReportCard), findsNothing);
+            final human = find.byWidgetPredicate(
+              (widget) =>
+                  widget is MessageBubble &&
+                  widget.isUser &&
+                  widget.content == body,
+            );
+            expect(human, findsOneWidget);
+            expect(fixture.submits, 0);
+            final humanTarget = find.descendant(
+              of: human,
+              matching: find.byKey(const Key('message-bubble')),
+            );
+            await tester.ensureVisible(humanTarget);
+            await tester.pumpAndSettle();
+            expect(humanTarget.hitTestable(), findsOneWidget);
+            await tester.longPress(humanTarget);
+            await tester.pumpAndSettle();
+            await tester.tap(find.text('Edit and resend'));
+            await tester.pumpAndSettle();
+            expect(_draft(tester), body);
+            expect(fixture.submits, 0);
+
+            await tester.enterText(find.byType(TextField), 'Unsent draft');
+            final answer = find.byWidgetPredicate(
+              (widget) =>
+                  widget is MessageBubble &&
+                  !widget.isUser &&
+                  widget.content == 'Answer',
+            );
+            final answerTarget = find.descendant(
+              of: answer,
+              matching: find.byKey(const Key('message-bubble')),
+            );
+            await tester.ensureVisible(answerTarget);
+            await tester.pumpAndSettle();
+            expect(answerTarget.hitTestable(), findsOneWidget);
+            await tester.longPress(answerTarget);
+            await tester.pumpAndSettle();
+            await tester.tap(find.text('Regenerate response'));
+            for (var i = 0; i < 10 && fixture.submits == 0; i++) {
+              await tester.pump(const Duration(milliseconds: 100));
+            }
+            expect(fixture.submits, 1);
+            expect(fixture.submittedTexts.single, startsWith(body));
+            expect(
+              fixture.submittedTexts.single,
+              contains(entry.value['human']),
+            );
+            expect(tester.takeException(), isNull);
+          } finally {
+            await tester.pumpWidget(const SizedBox.shrink());
+            await controller.close();
+            await tester.pump();
+          }
+        },
+      );
+    }
+  }
+
   final taskCases = {
     ...preservedTaskListFixtures(),
     for (final name in [
@@ -489,6 +577,7 @@ Widget _app(
           required onSent,
         }) async {
           fixture.submits++;
+          fixture.submittedTexts.add(text);
         },
     testVoiceComposerAdapter: FakeVoiceComposerAdapter(),
   ),
@@ -497,6 +586,7 @@ Widget _app(
 class _History {
   int reads = 0;
   int submits = 0;
+  final submittedTexts = <String>[];
   final requests = <http.Request>[];
   final connection = SavedConnection(
     id: 'background-report-fixture',

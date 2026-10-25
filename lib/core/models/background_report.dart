@@ -52,8 +52,12 @@ class BackgroundReport {
     if (body is! String || body.isEmpty) return null;
     if (kind == null) {
       // Explicit unknown/human kinds and public projections outrank heuristics.
+      // A backend user-row merge can deliberately drop a notice's kind. Its
+      // absorbed identity/prefix means the body is no longer standalone: an
+      // open result envelope must not consume the appended human request.
       if (message['role'] != 'user' ||
           hasProjection ||
+          _isMergedMessage(message) ||
           (message['display_kind'] != null && message['display_kind'] != '')) {
         return null;
       }
@@ -88,6 +92,21 @@ class BackgroundReport {
               completed >= 0 &&
               completed < total),
     );
+  }
+
+  static bool _isMergedMessage(Map<String, dynamic> message) {
+    final prefix = message['_merged_turn_prefix'];
+    if (prefix is String && prefix.isNotEmpty) return true;
+    for (final key in ['absorbed_message_uids', '_absorbed_message_uids']) {
+      final witness = message[key];
+      // SessionDB exposes JSON text; live message identity uses a list. Treat
+      // any nonempty encoded witness conservatively without parsing its IDs.
+      if (witness is List && witness.isNotEmpty ||
+          witness is String && witness.isNotEmpty && witness != '[]') {
+        return true;
+      }
+    }
+    return false;
   }
 
   static const _taskListHeader =

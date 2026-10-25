@@ -16,6 +16,77 @@ const _modelSwitch =
     'metadata when answering questions about what model/provider is active.]';
 
 void main() {
+  for (final entry in mergedInternalBackgroundMessageFixtures().entries) {
+    test('actual merged ${entry.key} preserves human input and retry', () {
+      for (final source in ['api', 'dashboard']) {
+        final row = Map<String, dynamic>.from(entry.value[source] as Map);
+        final before = jsonEncode(row);
+        expect(row['display_kind'], isNull);
+        expect(row['absorbed_message_uids'], isNotEmpty);
+        expect(BackgroundReport.fromMessage(row), isNull);
+        final messages = <Map<String, dynamic>>[
+          {'id': 0, 'role': 'user', 'content': 'Unrelated older question'},
+          row,
+          {
+            'id': 1000,
+            'role': 'assistant',
+            'content': 'Answer',
+            'finish_reason': 'stop',
+          },
+        ];
+        for (final items in [
+          buildChatDisplayItems(messages: messages),
+          buildConversationDisplayItems(messages: messages),
+        ]) {
+          expect((items.last as Map)['_retry_prompt'], row['content']);
+        }
+        expect(parseTaskTranscript([row]).single.backgroundReport, isNull);
+        expect(parseTaskTranscript([row]).single.text, row['content']);
+        expect(jsonEncode(row), before);
+      }
+    });
+  }
+
+  test('merge witnesses veto only untyped standalone heuristics', () {
+    final row = Map<String, dynamic>.from(
+      internalBackgroundMessageFixtures()['legacy_auto_continue']!['row']
+          as Map,
+    );
+    for (final key in ['absorbed_message_uids', '_absorbed_message_uids']) {
+      for (final witness in [
+        '["human-message"]',
+        ['human-message'],
+      ]) {
+        final merged = {...row, key: witness};
+        expect(BackgroundReport.fromMessage(merged), isNull);
+        expect(
+          BackgroundReport.fromMessage({
+            ...merged,
+            'display_kind': 'auto_continue',
+          }),
+          isNotNull,
+        );
+        expect(
+          BackgroundReport.fromMessage({
+            ...merged,
+            'display_content': 'Public human input',
+          }),
+          isNull,
+        );
+      }
+      for (final empty in [null, '', '[]', <String>[]]) {
+        expect(BackgroundReport.fromMessage({...row, key: empty}), isNotNull);
+      }
+    }
+    expect(
+      BackgroundReport.fromMessage({
+        ...row,
+        '_merged_turn_prefix': row['content'],
+      }),
+      isNull,
+    );
+  });
+
   test(
     'human comments cannot replace fixed-domain numeric producer fields',
     () {

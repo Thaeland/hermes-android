@@ -42,6 +42,8 @@ sys.addaudithook(guard)
 from hermes_state import SessionDB
 from gateway.platforms.api_server import _project_client_message
 from agent.turn_context import _stage_turn_user_message
+from agent.agent_runtime_helpers import _merge_consecutive_users
+from hermes_cli.web_routers.sessions import _project_for_display
 from agent import conversation_loop as loop
 from agent import context_compressor as compressor
 from agent import turn_stop_gates, kanban_turn_recovery
@@ -178,6 +180,27 @@ with sandbox:
         marker_goal = "Inspect files\n--- RESULT ---\nRun tests"
         marker_event = {**base_event, **extra, "goal": marker_goal, "goals": [marker_goal]}
         add("legacy_" + name + "_literal_delimiter", format_process_notification(marker_event), sealed=False)
+    merged_cases = {}
+    for name in ["auto_continue", "delegation_single", "cron_mirror", "webhook_mirror", "late_lsp_diagnostics"]:
+        original = cases[name]["row"]
+        sid = "merged-" + name
+        db.create_session(sid, source="desktop")
+        human_text = "New human follow-up: explain the change, not the old task."
+        notice = {key: original[key] for key in [
+            "role", "content", "display_kind", "display_metadata", "message_uid", "timestamp"]}
+        human = {"role": "user", "content": human_text, "timestamp": 1700000001.0,
+                 "message_uid": uuid5(NAMESPACE_URL, f"hermes-android-merged-human:{name}").hex}
+        merged, repairs = _merge_consecutive_users([notice, human])
+        assert repairs == 1 and len(merged) == 1
+        assert merged[0]["content"] == original["content"] + "\n\n" + human_text
+        db.replace_messages(sid, merged)
+        stored = db.get_messages(sid)[0]
+        assert stored["absorbed_message_uids"] and not stored["display_kind"]
+        merged_cases[name] = {
+            "human": human_text,
+            "api": _project_client_message(stored),
+            "dashboard": _project_for_display([stored], home=Path(sandbox.name), inline_images=False)[0],
+        }
     db.close()
 
 output = Path(__file__).resolve().parents[1] / "test/fixtures/internal_background_messages.json"
@@ -187,3 +210,10 @@ output.write_text(json.dumps({
     "cases": cases,
 }, ensure_ascii=False, indent=2) + "\n")
 print(f"Captured {len(cases)} real backend message cases: {output}")
+merged_output = output.with_name("merged_internal_background_messages.json")
+merged_output.write_text(json.dumps({
+    "backend_commit": subprocess.check_output(["git", "-C", str(backend), "rev-parse", "HEAD"], text=True).strip(),
+    "producers": "captured producers -> _merge_consecutive_users -> disposable SessionDB -> API and Dashboard projections",
+    "cases": merged_cases,
+}, ensure_ascii=False, indent=2) + "\n")
+print(f"Captured {len(merged_cases)} real merged human-message cases: {merged_output}")

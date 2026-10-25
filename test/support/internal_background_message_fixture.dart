@@ -14,3 +14,17 @@ Map<String, Map<String, dynamic>> internalBackgroundMessageFixtures() {
     (name, value) => MapEntry(name, Map<String, dynamic>.from(value as Map)),
   );
 }
+
+/// Actual backend consecutive-user repairs, persisted and publicly projected.
+Map<String, Map<String, dynamic>> mergedInternalBackgroundMessageFixtures() {
+  final fixture =
+      jsonDecode(
+            File(
+              'test/fixtures/merged_internal_background_messages.json',
+            ).readAsStringSync(),
+          )
+          as Map<String, dynamic>;
+  return (fixture['cases'] as Map<String, dynamic>).map(
+    (name, value) => MapEntry(name, Map<String, dynamic>.from(value as Map)),
+  );
+}

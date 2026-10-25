@@ -66,6 +66,12 @@ notes accompanying a *new* human request do not make that whole request internal
 Pure compaction summaries retain the existing hidden/public projection policy;
 composite carriers must keep their server-projected human content.
 
+An untyped row with an absorbed-message witness (the persisted
+`absorbed_message_uids` column or its live counterpart) is not standalone.
+Keep it human rather than guessing where an open-ended notification/result stops
+and the absorbed human request begins. Explicit server kinds and public-content
+projections retain their normal precedence.
+
 ### Compatibility limit
 
 Text matching is a display heuristic, not authentication or provenance. A human
@@ -101,6 +107,10 @@ The capture supplies known display kinds when staging typed cases; it exercises
 the real API projection, not an end-to-end run of both history serializers.
 It supplies fixed timestamps and deterministic caller message UIDs so repeated
 captures are byte-identical without changing any producer body or projected field.
+The separate `merged_internal_background_messages.json` fixture runs real
+consecutive-user repair and disposable persistence, then captures both the API
+and Dashboard projection functions. It verifies that their surviving merge
+witness keeps absorbed human follow-ups visible and owns the reply's retry.
 
 The tests check full-body preservation, source separation, quiet/verbose policy,
 retry ownership, public/hidden precedence, quotes and human tails, CRLF bodies,
