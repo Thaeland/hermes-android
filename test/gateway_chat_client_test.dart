@@ -31,8 +31,41 @@ String _tool([String newline = '\n']) =>
     '${jsonEncode({'tool': 'terminal', 'toolCallId': 'call-1', 'status': 'completed'})}'
     '$newline$newline';
 
+String _reasoning(String text, [String newline = '\n']) => _data({
+  'choices': [
+    {
+      'delta': {'reasoning_content': text},
+    },
+  ],
+}, newline);
+
+String _status([String newline = '\n']) =>
+    'event: hermes.status$newline${_data({'kind': 'compacting', 'text': 'Compacting context…'}, newline)}';
+
 void main() {
   group('GatewayChatClient completion authority', () {
+    for (final newline in ['\n', '\r\n']) {
+      test('fragmented reasoning and status remain separate from reply text '
+          'for newline ${newline.length}', () async {
+        final result = await _run(
+          '${_reasoning('Inspecting 🐈', newline)}'
+          '${_tool(newline)}${_status(newline)}'
+          '${_token('answer', newline)}${_finish('stop', newline)}'
+          '${_done(newline)}',
+          fragmentBytes: 1,
+        );
+        expect(result.events, [
+          'reasoning:Inspecting 🐈',
+          'tool:terminal',
+          'status:compacting',
+          'token:answer',
+          'done',
+        ]);
+        expect(result.tokens, ['answer']);
+        expect(result.errors, isEmpty);
+      });
+    }
+
     for (final newline in ['\n', '\r\n']) {
       final label = newline == '\n' ? 'LF' : 'CRLF';
       for (final fragmentBytes in [1, 7, 4096]) {
@@ -94,6 +127,9 @@ void main() {
       'DONE without assistant text': _done(),
       'stop without assistant text': _finish('stop'),
       'tool progress only': '${_tool()}${_done()}',
+      'reasoning only': '${_reasoning('private reasoning')}${_done()}',
+      'reasoning and status only':
+          '${_reasoning('private reasoning')}${_status()}${_finish('stop')}${_done()}',
       'whitespace only': '${_token('  ')}${_done()}',
       'tool-call after commentary without a final assistant finish':
           '${_token('commentary')}${_data({
@@ -184,10 +220,13 @@ void main() {
           'later frames in the same chunk', () async {
         final result = await _run(
           '${_token('partial')}${failure.value}'
+          '${_reasoning('must be muted')}${_status()}'
           '${_token('must be muted')}${_tool()}${_finish('stop')}${_done()}',
         );
         expect(result.tokens, ['partial']);
         expect(result.tools, isEmpty);
+        expect(result.reasoning, isEmpty);
+        expect(result.statuses, isEmpty);
         expect(result.done, 0);
         expect(result.errors, hasLength(1));
         if (failure.value.contains('upstream failed')) {
@@ -235,6 +274,7 @@ void main() {
       '{"choices": [null]}',
       '{"choices": [{"delta": "invalid"}]}',
       '{"choices": [{"delta": {"content": 42}}]}',
+      '{"choices": [{"delta": {"reasoning_content": 42}}]}',
       '{"choices": [{"delta": {}, "finish_reason": 42}]}',
     ]) {
       test(
@@ -305,6 +345,39 @@ void main() {
   });
 
   group('GatewayChatClient cancellation and detached settlement', () {
+    test(
+      'cancellation in reasoning mutes the same-frame text and later status',
+      () async {
+        final client = _ControlledClient();
+        final response = client.enqueue();
+        final probe = _Probe(client);
+        final sending = probe.send(
+          onReasoning: (_) => probe.gateway.cancelActiveMessage(),
+        );
+        await response.listening.future;
+        response.body.add(
+          utf8.encode(
+            '${_data({
+              'choices': [
+                {
+                  'delta': {'reasoning_content': 'Before cancel', 'content': 'Must not arrive'},
+                },
+              ],
+            })}${_status()}${_done()}',
+          ),
+        );
+        await sending;
+        await probe.gateway.whenStreamSettles();
+        await response.body.close();
+        expect(probe.events, ['reasoning:Before cancel']);
+        expect(probe.tokens, isEmpty);
+        expect(probe.statuses, isEmpty);
+        expect(probe.done, 0);
+        expect(probe.errors, isEmpty);
+        probe.api.close();
+      },
+    );
+
     for (final reply in {
       'OpenAI JSON': '{"error":{"message":"model unavailable"}}',
       'string JSON': '{"error":"model unavailable"}',
@@ -595,33 +668,46 @@ class _Probe {
   late final ApiClient api;
   late final GatewayChatClient gateway;
   final tokens = <String>[];
+  final reasoning = <String>[];
   final tools = <Map<String, dynamic>>[];
+  final statuses = <Map<String, dynamic>>[];
   final errors = <String>[];
   final events = <String>[];
   var done = 0;
 
-  Future<void> send({void Function(String)? onToken}) =>
-      gateway.sendMessageStreaming(
-        message: 'question',
-        sessionId: 'mob-sse-test',
-        onToken: (token) {
-          tokens.add(token);
-          events.add('token:$token');
-          onToken?.call(token);
-        },
-        onToolProgress: (progress) {
-          tools.add(progress);
-          events.add('tool:${progress['tool']}');
-        },
-        onDone: () {
-          done++;
-          events.add('done');
-        },
-        onError: (error) {
-          errors.add(error);
-          events.add('error:$error');
-        },
-      );
+  Future<void> send({
+    void Function(String)? onToken,
+    void Function(String)? onReasoning,
+  }) => gateway.sendMessageStreaming(
+    message: 'question',
+    sessionId: 'mob-sse-test',
+    onToken: (token) {
+      tokens.add(token);
+      events.add('token:$token');
+      onToken?.call(token);
+    },
+    onToolProgress: (progress) {
+      tools.add(progress);
+      events.add('tool:${progress['tool']}');
+    },
+    onReasoning: (text) {
+      reasoning.add(text);
+      events.add('reasoning:$text');
+      onReasoning?.call(text);
+    },
+    onStatus: (status) {
+      statuses.add(status);
+      events.add('status:${status['kind']}');
+    },
+    onDone: () {
+      done++;
+      events.add('done');
+    },
+    onError: (error) {
+      errors.add(error);
+      events.add('error:$error');
+    },
+  );
 }
 
 class _ControlledResponse {

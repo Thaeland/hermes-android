@@ -44,7 +44,18 @@ newer IDs and message order cannot establish correspondence.
 ## Current activity
 
 One bar above the composer shows the current tool or other active work in either
-mode. Saved tools and late updates from older delegated tasks do not start it.
+mode. During tool use, it includes the tool name and the latest short context or
+progress preview supplied by the gateway, for example **Using Terminal: Running
+the regression tests…**. Exposed reasoning shows **Reasoning**, not the reasoning
+body; status updates can show work such as compacting conversation context.
+
+Both Remote Gateway and REST/SSE connections update this bar. REST/SSE reads
+`delta.reasoning_content`, `hermes.tool.progress` and `hermes.status`; gateways
+that do not emit these events retain the generic responding indicator. Reasoning
+and status alone never count as a completed reply. Verbose Mode still controls
+the transcript details, not whether the current activity is visible.
+
+Saved tools and late updates from older delegated tasks do not start the bar.
 Completion removes the active indicator. Stop hides it for that turn without
 claiming the gateway has accepted another prompt. Failure and uncertain-outcome
 notices use the same area without a typing spinner.
