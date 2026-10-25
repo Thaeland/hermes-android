@@ -16,6 +16,14 @@ shows only the three latest releases.
   completes after later interim commentary. Preserve existing completion,
   source ownership and release gates.
 
+### Fixed
+
+- Present machine-authored model/provider and personality changes, automatic
+  recovery, internal notifications and recognised legacy automation messages as
+  collapsed background cards instead of user messages, including delegated-task
+  history. Keep them out of quiet chat and retry prompts without modifying the
+  saved transcript or hiding real user controls and quoted examples.
+
 ## [3.0.0-rc.2] - 2026-10-24
 
 Testing candidate only. The latest stable release remains **2.1.33**. Back up
