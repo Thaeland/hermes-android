@@ -1,9 +1,9 @@
 # Android background work
 
-The background features shipped in v2.1.31. This integration retains them and
-adds unreleased lifecycle, authority and presentation hardening without changing
-the release identity. A local build or passing suite does not prove a particular
-phone has this candidate installed.
+The background features first shipped in v2.1.31. Version 3.0.0 retains them,
+hardens lifecycle and account authority, and adds simpler optional push setup.
+Confirm a phone's installed version in Settings → About; a local build or
+passing suite does not establish which build that phone runs.
 
 ## Keeping an active chat connected
 
@@ -57,20 +57,27 @@ Without an enabled push transport, a terminated app cannot learn
 about completion until it runs and reconnects. Android Force stop blocks background delivery and is not a supported way to test
 background push.
 
-## Optional encrypted UnifiedPush
+## Optional encrypted background notifications
 
-UnifiedPush is a separate, explicit opt-in for server-originated hints when a live
-socket is unavailable. It has no FCM dependency. It requires all of:
+Background notifications are a separate opt-in for server-originated hints when
+a live socket is unavailable. In 3.0.0, enable them in the saved connection's
+Settings and grant Android notification permission. Automatic subscriptions
+follow the verified login's authorised current and future durable chats; old
+selected-session consent is not widened without disable/re-enable.
 
-- A compatible UnifiedPush distributor installed and configured on the phone.
-- The [server companion](mobile-push-server.md), installed and enabled in
-  the intended Hermes profile with a private VAPID key and explicit session grants.
-- A trusted authenticated dashboard session. A shared API bearer token or a
-  client-supplied identity header is not a substitute.
-- A saved connection and explicit durable-session allowlist selected in the
-  [Android push settings](mobile-push-android.md). The server contract allows at
-  most 128 IDs, each 1–200 ASCII characters from `A–Z`, `a–z`, `0–9`, `_`, `.`,
-  `:`, `@` and `-`.
+Both phone transports require the separately installed, enabled and
+operator-authorised [server companion](mobile-push-server.md), its private VAPID
+key, live policy grants, and active API plus turn-hook/sender worker. A trusted
+authenticated dashboard login is required; a shared API bearer token or a
+client-supplied identity header is not a substitute. The phone's retry action
+cannot install server software.
+
+On phones with working Google Play Services, the built-in Google-backed
+transport needs no Firebase project, Firebase credentials or separate distributor
+app. Google-free phones need a compatible external UnifiedPush distributor,
+available as the advanced alternative. Neither transport removes the server
+prerequisite. See [Android push setup](mobile-push-android.md) for registration,
+privacy and supported host/profile limits.
 
 The encrypted endpoint challenge must complete before activation. Subscription
 renewal, revocation, account edits and recovery must preserve generation/nonce

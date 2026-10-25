@@ -6,6 +6,66 @@ shows only the three latest releases.
 
 ## [Unreleased]
 
+## [3.0.0] - 2026-10-25
+
+Stable promotion of RC3's application code. This entry covers **all changes since 2.1.33**, including RC1 and RC2, not only the final candidate. Release identity is `3.0.0+3003`; production APK codes are `30031`, `30032` and `30033`, above all 3.0 RCs. Package and production signer remain unchanged. Back up settings before updating. See [the detailed release notes](docs/releases/3.0.0.md) for the full behaviour inventory and compatibility limits.
+
+### Added
+
+- Ten complete colour palettes with independent light/dark/system appearance, live route updates, persisted preferences and encrypted backup/restore. Connection-screen appearance works before connecting; Android system chrome follows the app theme.
+- A dedicated Crons conversation browser, with search, All/Recent/Archived filters and local pins. Scheduled conversations no longer appear in human Chats, including legacy job IDs and compressed roots.
+- Verified Archive/Unarchive actions for stored chats, including durable restoration of expired Quick Chats and retryable incomplete archive reads.
+- A current-work responding bar in quiet and Verbose modes, covering tools, exposed reasoning, delegated work and gateway status when emitted by the server.
+- Local-time footers for human messages and completed Hermes replies, with server/device provenance, full-date tooltips and device locale/12-hour/24-hour formatting. Missing history times remain absent.
+- Separate Stop and Send controls during active work. Remote Gateway Send provides text guidance through `session.steer`; REST/non-steering connections offer explicit Stop and send. Pending acknowledgements preserve newer edits and never trigger an automatic retry or interruption fallback.
+- More → Assets with source-chat/filename search, type filters, incremental scans, source navigation and partial/retry reporting. Timeline and Assets recognise explicit MEDIA/filesystem deliveries and successful image-generation results, including outputs omitted from final prose.
+- Zoomable image, Android PDF-page and selectable inert-text previews; direct native save/download from cards and popups, separately from Share. Other binaries retain metadata/download fallback. Transfers share a streaming 25 MiB per-file limit and resource/cancellation ownership.
+- Tap-triggered HTTPS image downloads through a separate credential-free client, and external HTTP/HTTPS web-link opening in replies, selectable text and delegated-task transcripts. Code/unsupported schemes stay inert.
+- Optional imported per-connection PEM/P12 client-certificate authentication, including encrypted PEM/password retries, bounded content-sniffed mobile picking, TLS validation and certificate-chain handling.
+- Encrypted backup format v2 with portable imported identities, required passphrases and palette preferences; older supported backups remain readable.
+- Simplified automatic background notifications with one opt-in plus Android permission, a built-in Google-backed transport on supported phones and optional external UnifiedPush. Authorised current/future-chat scope follows live server policy; old narrow consent is not expanded without a new choice.
+- A bounded, metadata-only operational Activity index for stock Gateway turns, surviving restart and retaining compressed-chat lineage.
+- Offline application/font/embedded-library/dependency licence notices in Settings → About → Licences, plus exact-source/relink release materials and checksums.
+
+### Changed
+
+- Navigation is Chats → Crons → Projects → Activity → More, with Chats replacing Home as the default. Relevant Needs you/Running now summaries sit above Chats.
+- More groups Cron, Skills and Memory under Agent; duplicate archive navigation and unimplemented Organisation/batch/AI-filing placeholders are removed.
+- Quiet mode shows human input and positively completed replies while keeping current work in the responding bar. Verbose Mode exposes retained detail with every expandable section initially collapsed; choices survive updates/lazy scrolling within a visit, not a true close/reopen.
+- Recognised internal notices and preserved task reports use neutral, read-only background cards rather than editable human bubbles. Genuine steering, skill invocations, merged human follow-ups and public/hidden/model-only boundaries remain intact, including task history.
+- Saved and received chat output retain independent provenance. Covered live copies yield to saved history only with a complete committed-turn receipt and fresh physical rows. The received-output explanation moves out of the transcript into Chat actions.
+- Activity includes app-observed stock turns and gateway chats updated within seven days, including REST/other-client updates. Updated metadata is not inferred success/running; partial/stale coverage and uncertain outcomes remain explicit. Refresh pauses while hidden/backgrounded.
+- Progressive, shared session scans replace the old 2,000-row ceiling. Active, archived and Project/Quick metadata complete independently and preserve known rows on failures.
+- Android supplies file-delivery guidance through existing chat protocols, including reused TUI sessions, without a backend patch. Raw history retains ordinary app-added context; Android's public display/export hides recognised framing while preserving literal commands and voice-stop phrases.
+- Release creation is immutable and create-only, bound to the peeled remote tag. Publication verifies every actual APK's identity, ABI code, production signer and licence/source bytes; early PR CI runs publisher/verifier/native-config regressions.
+
+### Fixed
+
+- Open chats at their latest visible message without pulling readers away during refresh, streaming, late history failure or task inspection.
+- Preserve the previous completed REST reply when stopping a new response before its first text. Stale history cannot erase retained received output without its own proof.
+- Keep canonical/local draft ownership, deliberate clears, reasoning/tool choices and child observers across identity binding, preference reloads, hydration failure, route reopen and delayed saves/rejections.
+- Fence submission/recovery/history by request-start and observation authority so stale idle/terminal events cannot settle a newer turn, release Send early or resubmit uncertainty. Share proven receipt replacement across retained routes; retry superseded context without corrupting paging.
+- Preserve newer external titles, confirmed archive/move results and late local pins through older aggregate reads and independent scope refreshes. Failed Quick Chat restoration remains retryable rather than claiming success.
+- Preserve public-only export replacements, suppress hidden/model-only physical rows and image-only empty placeholders, and retain received unknown-outcome provenance.
+- Keep appearance/device settings usable when server-model reads fail. Serialised saves and dismissed-picker rollback update the surviving app.
+- Carry the saved TLS identity through independent REST/SSE, WSS, history/recovery, search, task, Memory, push and file clients, without lending it to GitHub updates or external images. Keep private-key passphrases in secure credential storage.
+- Own staged/committed certificate files across queued account transactions and backup rollback. Preserve existing identities after cancellation/lost acknowledgements; report incomplete restoration under persistent storage failure.
+- Serialise saved-account list transactions across managers, sanitise prerequisite-storage failures and isolate optional mutation observers.
+- Retain notification taps across pause/resume and validate current credentials/profile/consent after asynchronous lookups. Coalesce canonical routes and reject stale/unscoped sensitive approval actions without preventing safe chat navigation.
+- Start foreground protection only from confirmed policy; refresh notification permission without repeating startup prompts and clean up only the affected chat's entries.
+- Recover fenced push registration/challenge state without widening consent. Old delayed writes/revocations/account changes cannot resurrect stale registration; native storage/leases belong to the Flutter engine across Activity detach/reattach.
+- Explain missing/disabled/outdated/unauthorised push companions, link installation steps and scope off-state probes to Settings without enabling push. Companion dependency bounds admit current supported Hermes cryptography versions; guides distinguish mounted APIs from active hooks/workers and supported launch-profile hosting.
+- Accept observed hosted `V2 Signer:` output while retaining strict production pinning and malformed/extra-signer rejection. Clean native CI provisions its pinned Gradle and actual Flutter version identity.
+
+### Compatibility and limits
+
+Quiet saved history needs completion metadata; duplicate handover needs optional `persisted_turn` receipts. Assets is partial discovery, not a filesystem catalogue. Imported identities are app-private files, not Android KeyChain keys. Push needs a separately installed/enabled/operator-authorised companion and supported phone transport; Force stop, Doze and OEM restrictions still apply. No host service is installed by the APK, and no private-CA, killed-process delivery, legal clearance or F-Droid approval is implied by automated checks. Some new strings retain English fallback in existing locales.
+
+### Thanks
+
+- @smhc contributed imported client certificates (#166), mobile picking/password/layout improvements (#187) and a physical Android mTLS report. Maintainer follow-ups preserve their commits and add encrypted-PEM, chain, ownership and transport coverage.
+- Hermes Agent assisted with implementation, review, documentation and regression tests. Existing community credits remain in README/NOTICE. Historical RC entries below describe their status at publication, not the current stable version.
+
 ## [3.0.0-rc.3] - 2026-10-25
 
 Testing candidate only. **2.1.33 remains latest stable.** Back up settings before

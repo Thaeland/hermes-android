@@ -37,9 +37,13 @@ its own completion evidence. REST/SSE received replies remain local to the chat
 visit.
 
 The app keeps saved and received Remote Gateway output as independent sources.
-Verbose Mode labels them and can show repeated prose across the sources. Quiet mode
-hides the labels without merging the underlying rows. The display filter does not
-remove raw messages or add synthetic messages to request history.
+Verbose Mode labels them and can show repeated prose across the sources. A complete
+`persisted_turn` receipt from an owned successful response, plus fresh history
+containing all addressed rows and its completed final reply, can prove a handover
+and retire the covered live copy. Matching text, an admission baseline or idle
+status cannot prove correspondence. Older gateways or lagging history may retain
+both sources. Quiet mode hides source labels; it does not infer identity. These
+presentation rules do not remove raw messages or add synthetic request history.
 
 After a successful REST/SSE reply, a stale history GET must not erase its received
 body or receipt timeline. Handover requires the final response's own durable ID and
