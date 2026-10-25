@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+import '../models/background_report.dart';
 import '../models/gateway_insight.dart';
 import '../utils/android_prompt_context.dart';
 import 'connection_manager.dart';
@@ -480,6 +481,7 @@ class TaskTranscriptRow {
     required this.calls,
     this.toolId,
     this.toolName,
+    this.backgroundReport,
   });
   final int id;
   final String role;
@@ -489,6 +491,7 @@ class TaskTranscriptRow {
   final List<TaskToolCall> calls;
   final String? toolId;
   final String? toolName;
+  final BackgroundReport? backgroundReport;
 }
 
 int? taskRowId(Map<String, dynamic> row) {
@@ -509,7 +512,12 @@ List<TaskTranscriptRow> parseTaskTranscript(List<Map<String, dynamic>> rows) {
   }
   final transcript = <TaskTranscriptRow>[];
   for (final row in ordered) {
+    final metadata = row['display_metadata'];
     if (row['display_kind'] == 'hidden' ||
+        (metadata is Map && metadata['model_only'] == true) ||
+        (row['role'] == 'user' &&
+            row.containsKey('display_content') &&
+            (row['display_content'] == null || row['display_content'] == '')) ||
         !const {
           'user',
           'assistant',
@@ -540,6 +548,7 @@ List<TaskTranscriptRow> parseTaskTranscript(List<Map<String, dynamic>> rows) {
       TaskTranscriptRow(
         id: taskRowId(row)!,
         role: row['role'] == 'agent' ? 'assistant' : row['role'] as String,
+        backgroundReport: BackgroundReport.fromMessage(row),
         text: row['role'] == 'tool'
             ? (row['content'] == null ? '' : _pretty(row['content']))
             : [

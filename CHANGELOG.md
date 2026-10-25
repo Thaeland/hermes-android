@@ -18,6 +18,11 @@ shows only the three latest releases.
 
 ### Fixed
 
+- Present machine-authored model/provider and personality changes, automatic
+  recovery, internal notifications and recognised legacy automation messages as
+  collapsed background cards instead of user messages, including delegated-task
+  history. Keep them out of quiet chat and retry prompts without modifying the
+  saved transcript or hiding real user controls and quoted examples.
 - Avoid duplicate prompts and Hermes replies when Remote Gateway history catches
   up with a live response. Use the gateway's explicit committed-message receipt
   and confirm its exact saved rows before retiring that turn's live copy,
