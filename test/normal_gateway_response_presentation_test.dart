@@ -513,7 +513,524 @@ void main() {
       expect(restarted.calls, isEmpty, reason: 'recovery must not resubmit');
     },
   );
+  group('explicit persisted-turn handover', () {
+    for (final unknownFloor in [false, true]) {
+      for (final sameText in [false, true]) {
+        test(
+          'committed IDs hand over one prompt/reply: unknownFloor=$unknownFloor sameText=$sameText',
+          () async {
+            final f = _Fixture()..historyFails = unknownFloor;
+            addTearDown(f.close);
+            final chat = await f.open(seedHistory: !unknownFloor);
+            final observed = <NormalGatewayChatSnapshot>[];
+            final token = chat.subscribe(observed.add);
+            addTearDown(() => chat.unsubscribe(token));
+            final call = await f.begin(chat, 'Current question');
+            call.emit('message.delta', {'text': 'Wire answer'});
+            call.emit('message.complete', {
+              'text': 'Wire answer',
+              'status': 'complete',
+              'persisted_turn': _receipt(),
+            });
+            expect(chat.snapshot.hasActiveTurn, isTrue);
+            expect(chat.snapshot.displayRows, isNotEmpty);
+            // Completion identifies stored rows, not lifecycle settlement.
+            expect(chat.reserve(), isNull);
+            f.historyFails = false;
+            final saved = sameText
+                ? 'Wire answer'
+                : 'Saved authoritative answer';
+            f.rows = _committedRows(answer: saved);
+            expect(chat.observeHistory(f.rows), isFalse);
+            call.emit('turn.end', {'status': 'completed'});
+            call.ack();
+            await _until(() => !chat.snapshot.hasActiveTurn);
+            await pumpEventQueue();
+            expect(chat.snapshot.historyRows, f.rows);
+            expect(chat.snapshot.displayRows, isEmpty);
+            expect(chat.snapshot.timeline.runs, isEmpty);
+            expect(chat.snapshot.tools, isEmpty);
+            expect(chat.snapshot.receivedOutcomes, isEmpty);
+            expect(_quiet(chat.snapshot), [
+              'Older question',
+              'Older confirmed answer',
+              'Current question',
+              saved,
+            ]);
+            expect(
+              observed.every(
+                (s) =>
+                    _quiet(s).where((t) => t == 'Current question').length <= 1,
+              ),
+              isTrue,
+              reason: 'handover must not publish canonical and received copies',
+            );
+            final reopened = f.session.chatFor('stored', title: 'Reopened');
+            expect(reopened, same(chat));
+            expect(_quiet(reopened.snapshot), _quiet(chat.snapshot));
+            expect(f.calls, hasLength(1));
+          },
+        );
+      }
+    }
+
+    test(
+      'lagging history retains output until a later exact-ID read',
+      () async {
+        final f = _Fixture();
+        addTearDown(f.close);
+        final chat = await f.open();
+        final call = await f.begin(chat, 'Current question');
+        call.emit('message.complete', {
+          'text': 'Wire answer',
+          'persisted_turn': _receipt(),
+        });
+        call.emit('turn.end', {'status': 'completed'});
+        call.ack();
+        await _until(() => !chat.snapshot.hasActiveTurn);
+        await pumpEventQueue();
+        final retained = chat.snapshot.displayRows;
+        expect(_quiet(chat.snapshot), contains('Wire answer'));
+        for (final stale in <List<Map<String, dynamic>>>[
+          [],
+          _previous,
+          [_row(12, 'user', 'Current question')],
+          _committedRows(finalMetadata: {}),
+          _committedRows(finalMetadata: {'status': 'interrupted'}),
+          _committedRows(
+            finalMetadata: {'status': 'completed', 'partial': true},
+          ),
+          [
+            ..._previous,
+            _row(12, 'assistant', 'Wrong anchor role'),
+            _row(
+              13,
+              'assistant',
+              'Wire answer',
+              extra: {'status': 'completed'},
+            ),
+          ],
+          [
+            ..._previous,
+            _row(12, 'user', 'Current question'),
+            _row(
+              13,
+              'tool',
+              'Not a final reply',
+              extra: {'status': 'completed'},
+            ),
+          ],
+          [
+            ..._previous,
+            _row(100, 'user', 'Current question'),
+            _row(
+              101,
+              'assistant',
+              'Wire answer',
+              extra: {'status': 'completed'},
+            ),
+          ],
+        ]) {
+          expect(chat.observeHistory(stale), isTrue);
+          expect(chat.snapshot.displayRows, retained);
+        }
+        expect(chat.observeHistory(_committedRows()), isTrue);
+        expect(chat.snapshot.displayRows, isEmpty);
+        expect(
+          _quiet(chat.snapshot).where((s) => s == 'Wire answer'),
+          hasLength(1),
+        );
+        expect(f.calls, hasLength(1));
+      },
+    );
+
+    for (final invalid in <dynamic>[
+      null,
+      'not a receipt',
+      {
+        'row_ids': [12, 13],
+        'complete': false,
+        'user_row_id': 12,
+        'final_assistant_row_id': 13,
+      },
+      {
+        'row_ids': [12, 13],
+        'complete': 'true',
+        'user_row_id': 12,
+        'final_assistant_row_id': 13,
+      },
+      {
+        'row_ids': ['12', 13],
+        'complete': true,
+        'user_row_id': 12,
+        'final_assistant_row_id': 13,
+      },
+      {
+        'row_ids': [12, 12, 13],
+        'complete': true,
+        'user_row_id': 12,
+        'final_assistant_row_id': 13,
+      },
+      {
+        'row_ids': [13, 12],
+        'complete': true,
+        'user_row_id': 12,
+        'final_assistant_row_id': 13,
+      },
+      {
+        'row_ids': [12, 13],
+        'complete': true,
+        'user_row_id': 11,
+        'final_assistant_row_id': 13,
+      },
+      {
+        'row_ids': [12, 13],
+        'complete': true,
+        'user_row_id': 12,
+        'final_assistant_row_id': 14,
+      },
+      {
+        'row_ids': [12, 13],
+        'complete': true,
+        'user_row_id': 12,
+      },
+    ]) {
+      test(
+        'unproved receipt cannot retire received output: $invalid',
+        () async {
+          final f = _Fixture();
+          addTearDown(f.close);
+          final chat = await f.open();
+          final call = await f.begin(chat, 'Current question');
+          f.rows = _committedRows();
+          call.emit('message.complete', {
+            'text': 'Wire answer',
+            'persisted_turn': invalid,
+          });
+          call.emit('turn.end', {'status': 'completed'});
+          call.ack();
+          await _until(() => !chat.snapshot.hasActiveTurn);
+          await pumpEventQueue();
+          expect(
+            chat.snapshot.displayRows.map((r) => r['content']),
+            contains('Wire answer'),
+          );
+          expect(f.calls, hasLength(1));
+        },
+      );
+    }
+
+    test(
+      'receipt removes only its own prior scope after the next turn',
+      () async {
+        final f = _Fixture();
+        addTearDown(f.close);
+        final chat = await f.open();
+        final a = await f.begin(chat, 'Unproved question');
+        await f.complete(chat, a, 'Unproved earlier answer');
+        final b = await f.begin(chat, 'Current question');
+        b.emit('message.complete', {
+          'text': 'Wire answer',
+          'persisted_turn': _receipt(),
+        });
+        b.emit('turn.end', {'status': 'completed'});
+        b.ack();
+        await _until(() => !chat.snapshot.hasActiveTurn);
+        await pumpEventQueue();
+        final c = await f.begin(chat, 'Later question');
+        c.emit('message.delta', {'text': 'Later live answer'});
+        c.emit('message.complete', {'text': 'Later live answer'});
+        c.emit('turn.end', {'status': 'completed'});
+        c.ack();
+        await _until(() => !chat.snapshot.hasActiveTurn);
+        await pumpEventQueue();
+        expect(chat.observeHistory(_committedRows()), isTrue);
+        expect(chat.snapshot.displayRows.map((r) => r['content']), [
+          'Unproved question',
+          'Unproved earlier answer',
+          'Later question',
+          'Later live answer',
+        ]);
+        expect(
+          _quiet(chat.snapshot).where((s) => s == 'Current question'),
+          hasLength(1),
+        );
+        expect(chat.snapshot.receivedOutcomes, hasLength(2));
+        expect(f.calls, hasLength(3));
+      },
+    );
+
+    test('unknown lifecycle remains unknown after receipt handover', () async {
+      final f = _Fixture();
+      addTearDown(f.close);
+      final chat = await f.open();
+      final call = await f.begin(chat, 'Current question');
+      f.rows = _committedRows();
+      f.resumeResult = const ResumedGatewaySession(
+        runtimeSessionId: 'runtime',
+        running: false,
+        status: 'idle',
+      );
+      call.emit('message.complete', {
+        'text': 'Wire answer',
+        'persisted_turn': _receipt(),
+      });
+      call.ack();
+      await _until(() => !chat.snapshot.hasActiveTurn);
+      await pumpEventQueue();
+      expect(chat.phase, NormalGatewayTurnPhase.reconciledUnknown);
+      expect(chat.snapshot.status?.kind, 'reconciled_unknown');
+      expect(chat.snapshot.displayRows, isEmpty);
+      expect(
+        _quiet(chat.snapshot).where((s) => s == 'Wire answer'),
+        hasLength(1),
+      );
+      expect(await f.pendingStore.load(_Fixture.scope), isEmpty);
+      expect(f.calls, hasLength(1));
+    });
+
+    test(
+      'an unowned completion cannot lend its saved IDs to the next turn',
+      () async {
+        final f = _Fixture();
+        addTearDown(f.close);
+        final chat = await f.open();
+        final call = await f.begin(chat, 'Current question');
+        f.session.receiveEvent(
+          'local',
+          StreamEvent(
+            type: 'message.complete',
+            turnId: 'another-turn',
+            data: {'text': 'Wire answer', 'persisted_turn': _receipt()},
+          ),
+        );
+        f.rows = _committedRows();
+        await f.complete(chat, call, 'Wire answer');
+        expect(
+          chat.snapshot.displayRows.map((r) => r['content']),
+          contains('Wire answer'),
+        );
+        expect(f.calls, hasLength(1));
+      },
+    );
+
+    test(
+      'failed completion cannot use a positive persistence receipt',
+      () async {
+        final f = _Fixture();
+        addTearDown(f.close);
+        final chat = await f.open();
+        final call = await f.begin(chat, 'Current question');
+        f.rows = _committedRows();
+        call.emit('message.complete', {
+          'text': 'Wire answer',
+          'status': 'error',
+          'partial': true,
+          'persisted_turn': _receipt(),
+        });
+        call.emit('turn.error', {'error': 'Current turn failed'});
+        call.ack();
+        await _until(() => !chat.snapshot.hasActiveTurn);
+        await pumpEventQueue();
+        expect(chat.phase, NormalGatewayTurnPhase.failed);
+        expect(chat.snapshot.displayRows, isNotEmpty);
+        expect(_verbose(chat.snapshot), contains('Wire answer'));
+        expect(f.calls, hasLength(1));
+      },
+    );
+
+    test(
+      'a pre-submit history request cannot confirm a later receipt',
+      () async {
+        final f = _Fixture();
+        addTearDown(f.close);
+        final chat = await f.open();
+        final stale = chat.beginHistoryRead('stored');
+        final call = await f.begin(chat, 'Current question');
+        call.emit('message.complete', {
+          'text': 'Wire answer',
+          'persisted_turn': _receipt(),
+        });
+        call.emit('turn.end', {'status': 'completed'});
+        call.ack();
+        await _until(() => !chat.snapshot.hasActiveTurn);
+        await pumpEventQueue();
+        expect(chat.observeHistory(_committedRows(), read: stale), isFalse);
+        expect(chat.snapshot.displayRows, isNotEmpty);
+        expect(chat.observeHistory(_committedRows()), isTrue);
+        expect(chat.snapshot.displayRows, isEmpty);
+      },
+    );
+    test(
+      'complete context confirms all rows without expanding latest authority',
+      () async {
+        final f = _Fixture();
+        addTearDown(f.close);
+        final chat = await f.open();
+        final call = await f.begin(chat, 'Current question');
+        call.emit('tool.start', {'tool_id': 'one', 'name': 'terminal'});
+        call.emit('tool.complete', {
+          'tool_id': 'one',
+          'name': 'terminal',
+          'result': 'Passed',
+        });
+        final receipt = {
+          ..._receipt(),
+          'row_ids': [12, 13, 14],
+          'final_assistant_row_id': 14,
+        };
+        call.emit('message.complete', {
+          'text': 'Wire answer',
+          'persisted_turn': receipt,
+        });
+        call.emit('turn.end', {'status': 'completed'});
+        call.ack();
+        await _until(() => !chat.snapshot.hasActiveTurn);
+        await pumpEventQueue();
+        final context = [
+          _row(12, 'user', 'Current question'),
+          _row(13, 'tool', 'Passed', extra: {'tool_call_id': 'one'}),
+          _row(14, 'assistant', 'Wire answer', extra: {'status': 'completed'}),
+        ];
+        final latest = [context.last];
+        expect(chat.persistedTurnContextKey(latest), isNotNull);
+        // Matching endpoints alone must not discard the received tool.
+        expect(chat.observeHistory([context.first, context.last]), isTrue);
+        expect(chat.snapshot.tools, hasLength(1));
+        expect(chat.snapshot.displayRows, isNotEmpty);
+        // A stale completed context copy cannot override a current partial veto.
+        final partial = [
+          {...context.last, 'partial': true},
+        ];
+        expect(chat.observeHistory(partial, confirmedRows: context), isTrue);
+        expect(chat.snapshot.displayRows, isNotEmpty);
+        expect(chat.observeHistory(latest, confirmedRows: context), isTrue);
+        expect(
+          chat.snapshot.historyRows,
+          latest,
+          reason: 'only offset zero is latest authority',
+        );
+        expect(chat.snapshot.displayRows, isEmpty);
+        expect(chat.snapshot.timeline.runs, isEmpty);
+        expect(chat.snapshot.tools, isEmpty);
+        expect(chat.persistedTurnContextKey(latest), isNull);
+      },
+    );
+
+    test(
+      'post-completion body activity revokes an earlier persistence claim',
+      () async {
+        final f = _Fixture();
+        addTearDown(f.close);
+        final chat = await f.open();
+        final call = await f.begin(chat, 'Current question');
+        call.emit('message.complete', {
+          'text': 'Wire answer',
+          'persisted_turn': _receipt(),
+        });
+        call.emit('message.delta', {'text': ' plus later output'});
+        f.rows = _committedRows();
+        call.emit('turn.end', {'status': 'completed'});
+        call.ack();
+        await _until(() => !chat.snapshot.hasActiveTurn);
+        await pumpEventQueue();
+        expect(
+          chat.snapshot.displayRows.map((r) => r['content']),
+          contains('Wire answer plus later output'),
+        );
+        expect(chat.snapshot.timeline.runs, isNotEmpty);
+      },
+    );
+
+    test(
+      'captured receipt does not borrow mutable callback payloads',
+      () async {
+        final f = _Fixture();
+        addTearDown(f.close);
+        final chat = await f.open();
+        final call = await f.begin(chat, 'Current question');
+        final receipt = _receipt();
+        call.emit('message.complete', {
+          'text': 'Wire answer',
+          'persisted_turn': receipt,
+        });
+        (receipt['row_ids'] as List)[0] = 99;
+        receipt['complete'] = false;
+        f.rows = _committedRows();
+        call.emit('turn.end', {'status': 'completed'});
+        call.ack();
+        await _until(() => !chat.snapshot.hasActiveTurn);
+        await pumpEventQueue();
+        expect(chat.snapshot.displayRows, isEmpty);
+      },
+    );
+
+    test(
+      'verified alias handoff retains the receipt and independent child observer',
+      () async {
+        final f = _Fixture();
+        addTearDown(f.close);
+        final donor = await f.open();
+        final call = await f.begin(donor, 'Current question');
+        call.emit('subagent.start', {
+          'subagent_id': 'child-1',
+          'child_session_id': 'child-chat',
+          'goal': 'Keep observing',
+        });
+        call.emit('message.complete', {
+          'text': 'Wire answer',
+          'persisted_turn': _receipt(),
+        });
+        call.emit('turn.end', {'status': 'completed'});
+        call.ack();
+        await _until(() => !donor.snapshot.hasActiveTurn);
+        await pumpEventQueue();
+        final canonical = f.session.chatFor(
+          'canonical',
+          storedSessionId: 'canonical',
+          title: 'Canonical',
+        );
+        final reservation = canonical.reserve()!;
+        donor.bindStoredSession('canonical');
+        expect(f.session.findChat('local'), same(canonical));
+        canonical.cancelPreparation(reservation);
+        expect(canonical.observeHistory(_committedRows()), isTrue);
+        expect(canonical.snapshot.displayRows, isEmpty);
+        expect(canonical.snapshot.subagents, isNotEmpty);
+        f.session.receiveEvent(
+          'canonical',
+          StreamEvent(
+            type: 'subagent.complete',
+            data: {
+              'subagent_id': 'child-1',
+              'status': 'completed',
+              'result': 'Child finished',
+            },
+          ),
+        );
+        expect(canonical.snapshot.subagents.single.isComplete, isTrue);
+        expect(f.calls, hasLength(1));
+      },
+    );
+  });
 }
+
+Map<String, dynamic> _receipt() => {
+  'row_ids': [12, 13],
+  'complete': true,
+  'user_row_id': 12,
+  'user_row_ids': [12],
+  'final_assistant_row_id': 13,
+};
+
+List<Map<String, dynamic>> _committedRows({
+  String answer = 'Wire answer',
+  Map<String, dynamic> finalMetadata = const {'status': 'completed'},
+}) => [
+  ..._previous,
+  _row(12, 'user', 'Current question'),
+  _row(13, 'assistant', answer, extra: finalMetadata),
+];
 
 Map<String, dynamic> _row(
   int id,

@@ -23,6 +23,12 @@ shows only the three latest releases.
   collapsed background cards instead of user messages, including delegated-task
   history. Keep them out of quiet chat and retry prompts without modifying the
   saved transcript or hiding real user controls and quoted examples.
+- Avoid duplicate prompts and Hermes replies when Remote Gateway history catches
+  up with a live response. Use the gateway's explicit committed-message receipt
+  and confirm its exact saved rows before retiring that turn's live copy,
+  including its interim text and tool timeline. Keep replies through lagging or
+  failed history reads; never guess correspondence from identical text or
+  change an uncertain turn outcome into a successful one.
 
 ## [3.0.0-rc.2] - 2026-10-24
 
