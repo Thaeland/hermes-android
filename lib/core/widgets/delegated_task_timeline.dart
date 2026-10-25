@@ -6,6 +6,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import '../controllers/delegated_task_controller.dart';
 import '../services/delegated_task_history.dart';
 import '../l10n/l10n.dart';
+import 'background_report_card.dart';
 import 'delegated_task_labels.dart';
 import 'markdown_link_handler.dart';
 
@@ -49,6 +50,7 @@ class _DelegatedTaskTimelineState extends State<DelegatedTaskTimeline>
     with WidgetsBindingObserver {
   DelegatedTaskController get controller => widget.controller;
   final _scrollController = ScrollController();
+  final _backgroundReportExpansions = <int, bool>{};
   @override
   void initState() {
     super.initState();
@@ -63,6 +65,21 @@ class _DelegatedTaskTimelineState extends State<DelegatedTaskTimeline>
 
   void _changed() {
     if (mounted) setState(() {});
+  }
+
+  @override
+  void didUpdateWidget(covariant DelegatedTaskTimeline oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (identical(oldWidget.controller, controller)) return;
+    oldWidget.controller.removeListener(_changed);
+    oldWidget.controller.dispose();
+    _backgroundReportExpansions.clear();
+    controller.addListener(_changed);
+    controller.setForeground(
+      WidgetsBinding.instance.lifecycleState == null ||
+          WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed,
+    );
+    controller.start();
   }
 
   @override
@@ -122,7 +139,7 @@ class _DelegatedTaskTimelineState extends State<DelegatedTaskTimeline>
           Expanded(
             child: ListView(
               controller: _scrollController,
-              key: const PageStorageKey('task-timeline-scroll'),
+              key: PageStorageKey(('task-timeline-scroll', controller)),
               padding: const EdgeInsets.all(12),
               children: [
                 _identity(context),
@@ -198,7 +215,29 @@ class _DelegatedTaskTimelineState extends State<DelegatedTaskTimeline>
                     ),
                   ),
                 for (final row in transcript)
-                  _TranscriptRow(key: ValueKey('task-row-${row.id}'), row: row),
+                  if (row.backgroundReport case final report?)
+                    BackgroundReportCard(
+                      // Expansion's bool must not share the list's double
+                      // scroll-offset PageStorage entry during lazy eviction.
+                      key: PageStorageKey('task-background-${row.id}'),
+                      report: report,
+                      initiallyExpanded:
+                          _backgroundReportExpansions[row.id] ?? false,
+                      onExpansionChanged: (expanded) {
+                        _backgroundReportExpansions.remove(row.id);
+                        _backgroundReportExpansions[row.id] = expanded;
+                        if (_backgroundReportExpansions.length > 128) {
+                          _backgroundReportExpansions.remove(
+                            _backgroundReportExpansions.keys.first,
+                          );
+                        }
+                      },
+                    )
+                  else
+                    _TranscriptRow(
+                      key: ValueKey('task-row-${row.id}'),
+                      row: row,
+                    ),
               ],
             ),
           ),
@@ -260,8 +299,8 @@ class _TranscriptRow extends StatelessWidget {
           children: [
             Text(
               context.l10n.task_row_label(
-                taskTranscriptRole(context.l10n, row.role),
                 row.id,
+                taskTranscriptRole(context.l10n, row.role),
               ),
               style: Theme.of(context).textTheme.labelMedium,
             ),

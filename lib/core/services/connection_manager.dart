@@ -1635,6 +1635,9 @@ class GatewayChatClient {
     if (eventType == 'hermes.tool.progress') {
       return _SseFrame(toolProgress: parsed);
     }
+    if (eventType == 'hermes.status') {
+      return _SseFrame(status: parsed);
+    }
     final choices = parsed['choices'];
     // Usage-only chunks and extension events do not carry completion evidence.
     if (choices == null || (choices is List && choices.isEmpty)) {
@@ -1660,8 +1663,13 @@ class GatewayChatClient {
     if (content != null && content is! String) {
       return const _SseFrame(error: 'Gateway sent malformed SSE content.');
     }
+    final reasoning = delta is Map ? delta['reasoning_content'] : null;
+    if (reasoning != null && reasoning is! String) {
+      return const _SseFrame(error: 'Gateway sent malformed SSE reasoning.');
+    }
     return _SseFrame(
       token: content as String?,
+      reasoning: reasoning as String?,
       successfulFinish: finishReason == 'stop',
       hasToolCalls:
           delta is Map &&
@@ -1703,6 +1711,8 @@ class GatewayChatClient {
     String? imageDataUrl,
     required void Function(String token) onToken,
     ToolProgressCallback? onToolProgress,
+    void Function(String reasoning)? onReasoning,
+    void Function(Map<String, dynamic> status)? onStatus,
     required void Function() onDone,
     required void Function(String error) onError,
   }) async {
@@ -1804,6 +1814,14 @@ class GatewayChatClient {
           onToolProgress?.call(progress);
         }
         // A callback can cancel, abort, or synchronously start a newer send.
+        if (!ownsStream()) return;
+        if (frame.status case final status?) {
+          onStatus?.call(status);
+        }
+        if (!ownsStream()) return;
+        if (frame.reasoning case final reasoning? when reasoning.isNotEmpty) {
+          onReasoning?.call(reasoning);
+        }
         if (!ownsStream()) return;
         toolCallsSeen |= frame.hasToolCalls;
         successfulFinishSeen |= frame.successfulFinish;
@@ -1932,7 +1950,9 @@ class GatewayChatClient {
 /// Parsed frame authority, separate from the token-only public compatibility API.
 class _SseFrame {
   final String? token;
+  final String? reasoning;
   final Map<String, dynamic>? toolProgress;
+  final Map<String, dynamic>? status;
   final String? error;
   final bool successfulFinish;
   final bool hasToolCalls;
@@ -1940,7 +1960,9 @@ class _SseFrame {
 
   const _SseFrame({
     this.token,
+    this.reasoning,
     this.toolProgress,
+    this.status,
     this.error,
     this.successfulFinish = false,
     this.hasToolCalls = false,

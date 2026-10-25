@@ -42,6 +42,20 @@ testing is approved. Base code **3002** produces **30021**, **30022** and
   completes after later interim commentary. Preserve existing completion,
   source ownership and release gates.
 
+### Fixed
+
+- Present machine-authored model/provider and personality changes, automatic
+  recovery, internal notifications and recognised legacy automation messages as
+  collapsed background cards instead of user messages, including delegated-task
+  history. Keep them out of quiet chat and retry prompts without modifying the
+  saved transcript or hiding real user controls and quoted examples.
+- Avoid duplicate prompts and Hermes replies when Remote Gateway history catches
+  up with a live response. Use the gateway's explicit committed-message receipt
+  and confirm its exact saved rows before retiring that turn's live copy,
+  including its interim text and tool timeline. Keep replies through lagging or
+  failed history reads; never guess correspondence from identical text or
+  change an uncertain turn outcome into a successful one.
+
 ## [3.0.0-rc.2] - 2026-10-24
 
 Testing candidate only. The latest stable release remains **2.1.33**. Back up

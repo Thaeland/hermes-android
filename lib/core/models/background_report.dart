@@ -1,5 +1,7 @@
 import 'dart:math' as math;
 
+import 'legacy_background_message.dart';
+
 enum BackgroundReportKind { task, process }
 
 typedef _TaskListCandidate = ({
@@ -8,9 +10,10 @@ typedef _TaskListCandidate = ({
   int contentLength,
 });
 
-/// Display-only background report. Prefer server annotations; legacy standalone
-/// todo snapshots need a narrow format fallback because they have no annotation.
-/// Quoted headers and mixed human messages are not classified as reports.
+/// Display-only background report, never a change to the model/request history.
+/// Prefer server annotations; old standalone runtime notices and todo snapshots
+/// need conservative compatibility matching because they lack durable metadata.
+/// Quoted headers and mixed human messages are not classified by prefix alone.
 class BackgroundReport {
   const BackgroundReport._({
     required this.kind,
@@ -25,30 +28,48 @@ class BackgroundReport {
   final bool hasIssues;
 
   static BackgroundReport? fromMessage(Map<String, dynamic> message) {
-    final kind = switch (message['display_kind']) {
-      'async_delegation_complete' => BackgroundReportKind.task,
-      'process_complete' => BackgroundReportKind.process,
-      _ => null,
-    };
-    final body = message['content'];
-    if (body is! String) return null;
-    if (kind == null) {
-      // Explicit server kinds (including hidden/steer) always take precedence.
-      if (message['role'] != 'user' ||
-          (message['display_kind'] != null && message['display_kind'] != '') ||
-          !_isPreservedTaskList(body)) {
-        return null;
-      }
-      return BackgroundReport._(
-        kind: BackgroundReportKind.task,
-        body: body,
-        summary: null,
-        hasIssues: false,
-      );
-    }
-
     final metadata = message['display_metadata'];
     final fields = metadata is Map ? metadata : const {};
+    if (fields['model_only'] == true || message['display_kind'] == 'hidden') {
+      return null;
+    }
+    var kind = switch (message['display_kind']) {
+      'async_delegation_complete' => BackgroundReportKind.task,
+      'process_complete' => BackgroundReportKind.process,
+      'model_switch' ||
+      'personality_switch' ||
+      'auto_continue' ||
+      'internal_notification' when message['role'] == 'user' =>
+        BackgroundReportKind.task,
+      _ => null,
+    };
+    // A public replacement (including null/empty) must not expose the private
+    // carrier. Keep the raw row untouched and classify its public text only.
+    final hasProjection = message.containsKey('display_content');
+    final body = hasProjection
+        ? message['display_content']
+        : message['content'];
+    if (body is! String || body.isEmpty) return null;
+    if (kind == null) {
+      // Explicit unknown/human kinds and public projections outrank heuristics.
+      // A backend user-row merge can deliberately drop a notice's kind. Its
+      // absorbed identity/prefix means the body is no longer standalone: an
+      // open result envelope must not consume the appended human request.
+      if (message['role'] != 'user' ||
+          hasProjection ||
+          _isMergedMessage(message) ||
+          (message['display_kind'] != null && message['display_kind'] != '')) {
+        return null;
+      }
+      if (_isPreservedTaskList(body) || LegacyBackgroundMessage.isTask(body)) {
+        kind = BackgroundReportKind.task;
+      } else if (LegacyBackgroundMessage.isProcess(body)) {
+        kind = BackgroundReportKind.process;
+      } else {
+        return null;
+      }
+    }
+
     final displayText = fields['display_text'];
     // Bound only the preview, never the original body (including whitespace,
     // literal escapes and tool-looking markup).
@@ -71,6 +92,21 @@ class BackgroundReport {
               completed >= 0 &&
               completed < total),
     );
+  }
+
+  static bool _isMergedMessage(Map<String, dynamic> message) {
+    final prefix = message['_merged_turn_prefix'];
+    if (prefix is String && prefix.isNotEmpty) return true;
+    for (final key in ['absorbed_message_uids', '_absorbed_message_uids']) {
+      final witness = message[key];
+      // SessionDB exposes JSON text; live message identity uses a list. Treat
+      // any nonempty encoded witness conservatively without parsing its IDs.
+      if (witness is List && witness.isNotEmpty ||
+          witness is String && witness.isNotEmpty && witness != '[]') {
+        return true;
+      }
+    }
+    return false;
   }
 
   static const _taskListHeader =
