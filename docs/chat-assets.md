@@ -1,13 +1,11 @@
 # Generated attachments and chat assets
 
-**Status: 3.0.0 release-candidate development.** This feature does not publish a
-release or change the stable app version.
-
-**Verification status:** permanent regressions cover custom typed voice-stop
-phrases, image-only history presentation, literal client-note examples and public
-projection in non-normal transport exports. The final integrated tree still needs
-the full regression suite, native tests and APK builds; earlier attachment-build
-results do not validate this revision or establish physical-phone acceptance.
+These features ship in **3.0.0**, extending earlier inline file-delivery cards.
+See the [stable release notes](releases/3.0.0.md) for the full change set and
+compatibility limits. Permanent regressions cover typed voice-stop phrases,
+image-only history, literal client-note examples, public exports, previews,
+download bounds and cancellation. The GitHub release records final validation;
+automated checks do not establish acceptance on every physical phone.
 
 ## Send a file from Hermes
 

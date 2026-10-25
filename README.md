@@ -1,4 +1,6 @@
-# Hermes Android v2.1.33
+[![Hermes Android 3.0.0 announcement](docs/images/hermes-android-3.0.0-hero.jpg)](https://github.com/rusty4444/hermes-android/releases/tag/v3.0.0)
+
+# Hermes Android v3.0.0
 
 Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — chat with your Hermes sessions from a phone or tablet over local Wi-Fi or a private Tailscale network.
 
@@ -14,88 +16,28 @@ Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — ch
 
 ## Current release
 
-- Version: **2.1.33** (build 2176)
-- Package: `com.hermesagent.hermes_android`
-- Recommended APK for modern phones: ARM64 release build from the
-  [Releases](https://github.com/rusty4444/hermes-android/releases) page.
-- Production builds are signed with a private release keystore. Debug APKs
-  signed with the Android debug certificate remain available for testing
-  under the `com.hermesagent.hermes_android.dev` package ID.
-- v2.1.33 shows your saved facts in More → Memory, keeps delegated-task bubbles
-  compact and starts reasoning collapsed on each chat visit.
-  See the [changelog](CHANGELOG.md) for features, fixes and delivery limits.
-- The app checks [GitHub Releases](https://github.com/rusty4444/hermes-android/releases)
-  on ordinary launches. An answered check limits network requests to once
-  every 12 hours; offline attempts may retry at the next launch. A newer build
-  is offered in a dialog. It never downloads or installs APKs itself.
-  **Later** asks again on the next launch; **Skip this version** stays quiet
-  until a newer version is published. Shares and Quick Chat shortcuts are not
-  interrupted. In **Settings → About**, use **Check for updates** for an
-  immediate check or disable **Check for updates on launch**. These choices
-  are included in app backups; HTTP response caches are not.
-- Previous upstream releases remain available from the
-  [Releases](https://github.com/rusty4444/hermes-android/releases) page.
+**3.0.0** (base build **3003**) is the stable release, based on the RC3 application code. It uses the existing production package, `com.hermesagent.hermes_android`, and release signer. Export an encrypted configuration backup before updating; 2.1.33 and all 3.0 RCs can upgrade in place with the matching APK.
 
-## 3.0 testing release: RC3
+| Download | Device | Version code |
+| --- | --- | --- |
+| [ARM64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.0/app-arm64-v8a-release.apk) | Most current Android phones/tablets | `30032` |
+| [ARMv7 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.0/app-armeabi-v7a-release.apk) | Older 32-bit ARM devices | `30031` |
+| [x86_64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.0/app-x86_64-release.apk) | x86_64 Android devices/emulators | `30033` |
 
-The testing candidate is **3.0.0-rc.3** (base build **3002**). It is a GitHub
-prerelease, not the stable release; **2.1.33 remains latest stable**. Back up app
-settings before installing. RC3 uses the existing production package and signer
-and can upgrade RC2 in place. Its split codes are **30021** (armeabi-v7a),
-**30022** (arm64-v8a) and **30023** (x86_64).
+[Release and checksums](https://github.com/rusty4444/hermes-android/releases/tag/v3.0.0) · [All changes since 2.1.33](docs/releases/3.0.0.md) · [Full changelog](CHANGELOG.md)
 
-RC3 adds message times, live work in the responding bar, neutral internal-notice
-cards, proven saved/live duplicate handover and clearer push-server setup.
-It retains RC2's file previews/downloads, web links, latest-message opening,
-Stop/Send controls, quiet presentation and client-certificate improvements.
-Download it from the [RC3 testing release](https://github.com/rusty4444/hermes-android/releases/tag/v3.0.0-rc.3).
-Phone acceptance is required before stable 3.0 promotion or GitLab/F-Droid updates.
+Debug builds use the separate `com.hermesagent.hermes_android.dev` package and Android debug certificate. Older production APKs have lower version codes; downgrading can require uninstalling and restoring a backup.
 
-### Integrated release-candidate hardening
+### Before updating
 
-This branch preserves the published v2.1.33 features and adds stricter submission
-observation epochs, confirmed background-policy ownership, targeted notification
-cleanup, canonical draft ownership and paired push registration fences.
-Tool expansion remains per visit: choices survive lazy scrolling and identity
-binding, but a genuinely closed and reopened chat starts collapsed. Covering a
-retained route is not a new visit. This is a testing candidate; device acceptance
-and stable publication gates remain separate.
-See the [background-work guide](docs/android-background-work.md),
-[Android push guide](docs/mobile-push-android.md) and
-[server companion guide](docs/mobile-push-server.md) for the additional contracts
-and acceptance checks. Upgrade the companion together with the fenced client.
+- Updating the APK does not install or configure Hermes host software or the optional mobile-push server companion.
+- Quiet mode requires completion metadata for each reply. If an older gateway's saved answers are missing in quiet mode, enable **Verbose Mode**. Saved/live duplicate handover also needs the gateway's optional complete `persisted_turn` receipt and fresh history; older gateways can retain both sources.
+- Assets is partial discovery of shared files, not a complete attachment or filesystem catalogue. Downloads are limited to 25 MiB per file.
+- Protect encrypted backups and their passwords. Backups can contain connection secrets and imported client private keys. See the [upgrade notes and compatibility limits](docs/releases/3.0.0.md#compatibility-and-delivery-limits).
 
-The candidate also preserves main's compact delegated-task labels
-and full read-only task details. With **Verbose Mode off**, chat shows user
-messages and completed Hermes replies; tools, reasoning, task cards, commentary
-and partial replies stay out of the conversation. The existing bottom status bar
-shows current work in either mode: reasoning, the active tool with its short
-progress description, or gateway status such as context compaction. This also
-works on REST/SSE connections when the server sends those events. Failure and
-uncertain-outcome notices remain available without a typing spinner. Quiet mode requires completion evidence for
-each assistant reply. Saved rows without it, including older answers from gateways
-that omit completion metadata, remain available in Verbose Mode.
+### Update checks
 
-With **Verbose Mode on**, all retained detail is available, with each expandable
-section initially collapsed. Manual choices survive updates and lazy scrolling
-within the current visit; closing and reopening the chat resets them. Saved and
-received output remain independent sources, labelled in Verbose mode, with
-possible repetition across them. See [Chat presentation](docs/chat-presentation.md)
-and the [neutral integration and verification](docs/reviews/main-81d-neutral-integration.md).
-
-### Message times in RC3
-
-User messages and completed Hermes replies show a local-time footer in both
-quiet and Verbose Mode, including compact density. The device's locale and
-12/24-hour preference control formatting; the tooltip includes the full date
-and whether the time was recorded by the server, observed sending, or first
-received on this device. Recorded server time takes precedence. Live times are
-captured once, not on rebuild, refresh or reopen. Saved history without a valid
-recorded time stays untimed; recovery replay never fabricates a receipt time.
-Device observations follow the existing presentation lifetime, not a new
-persistent receipt log. After process restart, only server-recorded history
-times are available. This does not change quiet-mode completion requirements,
-saved/received ownership, or RC3's phone-acceptance and publication gates.
+The app checks GitHub Releases on ordinary launches. An answered check limits requests to once every 12 hours; offline attempts may retry on the next launch. The dialog offers a newer build but does not download or install it. **Later** asks again on the next launch; **Skip this version** stays quiet until another version appears. Shares and Quick Chat shortcuts are not interrupted. In **Settings → About**, use **Check for updates** or disable **Check for updates on launch**. Backups include these choices, not HTTP response caches.
 
 ## Background notifications: server setup required
 
@@ -124,7 +66,7 @@ app. An external UnifiedPush distributor is an optional phone transport, not the
 server companion; Google-free devices need that alternative. Neither transport
 removes the server prerequisite or guarantees background delivery.
 
-## Navigation changes in the 3.0 candidate
+## Navigation in 3.0.0
 
 The bottom bar is **Chats → Crons → Projects → Activity → More**. Chats is the
 default screen; the separate Home tab has been removed.
@@ -147,7 +89,7 @@ Older history is not silently cut off after 2,000 rows. Archived history uses
 the saved dashboard connection and profile; a failed read keeps available
 rows and offers Retry rather than claiming the archive is empty.
 
-## Additional 3.0 testing features
+## Chat guidance and shared files
 
 - **Send while Hermes is working:** the composer keeps separate **Stop** and
   **Send** buttons. Remote Gateway sends text as guidance for the current run
@@ -241,11 +183,13 @@ After an outage, the app keeps recovery pending until it can verify the server's
 state. A proven-idle turn with no recorded terminal outcome becomes inactive
 with an outcome-unknown status. It does not generate a completion alert.
 
-In Verbose mode, the app shows the complete loaded saved-history window followed
-by retained received output labelled as an unconfirmed match to saved history. Received
-output is bounded and temporary within the app/connection session, even after a
-successful turn. Repetition across these sources is intentional: an admission
-baseline or matching text cannot establish which saved row is a received reply.
+In Verbose Mode, saved history and retained received output remain independent
+sources. A complete gateway `persisted_turn` receipt plus fresh history containing
+all addressed rows can prove the handover to saved content and remove the covered
+live copy. Matching text, an admission baseline or idle status cannot prove it.
+Older gateways or lagging history may retain repetition across sources. Received
+output is bounded and temporary within the app/connection session, not an offline
+transcript archive. See [Chat presentation](docs/chat-presentation.md).
 
 The experimental v2 path adds a separate durable exactly-once recovery contract
 when the gateway advertises support. A legacy-transport capability notice refers
@@ -256,42 +200,31 @@ See [CHANGELOG.md](CHANGELOG.md) for the complete release history and
 [docs/HERMESAPK_DEVELOPMENT_LOG.md](docs/HERMESAPK_DEVELOPMENT_LOG.md) for the
 sanitized implementation and validation record.
 
+## What's new in v3.0.0
+
+These highlights cover the whole **2.1.33 → 3.0.0** change set, not just RC3.
+
+- Ten full-app colour themes with independent light/dark/system appearance, live updates and backup/restore. See [Appearance](docs/APPEARANCE_THEMES.md).
+- Default **Chats → Crons → Projects → Activity → More** navigation, separate scheduled conversations, verified Archive/Unarchive and progressive older-history loading.
+- Completed-reply quiet mode, collapsed Verbose details, neutral internal-report cards, message-level local times and a responding bar for tools, reasoning and gateway status.
+- Separate Stop and Send controls during work: Remote Gateway sends text guidance; REST uses an explicit Stop and send action. Newer draft edits survive delayed acknowledgements.
+- More → Assets, broader generated-file discovery, image/PDF/text previews, direct Android save/download and separate Share. Web links open in the external browser on tap.
+- Optional per-connection PEM/P12 client certificates for mTLS, portable encrypted backups and improved mobile certificate picking/password handling.
+- Simpler opt-in background notifications, automatic authorised-chat scope and an optional built-in Google-backed phone transport. The separate server companion is still required.
+- Stronger saved/live receipt handover, draft/identity/recovery ownership, Activity coverage, account-safe notifications and public-only exports. Offline licences and exact-source/relink release materials accompany the APKs.
+
+Read the [detailed release notes](docs/releases/3.0.0.md) for all changes, prerequisites, limits and contributor credits. Existing Memory facts, local pins, Project moves, voice and task inspection remain available.
+
 ## What's new in v2.1.33
 
-- More → Memory opens facts about you from the connected profile's `USER.md`.
-  Switch to Agent notes for `MEMORY.md`, select text or read long facts in full.
-  This read-only view does not enumerate external providers such as MemPalace.
-  See [Saved memory facts](docs/MEMORY_FACTS.md) for API compatibility limits.
-- Delegated-task bubbles keep a compact goal and status. Open the task timeline
-  for the full details and model information.
-- Reasoning starts collapsed on a new chat visit, even with gateway verbose
-  hints. Your manual choice survives updates and scrolling during that visit;
-  in that release, the app's explicit Verbose mode was an open default. The
-  unreleased 3.0 presentation described above starts all details collapsed.
+- More → Memory opens saved facts from the connected profile's `USER.md`; Agent notes opens `MEMORY.md`. Long facts support selectable full reads. The view does not enumerate external providers such as MemPalace.
+- Delegated-task bubbles keep a compact goal and status, with full details in the task timeline.
+- Reasoning starts collapsed on a new visit and retains manual choices during updates and scrolling. Version 3.0 extends collapsed defaults to all Verbose details.
 
 ## What's new in v2.1.32
 
-- Tool sections start collapsed when opening or returning to a chat, including
-  while work is running. The header previews the newest running call, or the
-  latest call when none are running, while retaining group status and timing.
-- Expand a section to inspect every call. Your choice survives incoming events
-  and scrolling within the visit; leaving and reopening resets it. Verbose
-  mode was an explicit open default in that release; the unreleased 3.0
-  presentation starts all details collapsed.
-
-## What's new in v2.1.31
-
-- Tap a delegated task for a read-only timeline above the parent chat. Inspect
-  recorded tools and exposed reasoning, refresh or load older rows. Missing
-  references and partial compression history carry explicit explanations.
-- Read live commentary, exposed reasoning and tool groups in receipt order.
-  Preview completion preserves their positions and expansion choices.
-- Leave and reopen stock Gateway chats without tying a turn to its screen.
-  Background work settings, one service disclosure and quiet per-chat entries
-  cover active chats; uncertain reconnects do not resubmit prompts.
-- Opt in to Google-free UnifiedPush for selected sessions with an installed
-  distributor and the separate server companion. Setup and Android delivery
-  limits appear in [Background work and notifications](#background-work-and-notifications).
+- Tool sections start collapsed when opening or returning to a chat, with a preview of the current or latest call.
+- Manual expansion survives incoming events and scrolling during the visit, then resets on a true close/reopen. Version 3.0 applies this policy to every expandable detail section.
 
 ## Features
 
@@ -299,8 +232,8 @@ sanitized implementation and validation record.
 - **Streaming responses:** Remote Gateway chat uses JSON-RPC over WebSocket;
   REST chat uses `POST /v1/chat/completions` with SSE. Live text, exposed reasoning
   and tool activity keep their receipt order without changing request history.
-- **Messaging-style UI** — dark/light/system themes, gold Hermes accent color (`#D4AF37`), markdown rendering, relative timestamps, and responsive phone/tablet layouts.
-- **Gold/black Hermes branding** — distinctive gold accent on black background, custom app icon with mipmap densities, agent messages use grey bubbles.
+- **Messaging-style UI:** ten colour palettes, independent dark/light/system appearance, Markdown, local message times and responsive phone/tablet layouts.
+- **Hermes branding:** the gold/black default remains available alongside nine other full-app palettes. Chat surfaces, controls, code blocks and navigation follow the selected theme.
 - **Gateway API integration** — sessions and chat run through the Hermes Gateway API Server, normally on port `8642`, with HTTP and HTTPS endpoints supported. Reverse-proxy deployments can set a gateway path prefix that is applied before `/api` and `/v1` routes.
 - **Dashboard integrations:** Memory, Cron Jobs, Skills, Settings and Remote Gateway chat use the authenticated Hermes dashboard (default port `9119`, configurable per connection). Use the built-in password login or a trusted reverse proxy. Current Hermes requires an authentication provider before the dashboard can bind to a non-loopback address; `--insecure` no longer bypasses this requirement.
 - **Model settings** — view and change the configured Hermes model where the dashboard exposes model settings.
@@ -317,30 +250,34 @@ sanitized implementation and validation record.
   controlling the child runtime. The viewer preserves the parent chat and draft.
 - **Background work:** keep active stock Gateway turns above chat routes, review
   device-local battery/notification settings and opt in to separate UnifiedPush.
-- **Three-way theme toggle** — Dark / Light / System default.
+- **Appearance:** Gold, Purple, Orange, Green, Blue, Red, Teal, Pink, Indigo and Cyan, with separate Dark / Light / System controls.
 - **Keyboard handling** — Enter inserts a new line; use the on-screen Send button to submit. The composer stays editable during setup and replies, so you can draft a follow-up without waiting. A failed submission restores its prompt only if you have not edited the cleared composer. FAB to scroll to bottom.
 - **Voice chat** — microphone dictation sends recognised speech to Hermes, with optional text-to-speech replies.
 
 ## Screenshots
 
-These screenshots show the published release and use anonymised example details.
-The unreleased navigation above replaces its Home tab.
+Ten fresh Android emulator captures, each using a different colour palette. These show the production-signed RC3 UI retained in 3.0.0, with illustrative demo conversations and files rather than private account data. The live-work example uses a local test gateway, not a model response. See [capture details](docs/screenshots/3.0.0/README.md).
 
 <table>
   <tr>
-    <td align="center"><img src="docs/screenshots/00-home.jpg" width="220" alt="Home dashboard with example tasks"><br><sub>Home</sub></td>
-    <td align="center"><img src="docs/screenshots/01-session-list.jpg" width="220" alt="Chats browser with example conversations"><br><sub>Chats</sub></td>
-    <td align="center"><img src="docs/screenshots/02-more.jpg" width="220" alt="More tab with workspace and organisation features"><br><sub>More</sub></td>
+    <td align="center"><img src="docs/screenshots/3.0.0/01-chats-gold.png" width="280" alt="Chats in the Gold · dark theme"><br><sub>Chats · Gold · dark</sub></td>
+    <td align="center"><img src="docs/screenshots/3.0.0/02-crons-purple.png" width="280" alt="Crons in the Purple · dark theme"><br><sub>Crons · Purple · dark</sub></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/screenshots/03-cron-jobs.jpg" width="220" alt="Cron jobs with example schedules"><br><sub>Cron jobs</sub></td>
-    <td align="center"><img src="docs/screenshots/04-add-cron-job.jpg" width="220" alt="Add cron job"><br><sub>Add cron job</sub></td>
-    <td align="center"><img src="docs/screenshots/05-memory.jpg" width="220" alt="Memory"><br><sub>Memory</sub></td>
+    <td align="center"><img src="docs/screenshots/3.0.0/03-activity-orange.png" width="280" alt="Activity in the Orange · light theme"><br><sub>Activity · Orange · light</sub></td>
+    <td align="center"><img src="docs/screenshots/3.0.0/04-more-green.png" width="280" alt="More in the Green · dark theme"><br><sub>More · Green · dark</sub></td>
   </tr>
   <tr>
-    <td align="center"><img src="docs/screenshots/06-settings.jpg" width="220" alt="Settings with an example model and provider"><br><sub>Settings</sub></td>
-    <td align="center"><img src="docs/screenshots/07-skills.jpg" width="220" alt="Skills"><br><sub>Skills</sub></td>
-    <td align="center"><img src="docs/screenshots/08-update-available.png" width="220" alt="Update available dialog for Hermes Android v2.1.22"><br><sub>Update available</sub></td>
+    <td align="center"><img src="docs/screenshots/3.0.0/05-settings-blue.png" width="280" alt="Settings in the Blue · light theme"><br><sub>Settings · Blue · light</sub></td>
+    <td align="center"><img src="docs/screenshots/3.0.0/06-appearance-red.png" width="280" alt="Appearance in the Red · light theme"><br><sub>Appearance · Red · light</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/3.0.0/07-conversation-teal.png" width="280" alt="Conversation in the Teal · dark theme"><br><sub>Conversation · Teal · dark</sub></td>
+    <td align="center"><img src="docs/screenshots/3.0.0/08-assets-pink.png" width="280" alt="Assets in the Pink · dark theme"><br><sub>Assets · Pink · dark</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/3.0.0/09-archived-indigo.png" width="280" alt="Archived chats in the Indigo · light theme"><br><sub>Archived chats · Indigo · light</sub></td>
+    <td align="center"><img src="docs/screenshots/3.0.0/10-live-work-cyan.png" width="280" alt="Live work and Stop/Send in the Cyan · dark theme"><br><sub>Live work and Stop/Send · Cyan · dark</sub></td>
   </tr>
 </table>
 
@@ -543,6 +480,14 @@ With that setup, the app calls gateway routes such as
 dashboard routes such as
 `https://your-hermes-host.example.com/dashboard/api/model/info`.
 
+### Optional client certificates (mTLS)
+
+For an HTTPS proxy that requires a client identity, use the connection editor's certificate import. Pick a PEM certificate/key pair in either order, a combined PEM file, or a PKCS#12 `.p12`/`.pfx` identity. The app asks for a password after selecting a protected file and validates the identity before reporting it loaded. Imports are limited to 1 MiB.
+
+The saved identity applies to that connection's API, dashboard, WebSocket, search and file access. It does not replace API/dashboard credentials or bypass server certificate trust. Private keys remain in app-private files, not Android KeyChain/non-exportable hardware storage; key passphrases use secure credential storage. Encrypted backups can include the portable identity and passphrase, so protect them as credentials. Remove or replace an identity through the connection editor.
+
+Thanks to [@smhc](https://github.com/smhc) for the certificate support and mobile picker improvements. See the [mTLS report and device-specific limits](docs/mtls-report.md).
+
 ### Security notes
 
 - Prefer Tailscale/VPN for remote use.
@@ -573,12 +518,12 @@ Android app (Flutter)
 
 - **Send messages:** Type in the input field and tap Send. Enter/Return inserts a new line.
 - **Streaming responses:** Replies arrive through Remote Gateway JSON-RPC or legacy REST/SSE. The chat follows new content while you are at the end; scrolling up lets you read earlier messages.
-- **Tool progress** — When the agent uses tools, inline progress messages show the tool name, status, and progress.
+- **Current work:** the responding bar shows the active tool, reasoning or gateway status in either mode. Verbose Mode also exposes retained tool cards, starting collapsed.
 - **Verbose mode** — Toggle in the app settings. Off shows the conversation only;
   on exposes retained reasoning, tools, tasks and message metadata in collapsed
   sections. The bottom status bar shows current work in both modes.
 - **Markdown rendering** — Assistant messages render markdown (code blocks, tables, lists, links).
-- **Relative timestamps** — Messages show "2m ago", "3h ago", etc.
+- **Message times:** local-clock footers follow your device locale and 12/24-hour setting. A tooltip shows the full date and server-recorded versus device-observed provenance. Missing server times are not guessed. Conversation lists retain relative ages.
 
 ### Inspect a delegated task
 
@@ -707,15 +652,16 @@ Spoken replies require Google Text-to-Speech to be installed and configured on y
 
 Access these dashboard-powered screens:
 
-- **Memory** — View conversation memory across sessions. Shows stored facts, preferences, and project context.
+- **Memory:** read the connected profile's saved `USER.md` facts and `MEMORY.md` agent notes, not an external-provider or complete conversation-memory catalogue.
 - **Cron Jobs** — List all scheduled cron jobs. Trigger, pause/resume, create, edit, or delete jobs.
 - **Skills** — Browse available Hermes skills with descriptions and trigger conditions.
 - **Settings** — View and change the configured Hermes model, theme preference, and verbose mode.
 
 ### Theme
 
-- Three-way toggle: **Dark** / **Light** / **System default**.
-- Gold Hermes accent (`#D4AF37`) on dark mode; adapted for light mode.
+Choose **Gold, Purple, Orange, Green, Blue, Red, Teal, Pink, Indigo or Cyan** in **Settings → Appearance**, or use the palette button on the connection screen before connecting. Select **Dark**, **Light** or **System** independently of the palette.
+
+The palette applies to the whole app, including existing chats, code blocks, dialogs and navigation. Choices persist across restarts and encrypted backup/restore. The launcher icon and native splash retain their branding. See [Appearance and themes](docs/APPEARANCE_THEMES.md).
 
 ### Cron job management
 
@@ -752,10 +698,11 @@ cp build/app/outputs/flutter-apk/app-*-release.apk release-apks/
 block in `android/app/build.gradle.kts` derives per-ABI codes as
 `base * 10 + ABI code` (armeabi-v7a = 1, arm64-v8a = 2, x86_64 = 3), so the
 codes stay ordered armeabi-v7a < arm64-v8a < x86_64 as fdroiddata requires.
-For v2.1.33, base `2176` therefore produces codes `21761`/`21762`/`21763`.
-CI reads the completed arm64 APK with `aapt` and fails if that relationship
-drifts. Release-floor checks continue to apply to the base value and must not
-be weakened to rely on the ABI code.
+For v3.0.0, base `3003` produces codes `30031`/`30032`/`30033`.
+Before publication, CI verifies all three actual APKs: package, version, ABI,
+effective code, production signer and required licence/source assets. Releases
+include checksums and exact-commit source/relink materials. Release-floor checks
+continue to apply to the base value and must not rely on the ABI digit alone.
 
 Output files:
 
