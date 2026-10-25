@@ -49,9 +49,12 @@ after acknowledgement.
 The app stores a minimal pending-turn receipt for restart recovery. It does not
 journal the prompt, password, approval answer or secret in that receipt. Retained
 live text and tools are in-memory presentation state; after process death the
-server's durable history is the source of truth. A late authoritative history
-response replaces settled optimistic presentation, while loading older history
-does not discard a still-retained turn.
+server's durable history is the source of truth. While a live copy is retained,
+replacement requires a complete valid `persisted_turn` receipt from that turn's
+owned successful response and fresh history containing all addressed rows and its
+completed final reply. Without that proof, or while history lags, independently
+sourced copies can remain; do not resend an uncertain prompt. Loading older
+history does not discard a still-retained turn.
 
 Without an enabled push transport, a terminated app cannot learn
 about completion until it runs and reconnects. Android Force stop blocks background delivery and is not a supported way to test
@@ -107,9 +110,12 @@ Gateway and record the phone model, Android version and battery policy.
    without a Flutter error, duplicate submission or stale-account navigation.
 4. Start a turn in each of two chats. Completing one must not stop protection for the
    other. When all work settles, ongoing entries and protection must stop.
-5. Interrupt networking and restore it. Confirm recovery does not resend the prompt
-   and that the final durable reply replaces optimistic text/tools without
-   duplication.
+5. Interrupt networking and restore it. Confirm recovery does not resend the prompt.
+   When a complete valid `persisted_turn` receipt from the owned successful
+   response and fresh history cover every addressed row and its completed final
+   reply, confirm the covered live copy is retired in favour of those saved rows.
+   Without that proof, independent copies can remain; do not resend an uncertain
+   prompt.
 6. Test protection and optional notifications as separate controls. Deny notification
    permission, grant it later in Android settings, and return to the app to check
    that permission state refreshes without another unsolicited prompt.
