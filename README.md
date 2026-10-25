@@ -4,6 +4,33 @@
 
 Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — chat with your Hermes sessions from a phone or tablet over local Wi-Fi or a private Tailscale network.
 
+## Screenshots
+
+Ten fresh Android emulator captures, each using a different colour palette. These show the production-signed RC3 UI retained in 3.0.0, with illustrative demo conversations and files rather than private account data. The live-work example uses a local test gateway, not a model response. See [capture details](docs/screenshots/3.0.0/README.md).
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/3.0.0/01-chats-gold.png" width="280" alt="Chats in the Gold · dark theme"><br><sub>Chats · Gold · dark</sub></td>
+    <td align="center"><img src="docs/screenshots/3.0.0/02-crons-purple.png" width="280" alt="Crons in the Purple · dark theme"><br><sub>Crons · Purple · dark</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/3.0.0/03-activity-orange.png" width="280" alt="Activity in the Orange · light theme"><br><sub>Activity · Orange · light</sub></td>
+    <td align="center"><img src="docs/screenshots/3.0.0/04-more-green.png" width="280" alt="More in the Green · dark theme"><br><sub>More · Green · dark</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/3.0.0/05-settings-blue.png" width="280" alt="Settings in the Blue · light theme"><br><sub>Settings · Blue · light</sub></td>
+    <td align="center"><img src="docs/screenshots/3.0.0/06-appearance-red.png" width="280" alt="Appearance in the Red · light theme"><br><sub>Appearance · Red · light</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/3.0.0/07-conversation-teal.png" width="280" alt="Conversation in the Teal · dark theme"><br><sub>Conversation · Teal · dark</sub></td>
+    <td align="center"><img src="docs/screenshots/3.0.0/08-assets-pink.png" width="280" alt="Assets in the Pink · dark theme"><br><sub>Assets · Pink · dark</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/3.0.0/09-archived-indigo.png" width="280" alt="Archived chats in the Indigo · light theme"><br><sub>Archived chats · Indigo · light</sub></td>
+    <td align="center"><img src="docs/screenshots/3.0.0/10-live-work-cyan.png" width="280" alt="Live work and Stop/Send in the Cyan · dark theme"><br><sub>Live work and Stop/Send · Cyan · dark</sub></td>
+  </tr>
+</table>
+
 > **v2.0.0** merges the community Remote Gateway edition contributed by
 > [@CristianGCiocoi](https://github.com/CristianGCiocoi), with review and
 > testing from [@AI-Guru](https://github.com/AI-Guru) and
@@ -253,33 +280,6 @@ Read the [detailed release notes](docs/releases/3.0.0.md) for all changes, prere
 - **Appearance:** Gold, Purple, Orange, Green, Blue, Red, Teal, Pink, Indigo and Cyan, with separate Dark / Light / System controls.
 - **Keyboard handling** — Enter inserts a new line; use the on-screen Send button to submit. The composer stays editable during setup and replies, so you can draft a follow-up without waiting. A failed submission restores its prompt only if you have not edited the cleared composer. FAB to scroll to bottom.
 - **Voice chat** — microphone dictation sends recognised speech to Hermes, with optional text-to-speech replies.
-
-## Screenshots
-
-Ten fresh Android emulator captures, each using a different colour palette. These show the production-signed RC3 UI retained in 3.0.0, with illustrative demo conversations and files rather than private account data. The live-work example uses a local test gateway, not a model response. See [capture details](docs/screenshots/3.0.0/README.md).
-
-<table>
-  <tr>
-    <td align="center"><img src="docs/screenshots/3.0.0/01-chats-gold.png" width="280" alt="Chats in the Gold · dark theme"><br><sub>Chats · Gold · dark</sub></td>
-    <td align="center"><img src="docs/screenshots/3.0.0/02-crons-purple.png" width="280" alt="Crons in the Purple · dark theme"><br><sub>Crons · Purple · dark</sub></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/screenshots/3.0.0/03-activity-orange.png" width="280" alt="Activity in the Orange · light theme"><br><sub>Activity · Orange · light</sub></td>
-    <td align="center"><img src="docs/screenshots/3.0.0/04-more-green.png" width="280" alt="More in the Green · dark theme"><br><sub>More · Green · dark</sub></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/screenshots/3.0.0/05-settings-blue.png" width="280" alt="Settings in the Blue · light theme"><br><sub>Settings · Blue · light</sub></td>
-    <td align="center"><img src="docs/screenshots/3.0.0/06-appearance-red.png" width="280" alt="Appearance in the Red · light theme"><br><sub>Appearance · Red · light</sub></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/screenshots/3.0.0/07-conversation-teal.png" width="280" alt="Conversation in the Teal · dark theme"><br><sub>Conversation · Teal · dark</sub></td>
-    <td align="center"><img src="docs/screenshots/3.0.0/08-assets-pink.png" width="280" alt="Assets in the Pink · dark theme"><br><sub>Assets · Pink · dark</sub></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="docs/screenshots/3.0.0/09-archived-indigo.png" width="280" alt="Archived chats in the Indigo · light theme"><br><sub>Archived chats · Indigo · light</sub></td>
-    <td align="center"><img src="docs/screenshots/3.0.0/10-live-work-cyan.png" width="280" alt="Live work and Stop/Send in the Cyan · dark theme"><br><sub>Live work and Stop/Send · Cyan · dark</sub></td>
-  </tr>
-</table>
 
 ## Quick start
 
