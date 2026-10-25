@@ -162,7 +162,11 @@ void main() {
           _expectQuiet(tester);
         }
 
-        f.emit('tool.start', {'name': 'terminal', 'tool_id': 't1'});
+        f.emit('tool.start', {
+          'name': 'terminal',
+          'tool_id': 't1',
+          'context': 'Running the regression tests',
+        });
         f.emit('tool.start', {'name': 'read_file', 'tool_id': 't2'});
         await _frames(tester);
         _expectActivity(tester, 'Using Read file…');
@@ -173,7 +177,17 @@ void main() {
         }
         f.emit('tool.complete', {'name': 'read_file', 'tool_id': 't2'});
         await _frames(tester);
-        _expectActivity(tester, 'Using Terminal…');
+        _expectActivity(
+          tester,
+          'Using Terminal: Running the regression tests…',
+        );
+        f.emit('tool.progress', {
+          'name': 'terminal',
+          'tool_id': 't1',
+          'preview': 'Checking the Android build',
+        });
+        await _frames(tester);
+        _expectActivity(tester, 'Using Terminal: Checking the Android build…');
         f.emit('tool.complete', {'name': 'terminal', 'tool_id': 't1'});
         await _frames(tester);
         _expectActivity(tester, 'Hermes is responding…');
@@ -1017,6 +1031,73 @@ void main() {
       _expectQuiet(tester);
     },
   );
+
+  for (final verbose in [false, true]) {
+    testWidgets(
+      'SSE activity follows reasoning, tool previews and status: verbose=$verbose',
+      (tester) async {
+        await _verbose(verbose);
+        await _largeSurface(tester);
+        final f = _SseFixture();
+        _cleanup(tester, f);
+        await f.open(tester);
+        await f.send(tester);
+        f.client.fragment(
+          'data: {"choices":[{"delta":{"reasoning_content":"Private reasoning body"}}]}\r\n\r\n',
+        );
+        await _frames(tester);
+        _expectActivity(tester, 'Reasoning');
+        expect(find.text('Private reasoning body'), findsNothing);
+        if (verbose) {
+          expect(_expanded(tester, _tile(GatewayReasoningCard)), isFalse);
+        } else {
+          _expectQuiet(tester);
+          expect(_bubbles(tester), ['Question']);
+        }
+        f.client.fragment(
+          'event: hermes.tool.progress\ndata: {"tool":"web_search","toolCallId":"sse-work","label":"Searching the documentation","status":"running"}\n\n',
+        );
+        await _frames(tester);
+        _expectActivity(
+          tester,
+          'Using Web search: Searching the documentation…',
+        );
+        f.client.fragment(
+          'event: hermes.tool.progress\r\ndata: {"tool":"web_search","toolCallId":"sse-work","status":"completed"}\r\n\r\n',
+        );
+        await _frames(tester);
+        _expectActivity(tester, 'Hermes is responding…');
+        f.client.fragment(
+          'event: hermes.status\ndata: {"kind":"compacting","text":"Compacting conversation context…"}\n\n',
+        );
+        await _frames(tester);
+        _expectActivity(tester, 'Compacting conversation context…');
+        f.client.fragment(
+          'data: {"choices":[{"delta":{"reasoning_content":"More private reasoning"}}]}\n\n',
+        );
+        await _frames(tester);
+        _expectActivity(tester, 'Reasoning');
+        f.client.fragment(
+          'data: {"choices":[{"delta":{"content":"Completed answer"}}]}\n\n',
+        );
+        await _frames(tester);
+        _expectActivity(tester, 'Hermes is responding…');
+        if (!verbose) {
+          _expectQuiet(tester);
+          expect(_bubbles(tester), ['Question']);
+        }
+        f.client.fragment(
+          'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+        );
+        await f.client.closeBody();
+        await _frames(tester);
+        expect(find.byType(ChatActivityBar), findsNothing);
+        expect(_bubbles(tester), ['Question', 'Completed answer']);
+        expect(f.client.submissions, 1);
+        if (!verbose) _expectQuiet(tester);
+      },
+    );
+  }
 
   testWidgets(
     'verbose SSE retains text-tool-text order through stale success and refresh',

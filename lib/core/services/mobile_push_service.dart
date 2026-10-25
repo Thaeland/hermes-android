@@ -26,6 +26,13 @@ class MobilePushRoute {
   final Map<String, dynamic> authority;
 }
 
+/// A read-only diagnosis, owned by its caller rather than shared consent state.
+class MobilePushAvailability {
+  const MobilePushAvailability._(this.status, this.error);
+  final String status;
+  final String? error;
+}
+
 /// Optional, one explicitly selected saved connection per Android installation.
 /// Native encrypted storage is the source of truth. Startup never requests
 /// permission, registers a distributor, or blocks credential hydration.
@@ -332,6 +339,40 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
       rethrow;
     }
     await refresh();
+  }
+
+  /// Read-only server check while off: never requests permission or registers.
+  /// Results must be fenced by the caller's lifetime/operation/connection. They
+  /// never change shared consent status/errors or invalidate its epoch.
+  Future<MobilePushAvailability?> checkAvailability(
+    SavedConnection connection,
+  ) async {
+    if (!supported || _closed || enabled || enabling) return null;
+    final epoch = _epoch;
+    final fingerprint = binding(connection);
+    final mutation = ConnectionMutationBarrier.capture(connection.id);
+    bool current() =>
+        !_closed &&
+        epoch == _epoch &&
+        !enabled &&
+        !enabling &&
+        ConnectionMutationBarrier.isCurrent(connection.id, mutation) &&
+        _connection(connection.id) != null &&
+        binding(_connection(connection.id)!) == fingerprint;
+    final client = _clientFactory(connection);
+    try {
+      if (!await _refreshCredentialCache(connection.id) || !current()) {
+        return null;
+      }
+      await MobilePushApi(client).capabilities(authorized: true);
+      return current()
+          ? const MobilePushAvailability._('Off; server API ready', null)
+          : null;
+    } catch (e) {
+      return current() ? MobilePushAvailability._('Error', _message(e)) : null;
+    } finally {
+      client.close();
+    }
   }
 
   Future<void> retry() async {
@@ -762,7 +803,7 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
     }
     if (error is DashboardHttpException) {
       if (error.statusCode == 404) {
-        return 'Optional mobile-push server plugin is not installed.';
+        return 'The server mobile-push companion is unavailable. It may be missing or disabled, or this connection may point to the wrong dashboard. Install or enable the companion on the server, check the dashboard connection, then refresh. See Server setup guide above.';
       }
       if (error.statusCode == 401 || error.statusCode == 403) {
         return 'Server denied mobile push. Ask the operator to authorize this principal and these sessions.';

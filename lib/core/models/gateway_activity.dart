@@ -176,15 +176,15 @@ class GatewayToolActivity {
         _maxDetailLength,
       ),
       GatewayToolActivityPhase.progress => _normalizeText(
-        _firstText(data, const ['preview', 'detail']),
+        _firstText(data, const ['preview', 'detail', 'label']),
         _maxDetailLength,
       ),
       GatewayToolActivityPhase.generating => _normalizeText(
-        _firstText(data, const ['preview', 'detail']),
+        _firstText(data, const ['preview', 'detail', 'label']),
         _maxDetailLength,
       ),
       GatewayToolActivityPhase.running => _normalizeText(
-        _firstText(data, const ['context', 'detail']),
+        _firstText(data, const ['context', 'detail', 'label']),
         _maxDetailLength,
       ),
     };
@@ -356,9 +356,15 @@ class GatewayTurnStatus {
     Iterable<GatewayToolActivity> activities,
   ) {
     final tool = activities.where((tool) => !tool.isTerminal).lastOrNull;
-    return tool == null
-        ? null
-        : GatewayTurnStatus(kind: 'tool', text: tool.displayName);
+    if (tool == null) return null;
+    final detail = _normalize(tool.detail, _maxTextLength);
+    return GatewayTurnStatus(
+      kind: 'tool',
+      text: _normalize(
+        detail == null ? tool.displayName : '${tool.displayName}: $detail',
+        _maxTextLength,
+      )!,
+    );
   }
 
   static GatewayTurnStatus? fromGatewayEvent(

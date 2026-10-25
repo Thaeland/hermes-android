@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/connection_manager.dart';
 import '../services/mobile_push_service.dart';
+import 'markdown_link_handler.dart';
 
 /// Explicit opt-in, deliberately separate from local notification preferences.
 class MobilePushSettings extends StatefulWidget {
@@ -19,6 +20,9 @@ class MobilePushSettings extends StatefulWidget {
 }
 
 class _MobilePushSettingsState extends State<MobilePushSettings> {
+  static const _serverSetupGuide =
+      'https://github.com/rusty4444/hermes-android/blob/main/docs/mobile-push-server.md'
+      '#operator-installation-not-performed-by-this-implementation';
   late final MobilePushService service =
       widget.service ?? MobilePushService.shared;
   List<Map<String, dynamic>> transports = [];
@@ -27,6 +31,7 @@ class _MobilePushSettingsState extends State<MobilePushSettings> {
   bool busy = false;
   int operation = 0;
   String? message;
+  MobilePushAvailability? availability;
   @override
   void initState() {
     super.initState();
@@ -35,7 +40,19 @@ class _MobilePushSettingsState extends State<MobilePushSettings> {
   }
 
   void _changed() {
-    if (mounted) setState(() {});
+    if (mounted) setState(() => availability = null);
+  }
+
+  @override
+  void didUpdateWidget(covariant MobilePushSettings oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (MobilePushService.binding(oldWidget.connection) !=
+        MobilePushService.binding(widget.connection)) {
+      ++operation;
+      busy = false;
+      message = null;
+      availability = null;
+    }
   }
 
   Future<void> _load() async {
@@ -63,6 +80,7 @@ class _MobilePushSettingsState extends State<MobilePushSettings> {
     setState(() {
       busy = true;
       message = null;
+      availability = null;
     });
     try {
       await action();
@@ -79,8 +97,30 @@ class _MobilePushSettingsState extends State<MobilePushSettings> {
     }
   }
 
+  Future<void> _refresh() async {
+    final ticket = operation;
+    final connection = widget.connection;
+    final fingerprint = MobilePushService.binding(connection);
+    bool current() =>
+        mounted &&
+        ticket == operation &&
+        MobilePushService.binding(widget.connection) == fingerprint;
+    await _load();
+    if (!current()) return;
+    if (service.enabled) {
+      await service.retry();
+    } else {
+      await service.refresh();
+      if (!current()) return;
+      final result = await service.checkAvailability(connection);
+      if (!current()) return;
+      setState(() => availability = result);
+    }
+  }
+
   @override
   void dispose() {
+    ++operation;
     service.removeListener(_changed);
     super.dispose();
   }
@@ -119,8 +159,16 @@ class _MobilePushSettingsState extends State<MobilePushSettings> {
                           : service.disable,
                     ),
             ),
-            Text('Status: ${service.status}'),
+            Text('Status: ${availability?.status ?? service.status}'),
             const SizedBox(height: 8),
+            const Text(
+              'Background notifications require a separately installed and enabled server-side mobile-push companion. Android cannot install it. Updating the APK alone does not set up the server.',
+            ),
+            TextButton.icon(
+              onPressed: () => openMarkdownWebLink(context, _serverSetupGuide),
+              icon: const Icon(Icons.open_in_new),
+              label: const Text('Server setup guide'),
+            ),
             const Text(
               'Enable to request Android notification permission and share this installation’s endpoint and encryption keys with this server. Encrypted activity hints contain no chat content. Only sessions authorized by your server login are included.',
             ),
@@ -149,20 +197,14 @@ class _MobilePushSettingsState extends State<MobilePushSettings> {
                 onPressed: () => _run(service.disable),
                 child: const Text('Disable and revoke'),
               ),
+            const Text(
+              'Refresh / retry rechecks availability after server setup; it cannot install the companion. Enabling notifications remains a separate choice.',
+            ),
             Wrap(
               spacing: 8,
               children: [
                 OutlinedButton(
-                  onPressed: busy || !ready
-                      ? null
-                      : () => _run(() async {
-                          await _load();
-                          if (service.enabled) {
-                            await service.retry();
-                          } else {
-                            await service.refresh();
-                          }
-                        }),
+                  onPressed: busy || !ready ? null : () => _run(_refresh),
                   child: const Text('Refresh / retry'),
                 ),
               ],
@@ -222,7 +264,8 @@ class _MobilePushSettingsState extends State<MobilePushSettings> {
               const Text(
                 'Server revocation pending. Local delivery is off; retry while the original saved login is available.',
               ),
-            if (message ?? service.error case final String text)
+            if (message ?? availability?.error ?? service.error
+                case final String text)
               Text(
                 text,
                 style: TextStyle(color: Theme.of(context).colorScheme.error),
