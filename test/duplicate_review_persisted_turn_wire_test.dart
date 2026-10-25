@@ -123,6 +123,65 @@ void main() {
   );
 
   testWidgets(
+    'held route Refresh cannot revive a newer alias presentation veto',
+    (tester) async {
+      final h = await _Harness.open(tester);
+      await h.send('Current prompt', 1);
+      h.server.finishReceipt('Current prompt', 'Saved answer', firstId: 3);
+      await h.untilRetired();
+      await tester.pumpAndSettle();
+      final olderLatest = h.owner.snapshot.historyRows.last;
+      final reservation = h.owner.reserve()!;
+      h.server.holdNextOffset = 0;
+      await tester.tap(find.byTooltip('Chat actions').hitTestable());
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.tap(find.text('Refresh').hitTestable());
+      await widgetUntil(tester, () => h.server.held != null);
+      final held = h.server.held!;
+      final alias = h.controller
+          .normalSessionFor(h.server.connection)
+          .chatFor('local-alias', title: 'Local alias');
+      final newerVeto = {...olderLatest, 'partial': true};
+      expect(alias.observeHistory([newerVeto]), isTrue);
+      alias.bindStoredSession('stored');
+      h.owner.cancelPreparation(reservation);
+      await tester.pumpAndSettle();
+      expect(h.owner.snapshot.historyRows.last, olderLatest);
+      expect(h.owner.snapshot.historyPresentationRows.last, newerVeto);
+      expect(_bubbles(tester), [
+        'Prior prompt',
+        'Prior answer',
+        'Current prompt',
+      ]);
+      held.release.complete(false);
+      await widgetUntil(tester, () => held.finished.isCompleted);
+      await tester.pumpAndSettle();
+      expect(h.owner.snapshot.historyPresentationRows.last, newerVeto);
+      expect(
+        _bubbles(tester),
+        ['Prior prompt', 'Prior answer', 'Current prompt'],
+        reason:
+            'physical latest authority must not overwrite newer alias context',
+      );
+      // A genuinely newer physical observation may replace the alias veto.
+      final readsBeforeRetry = h.server.reads.length;
+      await h.refresh();
+      await widgetUntil(tester, () => h.server.reads.length > readsBeforeRetry);
+      await tester.pumpAndSettle();
+      expect(h.owner.snapshot.historyPresentationRows.last, olderLatest);
+      expect(_bubbles(tester), [
+        'Prior prompt',
+        'Prior answer',
+        'Current prompt',
+        'Saved answer',
+      ]);
+      expect(h.server.prompts, hasLength(1));
+      await h.close();
+    },
+  );
+
+  testWidgets(
     'newer alias presentation veto survives the older admission snapshot',
     (tester) async {
       final h = await _Harness.open(tester);

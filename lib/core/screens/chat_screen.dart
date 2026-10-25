@@ -972,6 +972,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           });
         });
       }
+      if (!hydrateHistory &&
+          snapshot.historyPresentationRows.isNotEmpty &&
+          !_windowContainsLatest(_ownerHistoryForPresentation(snapshot))) {
+        // Physical readers already applied their cursor-owning batch, but it
+        // can predate an alias's retained per-row veto. This synchronous path
+        // supersedes the queued owner callback; apply its presentation union
+        // too, without lending that union paging or latest-read authority.
+        _historyWindow.mergeObservedRows(
+          _ownerHistoryForPresentation(snapshot),
+        );
+        _historyWindowRevision++;
+        _extractToolMessages(_historyWindow.rows);
+      }
       _messages = _restHistoryForPresentation();
       // Hydrated child roots and owner runtime IDs may differ. Preserve the
       // stable task anchor and forward all progress/final updates to the modal.
