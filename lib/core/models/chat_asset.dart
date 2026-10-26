@@ -68,7 +68,13 @@ class ChatAsset {
     'opus' ||
     'm4a' ||
     'flac' => ChatAssetKind.audio,
-    'mp4' || 'mov' || 'avi' || 'mkv' || 'webm' || '3gp' => ChatAssetKind.video,
+    'mp4' ||
+    'm4v' ||
+    'mov' ||
+    'avi' ||
+    'mkv' ||
+    'webm' ||
+    '3gp' => ChatAssetKind.video,
     _ => ChatAssetKind.document,
   };
 }

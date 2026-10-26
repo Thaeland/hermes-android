@@ -120,6 +120,37 @@ class AppLocalizationsEs extends AppLocalizations {
   String get attachment_loading => 'Cargando vista previa…';
 
   @override
+  String get attachment_document_text_notice =>
+      'Vista previa de texto. El diseño, las imágenes y el formato pueden diferir del original.';
+
+  @override
+  String get attachment_document_failed =>
+      'No se pudo mostrar la vista previa de este documento. Guarda o comparte el archivo original.';
+
+  @override
+  String get attachment_document_empty =>
+      'No se encontró texto legible en este documento.';
+
+  @override
+  String get attachment_video_failed =>
+      'No se pudo reproducir este vídeo. Es posible que su formato o códec no sea compatible. Guarda o comparte el archivo original.';
+
+  @override
+  String get attachment_video_play => 'Reproducir';
+
+  @override
+  String get attachment_video_pause => 'Pausar';
+
+  @override
+  String get attachment_video_mute => 'Silenciar';
+
+  @override
+  String get attachment_video_unmute => 'Activar sonido';
+
+  @override
+  String get attachment_video_seek => 'Posición del vídeo';
+
+  @override
   String get attachment_close => 'Cerrar vista previa';
 
   @override

@@ -284,7 +284,13 @@ class _MediaArtifactCardState extends State<MediaArtifactCard> {
     'svg' ||
     'heic' ||
     'avif' => Icons.image_outlined,
-    'mp4' || 'mov' || 'avi' || 'mkv' || 'webm' || '3gp' => Icons.movie_outlined,
+    'mp4' ||
+    'm4v' ||
+    'mov' ||
+    'avi' ||
+    'mkv' ||
+    'webm' ||
+    '3gp' => Icons.movie_outlined,
     'mp3' ||
     'm2a' ||
     'wav' ||

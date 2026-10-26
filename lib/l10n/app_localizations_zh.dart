@@ -110,6 +110,33 @@ class AppLocalizationsZh extends AppLocalizations {
   String get attachment_loading => '正在加载预览…';
 
   @override
+  String get attachment_document_text_notice => '文本预览。布局、图片和格式可能与原文件不同。';
+
+  @override
+  String get attachment_document_failed => '无法预览此文档。请保存或分享原始文件。';
+
+  @override
+  String get attachment_document_empty => '此文档中未找到可读文本。';
+
+  @override
+  String get attachment_video_failed => '无法播放此视频。其格式或编解码器可能不受支持。请保存或分享原始文件。';
+
+  @override
+  String get attachment_video_play => '播放';
+
+  @override
+  String get attachment_video_pause => '暂停';
+
+  @override
+  String get attachment_video_mute => '静音';
+
+  @override
+  String get attachment_video_unmute => '取消静音';
+
+  @override
+  String get attachment_video_seek => '视频进度';
+
+  @override
   String get attachment_close => '关闭预览';
 
   @override
@@ -3129,6 +3156,33 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get attachment_loading => '正在加载预览…';
+
+  @override
+  String get attachment_document_text_notice => '文本预览。布局、图片和格式可能与原文件不同。';
+
+  @override
+  String get attachment_document_failed => '无法预览此文档。请保存或分享原始文件。';
+
+  @override
+  String get attachment_document_empty => '此文档中未找到可读文本。';
+
+  @override
+  String get attachment_video_failed => '无法播放此视频。其格式或编解码器可能不受支持。请保存或分享原始文件。';
+
+  @override
+  String get attachment_video_play => '播放';
+
+  @override
+  String get attachment_video_pause => '暂停';
+
+  @override
+  String get attachment_video_mute => '静音';
+
+  @override
+  String get attachment_video_unmute => '取消静音';
+
+  @override
+  String get attachment_video_seek => '视频进度';
 
   @override
   String get attachment_close => '关闭预览';

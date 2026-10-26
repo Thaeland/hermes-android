@@ -209,7 +209,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  for (final extension in ['docx', 'xlsx', 'zip', 'bin', 'mp4']) {
+  for (final extension in ['doc', 'xls', 'ppt', 'zip', 'bin']) {
     testWidgets(
       '$extension opens honest themed fallback, not an executable viewer',
       (tester) async {

@@ -125,9 +125,12 @@ rows and offers Retry rather than claiming the archive is empty.
 - **More → Assets** browses generated files explicitly shared in saved Hermes
   replies, plus recognised successful image-generation results. The same file
   cards appear in the chat timeline, including filesystem Markdown links.
-  Tap to preview images, PDF pages or text; use **Download** to choose a save
-  destination, or **Share** to send a file to another app. Other binary formats
-  show file information and remain downloadable. History scans are incremental
+  Tap to preview images, PDF pages, text or videos with playback controls.
+  DOCX, XLSX and PPTX files have offline text previews; layout, images and
+  formatting may differ from the original. Use **Download** to choose a save
+  destination, or **Share** to send the original file to another app. Legacy
+  `.doc`/`.xls`/`.ppt` files and other unsupported binaries remain downloadable.
+  History scans are incremental
   and downloads are lazy, with a 25 MiB per-file limit. This is not a complete attachment or
   filesystem catalogue. See [Browsing chat assets](docs/chat-assets.md).
 

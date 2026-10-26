@@ -120,6 +120,37 @@ class AppLocalizationsRu extends AppLocalizations {
   String get attachment_loading => 'Загрузка предпросмотра…';
 
   @override
+  String get attachment_document_text_notice =>
+      'Предпросмотр текста. Макет, изображения и форматирование могут отличаться от оригинала.';
+
+  @override
+  String get attachment_document_failed =>
+      'Не удалось открыть предпросмотр документа. Сохраните исходный файл или поделитесь им.';
+
+  @override
+  String get attachment_document_empty =>
+      'В этом документе не найден читаемый текст.';
+
+  @override
+  String get attachment_video_failed =>
+      'Не удалось воспроизвести видео. Возможно, формат или кодек не поддерживается. Сохраните исходный файл или поделитесь им.';
+
+  @override
+  String get attachment_video_play => 'Воспроизвести';
+
+  @override
+  String get attachment_video_pause => 'Пауза';
+
+  @override
+  String get attachment_video_mute => 'Выключить звук';
+
+  @override
+  String get attachment_video_unmute => 'Включить звук';
+
+  @override
+  String get attachment_video_seek => 'Позиция видео';
+
+  @override
   String get attachment_close => 'Закрыть предпросмотр';
 
   @override

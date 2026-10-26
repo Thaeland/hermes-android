@@ -120,6 +120,37 @@ class AppLocalizationsDe extends AppLocalizations {
   String get attachment_loading => 'Vorschau wird geladen…';
 
   @override
+  String get attachment_document_text_notice =>
+      'Textvorschau. Layout, Bilder und Formatierung können vom Original abweichen.';
+
+  @override
+  String get attachment_document_failed =>
+      'Für dieses Dokument konnte keine Vorschau erstellt werden. Die Originaldatei speichern oder teilen.';
+
+  @override
+  String get attachment_document_empty =>
+      'In diesem Dokument wurde kein lesbarer Text gefunden.';
+
+  @override
+  String get attachment_video_failed =>
+      'Dieses Video konnte nicht abgespielt werden. Das Format oder der Codec wird möglicherweise nicht unterstützt. Die Originaldatei speichern oder teilen.';
+
+  @override
+  String get attachment_video_play => 'Abspielen';
+
+  @override
+  String get attachment_video_pause => 'Pause';
+
+  @override
+  String get attachment_video_mute => 'Stummschalten';
+
+  @override
+  String get attachment_video_unmute => 'Ton einschalten';
+
+  @override
+  String get attachment_video_seek => 'Videoposition';
+
+  @override
   String get attachment_close => 'Vorschau schließen';
 
   @override
