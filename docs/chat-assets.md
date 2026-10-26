@@ -1,9 +1,11 @@
 # Generated attachments and chat assets
 
-These base features ship in **3.0.0**, extending earlier inline file-delivery
-cards. Video playback and Office text previews described below are **unreleased**.
-See the [stable release notes](releases/3.0.0.md) for the full change set and
-compatibility limits. Permanent regressions cover typed voice-stop phrases,
+The shared file browser, image/PDF/text previews and Download/Share shipped in
+**3.0.0**, extending earlier inline file-delivery cards. **3.0.1** adds in-app
+video playback and offline Office text previews. See the
+[3.0.1 release notes](releases/3.0.1.md) for those changes and compatibility
+limits, and the [3.0.0 notes](releases/3.0.0.md) for the earlier features.
+Permanent regressions cover typed voice-stop phrases,
 image-only history, literal client-note examples, public exports, previews,
 download bounds and cancellation. The GitHub release records final validation;
 automated checks do not establish acceptance on every physical phone.
@@ -65,16 +67,18 @@ files are references to the connected host, never same-named files on the phone.
 - Images support zoom. Android PDF previews show rendered pages with paging.
   Text, Markdown, JSON, CSV and other recognised text formats are selectable,
   inert text; scripts, HTML and external resources are not executed.
-- Videos open an in-app player with play/pause, seeking and mute controls.
+- Videos open an in-app player with play/pause, replay, seeking and mute controls.
   Playback does not start automatically. MP4/M4V, MOV, WebM, MKV, AVI and 3GP
   containers are routed to the player; actual codec support depends on Android
   and the device. Unsupported/corrupt media shows an error without removing
-  Download or Share. Playback pauses when the app is backgrounded or covered.
+  Download or Share. Playback pauses when the app is backgrounded or another
+  route covers the preview. Returning does not resume it; tap Play to continue.
 - DOCX, XLSX and PPTX documents have selectable, offline **text previews**:
-  paragraphs/tables, sheet names/cells and slide text, respectively. The notice
-  in the viewer makes clear that original layout, images, charts and formatting
-  are not rendered. Formulas are not evaluated; stored spreadsheet values are
-  shown when available. External links/resources and macros are never executed.
+  paragraph/table text, sheet names/raw cached cell values with coordinates, and
+  slide text. The viewer explains that it does not render original layout,
+  images, charts or formatting. It does not evaluate formulas; stored spreadsheet
+  values appear when available, without Excel number/date formatting. The app
+  does not execute external links/resources or macros.
 - Legacy binary Office files (`.doc`, `.xls`, `.ppt`), OpenDocument formats,
   archives and other unsupported binaries retain the no-inline-preview message.
   Save or share these originals to open them in a compatible application.
