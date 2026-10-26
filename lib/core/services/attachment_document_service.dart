@@ -320,7 +320,13 @@ Map<String, _Relationship> _relationships(
       }
       // Unused image/chart/macro relationships are intentionally not read.
       final relationship = _Relationship(type, '');
-      if (relationship.isType('worksheet') ||
+      if (relationship.isType('chartsheet') ||
+          relationship.isType('dialogsheet') ||
+          relationship.isType('macrosheet') ||
+          relationship.isType('intlMacrosheet')) {
+        // Retain the type without resolving or reading unsupported sheet data.
+        result[id] = relationship;
+      } else if (relationship.isType('worksheet') ||
           relationship.isType('sharedStrings') ||
           relationship.isType('slide')) {
         result[id] = _Relationship(type, _resolvePart(source, target));
@@ -404,6 +410,14 @@ void _readWorkbook(_OfficePackage package, _LimitedText output) {
       : _readSharedStrings(package, sharedParts.single.part);
   final seen = <String>{};
   for (final sheet in sheets) {
+    final relationship = relationships[sheet.id];
+    if (relationship != null &&
+        (relationship.isType('chartsheet') ||
+            relationship.isType('dialogsheet') ||
+            relationship.isType('macrosheet') ||
+            relationship.isType('intlMacrosheet'))) {
+      continue;
+    }
     final path = _relatedPart(
       relationships,
       sheet.id,
@@ -603,6 +617,85 @@ void _readPresentation(_OfficePackage package, _LimitedText output) {
         if (_is(element, _drawingNamespaces, 'p')) output.add('\n');
       },
     );
+  }
+}
+
+const _compatibilityNamespaces = {
+  'http://schemas.openxmlformats.org/markup-compatibility/2006',
+};
+
+class _OfficeAlternative {
+  _OfficeAlternative(this.element);
+  final XmlStartElementEvent element;
+  var selected = false;
+}
+
+/// Office often stores the same textbox twice for newer and older consumers.
+/// Select the first Choice whose text vocabularies we recognise, or Fallback;
+/// never combine mutually exclusive branches. Skipped XML is still validated.
+class _OfficeCompatibility {
+  final _alternatives = <_OfficeAlternative>[];
+  XmlStartElementEvent? _suppressed;
+  bool get acceptsText => _suppressed == null;
+
+  bool start(XmlStartElementEvent element) {
+    if (_suppressed != null) return false;
+    if (_is(element, _compatibilityNamespaces, 'AlternateContent')) {
+      _alternatives.add(_OfficeAlternative(element));
+    } else if (_alternatives.isNotEmpty &&
+        identical(element.parent, _alternatives.last.element) &&
+        (_is(element, _compatibilityNamespaces, 'Choice') ||
+            _is(element, _compatibilityNamespaces, 'Fallback'))) {
+      final alternative = _alternatives.last;
+      final supported =
+          _is(element, _compatibilityNamespaces, 'Fallback') ||
+          _supportsChoice(element);
+      if (alternative.selected || !supported) {
+        _suppressed = element;
+        return false;
+      }
+      alternative.selected = true;
+    }
+    return true;
+  }
+
+  bool end(XmlStartElementEvent element) {
+    if (_suppressed != null) {
+      if (identical(element, _suppressed)) _suppressed = null;
+      return false;
+    }
+    if (_alternatives.isNotEmpty &&
+        identical(element, _alternatives.last.element)) {
+      _alternatives.removeLast();
+    }
+    return true;
+  }
+
+  bool _supportsChoice(XmlStartElementEvent element) {
+    final requires = _attribute(element, 'Requires')?.trim();
+    if (requires == null || requires.isEmpty) return false;
+    for (final prefix in requires.split(RegExp(r'\s+'))) {
+      String? namespace;
+      for (
+        XmlStartElementEvent? parent = element;
+        parent != null && namespace == null;
+        parent = parent.parent
+      ) {
+        namespace = _attribute(parent, 'xmlns:$prefix');
+      }
+      if (!_wordNamespaces.contains(namespace) &&
+          !_sheetNamespaces.contains(namespace) &&
+          !_presentationNamespaces.contains(namespace) &&
+          !_drawingNamespaces.contains(namespace) &&
+          !const {
+            'http://schemas.microsoft.com/office/word/2010/wordprocessingShape',
+            'http://schemas.microsoft.com/office/word/2010/wordprocessingGroup',
+            'urn:schemas-microsoft-com:vml',
+          }.contains(namespace)) {
+        return false;
+      }
+    }
+    return true;
   }
 }
 
@@ -806,6 +899,7 @@ class _OfficePackage {
     }
     _checkXmlMarkup(text);
     final stack = <XmlStartElementEvent>[];
+    final compatibility = _OfficeCompatibility();
     var rooted = false;
     for (final event in parseEvents(
       text,
@@ -836,24 +930,26 @@ class _OfficePackage {
           }
           rooted = true;
         }
-        onStart?.call(event);
+        if (compatibility.start(event)) onStart?.call(event);
         if (event.isSelfClosing) {
-          onEnd?.call(event);
+          if (compatibility.end(event)) onEnd?.call(event);
         } else {
           stack.add(event);
         }
       } else if (event is XmlEndElementEvent) {
         final element = stack.removeLast();
-        onEnd?.call(element);
+        if (compatibility.end(element)) onEnd?.call(element);
       } else if (event is XmlTextEvent) {
         final decoded = event.value;
         if (stack.isEmpty && decoded.trim().isNotEmpty) {
           throw const FormatException('Text outside document root');
         }
-        onText?.call(decoded, stack.isEmpty ? null : stack.last);
+        if (compatibility.acceptsText) {
+          onText?.call(decoded, stack.isEmpty ? null : stack.last);
+        }
       } else if (event is XmlCDATAEvent) {
         if (stack.isEmpty) throw const FormatException('CDATA outside root');
-        onText?.call(event.value, stack.last);
+        if (compatibility.acceptsText) onText?.call(event.value, stack.last);
       }
     }
     if (!rooted || stack.isNotEmpty) {

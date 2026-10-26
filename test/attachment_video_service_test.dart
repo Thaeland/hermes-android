@@ -91,8 +91,8 @@ class _Platform extends VideoPlayerPlatform {
   Future<void> dispose(int playerId) async {
     log.add('dispose:$playerId');
     disposed.add(playerId);
-    await streams.remove(playerId)?.close();
     if (throwOnDispose) throw StateError('native dispose failed');
+    await streams.remove(playerId)?.close();
   }
 
   @override
@@ -339,11 +339,16 @@ void main() {
     tearDown(() async {
       try {
         if (platform.throwOnDispose) {
-          await expectLater(session.close(), throwsA(isA<PlatformException>()));
+          await expectLater(session.close(), throwsA(isA<StateError>()));
         } else {
           await session.close();
         }
       } finally {
+        // Failed-dispose fixtures intentionally retain a native handle.
+        for (final stream in platform.streams.values) {
+          await stream.close();
+        }
+        platform.streams.clear();
         VideoPlayerPlatform.instance = previousPlatform;
       }
     });
@@ -579,10 +584,15 @@ void main() {
         platform.throwOnPause = true;
         platform.throwOnDispose = true;
         final closing = session.close();
-        await expectLater(closing, throwsA(isA<PlatformException>()));
-        await expectLater(session.close(), throwsA(isA<PlatformException>()));
+        await expectLater(closing, throwsA(isA<StateError>()));
+        await expectLater(session.close(), throwsA(isA<StateError>()));
         expect(platform.disposed, [1]);
         expect(store.staged.single.closes, 0);
+        expect(
+          platform.streams.containsKey(1),
+          isTrue,
+          reason: 'The failed native release leaves its reader owned.',
+        );
         expect(session.controller, isNull);
       },
     );

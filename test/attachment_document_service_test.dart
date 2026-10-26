@@ -208,6 +208,69 @@ void main() {
     },
   );
 
+  for (final requires in ['wps', 'unknown']) {
+    for (final fallback in ['Textbox', 'Legacy alternative']) {
+      test('DOCX alternate textbox selects one branch: $requires / $fallback', () {
+        String textbox(String text) =>
+            '<w:txbxContent><w:p><w:r><w:t>$text</w:t></w:r></w:p></w:txbxContent>';
+        final bytes = _zip({
+          'word/document.xml':
+              '<w:document xmlns:w="$_word" '
+              'xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" '
+              'xmlns:wps="http://schemas.microsoft.com/office/word/2010/wordprocessingShape" '
+              'xmlns:unknown="urn:unsupported-textbox" xmlns:v="urn:schemas-microsoft-com:vml">'
+              '<w:body><mc:AlternateContent><mc:Choice Requires="$requires">'
+              '<wps:wsp>${textbox('Textbox')}</wps:wsp></mc:Choice>'
+              '<mc:Fallback><v:shape>${textbox(fallback)}</v:shape></mc:Fallback>'
+              '</mc:AlternateContent><w:p><w:r><w:t>After</w:t></w:r></w:p>'
+              '</w:body></w:document>',
+        });
+        final result = AttachmentDocumentService.parse(bytes, 'docx');
+        expect(result.failed, isFalse);
+        final selected = requires == 'wps' ? 'Textbox' : fallback;
+        expect(result.text, '$selected\nAfter\n');
+      });
+    }
+  }
+
+  test(
+    'XLSX chart tabs do not discard readable worksheets or read chart data',
+    () {
+      final result = AttachmentDocumentService.parse(
+        _zip({
+          'xl/workbook.xml': _workbook(
+            '<sheet name="Chart" sheetId="1" r:id="chart"/>'
+            '<sheet name="Data" sheetId="2" r:id="data"/>',
+          ),
+          'xl/_rels/workbook.xml.rels': _rels(
+            _rel('chart', 'chartsheet', 'chartsheets/sheet1.xml') +
+                _rel('data', 'worksheet', 'worksheets/sheet1.xml'),
+          ),
+          'xl/chartsheets/sheet1.xml': 'not parsed: chart data is unsupported',
+          'xl/worksheets/sheet1.xml': _worksheet(
+            '<row><c t="inlineStr"><is><t>visible</t></is></c></row>',
+          ),
+        }),
+        'xlsx',
+      );
+      expect(result.failed, isFalse);
+      expect(result.text, '[Data]\nA1\tvisible\n');
+    },
+  );
+
+  test('XLSX missing worksheet relationships still fail closed', () {
+    final result = AttachmentDocumentService.parse(
+      _zip({
+        'xl/workbook.xml': _workbook(
+          '<sheet name="Data" sheetId="1" r:id="missing"/>',
+        ),
+        'xl/_rels/workbook.xml.rels': _rels(''),
+      }),
+      'xlsx',
+    );
+    expect(result.failed, isTrue);
+  });
+
   test('XLSX uses workbook relationship order and actual sheet titles', () {
     final result = AttachmentDocumentService.parse(
       _zip({
