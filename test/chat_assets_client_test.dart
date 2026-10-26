@@ -141,7 +141,7 @@ void main() {
         final families = {
           ChatAssetKind.image: 'png jpg jpeg gif webp bmp tiff svg',
           ChatAssetKind.audio: 'mp3 m2a wav ogg opus m4a flac',
-          ChatAssetKind.video: 'mp4 mov avi mkv webm 3gp',
+          ChatAssetKind.video: 'mp4 m4v mov avi mkv webm 3gp',
           ChatAssetKind.document: 'pdf zip pptx json py unknown',
         };
         for (final family in families.entries) {

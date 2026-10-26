@@ -115,6 +115,36 @@ class AppLocalizationsKo extends AppLocalizations {
   String get attachment_loading => '미리 보기 불러오는 중…';
 
   @override
+  String get attachment_document_text_notice =>
+      '텍스트 미리 보기입니다. 레이아웃, 이미지 및 서식이 원본과 다를 수 있습니다.';
+
+  @override
+  String get attachment_document_failed =>
+      '이 문서를 미리 볼 수 없습니다. 원본 파일을 저장하거나 공유하세요.';
+
+  @override
+  String get attachment_document_empty => '이 문서에서 읽을 수 있는 텍스트를 찾지 못했습니다.';
+
+  @override
+  String get attachment_video_failed =>
+      '이 동영상을 재생할 수 없습니다. 형식이나 코덱이 지원되지 않을 수 있습니다. 원본 파일을 저장하거나 공유하세요.';
+
+  @override
+  String get attachment_video_play => '재생';
+
+  @override
+  String get attachment_video_pause => '일시 정지';
+
+  @override
+  String get attachment_video_mute => '음소거';
+
+  @override
+  String get attachment_video_unmute => '음소거 해제';
+
+  @override
+  String get attachment_video_seek => '동영상 재생 위치';
+
+  @override
   String get attachment_close => '미리 보기 닫기';
 
   @override

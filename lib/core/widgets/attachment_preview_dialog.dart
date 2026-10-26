@@ -9,6 +9,9 @@ import 'package:hermes_android/core/l10n/l10n.dart';
 
 import '../services/attachment_controller.dart';
 import '../services/attachment_pdf_service.dart';
+import '../services/attachment_video_service.dart';
+import 'attachment_document_preview.dart';
+import 'attachment_video_preview.dart';
 import 'hermes_system_ui.dart';
 
 bool attachmentIsImage(String extension) => const {
@@ -287,6 +290,20 @@ class AttachmentPreviewDialog extends StatelessWidget {
         minScale: 0.5,
         maxScale: 8,
         child: Center(child: attachmentImage(context, bytes)),
+      );
+    }
+    if (attachmentIsVideo(extension)) {
+      return AttachmentVideoPreview(
+        key: ObjectKey(controller),
+        bytes: bytes,
+        extension: extension,
+      );
+    }
+    if (attachmentIsDocument(extension)) {
+      return AttachmentDocumentPreview(
+        key: ObjectKey(controller),
+        bytes: bytes,
+        extension: extension,
       );
     }
     if (extension == 'pdf') {

@@ -120,6 +120,37 @@ class AppLocalizationsPt extends AppLocalizations {
   String get attachment_loading => 'A carregar pré-visualização…';
 
   @override
+  String get attachment_document_text_notice =>
+      'Pré-visualização de texto. A disposição, as imagens e a formatação podem diferir do original.';
+
+  @override
+  String get attachment_document_failed =>
+      'Não foi possível pré-visualizar este documento. Guarde ou partilhe o ficheiro original.';
+
+  @override
+  String get attachment_document_empty =>
+      'Não foi encontrado texto legível neste documento.';
+
+  @override
+  String get attachment_video_failed =>
+      'Não foi possível reproduzir este vídeo. O formato ou codec pode não ser suportado. Guarde ou partilhe o ficheiro original.';
+
+  @override
+  String get attachment_video_play => 'Reproduzir';
+
+  @override
+  String get attachment_video_pause => 'Pausa';
+
+  @override
+  String get attachment_video_mute => 'Silenciar';
+
+  @override
+  String get attachment_video_unmute => 'Ativar som';
+
+  @override
+  String get attachment_video_seek => 'Posição do vídeo';
+
+  @override
   String get attachment_close => 'Fechar pré-visualização';
 
   @override
@@ -3255,6 +3286,37 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get attachment_loading => 'Carregando prévia…';
+
+  @override
+  String get attachment_document_text_notice =>
+      'Prévia do texto. O layout, as imagens e a formatação podem diferir do original.';
+
+  @override
+  String get attachment_document_failed =>
+      'Não foi possível visualizar este documento. Salve ou compartilhe o arquivo original.';
+
+  @override
+  String get attachment_document_empty =>
+      'Nenhum texto legível foi encontrado neste documento.';
+
+  @override
+  String get attachment_video_failed =>
+      'Não foi possível reproduzir este vídeo. O formato ou codec pode não ser compatível. Salve ou compartilhe o arquivo original.';
+
+  @override
+  String get attachment_video_play => 'Reproduzir';
+
+  @override
+  String get attachment_video_pause => 'Pausar';
+
+  @override
+  String get attachment_video_mute => 'Silenciar';
+
+  @override
+  String get attachment_video_unmute => 'Ativar som';
+
+  @override
+  String get attachment_video_seek => 'Posição do vídeo';
 
   @override
   String get attachment_close => 'Fechar prévia';

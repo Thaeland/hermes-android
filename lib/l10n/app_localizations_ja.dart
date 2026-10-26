@@ -115,6 +115,36 @@ class AppLocalizationsJa extends AppLocalizations {
   String get attachment_loading => 'プレビューを読み込み中…';
 
   @override
+  String get attachment_document_text_notice =>
+      'テキストのプレビューです。レイアウト、画像、書式は元のファイルと異なる場合があります。';
+
+  @override
+  String get attachment_document_failed =>
+      'この文書をプレビューできませんでした。元のファイルを保存または共有してください。';
+
+  @override
+  String get attachment_document_empty => 'この文書に読み取り可能なテキストが見つかりませんでした。';
+
+  @override
+  String get attachment_video_failed =>
+      'この動画を再生できませんでした。形式またはコーデックがサポートされていない可能性があります。元のファイルを保存または共有してください。';
+
+  @override
+  String get attachment_video_play => '再生';
+
+  @override
+  String get attachment_video_pause => '一時停止';
+
+  @override
+  String get attachment_video_mute => 'ミュート';
+
+  @override
+  String get attachment_video_unmute => 'ミュート解除';
+
+  @override
+  String get attachment_video_seek => '動画の再生位置';
+
+  @override
   String get attachment_close => 'プレビューを閉じる';
 
   @override

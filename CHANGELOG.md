@@ -6,6 +6,14 @@ shows only the three latest releases.
 
 ## [Unreleased]
 
+### Added
+
+- In-app video attachment playback with play/pause, seeking and mute controls,
+  using downloaded bytes rather than exposing gateway credentials to a player.
+- Offline DOCX, XLSX and PPTX text previews in the shared chat/Assets viewer.
+  Original formatting and images are not rendered; legacy binary Office formats
+  and unsupported codecs retain Download/Share. PDF and plain-text previews remain.
+
 ## [3.0.0] - 2026-10-25
 
 Stable promotion of RC3's application code. This entry covers **all changes since 2.1.33**, including RC1 and RC2, not only the final candidate. Release identity is `3.0.0+3003`; production APK codes are `30031`, `30032` and `30033`, above all 3.0 RCs. Package and production signer remain unchanged. Back up settings before updating. See [the detailed release notes](docs/releases/3.0.0.md) for the full behaviour inventory and compatibility limits.

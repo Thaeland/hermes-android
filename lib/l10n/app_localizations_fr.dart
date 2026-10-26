@@ -120,6 +120,37 @@ class AppLocalizationsFr extends AppLocalizations {
   String get attachment_loading => 'Chargement de l’aperçu…';
 
   @override
+  String get attachment_document_text_notice =>
+      'Aperçu du texte. La mise en page, les images et la mise en forme peuvent différer de l’original.';
+
+  @override
+  String get attachment_document_failed =>
+      'Impossible d’afficher un aperçu de ce document. Enregistrez ou partagez le fichier original.';
+
+  @override
+  String get attachment_document_empty =>
+      'Aucun texte lisible n’a été trouvé dans ce document.';
+
+  @override
+  String get attachment_video_failed =>
+      'Impossible de lire cette vidéo. Son format ou son codec n’est peut-être pas pris en charge. Enregistrez ou partagez le fichier original.';
+
+  @override
+  String get attachment_video_play => 'Lire';
+
+  @override
+  String get attachment_video_pause => 'Pause';
+
+  @override
+  String get attachment_video_mute => 'Couper le son';
+
+  @override
+  String get attachment_video_unmute => 'Activer le son';
+
+  @override
+  String get attachment_video_seek => 'Position de la vidéo';
+
+  @override
   String get attachment_close => 'Fermer l’aperçu';
 
   @override

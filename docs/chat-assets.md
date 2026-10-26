@@ -1,6 +1,7 @@
 # Generated attachments and chat assets
 
-These features ship in **3.0.0**, extending earlier inline file-delivery cards.
+These base features ship in **3.0.0**, extending earlier inline file-delivery
+cards. Video playback and Office text previews described below are **unreleased**.
 See the [stable release notes](releases/3.0.0.md) for the full change set and
 compatibility limits. Permanent regressions cover typed voice-stop phrases,
 image-only history, literal client-note examples, public exports, previews,
@@ -64,16 +65,33 @@ files are references to the connected host, never same-named files on the phone.
 - Images support zoom. Android PDF previews show rendered pages with paging.
   Text, Markdown, JSON, CSV and other recognised text formats are selectable,
   inert text; scripts, HTML and external resources are not executed.
-- Office documents, archives and other unsupported binaries show file information
-  and an honest no-inline-preview message. They can still be saved or shared.
+- Videos open an in-app player with play/pause, seeking and mute controls.
+  Playback does not start automatically. MP4/M4V, MOV, WebM, MKV, AVI and 3GP
+  containers are routed to the player; actual codec support depends on Android
+  and the device. Unsupported/corrupt media shows an error without removing
+  Download or Share. Playback pauses when the app is backgrounded or covered.
+- DOCX, XLSX and PPTX documents have selectable, offline **text previews**:
+  paragraphs/tables, sheet names/cells and slide text, respectively. The notice
+  in the viewer makes clear that original layout, images, charts and formatting
+  are not rendered. Formulas are not evaluated; stored spreadsheet values are
+  shown when available. External links/resources and macros are never executed.
+- Legacy binary Office files (`.doc`, `.xls`, `.ppt`), OpenDocument formats,
+  archives and other unsupported binaries retain the no-inline-preview message.
+  Save or share these originals to open them in a compatible application.
 - Use **Download** on either the card or popup to open Android's save picker.
   Choose a destination to write the original bytes. Cancelling is not reported
   as a successful save. A failure remains visible and retryable.
 - **Share** is separate: it passes a temporary copy to Android's share sheet.
 - File bytes are loaded only after a tap and capped at **25 MiB per file** while
   streaming, including responses without a Content-Length. Oversized files must
-  be retrieved through the authenticated Dashboard instead. Preview text and
-  native PDF rendering have additional display/resource bounds.
+  be retrieved through the authenticated Dashboard instead. Text/Office previews
+  and native PDF rendering have additional display/resource bounds. Office ZIP
+  entries and inflated XML are bounded before parsing, away from the UI isolate.
+- Video playback uses a uniquely owned app-private temporary copy of the already
+  downloaded bytes, never a gateway URL or forwarded credentials. Closing or
+  replacing the preview releases its player and deletes only its own copy.
+  If native disposal fails, the private copy is retained for OS cache cleanup
+  rather than removed while a native reader may still be using it.
 - Closing/replacing the owning card cancels its active transfer. Popup and card
   actions share the cached bytes instead of downloading the same file again.
 

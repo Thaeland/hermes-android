@@ -294,6 +294,60 @@ abstract class AppLocalizations {
   /// **'Loading preview…'**
   String get attachment_loading;
 
+  /// No description provided for @attachment_document_text_notice.
+  ///
+  /// In en, this message translates to:
+  /// **'Text preview. Layout, images and formatting may differ from the original.'**
+  String get attachment_document_text_notice;
+
+  /// No description provided for @attachment_document_failed.
+  ///
+  /// In en, this message translates to:
+  /// **'This document could not be previewed. Save or share the original file.'**
+  String get attachment_document_failed;
+
+  /// No description provided for @attachment_document_empty.
+  ///
+  /// In en, this message translates to:
+  /// **'No readable text was found in this document.'**
+  String get attachment_document_empty;
+
+  /// No description provided for @attachment_video_failed.
+  ///
+  /// In en, this message translates to:
+  /// **'This video could not be played. Its format or codec may not be supported. Save or share the original file.'**
+  String get attachment_video_failed;
+
+  /// No description provided for @attachment_video_play.
+  ///
+  /// In en, this message translates to:
+  /// **'Play'**
+  String get attachment_video_play;
+
+  /// No description provided for @attachment_video_pause.
+  ///
+  /// In en, this message translates to:
+  /// **'Pause'**
+  String get attachment_video_pause;
+
+  /// No description provided for @attachment_video_mute.
+  ///
+  /// In en, this message translates to:
+  /// **'Mute'**
+  String get attachment_video_mute;
+
+  /// No description provided for @attachment_video_unmute.
+  ///
+  /// In en, this message translates to:
+  /// **'Unmute'**
+  String get attachment_video_unmute;
+
+  /// No description provided for @attachment_video_seek.
+  ///
+  /// In en, this message translates to:
+  /// **'Video position'**
+  String get attachment_video_seek;
+
   /// No description provided for @attachment_close.
   ///
   /// In en, this message translates to:
