@@ -1,6 +1,6 @@
 [![Hermes Android 3.0.0 announcement](docs/images/hermes-android-3.0.0-hero.jpg)](https://github.com/rusty4444/hermes-android/releases/tag/v3.0.0)
 
-# Hermes Android v3.0.0
+# Hermes Android v3.0.1
 
 Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — chat with your Hermes sessions from a phone or tablet over local Wi-Fi or a private Tailscale network.
 
@@ -43,15 +43,15 @@ Ten fresh Android emulator captures, each using a different colour palette. Thes
 
 ## Current release
 
-**3.0.0** (base build **3003**) is the stable release, based on the RC3 application code. It uses the existing production package, `com.hermesagent.hermes_android`, and release signer. Export an encrypted configuration backup before updating; 2.1.33 and all 3.0 RCs can upgrade in place with the matching APK.
+**3.0.1** (base build **3004**) adds in-app video playback and offline Office text previews. It keeps the production package, `com.hermesagent.hermes_android`, and signing identity. Export an encrypted configuration backup before updating; the matching production-signed APK upgrades 3.0.0, 2.1.33 or any 3.0 RC in place.
 
 | Download | Device | Version code |
 | --- | --- | --- |
-| [ARM64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.0/app-arm64-v8a-release.apk) | Most current Android phones/tablets | `30032` |
-| [ARMv7 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.0/app-armeabi-v7a-release.apk) | Older 32-bit ARM devices | `30031` |
-| [x86_64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.0/app-x86_64-release.apk) | x86_64 Android devices/emulators | `30033` |
+| [ARM64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.1/app-arm64-v8a-release.apk) | Most current Android phones/tablets | `30042` |
+| [ARMv7 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.1/app-armeabi-v7a-release.apk) | Older 32-bit ARM devices | `30041` |
+| [x86_64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.1/app-x86_64-release.apk) | x86_64 Android devices/emulators | `30043` |
 
-[Release and checksums](https://github.com/rusty4444/hermes-android/releases/tag/v3.0.0) · [All changes since 2.1.33](docs/releases/3.0.0.md) · [Full changelog](CHANGELOG.md)
+[Release and checksums](https://github.com/rusty4444/hermes-android/releases/tag/v3.0.1) · [Changes since 3.0.0](docs/releases/3.0.1.md) · [Full changelog](CHANGELOG.md)
 
 Debug builds use the separate `com.hermesagent.hermes_android.dev` package and Android debug certificate. Older production APKs have lower version codes; downgrading can require uninstalling and restoring a backup.
 
@@ -60,7 +60,7 @@ Debug builds use the separate `com.hermesagent.hermes_android.dev` package and A
 - Updating the APK does not install or configure Hermes host software or the optional mobile-push server companion.
 - Quiet mode requires completion metadata for each reply. If an older gateway's saved answers are missing in quiet mode, enable **Verbose Mode**. Saved/live duplicate handover also needs the gateway's optional complete `persisted_turn` receipt and fresh history; older gateways can retain both sources.
 - Assets is partial discovery of shared files, not a complete attachment or filesystem catalogue. Downloads are limited to 25 MiB per file.
-- Protect encrypted backups and their passwords. Backups can contain connection secrets and imported client private keys. See the [upgrade notes and compatibility limits](docs/releases/3.0.0.md#compatibility-and-delivery-limits).
+- Protect encrypted backups and their passwords. Backups can contain connection secrets and imported client private keys. See the [upgrade notes and compatibility limits](docs/releases/3.0.1.md#compatibility-and-delivery-limits).
 
 ### Update checks
 
@@ -126,12 +126,12 @@ rows and offers Retry rather than claiming the archive is empty.
   replies, plus recognised successful image-generation results. The same file
   cards appear in the chat timeline, including filesystem Markdown links.
   Tap to preview images, PDF pages, text or videos with playback controls.
-  DOCX, XLSX and PPTX files have offline text previews; layout, images and
-  formatting may differ from the original. Use **Download** to choose a save
-  destination, or **Share** to send the original file to another app. Legacy
-  `.doc`/`.xls`/`.ppt` files and other unsupported binaries remain downloadable.
-  History scans are incremental
-  and downloads are lazy, with a 25 MiB per-file limit. This is not a complete attachment or
+  In 3.0.1, videos start paused; DOCX, XLSX and PPTX have offline text previews
+  without original layout, images, charts or formatting. Use **Download** to
+  choose a save destination, or **Share** to send the original file to another
+  app. Legacy `.doc`/`.xls`/`.ppt`, OpenDocument and other unsupported binaries
+  remain downloadable. History scans are incremental and downloads are lazy,
+  with a 25 MiB per-file limit. This is not a complete attachment or
   filesystem catalogue. See [Browsing chat assets](docs/chat-assets.md).
 
 ## Remote Gateway edition highlights
@@ -230,6 +230,16 @@ See [CHANGELOG.md](CHANGELOG.md) for the complete release history and
 [docs/HERMESAPK_DEVELOPMENT_LOG.md](docs/HERMESAPK_DEVELOPMENT_LOG.md) for the
 sanitized implementation and validation record.
 
+## What's new in v3.0.1
+
+- In-app video playback with play/pause, replay, seeking and mute. Videos start paused; playback pauses when the app is backgrounded or another route covers the preview, and resumes only after you tap Play.
+- Offline DOCX paragraph/table text, XLSX sheet names and raw cached cell values with coordinates, and PPTX slide text. The viewer extracts text only; it does not render original layout, formatting, images or charts, or evaluate formulas.
+- Chat cards, inline file links and More → Assets share the same viewer. Download and Share keep the cached original bytes; PDF and plain-text previews remain available.
+- Video uses an app-private local copy, without passing gateway URLs or credentials to the player. Codec support depends on Android and the device; unsupported files retain Download/Share. The existing 25 MiB per-file limit applies.
+- No backend patch or new server configuration is required for these previews. Background push still needs its separate server companion and supported phone transport.
+
+Read the [3.0.1 release notes](docs/releases/3.0.1.md) for formats, fallback behaviour and upgrade limits.
+
 ## What's new in v3.0.0
 
 These highlights cover the whole **2.1.33 → 3.0.0** change set, not just RC3.
@@ -250,11 +260,6 @@ Read the [detailed release notes](docs/releases/3.0.0.md) for all changes, prere
 - More → Memory opens saved facts from the connected profile's `USER.md`; Agent notes opens `MEMORY.md`. Long facts support selectable full reads. The view does not enumerate external providers such as MemPalace.
 - Delegated-task bubbles keep a compact goal and status, with full details in the task timeline.
 - Reasoning starts collapsed on a new visit and retains manual choices during updates and scrolling. Version 3.0 extends collapsed defaults to all Verbose details.
-
-## What's new in v2.1.32
-
-- Tool sections start collapsed when opening or returning to a chat, with a preview of the current or latest call.
-- Manual expansion survives incoming events and scrolling during the visit, then resets on a true close/reopen. Version 3.0 applies this policy to every expandable detail section.
 
 ## Features
 
@@ -701,7 +706,7 @@ cp build/app/outputs/flutter-apk/app-*-release.apk release-apks/
 block in `android/app/build.gradle.kts` derives per-ABI codes as
 `base * 10 + ABI code` (armeabi-v7a = 1, arm64-v8a = 2, x86_64 = 3), so the
 codes stay ordered armeabi-v7a < arm64-v8a < x86_64 as fdroiddata requires.
-For v3.0.0, base `3003` produces codes `30031`/`30032`/`30033`.
+For v3.0.1, base `3004` produces codes `30041`/`30042`/`30043`.
 Before publication, CI verifies all three actual APKs: package, version, ABI,
 effective code, production signer and required licence/source assets. Releases
 include checksums and exact-commit source/relink materials. Release-floor checks

@@ -6,6 +6,13 @@ shows only the three latest releases.
 
 ## [Unreleased]
 
+## [3.0.1] - 2026-10-26
+
+Release identity is `3.0.1+3004`, with production APK codes `30041`, `30042` and
+`30043`, above all 3.0.0 splits. The production package and signing identity stay
+the same. Export an encrypted configuration backup before updating. See the
+[detailed release notes](docs/releases/3.0.1.md).
+
 ### Added
 
 - In-app video attachment playback with play/pause, seeking and mute controls,
@@ -13,6 +20,25 @@ shows only the three latest releases.
 - Offline DOCX, XLSX and PPTX text previews in the shared chat/Assets viewer.
   Original formatting and images are not rendered; legacy binary Office formats
   and unsupported codecs retain Download/Share. PDF and plain-text previews remain.
+
+### Behaviour and limits
+
+- Videos start paused and offer replay after completion. Backgrounding the app
+  or covering the preview pauses playback; returning does not resume it without
+  a Play tap. The player reads an app-private local copy of cached original bytes.
+- XLSX text includes sheet names and cell coordinates with raw stored values;
+  the app does not evaluate formulas. DOCX tables and PPTX slides are text previews,
+  without original layout, charts, images or formatting.
+- Chat cards, inline file links and More → Assets share previews and cached
+  original-byte Download/Share. Existing 25 MiB transfer and bounded-preview
+  limits apply. Android/device codecs determine which videos can play; legacy
+  Office and OpenDocument files retain the download/share fallback.
+- These previews use existing gateway routes, with no backend patch or new
+  server configuration. Background push and its separate companion requirements
+  are unchanged. Automated checks do not establish physical-phone acceptance.
+
+Hermes Agent assisted with implementation, review, documentation and regression
+tests. Existing community credits and release history remain below.
 
 ## [3.0.0] - 2026-10-25
 
