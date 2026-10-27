@@ -11,6 +11,8 @@ import '../models/gateway_insight.dart';
 import '../models/normal_gateway_persisted_turn.dart';
 import '../utils/chat_conversation_projection.dart';
 import '../utils/android_prompt_context.dart';
+import '../utils/generated_media.dart';
+import '../utils/message_content.dart';
 import 'connection_manager.dart';
 import 'composer_draft_store.dart';
 import 'chat_history_window.dart';
@@ -70,10 +72,23 @@ class NormalGatewayChatActivity {
   });
 }
 
+/// Exact admitted operation outcome and live public final, never a history row.
+class NormalGatewayTurnTerminal {
+  const NormalGatewayTurnTerminal({
+    required this.turnId,
+    required this.completed,
+    required this.publicFinalText,
+  });
+  final String turnId;
+  final bool? completed;
+  final String? publicFinalText;
+}
+
 /// Durable history and transient presentation are deliberately separate. Never
 /// write displayRows into the history window: they have no durable row identity.
 class NormalGatewayChatSnapshot {
   final String? turnId;
+  final NormalGatewayTurnTerminal? terminal;
   final String? storedSessionId;
   final NormalGatewayTurnPhase phase;
   final bool wireEmitted;
@@ -102,6 +117,7 @@ class NormalGatewayChatSnapshot {
   final List<ReceivedScopeOutcome> receivedOutcomes;
   const NormalGatewayChatSnapshot({
     required this.turnId,
+    this.terminal,
     required this.storedSessionId,
     required this.phase,
     required this.wireEmitted,
@@ -702,6 +718,10 @@ class NormalGatewayChatOwner {
   set title(String value) => _root._title = value;
   final String? _workingDirectory;
   String? get workingDirectory => _root._workingDirectory;
+  NormalGatewayTurnTerminal? _voiceTerminal;
+  String? _voicePublicFinal;
+  bool _voiceFinalKnown = false;
+  bool _voiceCompletionSeen = false;
   String? _turnId;
   String? get turnId => _root._turnId;
   set turnId(String? value) => _root._turnId = value;
@@ -790,6 +810,7 @@ class NormalGatewayChatOwner {
           storedSessionId: storedSessionId,
           phase: phase,
           wireEmitted: wireEmitted,
+          terminal: _voiceTerminal,
           steering: _steerFlight != null,
           rowFloor: _floor,
           displayRows:
@@ -1430,6 +1451,10 @@ class NormalGatewayChatOwner {
     }
     _generation++;
     turnId = const Uuid().v4();
+    _voiceTerminal = null;
+    _voicePublicFinal = null;
+    _voiceFinalKnown = false;
+    _voiceCompletionSeen = false;
     _reservation = Object();
     phase = NormalGatewayTurnPhase.preparing;
     wireEmitted = false;
@@ -1534,6 +1559,7 @@ class NormalGatewayChatOwner {
     String? rawDraftText,
     bool canRestoreDraft = false,
     ComposerDraftHandle? draftHandle,
+    bool Function()? maySubmit,
   }) async {
     if (_redirect != null) {
       return _root.submitPrepared(
@@ -1545,6 +1571,7 @@ class NormalGatewayChatOwner {
         rawDraftText: rawDraftText,
         canRestoreDraft: canRestoreDraft,
         draftHandle: draftHandle,
+        maySubmit: maySubmit,
       );
     }
     if (!identical(_reservation, reservation) ||
@@ -1594,6 +1621,9 @@ class NormalGatewayChatOwner {
           workingDirectory: workingDirectory,
         );
         if (!_submissionCurrent(generation)) return;
+        if (maySubmit?.call() == false) {
+          throw StateError('Voice admission revoked');
+        }
         final stored = _session.client!.storedSessionKeyFor(localSessionId);
         if (stored == null) {
           throw StateError('No durable session binding before submit.');
@@ -1601,6 +1631,9 @@ class NormalGatewayChatOwner {
         _session._bind(this, stored);
       }
       if (!_submissionCurrent(generation)) return;
+      if (maySubmit?.call() == false) {
+        throw StateError('Voice admission revoked');
+      }
       // Allocation-time emptiness is consumed once, unless a newer verified
       // alias observation has superseded it. Resume/unknown/404 are never empty.
       final createdEmpty = _createdEmptySessionId == storedSessionId;
@@ -1609,6 +1642,9 @@ class NormalGatewayChatOwner {
         final stored = storedSessionId!;
         final baseline = await _readAdmissionBaseline(stored);
         if (!_submissionCurrent(generation)) return;
+        if (maySubmit?.call() == false) {
+          throw StateError('Voice admission revoked');
+        }
         if (stored == storedSessionId && baseline != null) {
           _acceptHistory(baseline);
         }
@@ -1622,6 +1658,9 @@ class NormalGatewayChatOwner {
           : null;
       _historyKnown = false;
       if (!_submissionCurrent(generation)) return;
+      if (maySubmit?.call() == false) {
+        throw StateError('Voice admission revoked');
+      }
       final now = DateTime.now().millisecondsSinceEpoch;
       _marker = NormalGatewayPendingMarker(
         scope: _session.scope,
@@ -1635,6 +1674,9 @@ class NormalGatewayChatOwner {
       );
       await _session.pendingStore.put(_marker!);
       if (!_submissionCurrent(generation)) return;
+      if (maySubmit?.call() == false) {
+        throw StateError('Voice admission revoked');
+      }
       _submissionPending = true;
       final NormalGatewayPromptSubmit submitPrompt =
           submit ??
@@ -1650,7 +1692,10 @@ class NormalGatewayChatOwner {
                   text: text,
                   onEvent: onEvent,
                   onSent: onSent,
-                  maySend: () => _current(generation) && snapshot.hasActiveTurn,
+                  maySend: () =>
+                      _current(generation) &&
+                      snapshot.hasActiveTurn &&
+                      maySubmit?.call() != false,
                 ));
       await submitPrompt(
         sessionId: localSessionId,
@@ -1900,6 +1945,8 @@ class NormalGatewayChatOwner {
       // persistence proof. A subsequent valid completion may establish a new
       // exact scope claim; lifecycle/status-only updates do not revoke it.
       _persistedTurns.remove(turnId);
+      _voiceFinalKnown = false;
+      _voicePublicFinal = null;
       _sawResponseActivity = true;
     }
     if (phase == NormalGatewayTurnPhase.reconciling &&
@@ -2031,6 +2078,22 @@ class NormalGatewayChatOwner {
         target['_chat_response_complete'] =
             ownsResponse && isSuccessfulResponseReceipt(event.data);
         _capturePersistedTurn(event.data);
+        // This is the admitted operation's live completion, not a history row.
+        // Preserve explicit empty/hidden public delivery instead of borrowing
+        // an older same-text assistant from a retained presentation.
+        _voiceFinalKnown = true;
+        _voiceCompletionSeen = true;
+        final public = <String, dynamic>{
+          ...event.data,
+          'role': 'assistant',
+          'content': text,
+        };
+        _voicePublicFinal =
+            ownsResponse &&
+                isSuccessfulResponseReceipt(event.data) &&
+                isPublicDeliveryMessage(public)
+            ? stripToolResultText(publicDeliveryText(public)).trim()
+            : null;
       }
     } else if (event.type.startsWith('tool.')) {
       final update = GatewayToolActivity.fromGatewayEvent(
@@ -2341,6 +2404,21 @@ class NormalGatewayChatOwner {
     final owned = generation ?? _generation;
     if (!_current(owned) || _settling || !snapshot.hasActiveTurn) return;
     final settledTurnId = turnId;
+    String? publicFinal = _voicePublicFinal;
+    if (!_voiceFinalKnown &&
+        !_voiceCompletionSeen &&
+        completed == true &&
+        wireEmitted) {
+      final assistant = _display.lastWhere(
+        (row) => row['role'] == 'assistant',
+        orElse: () => <String, dynamic>{},
+      );
+      if (assistant['_chat_response_complete'] == true &&
+          assistant['_gateway_interim'] != true &&
+          isPublicDeliveryMessage(assistant)) {
+        publicFinal = stripToolResultText(publicDeliveryText(assistant)).trim();
+      }
+    }
     final settledWireEmitted = wireEmitted;
     final settledSessionId = storedSessionId ?? localSessionId;
     final settledTitle = title;
@@ -2388,6 +2466,13 @@ class NormalGatewayChatOwner {
                 isCurrent: canRestore,
               ));
         if (!_current(owned)) return;
+      }
+      if (settledTurnId != null) {
+        _voiceTerminal = NormalGatewayTurnTerminal(
+          turnId: settledTurnId,
+          completed: completed,
+          publicFinalText: completed == true ? publicFinal : null,
+        );
       }
       phase = completed == null
           ? NormalGatewayTurnPhase.reconciledUnknown

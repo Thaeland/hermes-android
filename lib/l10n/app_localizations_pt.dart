@@ -25,6 +25,78 @@ class AppLocalizationsPt extends AppLocalizations {
   String get background_report_collapse => 'Recolher relatório';
 
   @override
+  String get hands_free_title => 'Mãos livres';
+
+  @override
+  String get hands_free_start => 'Iniciar mãos livres';
+
+  @override
+  String get hands_free_stop => 'Parar mãos livres';
+
+  @override
+  String get hands_free_preparing => 'A preparar voz — aguarde';
+
+  @override
+  String get hands_free_listening => 'Diga Hey Hermes';
+
+  @override
+  String get hands_free_recording => 'Pronto — fale agora';
+
+  @override
+  String get hands_free_waiting => 'A aguardar Hermes';
+
+  @override
+  String get hands_free_speaking => 'A falar — microfone desligado';
+
+  @override
+  String hands_free_followup(int seconds) {
+    return 'Ouvir até $seconds segundos';
+  }
+
+  @override
+  String get hands_free_error => 'Mãos livres parado';
+
+  @override
+  String get hands_free_setup => 'Configurar mãos livres';
+
+  @override
+  String hands_free_preview(String transcript) {
+    return 'Pré-visualização: $transcript';
+  }
+
+  @override
+  String get hands_free_short_disclosure =>
+      'Apenas com este chat aberto em primeiro plano. Ativação offline; a voz pode usar redes. Consome bateria.';
+
+  @override
+  String get hands_free_error_action =>
+      'Verifique microfone, serviço de voz, voz da resposta e ligação. Prima Parar e Iniciar. Nada é reenviado.';
+
+  @override
+  String get hands_free_disclosure =>
+      'A ativação funciona offline na CPU. O reconhecimento Android, a voz escolhida e o gateway podem usar redes. A escuta consome bateria e pode ativar por engano. Para ao cobrir ou fechar o chat ou sair do primeiro plano, sem reinício automático. O ditado manual continua como rascunho editável.';
+
+  @override
+  String get hands_free_ready_cue =>
+      'Diga «Hey Hermes», espere por «Pronto» e fale. Sem captura na mesma frase nem áudio anterior. Se a autorização sair da aplicação, prima Iniciar novamente após a conceder.';
+
+  @override
+  String get hands_free_timing_limit =>
+      'A janela de seguimento é um máximo, não um mínimo. O Android pode parar mais cedo. O silêncio volta à ativação local sem reinícios repetidos do reconhecimento.';
+
+  @override
+  String get hands_free_followup_off =>
+      'Seguimento desligado — diga Hey Hermes para cada mensagem';
+
+  @override
+  String get hands_free_start_blocked =>
+      'Requer rascunho vazio, sem anexos, chat ligado e inativo e respostas faladas ativas. Termine primeiro as ações de voz manuais.';
+
+  @override
+  String get hands_free_setup_complete =>
+      'Configuração do microfone concluída. Prima Iniciar novamente.';
+
+  @override
   String message_time_recorded(String time) {
     return 'Recorded by server: $time (local time)';
   }
@@ -3206,6 +3278,78 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
 
   @override
   String get background_report_collapse => 'Recolher relatório';
+
+  @override
+  String get hands_free_title => 'Mãos livres';
+
+  @override
+  String get hands_free_start => 'Iniciar mãos livres';
+
+  @override
+  String get hands_free_stop => 'Parar mãos livres';
+
+  @override
+  String get hands_free_preparing => 'Preparando voz — aguarde';
+
+  @override
+  String get hands_free_listening => 'Diga Hey Hermes';
+
+  @override
+  String get hands_free_recording => 'Pronto — fale agora';
+
+  @override
+  String get hands_free_waiting => 'Aguardando Hermes';
+
+  @override
+  String get hands_free_speaking => 'Falando — microfone desligado';
+
+  @override
+  String hands_free_followup(int seconds) {
+    return 'Ouvir por até $seconds segundos';
+  }
+
+  @override
+  String get hands_free_error => 'Mãos livres parado';
+
+  @override
+  String get hands_free_setup => 'Configurar mãos livres';
+
+  @override
+  String hands_free_preview(String transcript) {
+    return 'Prévia de voz: $transcript';
+  }
+
+  @override
+  String get hands_free_short_disclosure =>
+      'Só com este chat aberto em primeiro plano. Ativação offline; a voz pode usar redes. Consome bateria.';
+
+  @override
+  String get hands_free_error_action =>
+      'Confira microfone, serviço de voz, voz da resposta e conexão. Toque em Parar e Iniciar. Nada é reenviado.';
+
+  @override
+  String get hands_free_disclosure =>
+      'A ativação funciona offline na CPU. O reconhecimento Android, a voz escolhida e o gateway podem usar redes. A escuta consome bateria e pode ativar por engano. Para ao cobrir ou fechar o chat ou sair do primeiro plano, sem reinício automático. O ditado manual continua como rascunho editável.';
+
+  @override
+  String get hands_free_ready_cue =>
+      'Diga “Hey Hermes”, espere por “Pronto” e fale. Sem captura na mesma frase nem áudio anterior. Se a permissão sair do app, toque em Iniciar novamente após concedê-la.';
+
+  @override
+  String get hands_free_timing_limit =>
+      'A janela de continuação é um máximo, não um mínimo. O Android pode parar antes. O silêncio volta à ativação local sem reinícios repetidos do reconhecimento.';
+
+  @override
+  String get hands_free_followup_off =>
+      'Continuação desativada — diga Hey Hermes para cada mensagem';
+
+  @override
+  String get hands_free_start_blocked =>
+      'Requer rascunho vazio, sem anexos, chat conectado e sem atividade e respostas faladas ativas. Termine primeiro as ações de voz manuais.';
+
+  @override
+  String get hands_free_setup_complete =>
+      'Configuração do microfone concluída. Toque em Iniciar novamente.';
 
   @override
   String get stop_and_send => 'Parar e enviar';

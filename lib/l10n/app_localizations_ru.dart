@@ -25,6 +25,78 @@ class AppLocalizationsRu extends AppLocalizations {
   String get background_report_collapse => 'Свернуть отчёт';
 
   @override
+  String get hands_free_title => 'Голосовой диалог';
+
+  @override
+  String get hands_free_start => 'Начать диалог';
+
+  @override
+  String get hands_free_stop => 'Остановить диалог';
+
+  @override
+  String get hands_free_preparing => 'Подготовка — подождите';
+
+  @override
+  String get hands_free_listening => 'Скажите Hey Hermes';
+
+  @override
+  String get hands_free_recording => 'Готово — говорите';
+
+  @override
+  String get hands_free_waiting => 'Ожидание Hermes';
+
+  @override
+  String get hands_free_speaking => 'Озвучивание — микрофон выключен';
+
+  @override
+  String hands_free_followup(int seconds) {
+    return 'Слушать до $seconds секунд';
+  }
+
+  @override
+  String get hands_free_error => 'Диалог остановлен';
+
+  @override
+  String get hands_free_setup => 'Настройка диалога';
+
+  @override
+  String hands_free_preview(String transcript) {
+    return 'Распознано: $transcript';
+  }
+
+  @override
+  String get hands_free_short_disclosure =>
+      'Только в открытом чате на переднем плане. Активация офлайн; речь может использовать сеть. Расходует батарею.';
+
+  @override
+  String get hands_free_error_action =>
+      'Проверьте доступ к микрофону, речевой сервис, голос и соединение. Нажмите Стоп и Начать. Повторной отправки нет.';
+
+  @override
+  String get hands_free_disclosure =>
+      'Активация работает офлайн на процессоре. Распознавание Android, выбранный голос и шлюз могут использовать сеть. Прослушивание расходует батарею; возможны ложные срабатывания. При закрытии, перекрытии чата или уходе в фон всё останавливается без автозапуска. Ручная диктовка остаётся редактируемым черновиком.';
+
+  @override
+  String get hands_free_ready_cue =>
+      'Скажите «Hey Hermes», дождитесь «Готово», затем говорите. Нет захвата одной фразой или предзаписи. После выдачи разрешения вне приложения нажмите Начать снова.';
+
+  @override
+  String get hands_free_timing_limit =>
+      'Окно продолжения — максимум, не минимум. Android может остановиться раньше. Тишина возвращает локальную активацию без повторных запусков распознавания.';
+
+  @override
+  String get hands_free_followup_off =>
+      'Продолжение выключено — говорите Hey Hermes перед каждым запросом';
+
+  @override
+  String get hands_free_start_blocked =>
+      'Нужны пустой черновик, отсутствие вложений, свободный подключённый чат и включённая озвучка. Сначала завершите ручные голосовые действия.';
+
+  @override
+  String get hands_free_setup_complete =>
+      'Настройка микрофона завершена. Нажмите Начать снова.';
+
+  @override
   String message_time_recorded(String time) {
     return 'Recorded by server: $time (local time)';
   }
