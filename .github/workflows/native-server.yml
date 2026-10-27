@@ -50,7 +50,14 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.1.0'
-      - name: Run native lifecycle and push tests
+      - name: Verify pinned voice preparation tooling
+        run: python3 -m unittest scripts.test_prepare_voice_inputs
+      - name: Cache hash-verified build-time voice artifacts
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/hermes-voice
+          key: voice-inputs-${{ hashFiles('third_party/voice/manifest.json') }}
+      - name: Run native lifecycle, voice ownership and push tests
         working-directory: android
         run: gradle :app:testDebugUnitTest --no-daemon --stacktrace
       - name: Preserve native test reports

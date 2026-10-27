@@ -58,6 +58,9 @@ android {
            manifestPlaceholders["appLabel"] = "Hermes Agent Dev"
        }
        release {
+           isMinifyEnabled = true
+           isShrinkResources = true
+           proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "voice-proguard-rules.pro")
            // CI/local analysis may build a release artifact without access to
            // the private distribution keystore. Never fall back to the debug
            // key: leave the APK explicitly unsigned until the real
@@ -66,6 +69,14 @@ android {
                signingConfig = signingConfigs.getByName("release")
            }
        }
+   }
+
+   packaging {
+       jniLibs.useLegacyPackaging = false
+   }
+
+   androidResources {
+       noCompress += "onnx"
    }
 
    dependenciesInfo {
@@ -117,7 +128,28 @@ android.applicationVariants.configureEach {
     }
 }
 
+// A task-backed file dependency: a clean Gradle build cannot resolve an unverified
+// local AAR, nor package an untracked developer-only model directory.
+val voiceInputsDir = rootProject.layout.buildDirectory.dir("voice-inputs")
+val prepareVoiceInputs = tasks.register<Exec>("prepareVoiceInputs") {
+    val repository = rootProject.projectDir.parentFile
+    workingDir(repository)
+    commandLine("python3", repository.resolve("scripts/prepare_voice_inputs.py").absolutePath,
+        "--output", voiceInputsDir.get().asFile.absolutePath)
+    inputs.file(repository.resolve("scripts/prepare_voice_inputs.py"))
+    inputs.dir(repository.resolve("third_party/voice"))
+    outputs.dir(voiceInputsDir)
+    // Reverify cache/AAR/model hashes at the build boundary, even after a prior build.
+    outputs.upToDateWhen { false }
+}
+val voiceAar = files(voiceInputsDir.map { it.file("sherpa-onnx-2.0.1.aar") }).builtBy(prepareVoiceInputs)
+android.sourceSets.getByName("main").assets.srcDir(voiceInputsDir.get().dir("assets").asFile)
+tasks.matching { it.name == "preBuild" || it.name.startsWith("merge") && it.name.endsWith("Assets") }.configureEach {
+    dependsOn(prepareVoiceInputs)
+}
+
 dependencies {
+   implementation(voiceAar)
    // Open-source C2DM IPC transport, not Firebase SDK/GMS client libraries.
    val replacementEmbeddedPushAar = providers.gradleProperty("embeddedPushAar").orNull
    if (replacementEmbeddedPushAar == null) {

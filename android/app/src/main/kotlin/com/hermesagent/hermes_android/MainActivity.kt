@@ -24,6 +24,7 @@ class MainActivity : FlutterActivity() {
     private var initialShareIntent: Intent? = null
     private var initialLaunchAction: String? = null
     private var attachmentPdfPreview: AttachmentPdfPreview? = null
+    private var handsFreeVoice: HandsFreeVoicePlugin? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         initialShareIntent = intent.takeIf(::isShareIntent)
@@ -38,6 +39,7 @@ class MainActivity : FlutterActivity() {
         attachmentPdfPreview = AttachmentPdfPreview(this, flutterEngine.dartExecutor.binaryMessenger)
         BackgroundWorkPlatform.install(this, flutterEngine.dartExecutor.binaryMessenger)
         MobilePushPlugin.install(flutterEngine)
+        handsFreeVoice = HandsFreeVoicePlugin.install(flutterEngine)
         shareChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, shareChannelName).apply {
             setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -76,7 +78,24 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        handsFreeVoice?.setForeground(true)
+    }
+
+    override fun onPause() {
+        handsFreeVoice?.setForeground(false)
+        super.onPause()
+    }
+
+    override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        handsFreeVoice?.setForeground(false)
+        handsFreeVoice = null
+        super.cleanUpFlutterEngine(flutterEngine)
+    }
+
     override fun onDestroy() {
+        handsFreeVoice?.setForeground(false)
         attachmentPdfPreview?.close()
         attachmentPdfPreview = null
         // Finishing with Back removes the Activity without calling the
