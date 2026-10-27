@@ -30,5 +30,10 @@ late-after-new-speak orders. Dart speaker/controller tests hold B pending beyond
 the echo guard and permit capture only after its own reply plus the full guard.
 These are deterministic platform-boundary tests, not physical audio evidence.
 
+The Android Dart speaker also ignores uncorrelated global cancellation/error
+events: Stop's legacy onCancel notification can follow its reply and must not
+cancel a replacement operation. Native cancellation/error still settles its own
+awaited result as non-success. Non-Android legacy callback handling is retained.
+
 The pre-existing upstream service-connection inspection is retained unchanged;
 this patch adds no runtime-reflection adapter or replacement TTS instance.

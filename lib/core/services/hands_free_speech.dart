@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 
 import '../controllers/hands_free_conversation_controller.dart';
@@ -19,12 +20,15 @@ class FlutterVoiceReplySpeaker implements VoiceReplySpeaker {
   FlutterVoiceReplySpeaker(this.tts, {VoiceTimerFactory? timerFactory})
     : _timerFactory =
           timerFactory ?? ((duration, fire) => Timer(duration, fire)) {
-    tts.setCancelHandler(() => _end(HandsFreeSpeechOutcome.canceled));
-    tts.setErrorHandler((_) => _end(HandsFreeSpeechOutcome.failed));
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+      tts.setCancelHandler(() => _end(HandsFreeSpeechOutcome.canceled));
+      tts.setErrorHandler((_) => _end(HandsFreeSpeechOutcome.failed));
+    }
     // Android's pinned native patch correlates the awaitSpeakCompletion reply
     // with its utterance/epoch/result identity. The upstream 4.2.5 Future alone
-    // is not that guarantee. Raw completion callbacks never complete a chunk;
-    // cancellation/error callbacks are fail-closed side channels.
+    // is not that guarantee. All Android terminal outcomes use that owned reply;
+    // uncorrelated callbacks cannot complete OR cancel a replacement operation.
+    // Other platforms retain their existing cancellation/error side channels.
   }
   final FlutterTts tts;
   final VoiceTimerFactory _timerFactory;

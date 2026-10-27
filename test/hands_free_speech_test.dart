@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -98,6 +99,10 @@ void main() {
     expect(controller.state, HandsFreeState.speaking);
     oldResult.complete(0);
     await tts.platformCallHandler(const MethodCall('speak.onComplete', true));
+    await tts.platformCallHandler(const MethodCall('speak.onCancel', true));
+    await tts.platformCallHandler(
+      const MethodCall('speak.onError', 'sanitized'),
+    );
     await tester.pump(const Duration(seconds: 1));
     expect(native.audio, 'none');
     expect(controller.state, HandsFreeState.speaking);
@@ -188,13 +193,59 @@ void main() {
     },
   );
   for (final event in ['speak.onCancel', 'speak.onError']) {
-    testWidgets('HF06 $event resolves held plugin Future without rearm', (
+    testWidgets('Q142 Android stale $event cannot cancel replacement B', (
       tester,
     ) async {
       held = 'speak';
       gate = Completer();
       final tts = FlutterTts();
       final speaker = FlutterVoiceReplySpeaker(tts);
+      final first = speaker.speak('A', isCurrent: () => true);
+      await tester.pump();
+      await speaker.stop();
+      expect(await first, HandsFreeSpeechOutcome.canceled);
+      gate!.complete(0);
+      gate = Completer();
+      final second = speaker.speak('B', isCurrent: () => true);
+      HandsFreeSpeechOutcome? settled;
+      unawaited(
+        second.then((value) {
+          settled = value;
+        }),
+      );
+      await tester.pump();
+      try {
+        // Native Stop replies before its legacy uncorrelated onCancel event.
+        // onError also cannot supply an operation identity to this consumer.
+        await tts.platformCallHandler(MethodCall(event, 'sanitized'));
+        await tester.pump();
+        expect(settled, isNull);
+        gate!.complete(1);
+        await tester.pump();
+        expect(await second, HandsFreeSpeechOutcome.completed);
+      } finally {
+        if (!gate!.isCompleted) gate!.complete(0);
+        await speaker.stop();
+        await tester.pump();
+      }
+    });
+  }
+  for (final event in ['speak.onCancel', 'speak.onError']) {
+    testWidgets('HF06 $event resolves held plugin Future without rearm', (
+      tester,
+    ) async {
+      // The unchanged non-Android plugin still uses these legacy callbacks.
+      held = 'speak';
+      gate = Completer();
+      final tts = FlutterTts();
+      final previousPlatform = debugDefaultTargetPlatformOverride;
+      late final FlutterVoiceReplySpeaker speaker;
+      try {
+        debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+        speaker = FlutterVoiceReplySpeaker(tts);
+      } finally {
+        debugDefaultTargetPlatformOverride = previousPlatform;
+      }
       final speech = speaker.speak('Reply', isCurrent: () => true);
       await tester.pump();
       await tts.platformCallHandler(MethodCall(event, 'sanitized failure'));
