@@ -1,5 +1,6 @@
 import 'dart:math' as math;
 
+import 'cron_task_prompt.dart';
 import 'legacy_background_message.dart';
 import 'legacy_lcm_summary.dart';
 
@@ -69,7 +70,11 @@ class BackgroundReport {
         kind = BackgroundReportKind.task;
       } else if (role != 'user') {
         return null;
-      } else if (_isPreservedTaskList(body) ||
+      } else if (CronTaskPrompt.matches(
+            body,
+            sessionId: message['session_id'],
+          ) ||
+          _isPreservedTaskList(body) ||
           LegacyBackgroundMessage.isTask(body)) {
         kind = BackgroundReportKind.task;
       } else if (LegacyBackgroundMessage.isProcess(body)) {

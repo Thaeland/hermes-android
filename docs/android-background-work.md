@@ -60,6 +60,22 @@ Without an enabled push transport, a terminated app cannot learn
 about completion until it runs and reconnects. Android Force stop blocks background delivery and is not a supported way to test
 background push.
 
+## Scheduled-job messages in chat history
+
+Recognised scheduled-job setup appears as a neutral **Background task** card,
+not a message attributed to you. The card starts collapsed in Verbose Mode and
+is hidden in conversation-only mode. Expanding it retains the complete recorded
+prompt, including loaded skills and run context. This changes presentation only:
+stored roles/content and model request history remain unchanged, and generated
+setup is not selected as the prompt for Regenerate response.
+
+Compatibility matching covers the complete current cron hint and older skill
+scaffolds attached to a legacy cron-run message identity. A skill header alone
+in an ordinary chat is not enough. Explicit human/public/hidden annotations and
+available merge witnesses take precedence; normal follow-ups remain user input.
+Text matching is not authenticated provenance, and an API that omits annotations
+cannot distinguish a byte-identical human copy from generated setup.
+
 ## Optional encrypted background notifications
 
 Background notifications are a separate opt-in for server-originated hints when
