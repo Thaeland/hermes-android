@@ -55,6 +55,7 @@ import '../models/gateway_turn_contract.dart';
 import '../models/projects_tree_overview.dart';
 import '../services/tool_activity_group_pins.dart';
 import '../utils/chat_display_items.dart';
+import '../utils/chat_received_recovery_projection.dart';
 import '../utils/chat_conversation_projection.dart';
 import '../models/chat_message_time.dart';
 import '../utils/rest_chat_reply_retention.dart';
@@ -73,6 +74,7 @@ import '../widgets/markdown_code_block.dart';
 import '../widgets/markdown_link_handler.dart';
 import '../widgets/attachment_draft_tile.dart';
 import '../widgets/chat_end_affordance.dart';
+import '../widgets/received_recovery_inspector.dart';
 import '../widgets/gateway_approval_dialog.dart';
 import '../widgets/gateway_clarify_dialog.dart';
 import '../widgets/gateway_insight_card.dart';
@@ -479,6 +481,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _normalSessionReady = false;
   NormalGatewayChatOwner? _normalChat;
   NormalGatewayChatSnapshot? _normalSnapshot;
+  // Presentation only: no saved/received correspondence or owner retirement.
+  final Set<String> _retainedRecoveryOutcomeIds = {};
+  final Set<String> _historyObservedRecoveryOutcomeIds = {};
+  bool _receivedRecoverySheetOpen = false;
   late final Map<String, String> _notificationApprovalOrigin;
   Object? _normalSubscription;
   Object? _normalReservation;
@@ -822,6 +828,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     _normalSnapshot =
         snapshot; // read-only owner projection, not a route buffer
+    _retainedRecoveryOutcomeIds.retainAll(
+      snapshot.receivedOutcomes.map((outcome) => outcome.id),
+    );
+    _historyObservedRecoveryOutcomeIds.retainAll(
+      snapshot.receivedOutcomes.map((outcome) => outcome.id),
+    );
     final justDetached =
         _desktopConnectionState == DesktopConnectionState.connected &&
         snapshot.connectionState != DesktopConnectionState.connected &&
@@ -1305,6 +1317,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _backgroundReportExpansions = {};
       _detailExpansions = {};
       _delegationExpanded = null;
+      _retainedRecoveryOutcomeIds.clear();
+      _historyObservedRecoveryOutcomeIds.clear();
     }
   }
 
@@ -2054,7 +2068,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _applyScrollTarget(ChatScrollTarget target, {bool converge = true}) {
-    if (_openTaskController != null || !_scrollController.hasClients) return;
+    if (_openTaskController != null ||
+        _receivedRecoverySheetOpen ||
+        !_scrollController.hasClients) {
+      return;
+    }
     final maxExtent = _scrollController.position.maxScrollExtent;
     if ((_scrollController.position.pixels - maxExtent).abs() >
         _stableExtentTolerance) {
@@ -2065,11 +2083,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _goToEnd() {
+    if (_canFocusSavedRecovery && _retainIdleRecoveryForPresentation()) {
+      setState(() {});
+      _scheduleScrollTarget(const ChatScrollTarget.end());
+      return;
+    }
     _applyScrollTarget(const ChatScrollTarget.end());
   }
 
   void _scheduleScrollTarget(ChatScrollTarget? target) {
-    if (_openTaskController != null) return;
+    if (_openTaskController != null || _receivedRecoverySheetOpen) return;
     final generation = _automaticScrollGeneration;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_canApplyAutomaticScroll(generation)) return;
@@ -2082,7 +2105,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _scheduleStreamingFollow() {
-    if (_openTaskController != null || _streamFollowScheduled) return;
+    if (_openTaskController != null ||
+        _receivedRecoverySheetOpen ||
+        _streamFollowScheduled) {
+      return;
+    }
     final generation = _automaticScrollGeneration;
     _streamFollowScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -2100,6 +2127,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   bool _canApplyAutomaticScroll(int generation) =>
       mounted &&
       _openTaskController == null &&
+      !_receivedRecoverySheetOpen &&
       generation == _automaticScrollGeneration;
 
   void _scheduleInitialEndAlignment() {
@@ -2121,6 +2149,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   void _scheduleNextInitialEndFrame() {
     if (_openTaskController != null ||
+        _receivedRecoverySheetOpen ||
         _initialEndFrameScheduled ||
         _initialEndFramesRemaining <= 0) {
       return;
@@ -2232,6 +2261,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (!_canApplyHistoryRead(read)) return false;
     _historyReadAccepted = read.observation;
     _hasSuccessfulHistoryRead = true;
+    final snapshot = _normalSnapshot;
+    if (latest.isNotEmpty && snapshot != null && !snapshot.hasActiveTurn) {
+      _historyObservedRecoveryOutcomeIds.addAll(
+        snapshot.receivedOutcomes
+            .where((fact) => fact.outcome == ReceivedLifecycleOutcome.unknown)
+            .map((fact) => fact.id),
+      );
+    }
     return true;
   }
 
@@ -2264,12 +2301,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _fetchMessages({
     String? sessionId,
     Object? persistedContextFlight,
+    bool focusSavedHistory = false,
   }) async {
     if (_pendingReattachResync && sessionId == null) return;
     final read = _beginHistoryRead(
       sessionId ?? _normalChat?.storedSessionId ?? widget.session.id,
     );
     _loadingHistoryRead = read;
+    final navigationGeneration = _automaticScrollGeneration;
+    final mayFocusRecovery =
+        focusSavedHistory ||
+        (!_hasSuccessfulHistoryRead && !_openingScrollInterrupted);
     setState(() {
       _loading = true;
       _error = null;
@@ -2302,8 +2344,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       // Context fetched by this read can confirm a long receipt; retained
       // rows from earlier paging cannot lend this request fresh authority.
       if (!_acceptHistoryRead(read, latest!, confirmedRows: batch.rows)) return;
+      final wasFollowingEnd = _isNearEnd();
       _historyWindow.acceptRecent(batch);
       _historyWindowRevision++;
+
+      final regroupedRecovery =
+          mayFocusRecovery &&
+          navigationGeneration == _automaticScrollGeneration &&
+          _retainIdleRecoveryForPresentation();
       final messages = _restHistoryForPresentation();
       _extractToolMessages(
         _historyWindow.rows,
@@ -2315,6 +2363,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       });
       if (_normalChat != null) {
         _applyNormalSnapshot(_normalChat!.snapshot, hydrateHistory: false);
+      }
+      if (regroupedRecovery && wasFollowingEnd) {
+        _scheduleScrollTarget(const ChatScrollTarget.end());
       }
     } catch (e) {
       if (!_historyReadAttached(read)) return;
@@ -5522,7 +5573,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               onOpened: () => unawaited(_refreshArchiveState()),
               onSelected: (action) {
                 if (action == 'refresh' && !_pendingReattachResync) {
-                  _fetchMessages();
+                  _fetchMessages(focusSavedHistory: true);
                 }
                 if (action == 'export') _exportConversation();
                 if (action == 'received-output-info') {
@@ -5628,7 +5679,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         child: Stack(
                           children: [
                             Positioned.fill(child: _buildBody()),
-                            if (_endAffordanceController.isVisible)
+                            if (_endAffordanceController.isVisible ||
+                                _canFocusSavedRecovery)
                               Positioned(
                                 right: 12,
                                 bottom: 12,
@@ -5636,6 +5688,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                   newMessageCount:
                                       _endAffordanceController.newMessageCount,
                                   onPressed: _goToEnd,
+                                  label: _canFocusSavedRecovery
+                                      ? context.l10n.saved_history_heading
+                                      : null,
                                 ),
                               ),
                           ],
@@ -6052,6 +6107,106 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         conversationOnly: !(verbose ?? _verboseMode),
       );
 
+  bool get _canFocusSavedRecovery =>
+      _normalSnapshot?.hasActiveTurn == false &&
+      _normalSnapshot!.receivedOutcomes.any(
+        (fact) =>
+            fact.outcome == ReceivedLifecycleOutcome.unknown &&
+            _historyObservedRecoveryOutcomeIds.contains(fact.id) &&
+            !_retainedRecoveryOutcomeIds.contains(fact.id),
+      );
+
+  bool _retainIdleRecoveryForPresentation() {
+    final snapshot = _normalSnapshot;
+    if (snapshot == null || snapshot.hasActiveTurn) return false;
+    final before = _retainedRecoveryOutcomeIds.length;
+    _retainedRecoveryOutcomeIds.addAll(
+      snapshot.receivedOutcomes
+          .where(
+            (fact) =>
+                fact.outcome == ReceivedLifecycleOutcome.unknown &&
+                _historyObservedRecoveryOutcomeIds.contains(fact.id),
+          )
+          .map((fact) => fact.id),
+    );
+    return _retainedRecoveryOutcomeIds.length != before;
+  }
+
+  ChatReceivedRecoveryProjection _normalRecoveryProjection() {
+    ChatReceivedRecoveryProjection project(bool verbose) =>
+        ChatReceivedRecoveryProjection.build(
+          sections: _normalDisplaySections(verbose: verbose),
+          timeline: _normalSnapshot?.timeline ?? const ChatTimeline(),
+          outcomes: _normalSnapshot?.receivedOutcomes ?? const [],
+          retainedOutcomeIds: _retainedRecoveryOutcomeIds,
+        );
+    return project(_verboseMode);
+  }
+
+  Future<void> _inspectRetainedRecovery(ChatDisplaySection section) async {
+    if (_receivedRecoverySheetOpen) return;
+    // Capture all rendering and media authority before opening another route.
+    // The inspector never reads mutable ChatScreen state after construction.
+    final connection = _normalSession?.connection ?? widget.connection;
+    final sessionId = _storedSessionKey;
+    final testFiles = widget.testMediaFilesClient;
+    final verbose = _verboseMode;
+    final density = _chatDensity;
+    final sourceIdentity = (connection, sessionId, ChatDisplaySource.received);
+    RemoteFilesDataSource filesClient() =>
+        testFiles?.call(sessionId) ??
+        RemoteFilesClient.fromConnection(
+          connection,
+          sessionId: sessionId,
+          maxDownloadBytes: maxAttachmentDownloadBytes,
+        );
+    Widget buildMessage(
+      Map<String, dynamic> message,
+      bool expanded,
+      ValueChanged<bool> onExpansionChanged,
+    ) {
+      final isUser = message['role'] == 'user';
+      final content =
+          (message['_display_content'] as String?) ??
+          stripToolResultText(
+            messageContentToText(
+              AndroidPromptContext.displayContent(message, message['content']),
+            ),
+          );
+      return MessageBubble(
+        content: content,
+        isUser: isUser,
+        verbose: verbose,
+        density: density,
+        metadata: message,
+        metadataExpanded: expanded,
+        onMetadataExpansionChanged: onExpansionChanged,
+        mediaReferencesFinal: message['_gateway_pending_response'] != true,
+        mediaSourceIdentity: sourceIdentity,
+        mediaFilesClient: isUser ? null : filesClient,
+      );
+    }
+
+    _receivedRecoverySheetOpen = true;
+    _automaticScrollGeneration++;
+    try {
+      await showModalBottomSheet<void>(
+        context: context,
+        isScrollControlled: true,
+        useSafeArea: true,
+        builder: (_) => ReceivedRecoveryInspector(
+          section: section,
+          verbose: verbose,
+          sourceIdentity: sourceIdentity,
+          filesClient: filesClient,
+          messageBuilder: buildMessage,
+        ),
+      );
+    } finally {
+      _receivedRecoverySheetOpen = false;
+    }
+  }
+
   Widget _buildSavedHistoryHeading() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
@@ -6298,9 +6453,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
 
     final normal = _normalChat != null;
-    final sections = normal
-        ? _normalDisplaySections()
-        : const <ChatDisplaySection>[];
+    final recovery = normal ? _normalRecoveryProjection() : null;
+    final retained = recovery?.retained;
+    final sections = normal ? recovery!.sections : const <ChatDisplaySection>[];
     final displayMessages = normal
         ? [for (final section in sections) ...section.items]
         : !_verboseMode
@@ -6417,6 +6572,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     // its parent would discard the opening alignment or the reader's position.
     return Column(
       children: [
+        if (retained != null)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+            child: OutlinedButton.icon(
+              key: const Key('chat-retained-received-output'),
+              onPressed: () => unawaited(_inspectRetainedRecovery(retained)),
+              icon: const Icon(Icons.history),
+              label: Text(context.l10n.received_output_badge),
+            ),
+          ),
         if (_loading) const LinearProgressIndicator(),
         if (_error != null)
           MaterialBanner(
