@@ -74,6 +74,7 @@ import '../widgets/markdown_code_block.dart';
 import '../widgets/markdown_link_handler.dart';
 import '../widgets/attachment_draft_tile.dart';
 import '../widgets/chat_end_affordance.dart';
+import '../widgets/received_recovery_inspector.dart';
 import '../widgets/gateway_approval_dialog.dart';
 import '../widgets/gateway_clarify_dialog.dart';
 import '../widgets/gateway_insight_card.dart';
@@ -2260,6 +2261,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (!_canApplyHistoryRead(read)) return false;
     _historyReadAccepted = read.observation;
     _hasSuccessfulHistoryRead = true;
+    final snapshot = _normalSnapshot;
+    if (latest.isNotEmpty && snapshot != null && !snapshot.hasActiveTurn) {
+      _historyObservedRecoveryOutcomeIds.addAll(
+        snapshot.receivedOutcomes
+            .where((fact) => fact.outcome == ReceivedLifecycleOutcome.unknown)
+            .map((fact) => fact.id),
+      );
+    }
     return true;
   }
 
@@ -2338,14 +2347,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       final wasFollowingEnd = _isNearEnd();
       _historyWindow.acceptRecent(batch);
       _historyWindowRevision++;
-      final snapshot = _normalSnapshot;
-      if (latest!.isNotEmpty && snapshot != null && !snapshot.hasActiveTurn) {
-        _historyObservedRecoveryOutcomeIds.addAll(
-          snapshot.receivedOutcomes
-              .where((fact) => fact.outcome == ReceivedLifecycleOutcome.unknown)
-              .map((fact) => fact.id),
-        );
-      }
+
       final regroupedRecovery =
           mayFocusRecovery &&
           navigationGeneration == _automaticScrollGeneration &&
@@ -6143,12 +6145,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Future<void> _inspectRetainedRecovery(ChatDisplaySection section) async {
     if (_receivedRecoverySheetOpen) return;
-    final bucket = PageStorageBucket();
-    // Freeze this read-only inspection and its media authority before opening
-    // another route; later account/owner changes cannot retarget its files.
-    final connection = widget.connection;
+    // Capture all rendering and media authority before opening another route.
+    // The inspector never reads mutable ChatScreen state after construction.
+    final connection = _normalSession?.connection ?? widget.connection;
     final sessionId = _storedSessionKey;
     final testFiles = widget.testMediaFilesClient;
+    final verbose = _verboseMode;
+    final density = _chatDensity;
+    final sourceIdentity = (connection, sessionId, ChatDisplaySource.received);
     RemoteFilesDataSource filesClient() =>
         testFiles?.call(sessionId) ??
         RemoteFilesClient.fromConnection(
@@ -6156,23 +6160,33 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           sessionId: sessionId,
           maxDownloadBytes: maxAttachmentDownloadBytes,
         );
-    final l10n = context.l10n;
-    final children = [
-      for (final item in section.items)
-        KeyedSubtree(
-          key: ValueKey(chatDisplayItemIdentity(item)),
-          child: _buildReceivedCell(
-            item,
-            _buildDisplayItem(
-              item,
-              source: ChatDisplaySource.received,
-              readOnly: true,
-              mediaFilesClient: filesClient,
+    Widget buildMessage(
+      Map<String, dynamic> message,
+      bool expanded,
+      ValueChanged<bool> onExpansionChanged,
+    ) {
+      final isUser = message['role'] == 'user';
+      final content =
+          (message['_display_content'] as String?) ??
+          stripToolResultText(
+            messageContentToText(
+              AndroidPromptContext.displayContent(message, message['content']),
             ),
-            section.outcomes[chatDisplayItemIdentity(item)],
-          ),
-        ),
-    ];
+          );
+      return MessageBubble(
+        content: content,
+        isUser: isUser,
+        verbose: verbose,
+        density: density,
+        metadata: message,
+        metadataExpanded: expanded,
+        onMetadataExpansionChanged: onExpansionChanged,
+        mediaReferencesFinal: message['_gateway_pending_response'] != true,
+        mediaSourceIdentity: sourceIdentity,
+        mediaFilesClient: isUser ? null : filesClient,
+      );
+    }
+
     _receivedRecoverySheetOpen = true;
     _automaticScrollGeneration++;
     try {
@@ -6180,47 +6194,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         context: context,
         isScrollControlled: true,
         useSafeArea: true,
-        builder: (context) => FractionallySizedBox(
-          heightFactor: .85,
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        l10n.received_output_heading,
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                    ),
-                    IconButton(
-                      key: const Key('chat-retained-received-close'),
-                      tooltip: MaterialLocalizations.of(
-                        context,
-                      ).closeButtonTooltip,
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(Icons.close),
-                    ),
-                  ],
-                ),
-                Text(l10n.received_output_explanation),
-                const SizedBox(height: 8),
-                Text(l10n.received_output_lifetime),
-                const SizedBox(height: 12),
-                Expanded(
-                  child: PageStorage(
-                    bucket: bucket,
-                    child: ListView.builder(
-                      key: const PageStorageKey('retained-recovery-inspector'),
-                      itemCount: children.length,
-                      itemBuilder: (context, index) => children[index],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
+        builder: (_) => ReceivedRecoveryInspector(
+          section: section,
+          verbose: verbose,
+          sourceIdentity: sourceIdentity,
+          filesClient: filesClient,
+          messageBuilder: buildMessage,
         ),
       );
     } finally {
@@ -6299,12 +6278,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         maxDownloadBytes: maxAttachmentDownloadBytes,
       );
 
-  Widget _buildDisplayItem(
-    dynamic item, {
-    ChatDisplaySource? source,
-    bool readOnly = false,
-    RemoteFilesDataSource Function()? mediaFilesClient,
-  }) {
+  Widget _buildDisplayItem(dynamic item, {ChatDisplaySource? source}) {
     if (item is ChatAttachmentItem) {
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -6316,7 +6290,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             item.id,
           )),
           ref: item.ref,
-          filesClient: mediaFilesClient ?? _newMediaFilesClient,
+          filesClient: _newMediaFilesClient,
           sourceIdentity: (widget.connection, _storedSessionKey, source),
         ),
       );
@@ -6326,9 +6300,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         key: ValueKey<String>('tool-activity-${item.id}'),
         activities: item.activities,
         verbose: _verboseMode,
-        pinnedExpansion: readOnly ? false : _toolActivityPins[item.id],
+        pinnedExpansion: _toolActivityPins[item.id],
         onPinChanged: (expanded) {
-          if (readOnly) return;
           _toolActivityPins.pin(item.id, expanded);
           final toolId = item.activities.first.toolId;
           if (toolId != null && toolId.isNotEmpty) {
@@ -6357,11 +6330,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           id: item.id,
           pinnedExpansion: item.id == null
               ? null
-              : readOnly
-              ? false
               : _reasoningExpansionPins[item.id!],
           onPinChanged: (expanded) {
-            if (readOnly) return;
             if (item.id != null) {
               _reasoningExpansionPins.pin(item.id!, expanded);
             }
@@ -6377,9 +6347,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         key: ValueKey((_detailExpansions, identity)),
         notice: item,
         initiallyExpanded: _detailExpansions[identity] ?? false,
-        onExpansionChanged: (expanded) {
-          if (!readOnly) _pinDetail(identity, expanded);
-        },
+        onExpansionChanged: (expanded) => _pinDetail(identity, expanded),
       );
     }
 
@@ -6392,7 +6360,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         report: report,
         initiallyExpanded: _backgroundReportExpansions[identity] ?? false,
         onExpansionChanged: (expanded) {
-          if (readOnly) return;
           _backgroundReportExpansions.remove(identity);
           _backgroundReportExpansions[identity] = expanded;
           if (_backgroundReportExpansions.length >
@@ -6423,22 +6390,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       verbose: _verboseMode,
       metadataExpanded:
           _detailExpansions[(source, chatDisplayItemIdentity(msg))] ?? false,
-      onMetadataExpansionChanged: readOnly
-          ? null
-          : (expanded) =>
-                _pinDetail((source, chatDisplayItemIdentity(msg)), expanded),
+      onMetadataExpansionChanged: (expanded) =>
+          _pinDetail((source, chatDisplayItemIdentity(msg)), expanded),
       density: _chatDensity,
       metadata: msg,
       mediaReferencesFinal: msg['_gateway_pending_response'] != true,
       mediaSourceIdentity: (widget.connection, _storedSessionKey, source),
-      mediaFilesClient: isUser
-          ? null
-          : mediaFilesClient ?? _newMediaFilesClient,
-      onReadAloud: isUser || readOnly
+      mediaFilesClient: isUser ? null : _newMediaFilesClient,
+      onReadAloud: isUser
           ? null
           : () => _readAssistantText(content, announce: true),
-      onEdit: isUser && !readOnly ? () => _editAndResend(content) : null,
-      onRetry: isUser || readOnly
+      onEdit: isUser ? () => _editAndResend(content) : null,
+      onRetry: isUser
           ? null
           : () => _retryPrompt(msg['_retry_prompt']?.toString() ?? ''),
     );
