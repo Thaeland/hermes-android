@@ -1,6 +1,6 @@
 [![Hermes Android 3.0.0 announcement](docs/images/hermes-android-3.0.0-hero.jpg)](https://github.com/rusty4444/hermes-android/releases/tag/v3.0.0)
 
-# Hermes Android v3.0.1
+# Hermes Android v3.0.2
 
 Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — chat with your Hermes sessions from a phone or tablet over local Wi-Fi or a private Tailscale network.
 
@@ -43,15 +43,15 @@ Ten fresh Android emulator captures, each using a different colour palette. Thes
 
 ## Current release
 
-**3.0.1** (base build **3004**) adds in-app video playback and offline Office text previews. It keeps the production package, `com.hermesagent.hermes_android`, and signing identity. Export an encrypted configuration backup before updating; the matching production-signed APK upgrades 3.0.0, 2.1.33 or any 3.0 RC in place.
+**3.0.2** (base build **3006**) fixes a stale recovery view that could keep an older reply at the end of an existing chat despite newer saved messages. You can inspect retained unconfirmed output without losing your saved-history position. The production package, `com.hermesagent.hermes_android`, and signing identity stay the same. Export an encrypted configuration backup before updating; the matching production-signed APK upgrades 3.0.1 and 3.0.2-recovery.1 in place. Do not uninstall or clear app data to apply this fix.
 
 | Download | Device | Version code |
 | --- | --- | --- |
-| [ARM64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.1/app-arm64-v8a-release.apk) | Most current Android phones/tablets | `30042` |
-| [ARMv7 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.1/app-armeabi-v7a-release.apk) | Older 32-bit ARM devices | `30041` |
-| [x86_64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.1/app-x86_64-release.apk) | x86_64 Android devices/emulators | `30043` |
+| [ARM64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.2/app-arm64-v8a-release.apk) | Most current Android phones/tablets | `30062` |
+| [ARMv7 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.2/app-armeabi-v7a-release.apk) | Older 32-bit ARM devices | `30061` |
+| [x86_64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.2/app-x86_64-release.apk) | x86_64 Android devices/emulators | `30063` |
 
-[Release and checksums](https://github.com/rusty4444/hermes-android/releases/tag/v3.0.1) · [Changes since 3.0.0](docs/releases/3.0.1.md) · [Full changelog](CHANGELOG.md)
+[Release and checksums](https://github.com/rusty4444/hermes-android/releases/tag/v3.0.2) · [Changes since 3.0.1](docs/releases/3.0.2.md) · [Full changelog](CHANGELOG.md)
 
 Debug builds use the separate `com.hermesagent.hermes_android.dev` package and Android debug certificate. Older production APKs have lower version codes; downgrading can require uninstalling and restoring a backup.
 
@@ -60,7 +60,7 @@ Debug builds use the separate `com.hermesagent.hermes_android.dev` package and A
 - Updating the APK does not install or configure Hermes host software or the optional mobile-push server companion.
 - Quiet mode requires completion metadata for each reply. If an older gateway's saved answers are missing in quiet mode, enable **Verbose Mode**. Saved/live duplicate handover also needs the gateway's optional complete `persisted_turn` receipt and fresh history; older gateways can retain both sources.
 - Assets is partial discovery of shared files, not a complete attachment or filesystem catalogue. Downloads are limited to 25 MiB per file.
-- Protect encrypted backups and their passwords. Backups can contain connection secrets and imported client private keys. See the [upgrade notes and compatibility limits](docs/releases/3.0.1.md#compatibility-and-delivery-limits).
+- Protect encrypted backups and their passwords. Backups can contain connection secrets and imported client private keys. See the [upgrade notes and compatibility limits](docs/releases/3.0.2.md#compatibility-and-delivery-limits).
 
 ### Update checks
 
@@ -230,6 +230,15 @@ See [CHANGELOG.md](CHANGELOG.md) for the complete release history and
 [docs/HERMESAPK_DEVELOPMENT_LOG.md](docs/HERMESAPK_DEVELOPMENT_LOG.md) for the
 sanitized implementation and validation record.
 
+## What's new in v3.0.2
+
+- Open refreshed saved history at its newest visible message, rather than an older retained reply whose turn outcome remains unknown.
+- Tap **Received · match unconfirmed** to inspect retained output in a separate, read-only sheet. Inspecting it does not resend a prompt or change saved messages.
+- Keep tool and reasoning expansion choices while scrolling that sheet. Quiet mode keeps its existing completed-reply filtering; enable Verbose Mode for retained public details.
+- Preserve your reading position during delayed history reads, refresh and inspection. Use the **Saved history** end action to return to the saved end.
+
+Read the [3.0.2 release notes](docs/releases/3.0.2.md) for recovery semantics, retained-output lifetime and upgrade limits.
+
 ## What's new in v3.0.1
 
 - In-app video playback with play/pause, replay, seeking and mute. Videos start paused; playback pauses when the app is backgrounded or another route covers the preview, and resumes only after you tap Play.
@@ -254,12 +263,6 @@ These highlights cover the whole **2.1.33 → 3.0.0** change set, not just RC3.
 - Stronger saved/live receipt handover, draft/identity/recovery ownership, Activity coverage, account-safe notifications and public-only exports. Offline licences and exact-source/relink release materials accompany the APKs.
 
 Read the [detailed release notes](docs/releases/3.0.0.md) for all changes, prerequisites, limits and contributor credits. Existing Memory facts, local pins, Project moves, voice and task inspection remain available.
-
-## What's new in v2.1.33
-
-- More → Memory opens saved facts from the connected profile's `USER.md`; Agent notes opens `MEMORY.md`. Long facts support selectable full reads. The view does not enumerate external providers such as MemPalace.
-- Delegated-task bubbles keep a compact goal and status, with full details in the task timeline.
-- Reasoning starts collapsed on a new visit and retains manual choices during updates and scrolling. Version 3.0 extends collapsed defaults to all Verbose details.
 
 ## Features
 
@@ -706,7 +709,7 @@ cp build/app/outputs/flutter-apk/app-*-release.apk release-apks/
 block in `android/app/build.gradle.kts` derives per-ABI codes as
 `base * 10 + ABI code` (armeabi-v7a = 1, arm64-v8a = 2, x86_64 = 3), so the
 codes stay ordered armeabi-v7a < arm64-v8a < x86_64 as fdroiddata requires.
-For v3.0.1, base `3004` produces codes `30041`/`30042`/`30043`.
+For v3.0.2, base `3006` produces codes `30061`/`30062`/`30063`.
 Before publication, CI verifies all three actual APKs: package, version, ABI,
 effective code, production signer and required licence/source assets. Releases
 include checksums and exact-commit source/relink materials. Release-floor checks

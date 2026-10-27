@@ -6,6 +6,40 @@ shows only the three latest releases.
 
 ## [Unreleased]
 
+## [3.0.2] - 2026-10-27
+
+Release identity is `3.0.2+3006`, with production APK codes `30061`, `30062` and
+`30063`, above all 3.0.1 and 3.0.2-recovery.1 splits. The production package and
+signing identity stay the same. Install over the existing production app without
+uninstalling or clearing data. Export an encrypted configuration backup before
+updating. See the [detailed release notes](docs/releases/3.0.2.md).
+
+### Fixed
+
+- Existing chats could appear frozen at an older unconfirmed reply even after
+  newer saved messages arrived. Refreshed saved history now has its own end;
+  retained unknown output stays available through a separate read-only inspector.
+- The recovery inspector isolates its scroll and detail state, avoiding a
+  scroll-offset/expansion-state type collision. Tool and reasoning expansion
+  choices survive lazy scrolling within the visit.
+- Delayed history reads, refresh and inspection respect newer reading and
+  navigation intent. Failed or empty history reads do not hide retained output.
+
+### Behaviour and limits
+
+- Saved history and received output keep independent provenance. An unknown
+  outcome remains unknown; idle state and matching text do not prove success or
+  establish a saved-message match. The app does not resend missing requests.
+- Quiet mode keeps its completed-reply filtering. Verbose Mode exposes retained
+  public detail. Received output remains session-local and subject to existing
+  retention limits; it is not a durable archive.
+- You do not need a backend patch, gateway restart or app-data reset. Existing
+  preview, backup, authentication and background-notification limits remain.
+
+Sam confirmed the recovery testing build on his phone and approved stable
+promotion. Hermes Agent assisted with implementation, review, documentation and
+regression tests. Existing contributor credits and release history remain below.
+
 ## [3.0.1] - 2026-10-26
 
 Release identity is `3.0.1+3004`, with production APK codes `30041`, `30042` and
