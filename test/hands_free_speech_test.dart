@@ -1,10 +1,13 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:hermes_android/core/controllers/hands_free_conversation_controller.dart';
 import 'package:hermes_android/core/services/hands_free_speech.dart';
+
+import 'support/fake_hands_free_voice.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -33,6 +36,88 @@ void main() {
     });
   });
   tearDown(() => messenger.setMockMethodCallHandler(channel, null));
+  testWidgets('Q142 native-correlated B remains mic-off beyond echo guard', (
+    tester,
+  ) async {
+    // Native FlutterTtsCorrelationTest proves this held reply cannot be settled
+    // by A's queued/late callbacks. Here exercise the actual Dart consumer.
+    final tts = FlutterTts();
+    final speaker = FlutterVoiceReplySpeaker(tts);
+    held = 'speak';
+    gate = Completer();
+    final oldSpeech = speaker.speak('A', isCurrent: () => true);
+    await tester.pump();
+    await speaker.stop();
+    expect(await oldSpeech, HandsFreeSpeechOutcome.canceled);
+    final oldResult = gate!;
+    gate = Completer();
+    maximum = 100;
+    final native = FakeHandsFreeVoicePlatform();
+    final turn = Completer<HandsFreeTurnOutcome>();
+    final controller = HandsFreeConversationController(
+      platform: native,
+      ownerId: 'screen',
+      isAuthorityCurrent: (_) => true,
+      canStart: (_) => true,
+      prepareAudio: speaker.prepare,
+      submitHandsFreePrompt: (_) async =>
+          HandsFreeSubmittedTurn(clientTurnId: 'B', settled: turn.future),
+      speakHandsFreeReply: (reply) =>
+          speaker.speak(reply.text, isCurrent: () => true),
+      cancelSpeech: speaker.stop,
+      localeId: () => 'en_AU',
+    );
+    final authority = HandsFreeAuthority(
+      routeToken: Object(),
+      connectionId: 'account',
+      connectionMutationEpoch: Object(),
+      sessionId: 'chat',
+      foregroundEpoch: 1,
+      controllerGeneration: 1,
+    );
+    expect(
+      await controller.start(
+        authority: authority,
+        followupTimeout: const Duration(seconds: 10),
+      ),
+      isTrue,
+    );
+    native.armed();
+    native.wake();
+    await tester.pump();
+    native.ready();
+    native.finalAndEnd();
+    await tester.pump();
+    turn.complete(
+      const HandsFreeTurnOutcome(
+        clientTurnId: 'B',
+        status: HandsFreeTurnStatus.completed,
+        publicFinalText: 'B',
+      ),
+    );
+    await tester.pump();
+    expect(controller.state, HandsFreeState.speaking);
+    oldResult.complete(0);
+    await tts.platformCallHandler(const MethodCall('speak.onComplete', true));
+    await tts.platformCallHandler(const MethodCall('speak.onCancel', true));
+    await tts.platformCallHandler(
+      const MethodCall('speak.onError', 'sanitized'),
+    );
+    await tester.pump(const Duration(seconds: 1));
+    expect(native.audio, 'none');
+    expect(controller.state, HandsFreeState.speaking);
+    expect(native.count('recognizeOnce'), 1);
+    gate!.complete(1); // only B's genuine native terminal (native-tested).
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 299));
+    expect(native.audio, 'none');
+    await tester.pump(const Duration(milliseconds: 1));
+    expect(controller.state, HandsFreeState.followup);
+    expect(native.audio, 'speech');
+    await controller.stop(reason: HandsFreeStopReason.user);
+    controller.dispose();
+    await native.stream.close();
+  });
   String spoken(MethodCall call) => call.arguments is Map
       ? call.arguments['text'] as String
       : call.arguments as String;
@@ -108,13 +193,59 @@ void main() {
     },
   );
   for (final event in ['speak.onCancel', 'speak.onError']) {
-    testWidgets('HF06 $event resolves held plugin Future without rearm', (
+    testWidgets('Q142 Android stale $event cannot cancel replacement B', (
       tester,
     ) async {
       held = 'speak';
       gate = Completer();
       final tts = FlutterTts();
       final speaker = FlutterVoiceReplySpeaker(tts);
+      final first = speaker.speak('A', isCurrent: () => true);
+      await tester.pump();
+      await speaker.stop();
+      expect(await first, HandsFreeSpeechOutcome.canceled);
+      gate!.complete(0);
+      gate = Completer();
+      final second = speaker.speak('B', isCurrent: () => true);
+      HandsFreeSpeechOutcome? settled;
+      unawaited(
+        second.then((value) {
+          settled = value;
+        }),
+      );
+      await tester.pump();
+      try {
+        // Native Stop replies before its legacy uncorrelated onCancel event.
+        // onError also cannot supply an operation identity to this consumer.
+        await tts.platformCallHandler(MethodCall(event, 'sanitized'));
+        await tester.pump();
+        expect(settled, isNull);
+        gate!.complete(1);
+        await tester.pump();
+        expect(await second, HandsFreeSpeechOutcome.completed);
+      } finally {
+        if (!gate!.isCompleted) gate!.complete(0);
+        await speaker.stop();
+        await tester.pump();
+      }
+    });
+  }
+  for (final event in ['speak.onCancel', 'speak.onError']) {
+    testWidgets('HF06 $event resolves held plugin Future without rearm', (
+      tester,
+    ) async {
+      // The unchanged non-Android plugin still uses these legacy callbacks.
+      held = 'speak';
+      gate = Completer();
+      final tts = FlutterTts();
+      final previousPlatform = debugDefaultTargetPlatformOverride;
+      late final FlutterVoiceReplySpeaker speaker;
+      try {
+        debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+        speaker = FlutterVoiceReplySpeaker(tts);
+      } finally {
+        debugDefaultTargetPlatformOverride = previousPlatform;
+      }
       final speech = speaker.speak('Reply', isCurrent: () => true);
       await tester.pump();
       await tts.platformCallHandler(MethodCall(event, 'sanitized failure'));
