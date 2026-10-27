@@ -1,6 +1,6 @@
 [![Hermes Android 3.0.0 announcement](docs/images/hermes-android-3.0.0-hero.jpg)](https://github.com/rusty4444/hermes-android/releases/tag/v3.0.0)
 
-# Hermes Android v3.0.2
+# Hermes Android v3.0.3
 
 Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — chat with your Hermes sessions from a phone or tablet over local Wi-Fi or a private Tailscale network.
 
@@ -43,15 +43,15 @@ Ten fresh Android emulator captures, each using a different colour palette. Thes
 
 ## Current release
 
-**3.0.2** (base build **3006**) fixes a stale recovery view that could keep an older reply at the end of an existing chat despite newer saved messages. You can inspect retained unconfirmed output without losing your saved-history position. The production package, `com.hermesagent.hermes_android`, and signing identity stay the same. Export an encrypted configuration backup before updating; the matching production-signed APK upgrades 3.0.1 and 3.0.2-recovery.1 in place. Do not uninstall or clear app data to apply this fix.
+**3.0.3** (base build **3007**) improves Stop/recovery ownership, stalled-stream handling, session paging, local persistence and attachment-preview cleanup. Complete LCM context summaries now use read-only Background task reports instead of ordinary chat bubbles. The production package, `com.hermesagent.hermes_android`, and signing identity stay the same. Export an encrypted configuration backup before updating; the matching production-signed APK upgrades 3.0.2 in place. Do not uninstall or clear app data.
 
 | Download | Device | Version code |
 | --- | --- | --- |
-| [ARM64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.2/app-arm64-v8a-release.apk) | Most current Android phones/tablets | `30062` |
-| [ARMv7 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.2/app-armeabi-v7a-release.apk) | Older 32-bit ARM devices | `30061` |
-| [x86_64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.2/app-x86_64-release.apk) | x86_64 Android devices/emulators | `30063` |
+| [ARM64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.3/app-arm64-v8a-release.apk) | Most current Android phones/tablets | `30072` |
+| [ARMv7 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.3/app-armeabi-v7a-release.apk) | Older 32-bit ARM devices | `30071` |
+| [x86_64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.3/app-x86_64-release.apk) | x86_64 Android devices/emulators | `30073` |
 
-[Release and checksums](https://github.com/rusty4444/hermes-android/releases/tag/v3.0.2) · [Changes since 3.0.1](docs/releases/3.0.2.md) · [Full changelog](CHANGELOG.md)
+[Release and checksums](https://github.com/rusty4444/hermes-android/releases/tag/v3.0.3) · [Changes since 3.0.2](docs/releases/3.0.3.md) · [Full changelog](CHANGELOG.md)
 
 Debug builds use the separate `com.hermesagent.hermes_android.dev` package and Android debug certificate. Older production APKs have lower version codes; downgrading can require uninstalling and restoring a backup.
 
@@ -60,7 +60,7 @@ Debug builds use the separate `com.hermesagent.hermes_android.dev` package and A
 - Updating the APK does not install or configure Hermes host software or the optional mobile-push server companion.
 - Quiet mode requires completion metadata for each reply. If an older gateway's saved answers are missing in quiet mode, enable **Verbose Mode**. Saved/live duplicate handover also needs the gateway's optional complete `persisted_turn` receipt and fresh history; older gateways can retain both sources.
 - Assets is partial discovery of shared files, not a complete attachment or filesystem catalogue. Downloads are limited to 25 MiB per file.
-- Protect encrypted backups and their passwords. Backups can contain connection secrets and imported client private keys. See the [upgrade notes and compatibility limits](docs/releases/3.0.2.md#compatibility-and-delivery-limits).
+- Protect encrypted backups and their passwords. Backups can contain connection secrets and imported client private keys. See the [upgrade notes and compatibility limits](docs/releases/3.0.3.md#compatibility-and-delivery-limits).
 
 ### Update checks
 
@@ -230,6 +230,15 @@ See [CHANGELOG.md](CHANGELOG.md) for the complete release history and
 [docs/HERMESAPK_DEVELOPMENT_LOG.md](docs/HERMESAPK_DEVELOPMENT_LOG.md) for the
 sanitized implementation and validation record.
 
+## What's new in v3.0.3
+
+- Complete LCM context summaries use read-only **Background task** reports: collapsed in Verbose Mode, hidden in conversation-only mode, without changing raw history or ordinary messages.
+- Recovery-v2 Stop keeps observing its turn through wind-down. Stalled SSE bodies time out after 60 seconds without raw-body activity; keepalives renew the timer and uncertain prompts are never resent automatically.
+- Correct misleading session-paging metadata, rejected credential/Space persistence, optional share-intent startup failures and unsupported Project metadata.
+- Safely reclaim marked, unlocked old-process video staging on later video preparation; retain bytes when native disposal is unproven. Shared file classification and parser guard regressions preserve existing preview limits.
+
+Read the [3.0.3 release notes](docs/releases/3.0.3.md) and [all 30 audit dispositions](docs/audit-207/README.md) for scope, retained safety policies and unverified device behaviour.
+
 ## What's new in v3.0.2
 
 - Open refreshed saved history at its newest visible message, rather than an older retained reply whose turn outcome remains unknown.
@@ -248,21 +257,6 @@ Read the [3.0.2 release notes](docs/releases/3.0.2.md) for recovery semantics, r
 - No backend patch or new server configuration is required for these previews. Background push still needs its separate server companion and supported phone transport.
 
 Read the [3.0.1 release notes](docs/releases/3.0.1.md) for formats, fallback behaviour and upgrade limits.
-
-## What's new in v3.0.0
-
-These highlights cover the whole **2.1.33 → 3.0.0** change set, not just RC3.
-
-- Ten full-app colour themes with independent light/dark/system appearance, live updates and backup/restore. See [Appearance](docs/APPEARANCE_THEMES.md).
-- Default **Chats → Crons → Projects → Activity → More** navigation, separate scheduled conversations, verified Archive/Unarchive and progressive older-history loading.
-- Completed-reply quiet mode, collapsed Verbose details, neutral internal-report cards, message-level local times and a responding bar for tools, reasoning and gateway status.
-- Separate Stop and Send controls during work: Remote Gateway sends text guidance; REST uses an explicit Stop and send action. Newer draft edits survive delayed acknowledgements.
-- More → Assets, broader generated-file discovery, image/PDF/text previews, direct Android save/download and separate Share. Web links open in the external browser on tap.
-- Optional per-connection PEM/P12 client certificates for mTLS, portable encrypted backups and improved mobile certificate picking/password handling.
-- Simpler opt-in background notifications, automatic authorised-chat scope and an optional built-in Google-backed phone transport. The separate server companion is still required.
-- Stronger saved/live receipt handover, draft/identity/recovery ownership, Activity coverage, account-safe notifications and public-only exports. Offline licences and exact-source/relink release materials accompany the APKs.
-
-Read the [detailed release notes](docs/releases/3.0.0.md) for all changes, prerequisites, limits and contributor credits. Existing Memory facts, local pins, Project moves, voice and task inspection remain available.
 
 ## Features
 
