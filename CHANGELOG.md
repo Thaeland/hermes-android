@@ -4,10 +4,19 @@ All notable changes since v1.0.7 are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The [README](README.md)
 shows only the three latest releases.
 
-## [Unreleased]
+## [3.0.3] - 2026-10-28
+
+Release identity is `3.0.3+3007`, with production APK codes `30071`, `30072` and
+`30073`, above every 3.0.2 split. Package and production signing identity remain
+unchanged. Export an encrypted configuration backup, then install the matching
+APK without uninstalling or clearing app data. See the
+[release notes](docs/releases/3.0.3.md).
 
 ### Fixed
 
+- Complete LCM context summaries render as read-only Background task reports,
+  collapsed in Verbose Mode and hidden in conversation-only mode. Ordinary
+  messages, genuine human input and saved history remain unchanged (#211).
 - Recovery-v2 Stop preserves the admitted turn's observer through wind-down and
   handles Stop before its first state callback; attachment-only mid-turn Send
   now explains its unsupported action without losing staged files (#207).
@@ -30,7 +39,9 @@ shows only the three latest releases.
   disproved premises, intentional bounded behaviour and an unreproduced flake.
 
 Hermes Agent assisted with validation, implementation, documentation and tests.
-These changes are unreleased; existing versions and distribution limits remain.
+Automated checks do not certify physical-device codecs, memory use or every
+gateway contract. Unknown outcomes remain unknown; prompts are not resent
+automatically. The historical timing report remains not reproduced.
 
 ## [3.0.2] - 2026-10-27
 
