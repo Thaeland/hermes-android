@@ -4,7 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   test(
-    'Stable 3.0.1 has the exact identity and upgrades every 3.0.0 split',
+    'Recovery prerelease has the exact identity and upgrades every 3.0.1 split',
     () {
       final pubspec = File('pubspec.yaml').readAsStringSync();
       final match = RegExp(
@@ -13,19 +13,19 @@ void main() {
       ).firstMatch(pubspec);
 
       expect(match, isNotNull);
-      expect(match!.group(1), '3.0.1');
+      expect(match!.group(1), '3.0.2-recovery.1');
       final baseCode = int.parse(match.group(2)!);
-      expect(baseCode, 3004);
-      expect(baseCode, greaterThan(3003));
-      // Every new split must exceed even the highest published 3.0.0 split.
+      expect(baseCode, 3005);
+      expect(baseCode, greaterThan(3004));
+      // Every new split must exceed even the highest published 3.0.1 split.
       for (final abiCode in [1, 2, 3]) {
-        expect(baseCode * 10 + abiCode, greaterThan(30033));
+        expect(baseCode * 10 + abiCode, greaterThan(30043));
       }
       expect(
         [
           for (final abiCode in [1, 2, 3]) baseCode * 10 + abiCode,
         ],
-        [30041, 30042, 30043],
+        [30051, 30052, 30053],
       );
     },
   );
@@ -51,7 +51,7 @@ void main() {
     );
     expect(gradle, contains('variant.versionCode * 10 + abiVersionCode'));
     expect(releaseWorkflow, contains("MINIMUM_INSTALLED_VERSION_CODE: '2127'"));
-    expect(releaseWorkflow, contains("REQUIRED_BASE_VERSION_CODE: '3004'"));
+    expect(releaseWorkflow, contains("REQUIRED_BASE_VERSION_CODE: '3005'"));
     expect(releaseWorkflow, contains("ARM64_ABI_CODE: '2'"));
     expect(
       releaseWorkflow,
@@ -76,7 +76,7 @@ void main() {
     );
     expect(releaseWorkflow, contains('if certs != {expected_cert}:'));
     expect(qualityWorkflow, contains("MINIMUM_INSTALLED_VERSION_CODE: '2127'"));
-    expect(qualityWorkflow, contains("REQUIRED_BASE_VERSION_CODE: '3004'"));
+    expect(qualityWorkflow, contains("REQUIRED_BASE_VERSION_CODE: '3005'"));
     expect(qualityWorkflow, contains('scripts.test_verify_release_apks'));
   });
 
