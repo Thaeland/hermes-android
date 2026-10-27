@@ -9,6 +9,8 @@ import 'package:hermes_android/core/services/gateway_turn_application_controller
 import 'package:hermes_android/core/services/normal_gateway_application_session.dart';
 import 'package:hermes_android/core/services/ws_client.dart';
 import 'package:hermes_android/core/widgets/chat_end_affordance.dart';
+import 'package:hermes_android/core/widgets/gateway_activity_card.dart';
+import 'package:hermes_android/core/widgets/gateway_insight_card.dart';
 import 'package:hermes_android/l10n/app_localizations.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -72,7 +74,7 @@ void main() {
         expect(_bubble(_oldReply), verbose ? findsOneWidget : findsNothing);
         for (final bubble in tester.widgetList<MessageBubble>(
           find.descendant(
-            of: find.byKey(const PageStorageKey('retained-recovery-inspector')),
+            of: find.byKey(const Key('retained-recovery-inspector')),
             matching: find.byType(MessageBubble),
           ),
         )) {
@@ -140,6 +142,89 @@ void main() {
         reason: 'A stale saved page cannot hide a newer successful receipt',
       );
       expect(f.submissions, 2);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await f.controller.close();
+      await tester.pump();
+    },
+  );
+
+  testWidgets(
+    'recovery inspector tool and reasoning expansion never share scroll storage',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(360, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final f = _Fixture();
+      addTearDown(f.controller.close);
+      await f.seedUnknown(tester, withWork: true);
+      await tester.pumpWidget(f.widget());
+      await pumpChatUpdates(tester);
+      await tester.tap(find.byKey(_retainedButton));
+      await pumpChatUpdates(tester);
+      for (final card in [
+        find.byType(GatewayReasoningCard),
+        find.byType(GatewayActivityCard),
+      ]) {
+        await tester.scrollUntilVisible(
+          card,
+          100,
+          scrollable: find
+              .descendant(
+                of: find.byType(BottomSheet),
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        );
+        expect(card, findsOneWidget);
+        await tester.ensureVisible(card);
+        await tester.pumpAndSettle();
+        final tile = find.descendant(
+          of: card,
+          matching: find.byType(ExpansionTile),
+        );
+        await tester.tap(tile);
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(
+          tester.widget<ExpansionTile>(tile).controller!.isExpanded,
+          isTrue,
+        );
+      }
+      final list = find.descendant(
+        of: find.byType(BottomSheet),
+        matching: find.byType(ListView),
+      );
+      for (var i = 0; i < 5; i++) {
+        await tester.drag(list, const Offset(0, -650));
+        await tester.pumpAndSettle();
+      }
+      tester.widget<ListView>(list).controller!.jumpTo(0);
+      await pumpChatUpdates(tester);
+      expect(tester.takeException(), isNull);
+      for (final type in [GatewayReasoningCard, GatewayActivityCard]) {
+        final card = find.byType(type);
+        await tester.scrollUntilVisible(
+          card,
+          100,
+          scrollable: find
+              .descendant(
+                of: find.byType(BottomSheet),
+                matching: find.byType(Scrollable),
+              )
+              .first,
+        );
+        final tile = tester.widget<ExpansionTile>(
+          find.descendant(of: card, matching: find.byType(ExpansionTile)),
+        );
+        expect(
+          tile.controller!.isExpanded,
+          isTrue,
+          reason: 'Inspector visit pins survive lazy eviction',
+        );
+      }
+      await tester.tap(find.byKey(_retainedClose));
+      await pumpChatUpdates(tester);
+      expect(_bubble(_latestReply).hitTestable(), findsOneWidget);
+      expect(f.submissions, 1);
       await tester.pumpWidget(const SizedBox.shrink());
       await f.controller.close();
       await tester.pump();
@@ -392,6 +477,7 @@ class _Fixture {
   Future<void> seedUnknown(
     WidgetTester tester, {
     bool longRecovery = false,
+    bool withWork = false,
   }) async {
     await app.ready;
     owner.observeHistory([]);
@@ -403,6 +489,21 @@ class _Fixture {
           : 'Older prompt',
     );
     emit('message.delta', {'text': _oldReply});
+    if (withWork) {
+      emit('reasoning.delta', {'text': 'Earlier reasoning'});
+      emit('tool.start', {'tool_id': 'earlier-tool', 'name': 'terminal'});
+      emit('tool.complete', {
+        'tool_id': 'earlier-tool',
+        'name': 'terminal',
+        'output': 'Earlier result',
+      });
+      emit('message.delta', {
+        'text': List.filled(
+          50,
+          '\n\nEarlier trailing context after work.',
+        ).join(),
+      });
+    }
     running = false;
     app.receiveEvent(
       'stored',
