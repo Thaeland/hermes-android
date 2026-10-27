@@ -92,17 +92,24 @@ orders, manual selection/Stop/Cancel, all three submission paths, permission and
 navigation/account revocation, TTS chunk/deadline/cancel/error barriers and stale
 or malformed events. These fixtures are **not physical microphone/acoustic proof**.
 
-Independent host inference evidence for the frozen 2.0.1 runtime/model reports
+Independent native CPU inference of the frozen 2.0.1 runtime/model detected all
 six labelled synthetic “Hey Hermes” positives (Samantha, Daniel and Karen voices
-at two rates) and seven negatives (including “Hey Henry”, “Hello Hermes”, silence
-and noise), with the same outcomes on a fresh-engine replay of all thirteen
-fixtures. That is **synthetic macOS ARM CPU inference evidence**, not Android
-hardware validation, human/accent/noise accuracy, false-accept-rate, battery,
-thermal, latency or microphone-routing measurement. Android 14–16 physical
-permission/privacy-switch/provider/network/TTS loss, actual wake/STT/TTS and
-background/lock behaviour remain explicit device acceptance gates. APK/R8/JNI,
-all distributed ABIs, packaged hashes/notices and 16 KB APK/native launch need
-separate native/build evidence. No performance or reliability claim is made here.
+at two rates) and rejected all seven negatives (including “Hey Henry”, “Hello
+Hermes”, silence and noise). Fresh-engine replays reproduced all thirteen outcomes.
+A separate **Android ARM64 AAR/JNI probe on an API 35 emulator** reproduced the
+same keywords, tokens, timestamps and feed positions, with verified model, keyword,
+native-library and executable hashes. Every native stream and engine was released.
+The parent independently replayed both host and Android probes without tuning.
+
+These are **synthetic engine tests**, not a microphone-to-reply demonstration,
+human/accent/noise accuracy estimate, field false-accept rate, battery, thermal,
+latency or microphone-routing measurement. The emulator used 4096-byte pages;
+it is not 16 KB runtime proof. Android 14–16 physical permission/privacy-switch/
+provider/network/TTS loss, actual wake/STT/TTS and background/lock behaviour remain
+explicit device acceptance gates. Exact-candidate APK/R8 packaging, all distributed
+ABIs, bundled hashes/notices and real 16 KB launch are separate checks; no performance
+or reliability claim is made here. Runtime and model licensing/provenance are in
+[the bundled voice notice](../third_party/voice/NOTICE.md).
 
 ## Primary sources
 
@@ -120,3 +127,6 @@ separate native/build evidence. No performance or reliability claim is made here
   `awaitSpeakCompletion(true)`, queue mode and speech input limits.
 - [speech_to_text 7.4.0](https://pub.dev/packages/speech_to_text/versions/7.4.0):
   short intermittent dictation, not continuous hotword listening.
+
+Thanks to @mannok for the feature proposal in #142. Hermes Agent assisted with
+research, implementation, documentation and regression testing.

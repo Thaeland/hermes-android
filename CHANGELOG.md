@@ -6,6 +6,22 @@ shows only the three latest releases.
 
 ## [Unreleased]
 
+### Added
+
+- Opt-in foreground Android hands-free voice: local English “Hey Hermes” wake
+  detection, one recognised prompt through normal chat admission, that turn's
+  spoken reply, and a configurable 0–30 second follow-up window. The mode is off
+  by default and stops on navigation, backgrounding, account changes or errors;
+  returning never restarts the microphone. Wake detection is offline, but the
+  Android speech provider, selected voice and gateway may use networks.
+- A shared, joinable native capture owner for Android manual dictation and
+  hands-free input. Manual dictation remains draft-only. Bundled runtime/model
+  provenance and licences accompany reproducible, hash-checked build inputs.
+
+Thanks to @mannok for #142. Hermes Agent assisted with research, implementation,
+documentation and regression tests. Physical-device acoustic, privacy, provider,
+battery and 16 KB launch checks remain explicit acceptance limits, not promises.
+
 ## [3.0.2] - 2026-10-27
 
 Release identity is `3.0.2+3006`, with production APK codes `30061`, `30062` and
