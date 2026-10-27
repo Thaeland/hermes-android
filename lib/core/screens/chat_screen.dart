@@ -622,6 +622,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   late final VoiceReplySpeaker _replySpeaker;
   late final Future<void> _voiceSetup;
   final Object _voiceRouteToken = Object();
+  ModalRoute<dynamic>? _voiceRoute;
+  bool _voiceElementActive = true;
   bool _voiceBound = false;
   Object? _voiceAccountEpoch;
   bool _voiceForeground = true;
@@ -1371,6 +1373,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _voiceRoute = ModalRoute.of(context);
     // ModalRoute establishes a dependency on visibility. A lower duplicate
     // route becoming current must replay pending input even if the server is
     // blocked waiting for that answer and sends no further stream frames.
@@ -1380,7 +1383,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     if (current && _normalChat != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && ModalRoute.of(context)?.isCurrent == true) {
+        if (_voiceElementActive && mounted && _voiceRoute?.isCurrent == true) {
           _applyNormalSnapshot(_normalChat!.snapshot, followStream: false);
         }
       });
@@ -1416,6 +1419,25 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _retainedRecoveryOutcomeIds.clear();
       _historyObservedRecoveryOutcomeIds.clear();
     }
+  }
+
+  @override
+  void deactivate() {
+    // A mounted State can already be inactive when a replacement Navigator
+    // notifies the global observer. Revoke before leaving the active tree;
+    // neither retained callbacks nor pending audio starts may borrow a reparent.
+    _voiceElementActive = false;
+    handsFreeRouteObserver.removeListener(_onVoiceRouteChanged);
+    _revokeVoice(HandsFreeStopReason.routeChanged);
+    super.deactivate();
+  }
+
+  @override
+  void activate() {
+    super.activate();
+    _voiceElementActive = true;
+    handsFreeRouteObserver.addListener(_onVoiceRouteChanged);
+    // Reactivation restores observation, never microphone consent.
   }
 
   @override
@@ -1870,9 +1892,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   bool get _voiceRouteCurrent =>
       mounted &&
+      _voiceElementActive &&
       widget.active &&
-      ModalRoute.of(context)?.isCurrent == true &&
-      handsFreeRouteObserver.permits(ModalRoute.of(context));
+      _voiceRoute?.isCurrent == true &&
+      handsFreeRouteObserver.permits(_voiceRoute);
 
   HandsFreeAuthority _captureVoiceAuthority() => HandsFreeAuthority(
     routeToken: _voiceRouteToken,
@@ -2204,7 +2227,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _voiceTurn?.finish(HandsFreeTurnStatus.unknown);
       _voiceTurn = null;
     }
-    if (mounted) setState(() {});
+    if (mounted && _voiceElementActive) setState(() {});
   }
 
   Future<void> _speakAssistantText(String text) async {
@@ -6296,6 +6319,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Widget _buildInputBar({required double availableHeight}) {
+    final handsFreeAction = _buildHandsFreeComposerAction();
+    final separateVoiceAction = MediaQuery.sizeOf(context).width < 400;
     final sendEnabled =
         !_transcriptLoadBlocksComposer &&
         !_archiving &&
@@ -6476,6 +6501,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 ),
               ),
             ),
+            if (separateVoiceAction && handsFreeAction != null)
+              Align(alignment: Alignment.centerRight, child: handsFreeAction),
             Row(
               children: [
                 Semantics(
@@ -6536,38 +6563,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   ),
                 ),
                 const SizedBox(width: 8),
-                if (_handsFreeSupported &&
-                    !_voiceComposer.listening &&
-                    !_handsFree.active &&
-                    _handsFree.state != HandsFreeState.error)
-                  IconButton(
-                    key: const Key('hands-free-start'),
-                    tooltip: context.l10n.hands_free_start,
-                    icon: const Icon(Icons.record_voice_over_outlined),
-                    constraints: const BoxConstraints.tightFor(
-                      width: 48,
-                      height: 48,
-                    ),
-                    onPressed: _handsFree.starting
-                        ? null
-                        : () => unawaited(_startHandsFree()),
-                  ),
-                if (_handsFree.active ||
-                    _handsFree.state == HandsFreeState.error)
-                  IconButton(
-                    key: const Key('hands-free-quick-stop'),
-                    tooltip: context.l10n.hands_free_stop,
-                    icon: const Icon(Icons.voice_over_off),
-                    constraints: const BoxConstraints.tightFor(
-                      width: 48,
-                      height: 48,
-                    ),
-                    onPressed: () => unawaited(
-                      _handsFree
-                          .stop(reason: HandsFreeStopReason.user)
-                          .catchError((Object _) {}),
-                    ),
-                  ),
+                if (!separateVoiceAction && handsFreeAction != null)
+                  handsFreeAction,
                 if (!_voiceComposer.listening && !_streaming)
                   VoiceComposerStartButton(
                     enabled:
@@ -6634,6 +6631,40 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           ],
         ),
       ),
+    );
+  }
+
+  Widget? _buildHandsFreeComposerAction() {
+    if (_handsFree.active || _handsFree.state == HandsFreeState.error) {
+      return IconButton(
+        key: const Key('hands-free-quick-stop'),
+        tooltip: context.l10n.hands_free_stop,
+        icon: const Icon(Icons.voice_over_off),
+        constraints: const BoxConstraints.tightFor(width: 48, height: 48),
+        onPressed: () => unawaited(
+          _handsFree
+              .stop(reason: HandsFreeStopReason.user)
+              .catchError((Object _) {}),
+        ),
+      );
+    }
+    // Starting hands-free is unavailable while a turn owns the composer. Do
+    // not spend editor width on an inert Start; active Stop is never omitted.
+    if (!_handsFreeSupported ||
+        _voiceComposer.listening ||
+        _streaming ||
+        _sending ||
+        _preparingSend) {
+      return null;
+    }
+    return IconButton(
+      key: const Key('hands-free-start'),
+      tooltip: context.l10n.hands_free_start,
+      icon: const Icon(Icons.record_voice_over_outlined),
+      constraints: const BoxConstraints.tightFor(width: 48, height: 48),
+      onPressed: _handsFree.starting
+          ? null
+          : () => unawaited(_startHandsFree()),
     );
   }
 

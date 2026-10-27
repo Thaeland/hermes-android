@@ -259,6 +259,49 @@ class _Rig {
 }
 
 void main() {
+  for (final phase in ['wake', 'waiting', 'playback']) {
+    testWidgets('HF05 compact keyboard retains editor and Stop during $phase', (
+      tester,
+    ) async {
+      tester.view.physicalSize = const Size(320, 860);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      final rig = _Rig('rest');
+      await rig.pump(tester, textScale: 2);
+      await rig.start(tester);
+      if (phase != 'wake') await rig.prompt(tester);
+      if (phase == 'playback') {
+        rig.speaker.held = Completer<HandsFreeSpeechOutcome>();
+        await rig.finish(tester);
+        expect(rig.speaker.playing, isTrue);
+      }
+      tester.view.viewInsets = const FakeViewPadding(bottom: 340);
+      await tester.pump();
+      final stop = find.byKey(const Key('hands-free-quick-stop'));
+      expect(stop.hitTestable(), findsOneWidget);
+      expect(tester.getSize(stop), const Size(48, 48));
+      expect(tester.getRect(stop).bottom, lessThanOrEqualTo(520));
+      expect(
+        tester.getSize(find.byKey(const Key('chat-message-composer'))).width,
+        greaterThan(80),
+      );
+      if (phase == 'waiting') {
+        final responseStop = find.byKey(const Key('chat-stop-response'));
+        final send = find.byKey(const Key('chat-send-message'));
+        expect(responseStop.hitTestable(), findsOneWidget);
+        expect(send.hitTestable(), findsOneWidget);
+        expect(tester.getSize(responseStop), const Size(48, 48));
+        expect(tester.getSize(send), const Size(48, 48));
+        expect(tester.getRect(stop).overlaps(tester.getRect(send)), isFalse);
+      }
+      await tester.tap(stop);
+      await tester.pump();
+      expect(rig.native.audio, 'none');
+      expect(rig.speaker.playing, isFalse);
+      expect(tester.takeException(), isNull);
+      await rig.close(tester);
+    });
+  }
   testWidgets('HF05 fixed Stop stays visible at compact width and large text', (
     tester,
   ) async {
@@ -476,6 +519,7 @@ void main() {
     'paused',
     'account',
     'pop',
+    'root replacement',
   ]) {
     testWidgets(
       'HF05 $action revokes held model/native Start; resume never restarts',
@@ -517,8 +561,17 @@ void main() {
                 builder: (_) => const Scaffold(body: Text('Elsewhere')),
               ),
             );
+          case 'root replacement':
+            await tester.pumpWidget(
+              MaterialApp(
+                key: const ValueKey('replacement-root'),
+                navigatorObservers: [handsFreeRouteObserver],
+                home: const Scaffold(body: Text('New root')),
+              ),
+            );
         }
         await tester.pump();
+        expect(rig.native.revoked, isNotEmpty);
         load.complete();
         await tester.pump();
         expect(rig.native.audio, 'none');
