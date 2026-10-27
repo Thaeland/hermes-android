@@ -21,9 +21,10 @@ class FlutterVoiceReplySpeaker implements VoiceReplySpeaker {
           timerFactory ?? ((duration, fire) => Timer(duration, fire)) {
     tts.setCancelHandler(() => _end(HandsFreeSpeechOutcome.canceled));
     tts.setErrorHandler((_) => _end(HandsFreeSpeechOutcome.failed));
-    // The awaitSpeakCompletion future is the positive per-chunk completion
-    // barrier. An uncorrelated late completion callback cannot complete a newer
-    // chunk; only cancellation/error callbacks are fail-closed side channels.
+    // Android's pinned native patch correlates the awaitSpeakCompletion reply
+    // with its utterance/epoch/result identity. The upstream 4.2.5 Future alone
+    // is not that guarantee. Raw completion callbacks never complete a chunk;
+    // cancellation/error callbacks are fail-closed side channels.
   }
   final FlutterTts tts;
   final VoiceTimerFactory _timerFactory;

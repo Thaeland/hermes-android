@@ -72,7 +72,10 @@ Dart uses `com.hermesagent.hermes_android/voice` and `voice/events` with protoco
 version 1, typed string-keyed StandardMessageCodec maps and owner/generation/
 sequence/operation fences. Android manual dictation and hands-free use the same
 joinable native capture owner; non-Android manual dictation retains
-`speech_to_text`. TTS reuses the chat's existing `FlutterTts` instance.
+`speech_to_text`. TTS reuses the chat's existing `FlutterTts` instance. Android
+builds apply a [content-pinned local 4.2.5 native patch](../third_party/flutter_tts_android/README.md)
+for utterance/result/epoch correlation and Stop-versus-queued-start fencing.
+This is not an upstream fix claim; Dart/non-Android plugin sources are unchanged.
 
 A stopped generation cannot restart. Native release acknowledgement is required
 before another capture/playback action; waiting for a timer or `notListening`
