@@ -1,0 +1,169 @@
+import 'dart:async';
+
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_tts/flutter_tts.dart';
+import 'package:hermes_android/core/controllers/hands_free_conversation_controller.dart';
+import 'package:hermes_android/core/services/hands_free_speech.dart';
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  const channel = MethodChannel('flutter_tts');
+  final messenger =
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+  late List<MethodCall> calls;
+  Completer<Object?>? gate;
+  String? held;
+  Object? speakResult;
+  int? maximum;
+  setUp(() {
+    calls = [];
+    gate = null;
+    held = null;
+    speakResult = 1;
+    maximum = 12;
+    messenger.setMockMethodCallHandler(channel, (call) async {
+      calls.add(call);
+      if (call.method == held) return gate!.future;
+      return switch (call.method) {
+        'getMaxSpeechInputLength' => maximum,
+        'speak' => speakResult,
+        _ => 1,
+      };
+    });
+  });
+  tearDown(() => messenger.setMockMethodCallHandler(channel, null));
+  String spoken(MethodCall call) => call.arguments is Map
+      ? call.arguments['text'] as String
+      : call.arguments as String;
+  testWidgets(
+    'HF06 real plugin awaits each chunk and configures completion/queue',
+    (tester) async {
+      held = 'speak';
+      gate = Completer();
+      final speaker = FlutterVoiceReplySpeaker(FlutterTts());
+      const text = 'A long reply with emoji 🙂 and more words.';
+      final speech = speaker.speak(text, isCurrent: () => true);
+      await tester.pump();
+      expect(calls[0].method, 'awaitSpeakCompletion');
+      expect(calls[0].arguments, true);
+      expect(calls[1].method, 'setQueueMode');
+      expect(calls[1].arguments, 0);
+      expect(calls.where((call) => call.method == 'speak'), hasLength(1));
+      final first = gate!;
+      held = null;
+      first.complete(1);
+      expect(await speech, HandsFreeSpeechOutcome.completed);
+      final chunks = calls
+          .where((call) => call.method == 'speak')
+          .map(spoken)
+          .toList();
+      expect(chunks.join(), text);
+      expect(chunks.every((text) => text.length <= 12), isTrue);
+      expect(chunks.any((text) => text.contains('🙂')), isTrue);
+      expect(calls.where((call) => call.method == 'stop'), isEmpty);
+    },
+  );
+  for (final stage in [
+    'awaitSpeakCompletion',
+    'setQueueMode',
+    'getMaxSpeechInputLength',
+    'speak',
+  ]) {
+    testWidgets('HF06 Stop while $stage held never starts a later chunk', (
+      tester,
+    ) async {
+      held = stage;
+      gate = Completer();
+      final speaker = FlutterVoiceReplySpeaker(FlutterTts());
+      final speech = speaker.speak(
+        'Long public reply to be canceled.',
+        isCurrent: () => true,
+      );
+      await tester.pump();
+      final stop = speaker.stop();
+      await tester.pump();
+      await stop;
+      expect(await speech, HandsFreeSpeechOutcome.canceled);
+      final count = calls.where((call) => call.method == 'speak').length;
+      held = null;
+      gate!.complete(stage == 'getMaxSpeechInputLength' ? 12 : 1);
+      await tester.pump();
+      expect(calls.where((call) => call.method == 'speak'), hasLength(count));
+    });
+  }
+  testWidgets(
+    'HF06 a missing native speak completion expires after five minutes',
+    (tester) async {
+      held = 'speak';
+      gate = Completer();
+      final speaker = FlutterVoiceReplySpeaker(FlutterTts());
+      final speech = speaker.speak('Reply', isCurrent: () => true);
+      await tester.pump();
+      await tester.pump(const Duration(minutes: 5));
+      expect(await speech, HandsFreeSpeechOutcome.deadline);
+      expect(calls.where((call) => call.method == 'stop'), isNotEmpty);
+      gate!.complete(1);
+      await tester.pump();
+    },
+  );
+  for (final event in ['speak.onCancel', 'speak.onError']) {
+    testWidgets('HF06 $event resolves held plugin Future without rearm', (
+      tester,
+    ) async {
+      held = 'speak';
+      gate = Completer();
+      final tts = FlutterTts();
+      final speaker = FlutterVoiceReplySpeaker(tts);
+      final speech = speaker.speak('Reply', isCurrent: () => true);
+      await tester.pump();
+      await tts.platformCallHandler(MethodCall(event, 'sanitized failure'));
+      await tester.pump();
+      expect(
+        await speech,
+        event == 'speak.onCancel'
+            ? HandsFreeSpeechOutcome.canceled
+            : HandsFreeSpeechOutcome.failed,
+      );
+      gate!.complete(1);
+      await tester.pump();
+    });
+  }
+  testWidgets(
+    'HF06 non-1 and unavailable input length never count as completion',
+    (tester) async {
+      final speaker = FlutterVoiceReplySpeaker(FlutterTts());
+      for (final result in [0, null, false]) {
+        speakResult = result;
+        expect(
+          await speaker.speak('Reply', isCurrent: () => true),
+          HandsFreeSpeechOutcome.failed,
+        );
+      }
+      maximum = null;
+      expect(
+        await speaker.speak('Reply', isCurrent: () => true),
+        HandsFreeSpeechOutcome.unavailable,
+      );
+    },
+  );
+  test(
+    'HF06 UTF16 chunks retain exact text and never split a surrogate pair',
+    () {
+      const text = '🙂🙂 hello こんにちは 🙂 end';
+      for (final length in [2, 3, 4, 7, 12]) {
+        final chunks = splitSpeechInput(text, length);
+        expect(chunks.join(), text);
+        expect(chunks.every((chunk) => chunk.length <= length), isTrue);
+        expect(
+          chunks.every(
+            (chunk) =>
+                !(chunk.codeUnitAt(0) >= 0xdc00 &&
+                    chunk.codeUnitAt(0) <= 0xdfff),
+          ),
+          isTrue,
+        );
+      }
+    },
+  );
+}

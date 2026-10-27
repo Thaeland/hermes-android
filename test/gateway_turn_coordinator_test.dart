@@ -46,6 +46,21 @@ class _MemoryJournalStore implements GatewayTurnJournalStore {
   }
 }
 
+class _VoiceAdmissionJournalStore extends _MemoryJournalStore {
+  final written = Completer<void>();
+  final release = Completer<void>();
+  bool held = false;
+  @override
+  Future<void> write(String newValue) async {
+    await super.write(newValue);
+    if (!held && newValue.contains(_clientA)) {
+      held = true;
+      written.complete();
+      await release.future;
+    }
+  }
+}
+
 class _CrashJournalSlot {
   String? value;
   final ackSealed = Completer<void>();
@@ -637,6 +652,60 @@ Future<void> _waitFor(
 }
 
 void main() {
+  test(
+    'HF05 revoked local voice consent after durable write never emits prompt.submit',
+    () async {
+      final fixture = await _GatewayFixture.start();
+      final store = _VoiceAdmissionJournalStore();
+      var current = true;
+      var nextId = 0;
+      final coordinator = _coordinator(
+        fixture: fixture,
+        journal: GatewayTurnJournal(store: store),
+        uuidFactory: () => nextId++ == 0 ? _clientA : _clientB,
+      );
+      try {
+        final submission = coordinator.submit(
+          text: 'fixture voice prompt',
+          maySubmit: () => current,
+        );
+        final rejected = expectLater(
+          submission,
+          throwsA(isA<GatewayTurnAdmissionRevoked>()),
+        );
+        await store.written.future;
+        current = false;
+        store.release.complete();
+        await rejected;
+        expect(
+          fixture.requests.where(
+            (request) => request['method'] == 'prompt.submit',
+          ),
+          isEmpty,
+        );
+        expect(
+          (jsonDecode(store.value!) as Map<String, dynamic>)['entries'],
+          isEmpty,
+        );
+        expect(coordinator.stateFor(_clientA), isNull);
+        current = true;
+        await coordinator.submit(
+          text: 'later explicit prompt',
+          maySubmit: () => current,
+        );
+        expect(
+          fixture.requests.where(
+            (request) => request['method'] == 'prompt.submit',
+          ),
+          hasLength(1),
+        );
+      } finally {
+        if (!store.release.isCompleted) store.release.complete();
+        await coordinator.close();
+        await fixture.close();
+      }
+    },
+  );
   test(
     'registry binding listeners are session-scoped and token-owned',
     () async {

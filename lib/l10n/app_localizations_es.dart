@@ -25,6 +25,78 @@ class AppLocalizationsEs extends AppLocalizations {
   String get background_report_collapse => 'Contraer informe';
 
   @override
+  String get hands_free_title => 'Manos libres';
+
+  @override
+  String get hands_free_start => 'Iniciar manos libres';
+
+  @override
+  String get hands_free_stop => 'Detener manos libres';
+
+  @override
+  String get hands_free_preparing => 'Preparando voz — espera';
+
+  @override
+  String get hands_free_listening => 'Di Hey Hermes';
+
+  @override
+  String get hands_free_recording => 'Listo — habla ahora';
+
+  @override
+  String get hands_free_waiting => 'Esperando a Hermes';
+
+  @override
+  String get hands_free_speaking => 'Hablando — micrófono apagado';
+
+  @override
+  String hands_free_followup(int seconds) {
+    return 'Escuchar hasta $seconds segundos';
+  }
+
+  @override
+  String get hands_free_error => 'Manos libres detenido';
+
+  @override
+  String get hands_free_setup => 'Configurar manos libres';
+
+  @override
+  String hands_free_preview(String transcript) {
+    return 'Vista previa: $transcript';
+  }
+
+  @override
+  String get hands_free_short_disclosure =>
+      'Solo con este chat abierto en primer plano. Activación sin conexión; la voz puede usar la red. Consume batería.';
+
+  @override
+  String get hands_free_error_action =>
+      'Revisa permiso de micrófono, servicio de voz, voz de respuesta y conexión. Pulsa Detener e Iniciar. No se reenvía nada.';
+
+  @override
+  String get hands_free_disclosure =>
+      'La activación funciona sin conexión en la CPU. El reconocimiento de Android, la voz elegida y el gateway pueden usar redes. Escuchar consume batería y puede haber activaciones falsas. Se detiene al cubrir o cerrar el chat o salir del primer plano; nunca se reinicia solo. El dictado manual sigue siendo un borrador editable.';
+
+  @override
+  String get hands_free_ready_cue =>
+      'Di «Hey Hermes», espera a «Listo» y habla. Sin captura en la misma frase ni audio previo. Si el permiso te saca de la app, pulsa Iniciar otra vez tras concederlo.';
+
+  @override
+  String get hands_free_timing_limit =>
+      'La ventana de seguimiento es un máximo, no un mínimo. Android puede detenerse antes. El silencio vuelve a la activación local sin reiniciar repetidamente el reconocimiento.';
+
+  @override
+  String get hands_free_followup_off =>
+      'Seguimiento desactivado — di Hey Hermes para cada mensaje';
+
+  @override
+  String get hands_free_start_blocked =>
+      'Se requiere borrador vacío, sin adjuntos, chat conectado sin actividad y respuestas habladas activadas. Termina primero cualquier acción de voz manual.';
+
+  @override
+  String get hands_free_setup_complete =>
+      'Configuración de micrófono terminada. Pulsa Iniciar otra vez.';
+
+  @override
   String message_time_recorded(String time) {
     return 'Recorded by server: $time (local time)';
   }

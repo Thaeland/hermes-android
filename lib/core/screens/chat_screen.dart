@@ -11,6 +11,14 @@ import '../widgets/session_name_dialog.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_tts/flutter_tts.dart';
+import 'package:uuid/uuid.dart';
+import '../controllers/hands_free_conversation_controller.dart';
+import '../services/hands_free_voice_platform.dart';
+import '../services/android_voice_composer_adapter.dart';
+import '../services/hands_free_speech.dart';
+import '../services/hands_free_route_observer.dart';
+import '../services/connection_mutation_barrier.dart';
+import '../widgets/hands_free_voice_controls.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -340,6 +348,14 @@ class ChatScreen extends StatefulWidget {
   @visibleForTesting
   final VoiceComposerAdapter? testVoiceComposerAdapter;
 
+  @visibleForTesting
+  final HandsFreeVoicePlatform? testHandsFreePlatform;
+  @visibleForTesting
+  final VoiceReplySpeaker? testVoiceReplySpeaker;
+
+  /// Retained/offstage destinations must explicitly relinquish voice authority.
+  final bool active;
+
   /// Lets a test observe what the chat posts to Android when a turn settles,
   /// without touching the notification platform channel.
   @visibleForTesting
@@ -402,6 +418,9 @@ class ChatScreen extends StatefulWidget {
     this.testInitialAttachmentDrafts = const [],
     this.testComposerDraftReader,
     this.testVoiceComposerAdapter,
+    this.testHandsFreePlatform,
+    this.testVoiceReplySpeaker,
+    this.active = true,
     this.testTurnNotifications,
     this.testDesktopConnectionHook,
     this.testDesktopAsyncEventHook,
@@ -418,6 +437,27 @@ class ChatScreen extends StatefulWidget {
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
+}
+
+class _HandsFreeTurnBinding {
+  _HandsFreeTurnBinding(this.prompt) : clientTurnId = const Uuid().v4();
+  final HandsFreePrompt prompt;
+  String clientTurnId;
+  String? transportTurnId;
+  int? responseGeneration;
+  final admitted = Completer<bool>();
+  final terminal = Completer<HandsFreeTurnOutcome>();
+  void finish(HandsFreeTurnStatus status, [String? text]) {
+    if (!terminal.isCompleted) {
+      terminal.complete(
+        HandsFreeTurnOutcome(
+          clientTurnId: clientTurnId,
+          status: status,
+          publicFinalText: text,
+        ),
+      );
+    }
+  }
 }
 
 class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
@@ -578,7 +618,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   // Voice input / spoken replies
   final FlutterTts _flutterTts = FlutterTts();
   late final VoiceComposerController _voiceComposer;
+  late final HandsFreeConversationController _handsFree;
+  late final VoiceReplySpeaker _replySpeaker;
+  late final Future<void> _voiceSetup;
+  final Object _voiceRouteToken = Object();
+  bool _voiceBound = false;
+  Object? _voiceAccountEpoch;
+  bool _voiceForeground = true;
+  int _voiceForegroundEpoch = 0;
+  int _manualAudioIntent = 0;
+  Duration _followupTimeout = const Duration(seconds: 10);
+  _HandsFreeTurnBinding? _voiceTurn;
+  bool get _handsFreeSupported =>
+      widget.testHandsFreePlatform != null ||
+      (!kIsWeb && defaultTargetPlatform == TargetPlatform.android);
   bool _voiceReplyEnabled = true;
+  bool _voicePlaybackConfigured = false;
   bool _awaitingVoiceReply = false;
   String? _voiceStatus;
   String? _sttLocaleId;
@@ -616,6 +671,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _sessionTitle = widget.session.title;
     _sessionArchived = widget.session.archived;
     WidgetsBinding.instance.addObserver(this);
+    _voiceAccountEpoch = ConnectionMutationBarrier.capture(
+      widget.connection.id,
+    );
+    _voiceForeground =
+        WidgetsBinding.instance.lifecycleState == null ||
+        WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
     _projectName = _normalisedProjectName(widget.projectName);
     _viewController =
         widget.turnApplicationController ??
@@ -672,8 +733,27 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _voiceComposer = VoiceComposerController(
       textController: _textController,
       adapter:
-          widget.testVoiceComposerAdapter ?? SpeechToTextVoiceComposerAdapter(),
+          widget.testVoiceComposerAdapter ??
+          createVoiceComposerAdapter(platform: widget.testHandsFreePlatform),
     )..addListener(_onVoiceComposerChanged);
+    _replySpeaker =
+        widget.testVoiceReplySpeaker ?? FlutterVoiceReplySpeaker(_flutterTts);
+    _handsFree = HandsFreeConversationController(
+      platform:
+          widget.testHandsFreePlatform ??
+          MethodChannelHandsFreeVoicePlatform.shared,
+      ownerId: 'hands-free-${const Uuid().v4()}',
+      isAuthorityCurrent: _isVoiceAuthorityCurrent,
+      canStart: _canStartHandsFree,
+      prepareAudio: _prepareHandsFreeAudio,
+      submitHandsFreePrompt: _submitHandsFreePrompt,
+      speakHandsFreeReply: _speakHandsFreeReply,
+      cancelSpeech: _replySpeaker.stop,
+      localeId: () => _sttLocaleId,
+    )..addListener(_onVoiceComposerChanged);
+    _voiceBound = true;
+    handsFreeRouteObserver.addListener(_onVoiceRouteChanged);
+    ConnectionMutationBarrier.addListener(_onVoiceAccountChanged);
     _attachmentDrafts
       ..addAll(widget.initialAttachmentDrafts)
       ..addAll(widget.testInitialAttachmentDrafts);
@@ -743,7 +823,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _loadVerboseMode();
     _loadChatDensity();
     chatDensitySelection.addListener(_onChatDensityChanged);
-    _initVoice();
+    _voiceSetup = _initVoice();
     _recoverLostImage();
     _scrollController.addListener(_onScroll);
     if (_desktopGateway != null) unawaited(_ensureDesktopSession());
@@ -800,6 +880,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     bool followStream = true,
   }) {
     if (!mounted) return;
+    _observeVoiceNormalTerminal(snapshot);
     final rejectedDraft = snapshot.rejectedDraft;
     if (rejectedDraft != null &&
         widget.initialComposerText == null &&
@@ -1149,6 +1230,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       '$_connectionIdentity|${widget.session.id}';
 
   void _onComposerChanged() {
+    if (_voiceBound && _handsFree.active) {
+      _handsFree.revoke(HandsFreeStopReason.composerEdited);
+    }
     _composerRevision += 1;
     _normalChat?.invalidateDraftRecovery();
     final text = _textController.text;
@@ -1290,7 +1374,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     // ModalRoute establishes a dependency on visibility. A lower duplicate
     // route becoming current must replay pending input even if the server is
     // blocked waiting for that answer and sends no further stream frames.
-    final current = ModalRoute.of(context)?.isCurrent == true;
+    final current = ModalRoute.isCurrentOf(context) == true;
+    if (!current || !widget.active) {
+      _revokeVoice(HandsFreeStopReason.routeChanged);
+    }
     if (current && _normalChat != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted && ModalRoute.of(context)?.isCurrent == true) {
@@ -1303,6 +1390,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   @override
   void didUpdateWidget(covariant ChatScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.connection != widget.connection ||
+        oldWidget.session.id != widget.session.id ||
+        !widget.active) {
+      _revokeVoice(
+        oldWidget.session.id != widget.session.id
+            ? HandsFreeStopReason.sessionChanged
+            : HandsFreeStopReason.connectionChanged,
+      );
+    }
     final registry = (widget.turnApplicationController ?? _viewController)
         .presentationFor(widget.connection);
     if (!identical(registry, _reasoningRegistry) ||
@@ -1324,6 +1420,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    _manualAudioIntent++;
+    _voiceBound = false;
+    handsFreeRouteObserver.removeListener(_onVoiceRouteChanged);
+    ConnectionMutationBarrier.removeListener(_onVoiceAccountChanged);
+    _handsFree
+      ..removeListener(_onVoiceComposerChanged)
+      ..dispose();
+    _voiceTurn?.finish(HandsFreeTurnStatus.unknown);
+    _voiceTurn = null;
+    unawaited(_replySpeaker.stop().catchError((Object _) {}));
     final normalChat = _normalChat;
     final reservation = _normalReservation;
     final subscription = _normalSubscription;
@@ -1346,9 +1452,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _voiceComposer
       ..removeListener(_onVoiceComposerChanged)
       ..dispose();
-    if (widget.testVoiceComposerAdapter == null) {
-      _flutterTts.stop();
-    }
     for (final timer in _notificationTimers.values) {
       timer.cancel();
     }
@@ -1419,6 +1522,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    final foreground = state == AppLifecycleState.resumed;
+    if (_voiceForeground != foreground) _voiceForegroundEpoch++;
+    _voiceForeground = foreground;
+    if (!_voiceForeground) _revokeVoice(HandsFreeStopReason.background);
     if (state == AppLifecycleState.paused ||
         state == AppLifecycleState.hidden ||
         state == AppLifecycleState.detached) {
@@ -1761,33 +1868,291 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       ..writeln();
   }
 
+  bool get _voiceRouteCurrent =>
+      mounted &&
+      widget.active &&
+      ModalRoute.of(context)?.isCurrent == true &&
+      handsFreeRouteObserver.permits(ModalRoute.of(context));
+
+  HandsFreeAuthority _captureVoiceAuthority() => HandsFreeAuthority(
+    routeToken: _voiceRouteToken,
+    connectionId: widget.connection.id,
+    connectionMutationEpoch: ConnectionMutationBarrier.capture(
+      widget.connection.id,
+    ),
+    sessionId: widget.session.id,
+    foregroundEpoch: _voiceForegroundEpoch,
+    controllerGeneration: _handsFree.generation + 1,
+  );
+
+  bool _voiceAccountCurrent() {
+    try {
+      return mapEquals(
+        _notificationApprovalOrigin,
+        NotificationApprovalAuthority.origin(widget.connection),
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  bool _isVoiceAuthorityCurrent(HandsFreeAuthority authority) =>
+      mounted &&
+      _voiceRouteCurrent &&
+      _voiceForeground &&
+      identical(authority.routeToken, _voiceRouteToken) &&
+      authority.connectionId == widget.connection.id &&
+      _voiceAccountCurrent() &&
+      identical(authority.connectionMutationEpoch, _voiceAccountEpoch) &&
+      authority.sessionId == widget.session.id &&
+      authority.foregroundEpoch == _voiceForegroundEpoch &&
+      ConnectionMutationBarrier.isCurrent(
+        authority.connectionId,
+        authority.connectionMutationEpoch,
+      );
+
+  bool _canStartHandsFree(HandsFreeAuthority authority) =>
+      _isVoiceAuthorityCurrent(authority) &&
+      _voiceReplyEnabled &&
+      !_voiceComposer.listening &&
+      !_voiceComposer.starting &&
+      _textController.text.isEmpty &&
+      _attachmentDrafts.isEmpty &&
+      !_transcriptLoadBlocksComposer &&
+      !_preparingSend &&
+      !_sending &&
+      !_streaming &&
+      !_changingModel &&
+      !_loadingModelOptions &&
+      !_archiving &&
+      !_renaming &&
+      !_recoveringTurn &&
+      !_pendingReattachResync &&
+      !_stopResponseInFlight &&
+      !_midTurnSendInFlight &&
+      _activeClientTurnId == null &&
+      _normalChat?.snapshot.hasActiveTurn != true &&
+      _normalChat?.snapshot.phase != NormalGatewayTurnPhase.reconciledUnknown &&
+      (_normalSession == null || _normalSessionReady);
+
+  Future<bool> _prepareHandsFreeAudio() async {
+    await _voiceSetup;
+    if (!_voicePlaybackConfigured) return false;
+    await _voiceComposer.settle();
+    final adapter = _voiceComposer.adapter;
+    if (adapter is AndroidVoiceComposerAdapter) {
+      await adapter.cancel();
+      await adapter.settle();
+    }
+    await _replySpeaker.stop();
+    if (!await _replySpeaker.prepare()) return false;
+    return mounted && !_voiceComposer.listening && !_voiceComposer.starting;
+  }
+
+  void _revokeVoice(HandsFreeStopReason reason) {
+    if (!_voiceBound) return;
+    _manualAudioIntent++;
+    _handsFree.revoke(reason);
+    if (_voiceComposer.listening || _voiceComposer.starting) {
+      unawaited(_voiceComposer.cancel());
+    }
+    _voiceTurn?.finish(HandsFreeTurnStatus.unknown);
+    _voiceTurn = null;
+    unawaited(_replySpeaker.stop().catchError((Object _) {}));
+  }
+
+  void _onVoiceRouteChanged() {
+    if (!_voiceRouteCurrent) _revokeVoice(HandsFreeStopReason.routeChanged);
+  }
+
+  void _onVoiceAccountChanged() {
+    final authority = _handsFree.authority;
+    if ((authority != null ||
+            _voiceComposer.listening ||
+            _voiceComposer.starting) &&
+        !ConnectionMutationBarrier.isCurrent(
+          widget.connection.id,
+          _voiceAccountEpoch,
+        )) {
+      _revokeVoice(HandsFreeStopReason.accountMutation);
+    }
+  }
+
+  Future<void> _startHandsFree() async {
+    final authority = _captureVoiceAuthority();
+    if (!_canStartHandsFree(authority)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(context.l10n.hands_free_start_blocked)),
+      );
+      return;
+    }
+    final setup = await showHandsFreeSetup(
+      context,
+      followupTimeout: _followupTimeout,
+    );
+    if (!mounted || setup == null || !_isVoiceAuthorityCurrent(authority)) {
+      return;
+    }
+    await _setFollowupSeconds(setup);
+    if (!mounted || !_isVoiceAuthorityCurrent(authority)) return;
+    await _handsFree.start(
+      authority: authority,
+      followupTimeout: _followupTimeout,
+    );
+  }
+
+  Future<void> _setFollowupSeconds(int seconds) async {
+    if (seconds < 0 || seconds > 30) return;
+    await _handsFree.stop(reason: HandsFreeStopReason.user);
+    final prefs = await SharedPreferences.getInstance();
+    if (!await prefs.setInt('hands_free_followup_timeout_ms', seconds * 1000)) {
+      return;
+    }
+    if (mounted) setState(() => _followupTimeout = Duration(seconds: seconds));
+  }
+
+  Future<HandsFreeSubmittedTurn?> _submitHandsFreePrompt(
+    HandsFreePrompt prompt,
+  ) async {
+    if (!_handsFree.isCurrent(prompt.authority) ||
+        !_canStartHandsFree(prompt.authority) ||
+        _voiceTurn != null) {
+      return null;
+    }
+    final binding = _voiceTurn = _HandsFreeTurnBinding(prompt);
+    unawaited(() async {
+      try {
+        await _sendMessage(handsFreePrompt: prompt, voiceBinding: binding);
+      } catch (_) {
+        binding.finish(HandsFreeTurnStatus.failed);
+      } finally {
+        if (!binding.admitted.isCompleted) binding.admitted.complete(false);
+      }
+    }());
+    if (!await binding.admitted.future) {
+      if (identical(_voiceTurn, binding)) _voiceTurn = null;
+      return null;
+    }
+    return HandsFreeSubmittedTurn(
+      clientTurnId: binding.clientTurnId,
+      settled: binding.terminal.future,
+    );
+  }
+
+  Future<HandsFreeSpeechOutcome> _speakHandsFreeReply(
+    HandsFreeReply reply,
+  ) async {
+    if (!_voiceReplyEnabled || !_handsFree.isCurrent(reply.authority)) {
+      return HandsFreeSpeechOutcome.canceled;
+    }
+    return _replySpeaker.speak(
+      reply.text,
+      isCurrent: () =>
+          _voiceReplyEnabled && _handsFree.isCurrent(reply.authority),
+    );
+  }
+
+  void _bindRecoveryVoiceTurn(
+    _HandsFreeTurnBinding binding,
+    GatewayTurnRecoveryState state,
+  ) {
+    if (binding.transportTurnId != null &&
+        binding.transportTurnId != state.clientTurnId) {
+      return;
+    }
+    binding.transportTurnId = state.clientTurnId;
+    if (!binding.admitted.isCompleted) {
+      // Recovery-v2 already allocates a stable client turn ID. Publish that
+      // exact ID, never a second voice wire identity or a history-derived one.
+      binding.clientTurnId = state.clientTurnId;
+      binding.admitted.complete(true);
+    }
+  }
+
+  void _finishVoiceTurn(
+    _HandsFreeTurnBinding binding,
+    HandsFreeTurnStatus status, [
+    String? publicFinal,
+  ]) {
+    binding.finish(status, publicFinal);
+    if (identical(_voiceTurn, binding)) _voiceTurn = null;
+  }
+
+  void _observeVoiceNormalTerminal(NormalGatewayChatSnapshot snapshot) {
+    final binding = _voiceTurn;
+    if (binding == null ||
+        binding.transportTurnId == null ||
+        snapshot.turnId != binding.transportTurnId) {
+      return;
+    }
+    if (snapshot.pendingInput.isNotEmpty) {
+      _finishVoiceTurn(binding, HandsFreeTurnStatus.needsInput);
+      return;
+    }
+    if (snapshot.phase == NormalGatewayTurnPhase.reconciling ||
+        snapshot.phase == NormalGatewayTurnPhase.reconciledUnknown) {
+      _finishVoiceTurn(binding, HandsFreeTurnStatus.unknown);
+      return;
+    }
+    final terminal = snapshot.terminal;
+    if (terminal == null || terminal.turnId != binding.transportTurnId) return;
+    _finishVoiceTurn(
+      binding,
+      terminal.completed == true
+          ? HandsFreeTurnStatus.completed
+          : terminal.completed == false
+          ? HandsFreeTurnStatus.failed
+          : HandsFreeTurnStatus.unknown,
+      terminal.publicFinalText,
+    );
+  }
+
   Future<void> _initVoice({bool requestSpeechPermission = false}) async {
     try {
       final prefs = await SharedPreferences.getInstance();
       final voiceName = prefs.getString('voice_name');
       final voiceLocale = prefs.getString('voice_locale');
+      if (mounted) {
+        setState(
+          () => _followupTimeout = Duration(
+            milliseconds:
+                (prefs.getInt('hands_free_followup_timeout_ms') ?? 10000).clamp(
+                  0,
+                  30000,
+                ),
+          ),
+        );
+      }
 
       if (widget.testVoiceComposerAdapter == null) {
         if (voiceName != null && voiceName.isNotEmpty) {
           if (voiceName == voiceLocale) {
-            await _flutterTts.setLanguage(voiceName);
+            if (await _flutterTts.setLanguage(voiceName) != 1) {
+              throw StateError('Selected reply language is unavailable');
+            }
           } else {
-            await _flutterTts.setVoice({
-              'name': voiceName,
-              'locale': voiceLocale ?? '',
-            });
+            if (await _flutterTts.setVoice({
+                  'name': voiceName,
+                  'locale': voiceLocale ?? '',
+                }) !=
+                1) {
+              throw StateError('Selected reply voice is unavailable');
+            }
           }
           _sttLocaleId = voiceLocale?.replaceAll('-', '_');
         } else {
           _sttLocaleId = null;
         }
-        await _flutterTts.setSpeechRate(0.48);
-        await _flutterTts.setVolume(1.0);
-        await _flutterTts.setPitch(1.0);
+        if (await _flutterTts.setSpeechRate(0.48) != 1 ||
+            await _flutterTts.setVolume(1.0) != 1 ||
+            await _flutterTts.setPitch(1.0) != 1) {
+          throw StateError('Reply voice configuration is unavailable');
+        }
       } else {
         _sttLocaleId = voiceLocale?.replaceAll('-', '_');
       }
 
+      _voicePlaybackConfigured = true;
       await _voiceComposer.initialize(
         requestPermission: requestSpeechPermission,
       );
@@ -1798,16 +2163,28 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _startVoiceInput() async {
+    final intent = ++_manualAudioIntent;
     if (_streaming ||
         _sending ||
         _transcriptLoadBlocksComposer ||
         _pendingReattachResync) {
       return;
     }
-    if (widget.testVoiceComposerAdapter == null) {
-      await _flutterTts.stop();
+    try {
+      await _handsFree.stop(reason: HandsFreeStopReason.manualDictation);
+      if (widget.testVoiceComposerAdapter == null ||
+          widget.testVoiceReplySpeaker != null) {
+        await _replySpeaker.stop();
+      }
+    } catch (_) {
+      return;
     }
-    if (!mounted) return;
+    if (!mounted ||
+        intent != _manualAudioIntent ||
+        !_voiceRouteCurrent ||
+        !_voiceForeground) {
+      return;
+    }
     final started = await _voiceComposer.start(localeId: _sttLocaleId);
     if (!started && mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1823,6 +2200,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   void _onVoiceComposerChanged() {
+    if (_voiceBound && !_handsFree.active) {
+      _voiceTurn?.finish(HandsFreeTurnStatus.unknown);
+      _voiceTurn = null;
+    }
     if (mounted) setState(() {});
   }
 
@@ -1832,8 +2213,24 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _readAssistantText(String text, {bool announce = false}) async {
+    final intent = ++_manualAudioIntent;
     final spokenText = text.trim();
     if (spokenText.isEmpty) return;
+    try {
+      await _handsFree.stop(reason: HandsFreeStopReason.manualReadAloud);
+      await _voiceComposer.cancel();
+      await _voiceComposer.settle();
+      final adapter = _voiceComposer.adapter;
+      if (adapter is AndroidVoiceComposerAdapter) await adapter.settle();
+    } catch (_) {
+      return;
+    }
+    if (!mounted ||
+        intent != _manualAudioIntent ||
+        !_voiceRouteCurrent ||
+        !_voiceForeground) {
+      return;
+    }
     if (announce && mounted) {
       final messenger = ScaffoldMessenger.of(context);
       messenger
@@ -1846,8 +2243,25 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         );
     }
     try {
-      await _flutterTts.stop();
-      await _flutterTts.speak(spokenText);
+      if (!_handsFreeSupported && widget.testVoiceReplySpeaker == null) {
+        // Preserve non-Android Read aloud: queue mode/input-length APIs are
+        // Android-only; hands-free completion guarantees are not claimed here.
+        await _flutterTts.stop();
+        await _flutterTts.speak(spokenText);
+        return;
+      }
+      await _replySpeaker.stop();
+      final outcome = await _replySpeaker.speak(
+        spokenText,
+        isCurrent: () =>
+            mounted &&
+            intent == _manualAudioIntent &&
+            _voiceRouteCurrent &&
+            _voiceForeground,
+      );
+      if (outcome != HandsFreeSpeechOutcome.completed) {
+        throw StateError('Playback unavailable');
+      }
     } catch (_) {
       if (!announce || !mounted) return;
       final messenger = ScaffoldMessenger.of(context);
@@ -2610,6 +3024,22 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void _applyGatewayTurnState(GatewayTurnRecoveryState state) {
     if (!mounted) return;
     final projection = GatewayTurnUiProjection.fromState(state);
+    final voiceBinding = _voiceTurn;
+    if (voiceBinding?.transportTurnId == state.clientTurnId &&
+        voiceBinding != null) {
+      if (state.status == GatewayRecoveryTurnStatus.waitingInput) {
+        _finishVoiceTurn(voiceBinding, HandsFreeTurnStatus.needsInput);
+      } else if (projection.isFailClosed || state.ackUncertain) {
+        _finishVoiceTurn(voiceBinding, HandsFreeTurnStatus.unknown);
+      } else if (projection.isTerminal) {
+        _finishVoiceTurn(voiceBinding, switch (projection.status) {
+          GatewayRecoveryTurnStatus.completed => HandsFreeTurnStatus.completed,
+          GatewayRecoveryTurnStatus.interrupted =>
+            HandsFreeTurnStatus.interrupted,
+          _ => HandsFreeTurnStatus.failed,
+        }, stripToolResultText(projection.assistantText).trim());
+      }
+    }
     final messageIndex = _gatewayAssistantMessageIndex(projection);
     final shouldCreateMessage =
         messageIndex == null &&
@@ -2828,6 +3258,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _showAttachmentPicker() async {
+    await _handsFree.stop(reason: HandsFreeStopReason.attachmentAction);
+    if (!mounted) return;
     if (_transcriptLoadBlocksComposer ||
         _streaming ||
         _sending ||
@@ -3520,7 +3952,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   /// Send message via SSE streaming (Gateway API Server).
-  Future<void> _sendMessage({bool speakResponse = false}) async {
+  Future<void> _sendMessage({
+    bool speakResponse = false,
+    HandsFreePrompt? handsFreePrompt,
+    _HandsFreeTurnBinding? voiceBinding,
+  }) async {
+    if (handsFreePrompt == null && _handsFree.active) {
+      await _handsFree.stop(reason: HandsFreeStopReason.manualSend);
+      if (!mounted) return;
+    }
+    if (handsFreePrompt != null &&
+        !_handsFree.isCurrent(handsFreePrompt.authority)) {
+      return;
+    }
     if (_voiceComposer.listening ||
         _preparingSend ||
         _archiving ||
@@ -3529,12 +3973,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _normalChat?.snapshot.steering == true) {
       return;
     }
-    final text = _textController.text.trim();
+    final text = handsFreePrompt?.transcript ?? _textController.text.trim();
     if (_streaming) {
       if (text.isNotEmpty) await _sendWhileWorking(text);
       return;
     }
-    final attachments = List<AttachmentDraft>.from(_attachmentDrafts);
+    final attachments = handsFreePrompt == null
+        ? List<AttachmentDraft>.from(_attachmentDrafts)
+        : <AttachmentDraft>[];
     if (text.isEmpty && attachments.isEmpty) return;
     if (_sending || _streaming || _pendingReattachResync) return;
     if (_transcriptLoadBlocksComposer) return;
@@ -3568,15 +4014,23 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       final reservation = _normalChat!.reserve();
       if (reservation == null) return;
       _normalReservation = reservation;
+      if (voiceBinding != null) {
+        voiceBinding.clientTurnId = _normalChat!.snapshot.turnId!;
+        voiceBinding.transportTurnId = voiceBinding.clientTurnId;
+      }
     }
     _preparingSend = true;
+    if (_turnApplicationSession == null || _legacyTransportFallback) {
+      voiceBinding?.admitted.complete(true);
+    }
     setState(() => _sending = true);
-    _clearComposerForSend(text);
+    if (voiceBinding == null) _clearComposerForSend(text);
     try {
       await _sessionModelRestore;
     } catch (error) {
       if (!mounted) return;
-      _restoreComposerAfterRejectedSend(text);
+      if (voiceBinding == null) _restoreComposerAfterRejectedSend(text);
+      voiceBinding?.finish(HandsFreeTurnStatus.failed);
       _handleSendError(error);
       final reservation = _normalReservation;
       if (reservation != null) _normalChat?.cancelPreparation(reservation);
@@ -3586,10 +4040,20 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       _preparingSend = false;
     }
     if (!mounted) return;
+    if (voiceBinding != null &&
+        !_handsFree.isCurrent(voiceBinding.prompt.authority)) {
+      final reservation = _normalReservation;
+      if (reservation != null) _normalChat?.cancelPreparation(reservation);
+      _normalReservation = null;
+      voiceBinding.finish(HandsFreeTurnStatus.unknown);
+      setState(() => _sending = false);
+      return;
+    }
     await _submitMessage(
       text: text,
       attachments: attachments,
       speakResponse: speakResponse,
+      voiceBinding: voiceBinding,
     );
   }
 
@@ -3673,6 +4137,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     required String text,
     required List<AttachmentDraft> attachments,
     required bool speakResponse,
+    _HandsFreeTurnBinding? voiceBinding,
   }) async {
     // A remote-gateway profile uses one transport for every prompt. Images and
     // arbitrary files are both attached with the official `file.attach` RPC.
@@ -3681,6 +4146,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         text: text,
         attachments: attachments,
         speakResponse: speakResponse,
+        voiceBinding: voiceBinding,
       );
       return;
     }
@@ -3689,6 +4155,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         text: text,
         attachments: attachments,
         speakResponse: speakResponse,
+        voiceBinding: voiceBinding,
       );
       return;
     }
@@ -3721,9 +4188,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             },
           ];
 
-    _commitComposerForSend();
+    if (voiceBinding == null) _commitComposerForSend();
     _awaitingVoiceReply = speakResponse && _voiceReplyEnabled;
     final responseGeneration = ++_responseGeneration;
+    voiceBinding?.responseGeneration = responseGeneration;
     _activeResponseTransport = _ResponseTransport.rest;
 
     // The server returns oldest-to-newest history. Preserve that order; the
@@ -3764,6 +4232,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     _scheduleStreamingFollow();
 
+    // Keep the exact admitted SSE output, not the latest assistant after a GET.
+    final voiceResponse = StringBuffer();
     // Accumulate tokens into the streaming placeholder
     await _gateway.sendMessageStreaming(
       message: text,
@@ -3780,6 +4250,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       imageDataUrl: imageDataUrl,
       onToken: (token) {
         if (!mounted || responseGeneration != _responseGeneration) return;
+        voiceResponse.write(token);
         setState(() {
           _gatewayTurnStatus = null;
           if (_messages.isNotEmpty && _messages.last['role'] == 'assistant') {
@@ -3837,6 +4308,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           _streaming = false;
           _gatewayTurnStatus = null;
         });
+        if (voiceBinding != null &&
+            voiceBinding.responseGeneration == responseGeneration) {
+          _finishVoiceTurn(
+            voiceBinding,
+            HandsFreeTurnStatus.completed,
+            stripToolResultText(voiceResponse.toString()).trim(),
+          );
+        }
         // Refresh messages to get the final server-side state. The token is
         // retained across both HTTP and attachment cleanup, including failure.
         final read = _beginHistoryRead(widget.session.id);
@@ -3918,7 +4397,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             _messages.removeLast();
           }
         });
-        if (!hadContent) _restoreComposerAfterRejectedSend(text);
+        if (!hadContent && voiceBinding == null) {
+          _restoreComposerAfterRejectedSend(text);
+        }
+        if (voiceBinding != null) {
+          _finishVoiceTurn(voiceBinding, HandsFreeTurnStatus.failed);
+        }
         _handleSendError(error, removePendingUserMessage: true);
       },
     );
@@ -3928,12 +4412,14 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     required String text,
     required List<AttachmentDraft> attachments,
     required bool speakResponse,
+    _HandsFreeTurnBinding? voiceBinding,
   }) async {
     final chat = _normalChat;
     if (chat == null) return;
     final reservation = _normalReservation ?? chat.reserve();
     if (reservation == null) {
-      _restoreComposerAfterRejectedSend(text);
+      if (voiceBinding == null) _restoreComposerAfterRejectedSend(text);
+      voiceBinding?.finish(HandsFreeTurnStatus.failed);
       return;
     }
     _normalReservation = reservation;
@@ -3987,6 +4473,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         },
         submitPrompt: (refTexts) async {
           if (!mounted || responseGeneration != _responseGeneration) return;
+          if (voiceBinding != null &&
+              !_handsFree.isCurrent(voiceBinding.prompt.authority)) {
+            voiceBinding.finish(HandsFreeTurnStatus.unknown);
+            return;
+          }
           final prompt = [
             text,
             refTexts.join('\n'),
@@ -4005,7 +4496,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               (widget.session.isLocalDraft && desktopGateway != null
                   ? null
                   : widget.session.id);
-          _commitComposerForSend();
+          if (voiceBinding == null) _commitComposerForSend();
           _attachmentDrafts.clear();
           handedOff = true;
           _normalReservation = null;
@@ -4018,8 +4509,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             submit: testSubmit,
             knownStoredSessionId: knownStored,
             rawDraftText: text,
-            canRestoreDraft: _composerRevision == _clearedComposerRevision,
+            canRestoreDraft:
+                voiceBinding == null &&
+                _composerRevision == _clearedComposerRevision,
             draftHandle: _draftWriter.draftHandle,
+            maySubmit: voiceBinding == null
+                ? null
+                : () => _handsFree.isCurrent(voiceBinding.prompt.authority),
           );
         },
       );
@@ -4029,7 +4525,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       // Only definitely pre-wire rejection restores this route's captured
       // revision. Post-wire errors are absorbed as unresolved by the owner.
       if (!chat.snapshot.wireEmitted) {
-        _restoreComposerAfterRejectedSend(text);
+        if (voiceBinding == null) _restoreComposerAfterRejectedSend(text);
+        voiceBinding?.finish(HandsFreeTurnStatus.failed);
         setState(() {
           _attachmentDrafts
             ..clear()
@@ -4039,7 +4536,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         unawaited(_refreshDeferredHistoryIfIdle());
       }
     } finally {
-      if (!handedOff) chat.cancelPreparation(reservation);
+      if (!handedOff) {
+        chat.cancelPreparation(reservation);
+        voiceBinding?.finish(HandsFreeTurnStatus.failed);
+      }
       if (identical(_normalReservation, reservation)) _normalReservation = null;
     }
   }
@@ -4048,6 +4548,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     required String text,
     required List<AttachmentDraft> attachments,
     required bool speakResponse,
+    _HandsFreeTurnBinding? voiceBinding,
   }) async {
     final turnSession = _turnApplicationSession;
     if (turnSession == null) return;
@@ -4068,6 +4569,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
 
     void onState(GatewayTurnRecoveryState state) {
+      if (voiceBinding != null) _bindRecoveryVoiceTurn(voiceBinding, state);
       releaseAcceptedAttachmentCache(state);
       if (!mounted || responseGeneration != _responseGeneration) return;
       _applyGatewayTurnState(state);
@@ -4145,7 +4647,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       text,
       attachmentLabels,
     ].where((part) => part.trim().isNotEmpty).join('\n\n');
-    _commitComposerForSend();
+    if (voiceBinding == null) _commitComposerForSend();
     _scrollCoordinator.beginStreaming(isNearEnd: _isNearEnd());
     setState(() {
       _streaming = true;
@@ -4170,18 +4672,37 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _scheduleStreamingFollow();
 
     try {
-      final state = await turnSession.submit(
-        localSessionId: widget.session.id,
-        text: text,
-        attachments: staged,
-        onState: onState,
-      );
+      final state = await (voiceBinding == null
+          ? turnSession.submit(
+              localSessionId: widget.session.id,
+              text: text,
+              attachments: staged,
+              onState: onState,
+            )
+          : submitGuardedGatewayTurn(
+              turnSession,
+              localSessionId: widget.session.id,
+              text: text,
+              onState: onState,
+              maySubmit: () =>
+                  _handsFree.isCurrent(voiceBinding.prompt.authority),
+            ));
+      if (voiceBinding != null) _bindRecoveryVoiceTurn(voiceBinding, state);
       releaseAcceptedAttachmentCache(state);
       if (!mounted || responseGeneration != _responseGeneration) return;
       _applyGatewayTurnState(state);
     } catch (error) {
       if (!mounted || responseGeneration != _responseGeneration) return;
-      if (gatewayTurnSubmissionWasDefinitelyRejected(error)) {
+      if (voiceBinding != null) {
+        _finishVoiceTurn(
+          voiceBinding,
+          error is GatewayTurnAdmissionRevoked
+              ? HandsFreeTurnStatus.interrupted
+              : HandsFreeTurnStatus.failed,
+        );
+      }
+      if (error is GatewayTurnAdmissionRevoked ||
+          gatewayTurnSubmissionWasDefinitelyRejected(error)) {
         setState(() {
           if (_messages.isNotEmpty &&
               _messages.last['role'] == 'assistant' &&
@@ -4191,7 +4712,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           if (_messages.isNotEmpty && _messages.last['role'] == 'user') {
             _messages.removeLast();
           }
-          _restoreComposerAfterRejectedSend(text);
+          if (voiceBinding == null) _restoreComposerAfterRejectedSend(text);
           for (final draft in attachments) {
             draft
               ..status = AttachmentDraftStatus.ready
@@ -5252,6 +5773,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   Future<bool> _stopResponse() async {
     if (!_streaming || _stopResponseInFlight) return false;
+    final voice = _voiceTurn;
+    if (voice != null) _finishVoiceTurn(voice, HandsFreeTurnStatus.interrupted);
     final normal = _normalChat;
     if (normal?.snapshot.hasActiveTurn == true) {
       final turn = normal!.turnId;
@@ -5920,6 +6443,29 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                           ),
                         ),
                       ),
+                    if (_handsFreeSupported &&
+                        !_voiceComposer.listening &&
+                        (_handsFree.active ||
+                            _handsFree.state == HandsFreeState.error))
+                      HandsFreeVoiceControls(
+                        controller: _handsFree,
+                        onStart: () => unawaited(_startHandsFree()),
+                        onStop: () => unawaited(
+                          _handsFree
+                              .stop(reason: HandsFreeStopReason.user)
+                              .catchError((Object _) {}),
+                        ),
+                        followupTimeout: _followupTimeout,
+                        onFollowupChanged: (seconds) =>
+                            unawaited(_setFollowupSeconds(seconds)),
+                      ),
+                    if (_handsFreeSupported &&
+                        _handsFree.permissionSetupComplete &&
+                        !_handsFree.active)
+                      Semantics(
+                        liveRegion: true,
+                        child: Text(context.l10n.hands_free_setup_complete),
+                      ),
                     if (_voiceComposer.listening)
                       VoiceComposerIndicator(
                         controller: _voiceComposer,
@@ -5990,6 +6536,38 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   ),
                 ),
                 const SizedBox(width: 8),
+                if (_handsFreeSupported &&
+                    !_voiceComposer.listening &&
+                    !_handsFree.active &&
+                    _handsFree.state != HandsFreeState.error)
+                  IconButton(
+                    key: const Key('hands-free-start'),
+                    tooltip: context.l10n.hands_free_start,
+                    icon: const Icon(Icons.record_voice_over_outlined),
+                    constraints: const BoxConstraints.tightFor(
+                      width: 48,
+                      height: 48,
+                    ),
+                    onPressed: _handsFree.starting
+                        ? null
+                        : () => unawaited(_startHandsFree()),
+                  ),
+                if (_handsFree.active ||
+                    _handsFree.state == HandsFreeState.error)
+                  IconButton(
+                    key: const Key('hands-free-quick-stop'),
+                    tooltip: context.l10n.hands_free_stop,
+                    icon: const Icon(Icons.voice_over_off),
+                    constraints: const BoxConstraints.tightFor(
+                      width: 48,
+                      height: 48,
+                    ),
+                    onPressed: () => unawaited(
+                      _handsFree
+                          .stop(reason: HandsFreeStopReason.user)
+                          .catchError((Object _) {}),
+                    ),
+                  ),
                 if (!_voiceComposer.listening && !_streaming)
                   VoiceComposerStartButton(
                     enabled:
@@ -6014,7 +6592,12 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     onPressed: () {
                       setState(() => _voiceReplyEnabled = !_voiceReplyEnabled);
                       if (!_voiceReplyEnabled) {
-                        _flutterTts.stop();
+                        _handsFree.revoke(
+                          HandsFreeStopReason.voiceReplyDisabled,
+                        );
+                        unawaited(
+                          _replySpeaker.stop().catchError((Object _) {}),
+                        );
                       }
                     },
                     tooltip: _voiceReplyEnabled
