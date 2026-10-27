@@ -9,6 +9,10 @@ class AppLocalizationsDe extends AppLocalizations {
   AppLocalizationsDe([String locale = 'de']) : super(locale);
 
   @override
+  String get paste_attachment_failed_text_kept =>
+      'Der eingefügte Text konnte nicht angehängt werden. Er bleibt in der Nachricht erhalten.';
+
+  @override
   String get background_task_report => 'Hintergrundaufgabe';
 
   @override

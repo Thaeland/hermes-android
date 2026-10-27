@@ -9,6 +9,10 @@ class AppLocalizationsJa extends AppLocalizations {
   AppLocalizationsJa([String locale = 'ja']) : super(locale);
 
   @override
+  String get paste_attachment_failed_text_kept =>
+      '貼り付けたテキストを添付できませんでした。テキストはメッセージに残っています。';
+
+  @override
   String get background_task_report => 'バックグラウンドタスク';
 
   @override

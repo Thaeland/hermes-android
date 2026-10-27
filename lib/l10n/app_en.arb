@@ -1,4 +1,5 @@
 {
+  "paste_attachment_failed_text_kept": "Could not attach the paste. The text was kept in the message.",
   "background_task_report": "Background task",
   "background_process_report": "Background process",
   "background_report_issues": "Issues reported — expand for details.",

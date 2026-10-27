@@ -1,4 +1,5 @@
 {
+  "paste_attachment_failed_text_kept": "貼り付けたテキストを添付できませんでした。テキストはメッセージに残っています。",
   "background_task_report": "バックグラウンドタスク",
   "background_process_report": "バックグラウンドプロセス",
   "background_report_issues": "問題が報告されています。展開して詳細を確認してください。",

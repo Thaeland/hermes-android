@@ -9,6 +9,10 @@ class AppLocalizationsKo extends AppLocalizations {
   AppLocalizationsKo([String locale = 'ko']) : super(locale);
 
   @override
+  String get paste_attachment_failed_text_kept =>
+      '붙여넣은 텍스트를 첨부하지 못했습니다. 텍스트는 메시지에 유지됩니다.';
+
+  @override
   String get background_task_report => '백그라운드 작업';
 
   @override

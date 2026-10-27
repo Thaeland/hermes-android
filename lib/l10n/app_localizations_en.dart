@@ -9,6 +9,10 @@ class AppLocalizationsEn extends AppLocalizations {
   AppLocalizationsEn([String locale = 'en']) : super(locale);
 
   @override
+  String get paste_attachment_failed_text_kept =>
+      'Could not attach the paste. The text was kept in the message.';
+
+  @override
   String get background_task_report => 'Background task';
 
   @override

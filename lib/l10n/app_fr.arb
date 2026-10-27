@@ -1,4 +1,5 @@
 {
+  "paste_attachment_failed_text_kept": "Impossible de joindre le texte collé. Il a été conservé dans le message.",
   "background_task_report": "Tâche en arrière-plan",
   "background_process_report": "Processus en arrière-plan",
   "background_report_issues": "Des problèmes ont été signalés — développez pour les détails.",
