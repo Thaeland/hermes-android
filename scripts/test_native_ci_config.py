@@ -57,6 +57,20 @@ class NativeCiConfigurationTest(unittest.TestCase):
         self.assertIn("run: gradle :app:testDebugUnitTest", workflow)
         self.assertNotIn("run: ./gradlew", workflow)
 
+    def test_ci_runs_tts_correlation_and_retains_both_native_reports(self):
+        workflow = (ROOT / ".github/workflows/native-server.yml").read_text()
+        self.assertIn(
+            "run: gradle :app:testDebugUnitTest :flutter_tts:testDebugUnitTest",
+            workflow,
+        )
+        self.assertIn(
+            "python3 -m unittest scripts.test_prepare_voice_inputs scripts.test_native_ci_config",
+            workflow,
+        )
+        for module in ("app", "flutter_tts"):
+            self.assertIn(f"build/{module}/reports/tests/testDebugUnitTest", workflow)
+            self.assertIn(f"build/{module}/test-results/testDebugUnitTest", workflow)
+
     def test_missing_pubspec_identity_fails_before_writing_properties(self):
         result, text = self.run_configuration("name: hermes_android\n")
         self.assertNotEqual(result.returncode, 0)
