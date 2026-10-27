@@ -510,6 +510,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   int _composerRevision = 0;
   int _clearedComposerRevision = 0;
   bool _preparingPaste = false;
+  bool _startingVoiceInput = false;
   late final LargePasteFormatter _largePasteFormatter;
   final Map<String, String> _pastedDraftTexts = {};
 
@@ -1805,25 +1806,32 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _startVoiceInput() async {
     if (_streaming ||
         _sending ||
+        _preparingPaste ||
+        _startingVoiceInput ||
         _transcriptLoadBlocksComposer ||
         _pendingReattachResync) {
       return;
     }
-    if (widget.testVoiceComposerAdapter == null) {
-      await _flutterTts.stop();
-    }
-    if (!mounted) return;
-    final started = await _voiceComposer.start(localeId: _sttLocaleId);
-    if (!started && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _voiceComposer.status ??
-                _voiceStatus ??
-                context.l10n.speech_recognition_is_unavailable,
+    setState(() => _startingVoiceInput = true);
+    try {
+      if (widget.testVoiceComposerAdapter == null) {
+        await _flutterTts.stop();
+      }
+      if (!mounted || _preparingPaste || _sending || _streaming) return;
+      final started = await _voiceComposer.start(localeId: _sttLocaleId);
+      if (!started && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _voiceComposer.status ??
+                  _voiceStatus ??
+                  context.l10n.speech_recognition_is_unavailable,
+            ),
           ),
-        ),
-      );
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _startingVoiceInput = false);
     }
   }
 
@@ -2849,6 +2857,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _preparingSend ||
         _pendingReattachResync ||
         _archiving ||
+        _startingVoiceInput ||
         _voiceComposer.listening ||
         _transcriptLoadBlocksComposer) {
       return;
@@ -2870,6 +2879,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         existingDrafts: List<AttachmentDraft>.of(_attachmentDrafts),
       );
       if (!mounted ||
+          _startingVoiceInput ||
+          _voiceComposer.listening ||
           !_draftWriter.isCurrent ||
           _composerRevision != revision ||
           _textController.value != edit.insertedValue) {
@@ -3176,7 +3187,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _removeAttachment(AttachmentDraft draft) async {
-    await _attachmentDraftService.removeCachedFile(draft);
     if (!mounted) return;
     setState(
       () => _attachmentDrafts.removeWhere((item) => item.id == draft.id),
@@ -3184,6 +3194,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     if (_pastedDraftTexts.remove(draft.id) != null) {
       _draftWriter.edit(_composerTextWithPastes(_textController.text));
     }
+    // The user intent and its draft authority precede asynchronous cleanup.
+    // A late deletion must never reclaim a replacement route's newer writer.
+    await _attachmentDraftService.removeCachedFile(draft);
   }
 
   void _moveAttachment(AttachmentDraft draft, int offset) {
@@ -3598,6 +3611,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// Send message via SSE streaming (Gateway API Server).
   Future<void> _sendMessage({bool speakResponse = false}) async {
     if (_voiceComposer.listening ||
+        _startingVoiceInput ||
         _preparingPaste ||
         _preparingSend ||
         _archiving ||
@@ -4016,6 +4030,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _normalReservation = reservation;
     final desktopGateway = _desktopGateway;
     final responseGeneration = _responseGeneration;
+    final pastedIds = attachments
+        .where((draft) => _pastedDraftTexts.containsKey(draft.id))
+        .map((draft) => draft.id)
+        .toSet();
+    final recoveryText = _composerTextWithPastes(text);
     var handedOff = false;
     _awaitingVoiceReply = speakResponse && _voiceReplyEnabled;
     try {
@@ -4083,6 +4102,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   ? null
                   : widget.session.id);
           _attachmentDrafts.clear();
+          _pastedDraftTexts.removeWhere((id, _) => pastedIds.contains(id));
           _commitComposerForSend();
           handedOff = true;
           _normalReservation = null;
@@ -4094,7 +4114,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             localContent: localContent,
             submit: testSubmit,
             knownStoredSessionId: knownStored,
-            rawDraftText: text,
+            rawDraftText: recoveryText,
             canRestoreDraft: _composerRevision == _clearedComposerRevision,
             draftHandle: _draftWriter.draftHandle,
           );
@@ -4109,9 +4129,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         setState(() {
           _attachmentDrafts
             ..clear()
-            ..addAll(attachments);
+            ..addAll(
+              attachments.where(
+                (draft) => !handedOff || !pastedIds.contains(draft.id),
+              ),
+            );
         });
-        _restoreComposerAfterRejectedSend(text);
+        _restoreComposerAfterRejectedSend(handedOff ? recoveryText : text);
         _handleSendError(error);
         unawaited(_refreshDeferredHistoryIfIdle());
       }
@@ -5477,7 +5501,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// Restore only the send's untouched draft. A newer edit (including typing
   /// and then deleting) belongs to the user, not this failed submission.
   void _restoreComposerAfterRejectedSend(String text) {
-    if (text.trim().isEmpty &&
+    if (text.isEmpty &&
         !_attachmentDrafts.any(
           (draft) => _pastedDraftTexts.containsKey(draft.id),
         )) {
@@ -5859,6 +5883,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final sendEnabled =
         !_transcriptLoadBlocksComposer &&
         !_preparingPaste &&
+        !_startingVoiceInput &&
         !_archiving &&
         !_preparingSend &&
         !_midTurnSendInFlight &&
@@ -6086,6 +6111,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   VoiceComposerStartButton(
                     enabled:
                         !_transcriptLoadBlocksComposer &&
+                        !_preparingPaste &&
+                        !_startingVoiceInput &&
                         !_streaming &&
                         !_sending &&
                         !_pendingReattachResync,

@@ -8,6 +8,8 @@ import 'package:hermes_android/core/models/attachment_draft.dart';
 import 'package:hermes_android/core/screens/chat_screen.dart';
 import 'package:hermes_android/core/services/attachment_draft_service.dart';
 import 'package:hermes_android/core/services/composer_draft_store.dart';
+import 'package:hermes_android/core/services/gateway_turn_application_controller.dart';
+import 'package:hermes_android/core/widgets/voice_composer_controls.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
 import 'package:hermes_android/core/widgets/attachment_draft_tile.dart';
 import 'package:hermes_android/l10n/app_localizations.dart';
@@ -24,6 +26,7 @@ final _longText = 'pasted line\r\n' * 251;
 
 class _PasteFiles extends AttachmentDraftService {
   Completer<void>? gate;
+  Completer<void>? removeGate;
   bool fail = false;
   final texts = <String, String>{};
   final removed = <String>[];
@@ -58,8 +61,10 @@ class _PasteFiles extends AttachmentDraftService {
       'data:text/plain;base64,${base64Encode(utf8.encode(texts[draft.id]!))}';
 
   @override
-  Future<void> removeCachedFile(AttachmentDraft draft) async =>
-      removed.add(draft.id);
+  Future<void> removeCachedFile(AttachmentDraft draft) async {
+    removed.add(draft.id);
+    await removeGate?.future;
+  }
 }
 
 Future<void> _pumpChat(
@@ -69,6 +74,8 @@ Future<void> _pumpChat(
   String? initialText,
   TestRemoteAttachmentUpload? upload,
   TestRemotePromptSubmit? submit,
+  GatewayTurnApplicationController? controller,
+  FakeVoiceComposerAdapter? voice,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
@@ -93,6 +100,7 @@ Future<void> _pumpChat(
           startedAt: 1,
         ),
         initialComposerText: initialText,
+        turnApplicationController: controller,
         testApiClient: ApiClient(
           baseUrl: 'http://fixture.invalid',
           apiKey: 'fixture',
@@ -100,7 +108,7 @@ Future<void> _pumpChat(
             (_) async => http.Response('{"data":[]}', 200),
           ),
         ),
-        testVoiceComposerAdapter: FakeVoiceComposerAdapter(),
+        testVoiceComposerAdapter: voice ?? FakeVoiceComposerAdapter(),
         testAttachmentDraftService: files,
         testRemotePromptSubmit: remote
             ? completedStockTurn(
@@ -128,13 +136,13 @@ Future<void> _pumpChat(
 }
 
 TextEditingController _controller(WidgetTester tester) =>
-    tester.widget<TextField>(find.byKey(_composer)).controller!;
+    tester.widget<TextField>(find.byKey(_composer).last).controller!;
 
 Future<void> _paste(WidgetTester tester, String text) async {
-  await tester.showKeyboard(find.byKey(_composer));
+  await tester.showKeyboard(find.byKey(_composer).last);
   await Clipboard.setData(ClipboardData(text: text));
   await tester
-      .state<EditableTextState>(find.byType(EditableText))
+      .state<EditableTextState>(find.byType(EditableText).last)
       .pasteText(SelectionChangedCause.toolbar);
   await tester.pump();
 }
@@ -149,6 +157,37 @@ Future<String?> _savedDraft(WidgetTester tester) async {
   );
   observer.didChangeAppLifecycleState(AppLifecycleState.resumed);
   return saved;
+}
+
+Future<NavigatorState> _pushSibling(
+  WidgetTester tester,
+  GatewayTurnApplicationController owner,
+) async {
+  final original = tester.widget<ChatScreen>(find.byType(ChatScreen));
+  final navigator = Navigator.of(tester.element(find.byType(ChatScreen)));
+  unawaited(
+    navigator.push<void>(
+      MaterialPageRoute(
+        builder: (_) => ChatScreen(
+          connection: original.connection,
+          session: original.session,
+          turnApplicationController: owner,
+          testApiClient: ApiClient(
+            baseUrl: 'http://fixture.invalid',
+            apiKey: 'fixture',
+            httpClient: MockClient(
+              (_) async => http.Response('{"data":[]}', 200),
+            ),
+          ),
+          testVoiceComposerAdapter: FakeVoiceComposerAdapter(),
+          testRemotePromptSubmit: original.testRemotePromptSubmit,
+          testAttachmentDraftService: _PasteFiles(),
+        ),
+      ),
+    ),
+  );
+  await pumpChatUpdates(tester);
+  return navigator;
 }
 
 void main() {
@@ -291,7 +330,7 @@ void main() {
         isNull,
       );
       oldSend();
-      await tester.enterText(find.byKey(_composer), newer);
+      await tester.enterText(find.byKey(_composer).last, newer);
       files.gate!.complete();
       await pumpChatUpdates(tester);
       expect(_controller(tester).text, newer);
@@ -324,7 +363,10 @@ void main() {
       await _pumpChat(tester, files, initialText: 'Explain this');
       await _paste(tester, _longText);
       await pumpChatUpdates(tester);
-      await tester.enterText(find.byKey(_composer), 'Keep this instruction');
+      await tester.enterText(
+        find.byKey(_composer).last,
+        'Keep this instruction',
+      );
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pump();
       await _pumpChat(tester, _PasteFiles());
@@ -338,7 +380,7 @@ void main() {
     (tester) async {
       final files = _PasteFiles();
       await _pumpChat(tester, files, initialText: 'Before replace after');
-      await tester.showKeyboard(find.byKey(_composer));
+      await tester.showKeyboard(find.byKey(_composer).last);
       _controller(tester).selection = const TextSelection(
         baseOffset: 14,
         extentOffset: 7,
@@ -362,8 +404,8 @@ void main() {
     final files = _PasteFiles()..gate = Completer<void>();
     await _pumpChat(tester, files);
     await _paste(tester, _longText);
-    await tester.enterText(find.byKey(_composer), 'Intermediate edit');
-    await tester.enterText(find.byKey(_composer), _longText);
+    await tester.enterText(find.byKey(_composer).last, 'Intermediate edit');
+    await tester.enterText(find.byKey(_composer).last, _longText);
     files.gate!.complete();
     await pumpChatUpdates(tester);
     expect(_controller(tester).text, _longText);
@@ -440,6 +482,327 @@ void main() {
     await _pumpChat(tester, _PasteFiles());
     expect(_controller(tester).text, _longText);
   });
+
+  for (final instruction in ['', 'Explain this']) {
+    testWidgets(
+      'detached pre-wire rejection recovers paste with instruction length ${instruction.length}',
+      (tester) async {
+        final owner = GatewayTurnApplicationController();
+        addTearDown(owner.close);
+        final gate = Completer<void>();
+        var attempts = 0;
+        await _pumpChat(
+          tester,
+          _PasteFiles(),
+          controller: owner,
+          submit:
+              ({
+                required sessionId,
+                required text,
+                required onEvent,
+                required onSent,
+              }) {
+                attempts++;
+                return gate.future;
+              },
+        );
+        if (instruction.isNotEmpty) {
+          await tester.enterText(find.byKey(_composer).last, instruction);
+        }
+        await _paste(tester, _longText);
+        await pumpChatUpdates(tester);
+        await tester.tap(find.byTooltip('Send'));
+        await pumpChatUpdates(tester);
+        expect(attempts, 1);
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
+        gate.completeError(StateError('rejected before wire emission'));
+        await pumpChatUpdates(tester);
+        final expected = [
+          instruction,
+          _longText,
+        ].where((part) => part.isNotEmpty).join('\n\n');
+        expect(
+          await ComposerDraftStore.read(
+            connectionId: 'paste-test',
+            sessionId: 'paste-session',
+          ),
+          expected,
+        );
+        await _pumpChat(tester, _PasteFiles(), controller: owner);
+        expect(_controller(tester).text, expected);
+        expect(find.byType(AttachmentDraftTile), findsNothing);
+        expect(attempts, 1);
+      },
+    );
+  }
+
+  testWidgets(
+    'mounted pre-wire rejection restores paste inline without a duplicate attachment',
+    (tester) async {
+      final gate = Completer<void>();
+      await _pumpChat(
+        tester,
+        _PasteFiles(),
+        submit:
+            ({
+              required sessionId,
+              required text,
+              required onEvent,
+              required onSent,
+            }) => gate.future,
+      );
+      await _paste(tester, _longText);
+      await pumpChatUpdates(tester);
+      await tester.tap(find.byTooltip('Send'));
+      await pumpChatUpdates(tester);
+      gate.completeError(StateError('not emitted'));
+      await pumpChatUpdates(tester);
+      expect(_controller(tester).text, _longText);
+      expect(find.byType(AttachmentDraftTile), findsNothing);
+      expect(await _savedDraft(tester), _longText);
+    },
+  );
+
+  for (final newer in ['New sibling draft', '']) {
+    testWidgets(
+      'held removal cannot reclaim a sibling writer (clear=${newer.isEmpty})',
+      (tester) async {
+        final owner = GatewayTurnApplicationController();
+        addTearDown(owner.close);
+        final files = _PasteFiles();
+        await _pumpChat(
+          tester,
+          files,
+          controller: owner,
+          initialText: 'Old route instructions',
+        );
+        await _paste(tester, _longText);
+        await pumpChatUpdates(tester);
+        files.removeGate = Completer<void>();
+        tester
+            .widget<AttachmentDraftTile>(find.byType(AttachmentDraftTile))
+            .onRemove();
+        await tester.pump();
+        final navigator = await _pushSibling(tester, owner);
+        expect(find.byType(ChatScreen, skipOffstage: false), findsNWidgets(2));
+        await tester.enterText(
+          find.byKey(_composer).last,
+          'Intermediate sibling edit',
+        );
+        await tester.enterText(find.byKey(_composer).last, newer);
+        files.removeGate!.complete();
+        await pumpChatUpdates(tester);
+        expect(_controller(tester).text, newer);
+        navigator.pop();
+        await pumpChatUpdates(tester);
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
+        expect(
+          await ComposerDraftStore.read(
+                connectionId: 'paste-test',
+                sessionId: 'paste-session',
+              ) ??
+              '',
+          newer,
+        );
+        await _pumpChat(tester, _PasteFiles(), controller: owner);
+        expect(_controller(tester).text, newer);
+      },
+    );
+  }
+
+  testWidgets('voice start is unavailable throughout held paste preparation', (
+    tester,
+  ) async {
+    final voice = FakeVoiceComposerAdapter();
+    final files = _PasteFiles()..gate = Completer<void>();
+    await _pumpChat(tester, files, voice: voice);
+    final staleStart = tester
+        .widget<VoiceComposerStartButton>(find.byType(VoiceComposerStartButton))
+        .onPressed;
+    await _paste(tester, _longText);
+    expect(
+      tester
+          .widget<VoiceComposerStartButton>(
+            find.byType(VoiceComposerStartButton),
+          )
+          .enabled,
+      isFalse,
+    );
+    staleStart();
+    await tester.pump();
+    expect(voice.listenCount, 0);
+    files.gate!.complete();
+    await pumpChatUpdates(tester);
+    expect(_controller(tester).text, '');
+    expect(find.text('paste.txt'), findsOneWidget);
+    await tester.tap(find.bySemanticsLabel('Start voice input'));
+    await tester.pump();
+    await tester.tap(find.byKey(VoiceComposerIndicator.cancelKey));
+    await pumpChatUpdates(tester);
+    expect(_controller(tester).text, '');
+    expect(find.text('paste.txt'), findsOneWidget);
+  });
+
+  for (final newer in ['New draft after send', '']) {
+    testWidgets(
+      'detached rejection cannot resurrect paste over a newer draft (clear=${newer.isEmpty})',
+      (tester) async {
+        final owner = GatewayTurnApplicationController();
+        addTearDown(owner.close);
+        final gate = Completer<void>();
+        await _pumpChat(
+          tester,
+          _PasteFiles(),
+          controller: owner,
+          submit:
+              ({
+                required sessionId,
+                required text,
+                required onEvent,
+                required onSent,
+              }) => gate.future,
+        );
+        await _paste(tester, _longText);
+        await pumpChatUpdates(tester);
+        await tester.tap(find.byTooltip('Send'));
+        await pumpChatUpdates(tester);
+        await tester.enterText(find.byKey(_composer).last, 'Intermediate edit');
+        await tester.enterText(find.byKey(_composer).last, newer);
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
+        gate.completeError(StateError('not emitted'));
+        await pumpChatUpdates(tester);
+        expect(
+          await ComposerDraftStore.read(
+                connectionId: 'paste-test',
+                sessionId: 'paste-session',
+              ) ??
+              '',
+          newer,
+        );
+        await _pumpChat(tester, _PasteFiles(), controller: owner);
+        expect(_controller(tester).text, newer);
+      },
+    );
+
+    testWidgets(
+      'pre-wire rejection respects a still-mounted sibling writer (clear=${newer.isEmpty})',
+      (tester) async {
+        final owner = GatewayTurnApplicationController();
+        addTearDown(owner.close);
+        final gate = Completer<void>();
+        await _pumpChat(
+          tester,
+          _PasteFiles(),
+          controller: owner,
+          submit:
+              ({
+                required sessionId,
+                required text,
+                required onEvent,
+                required onSent,
+              }) => gate.future,
+        );
+        await _paste(tester, _longText);
+        await pumpChatUpdates(tester);
+        await tester.tap(find.byTooltip('Send'));
+        await pumpChatUpdates(tester);
+        final navigator = await _pushSibling(tester, owner);
+        expect(find.byType(ChatScreen, skipOffstage: false), findsNWidgets(2));
+        await tester.enterText(
+          find.byKey(_composer).last,
+          'Intermediate sibling edit',
+        );
+        await tester.enterText(find.byKey(_composer).last, newer);
+        gate.completeError(StateError('not emitted'));
+        await pumpChatUpdates(tester);
+        expect(_controller(tester).text, newer);
+        navigator.pop();
+        await pumpChatUpdates(tester);
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
+        expect(
+          await ComposerDraftStore.read(
+                connectionId: 'paste-test',
+                sessionId: 'paste-session',
+              ) ??
+              '',
+          newer,
+        );
+      },
+    );
+  }
+
+  testWidgets(
+    'post-wire failure never restores or automatically resubmits a paste',
+    (tester) async {
+      final gate = Completer<void>();
+      var submits = 0;
+      await _pumpChat(
+        tester,
+        _PasteFiles(),
+        submit:
+            ({
+              required sessionId,
+              required text,
+              required onEvent,
+              required onSent,
+            }) {
+              submits++;
+              onSent();
+              return gate.future;
+            },
+      );
+      await _paste(tester, _longText);
+      await pumpChatUpdates(tester);
+      await tester.tap(find.byTooltip('Send'));
+      await tester.pump();
+      gate.completeError(StateError('socket closed after send'));
+      await pumpChatUpdates(tester);
+      expect(submits, 1);
+      expect(_controller(tester).text, '');
+      expect(find.byType(AttachmentDraftTile), findsNothing);
+      expect(await _savedDraft(tester), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await pumpChatUpdates(tester);
+      expect(submits, 1);
+    },
+  );
+
+  for (final whitespace in [' ' * 3001, '\r\n' * 1501]) {
+    testWidgets(
+      'whitespace-only paste survives durable reopen (${whitespace.codeUnitAt(0)})',
+      (tester) async {
+        await _pumpChat(tester, _PasteFiles());
+        await _paste(tester, whitespace);
+        await pumpChatUpdates(tester);
+        expect(find.text('paste.txt'), findsOneWidget);
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
+        expect(
+          await ComposerDraftStore.read(
+            connectionId: 'paste-test',
+            sessionId: 'paste-session',
+          ),
+          whitespace,
+        );
+        await _pumpChat(tester, _PasteFiles());
+        expect(_controller(tester).text, whitespace);
+        await tester.enterText(find.byKey(_composer).last, '');
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pump();
+        expect(
+          await ComposerDraftStore.read(
+            connectionId: 'paste-test',
+            sessionId: 'paste-session',
+          ),
+          isNull,
+        );
+      },
+    );
+  }
 
   testWidgets('REST and programmatic draft hydration never stage a paste', (
     tester,

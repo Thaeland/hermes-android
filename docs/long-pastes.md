@@ -30,13 +30,17 @@ new server method, plugin or configuration is required.
   Leaving and reopening a chat restores it **inline**, with the remaining
   instructions, rather than relying on a temporary attachment cache surviving.
   Explicitly removing a paste attachment also removes its recovery copy.
+  Nonempty whitespace is preserved in text drafts; only clearing to an empty
+  string removes a draft.
 - Legacy REST connections cannot upload general files, so long pastes remain
   ordinary message text there. Pasting during an active response or send also
   leaves text inline and does not add files to an already admitted turn.
 - Android keyboards can deliver clipboard text as a committed editing update
   rather than a separate Paste event. The app recognises a single paste-sized
   insertion or selection replacement. Ordinary typing, active IME composition,
-  dictation and programmatic draft restoration are not converted.
+  in-app dictation and programmatic draft restoration are not converted. A
+  keyboard's committed snippet or dictation insertion is indistinguishable from
+  a paste of the same size and can also become an attachment.
 
 Phone keyboard and clipboard behaviour can vary. Automated tests exercise
 Flutter's toolbar-paste path and Android-style editing updates; these are not a
