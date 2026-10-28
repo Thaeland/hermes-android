@@ -4,6 +4,34 @@ All notable changes since v1.0.7 are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The [README](README.md)
 shows only the three latest releases.
 
+## [3.0.5] - 2026-10-28
+
+Release identity is `3.0.5+3009`, with production APK codes `30091`, `30092` and
+`30093`, above every 3.0.4 split. The production package and signing identity
+remain unchanged. Export an encrypted configuration backup, then install over
+the existing app without uninstalling or clearing data. See the
+[release notes](docs/releases/3.0.5.md).
+
+### Fixed
+
+- Recognised scheduled-job setup, including embedded skill instructions, uses
+  read-only Background task cards: collapsed in Verbose Mode and hidden in
+  conversation-only mode. Ordinary human skill invocations, raw saved history
+  and prompt ownership retain their existing behaviour (#218).
+- An approval response dismisses only the dialog that submitted it. A removed
+  dialog cannot pop the underlying chat, and a covered dialog cannot dismiss a
+  newer prompt (#220).
+
+### Thanks
+
+- Thanks to @mordekai-lab for the approval-dialog route-ownership fix and
+  regression tests in #220. Their original commit history is preserved.
+
+Hermes Agent assisted with review, integration, documentation and tests.
+Automated checks do not establish physical-phone acceptance. Stock-turn receipt
+and long-paste changes from blocked PRs are not included; uncertain delivery is
+not automatically resent.
+
 ## [3.0.4] - 2026-10-28
 
 Release identity is `3.0.4+3008`, with production APK codes `30081`, `30082` and
