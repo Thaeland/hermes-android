@@ -9,6 +9,10 @@ class AppLocalizationsPt extends AppLocalizations {
   AppLocalizationsPt([String locale = 'pt']) : super(locale);
 
   @override
+  String get paste_attachment_failed_text_kept =>
+      'Não foi possível anexar o texto colado. O texto foi mantido na mensagem.';
+
+  @override
   String get background_task_report => 'Tarefa em segundo plano';
 
   @override
@@ -3194,6 +3198,10 @@ class AppLocalizationsPt extends AppLocalizations {
 /// The translations for Portuguese, as used in Brazil (`pt_BR`).
 class AppLocalizationsPtBr extends AppLocalizationsPt {
   AppLocalizationsPtBr() : super('pt_BR');
+
+  @override
+  String get paste_attachment_failed_text_kept =>
+      'Não foi possível anexar o texto colado. O texto foi mantido na mensagem.';
 
   @override
   String get background_task_report => 'Tarefa em segundo plano';

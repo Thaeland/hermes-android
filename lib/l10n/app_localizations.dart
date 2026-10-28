@@ -114,6 +114,12 @@ abstract class AppLocalizations {
     Locale.fromSubtags(languageCode: 'zh', scriptCode: 'Hans'),
   ];
 
+  /// No description provided for @paste_attachment_failed_text_kept.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not attach the paste. The text was kept in the message.'**
+  String get paste_attachment_failed_text_kept;
+
   /// No description provided for @background_task_report.
   ///
   /// In en, this message translates to:

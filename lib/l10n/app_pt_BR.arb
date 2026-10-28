@@ -1,4 +1,5 @@
 {
+  "paste_attachment_failed_text_kept": "Não foi possível anexar o texto colado. O texto foi mantido na mensagem.",
   "background_task_report": "Tarefa em segundo plano",
   "background_process_report": "Processo em segundo plano",
   "background_report_issues": "Problemas relatados — expanda para ver os detalhes.",

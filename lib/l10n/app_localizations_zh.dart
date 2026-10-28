@@ -9,6 +9,9 @@ class AppLocalizationsZh extends AppLocalizations {
   AppLocalizationsZh([String locale = 'zh']) : super(locale);
 
   @override
+  String get paste_attachment_failed_text_kept => '无法将粘贴的文本添加为附件。文本已保留在消息中。';
+
+  @override
   String get background_task_report => '后台任务';
 
   @override
@@ -3073,6 +3076,9 @@ class AppLocalizationsZh extends AppLocalizations {
 /// The translations for Chinese, using the Han script (`zh_Hans`).
 class AppLocalizationsZhHans extends AppLocalizationsZh {
   AppLocalizationsZhHans() : super('zh_Hans');
+
+  @override
+  String get paste_attachment_failed_text_kept => '无法将粘贴的文本添加为附件。文本已保留在消息中。';
 
   @override
   String get background_task_report => '后台任务';
