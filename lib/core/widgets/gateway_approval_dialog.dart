@@ -34,13 +34,22 @@ class _GatewayApprovalDialogState extends State<GatewayApprovalDialog> {
       return;
     }
 
+    final route = ModalRoute.of(context);
     setState(() {
       _submitting = choice;
       _error = null;
     });
     try {
       await widget.onRespond(choice);
-      if (mounted) Navigator.of(context).pop(true);
+      // Normal-owner cleanup may already have removed this dialog's route.
+      if (!mounted || route?.isActive != true) return;
+      final navigator = route!.navigator;
+      if (route.isCurrent) {
+        navigator?.pop(true);
+      } else {
+        // A newer prompt may be above this one; close only our own route.
+        navigator?.removeRoute(route, true);
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() {
