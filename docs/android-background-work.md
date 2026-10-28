@@ -31,6 +31,14 @@ Turning optional notifications off does not hide Android's required service
 disclosure. Android notification permission is still required for ordinary chat
 notifications.
 
+When a connection uses the stock Hermes gateway's API-server transport
+(REST `POST /v1/chat/completions` + SSE), a send registers as an active turn
+for its whole streaming lifetime, so the same protection engages while the
+turn is in flight. This raises process priority while backgrounded; it does
+not survive force-stop, Doze kill or an OEM battery killer, and on this
+transport there is still no durable run to reattach to after a real process
+death (tracked in #149).
+
 This is not a guarantee of uninterrupted networking. Doze, network changes,
 manufacturer battery policies, low memory and process termination can interrupt a
 connection. The battery-settings button opens Android settings; it does not grant
