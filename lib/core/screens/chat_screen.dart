@@ -3784,164 +3784,174 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     _scheduleStreamingFollow();
 
-    // Accumulate tokens into the streaming placeholder
-    await _gateway.sendMessageStreaming(
-      message: text,
-      sessionId: widget.session.id,
-      // The OpenAI-compatible endpoint does not consume the API session's
-      // persisted Browser lock. Carry both ids on API-only turns so duplicate
-      // model names cannot silently fall back to another provider. Desktop
-      // Gateway keeps its existing model-only request behaviour.
-      model: _sessionModelOverride ? _sessionModel : null,
-      provider: _desktopGateway == null && _sessionModelOverride
-          ? _sessionProvider
-          : null,
-      history: history,
-      imageDataUrl: imageDataUrl,
-      onToken: (token) {
-        if (!mounted || responseGeneration != _responseGeneration) return;
-        setState(() {
-          _gatewayTurnStatus = null;
-          if (_messages.isNotEmpty && _messages.last['role'] == 'assistant') {
-            final assistant = _messages.last;
-            final current = assistant['content'] as String;
-            if (current.isEmpty && token.isNotEmpty) {
-              _registerMaterializedAssistantMessage();
+    // Accumulate tokens into the streaming placeholder.
+    // Register this API-server send as app-wide turn activity so
+    // Settings → Background work can engage the foreground service on the
+    // stock-gateway REST transport (issue #225). The token is released when
+    // the stream settles — terminal, error, superseded or cancelled.
+    final legacyTurn = _viewController.beginLegacyTurn();
+    try {
+      await _gateway.sendMessageStreaming(
+        message: text,
+        sessionId: widget.session.id,
+        // The OpenAI-compatible endpoint does not consume the API session's
+        // persisted Browser lock. Carry both ids on API-only turns so duplicate
+        // model names cannot silently fall back to another provider. Desktop
+        // Gateway keeps its existing model-only request behaviour.
+        model: _sessionModelOverride ? _sessionModel : null,
+        provider: _desktopGateway == null && _sessionModelOverride
+            ? _sessionProvider
+            : null,
+        history: history,
+        imageDataUrl: imageDataUrl,
+        onToken: (token) {
+          if (!mounted || responseGeneration != _responseGeneration) return;
+          setState(() {
+            _gatewayTurnStatus = null;
+            if (_messages.isNotEmpty && _messages.last['role'] == 'assistant') {
+              final assistant = _messages.last;
+              final current = assistant['content'] as String;
+              if (current.isEmpty && token.isNotEmpty) {
+                _registerMaterializedAssistantMessage();
+              }
+              assistant['content'] = current + token;
+              if (token.isNotEmpty) {
+                ChatMessageTime.observe(
+                  assistant,
+                  source: ChatMessageTimeSource.received,
+                );
+              }
+              _timeline = _timeline.appendText(assistant, token);
+              _retainReceiptPresentation();
             }
-            assistant['content'] = current + token;
-            if (token.isNotEmpty) {
+          });
+          _scheduleStreamingFollow();
+        },
+        onToolProgress: (progress) {
+          if (!mounted || responseGeneration != _responseGeneration) return;
+          _upsertToolProgress(
+            progress,
+            eventType: progress['status'] == 'running'
+                ? 'tool.start'
+                : 'tool.update',
+          );
+        },
+        onReasoning: (text) => _handleDesktopGatewayEvent(
+          StreamEvent(type: 'reasoning.delta', data: {'text': text}),
+          responseGeneration,
+        ),
+        onStatus: (status) => _handleDesktopGatewayEvent(
+          StreamEvent(type: 'status.update', data: status),
+          responseGeneration,
+        ),
+        onDone: () async {
+          if (!mounted || responseGeneration != _responseGeneration) return;
+          // The SSE client requires an explicit successful protocol completion.
+          final assistant = _lastAssistantMessage();
+          setState(() {
+            assistant?['_chat_response_complete'] = true;
+            if (assistant != null) {
               ChatMessageTime.observe(
                 assistant,
                 source: ChatMessageTimeSource.received,
               );
             }
-            _timeline = _timeline.appendText(assistant, token);
-            _retainReceiptPresentation();
-          }
-        });
-        _scheduleStreamingFollow();
-      },
-      onToolProgress: (progress) {
-        if (!mounted || responseGeneration != _responseGeneration) return;
-        _upsertToolProgress(
-          progress,
-          eventType: progress['status'] == 'running'
-              ? 'tool.start'
-              : 'tool.update',
-        );
-      },
-      onReasoning: (text) => _handleDesktopGatewayEvent(
-        StreamEvent(type: 'reasoning.delta', data: {'text': text}),
-        responseGeneration,
-      ),
-      onStatus: (status) => _handleDesktopGatewayEvent(
-        StreamEvent(type: 'status.update', data: status),
-        responseGeneration,
-      ),
-      onDone: () async {
-        if (!mounted || responseGeneration != _responseGeneration) return;
-        // The SSE client requires an explicit successful protocol completion.
-        final assistant = _lastAssistantMessage();
-        setState(() {
-          assistant?['_chat_response_complete'] = true;
-          if (assistant != null) {
-            ChatMessageTime.observe(
-              assistant,
-              source: ChatMessageTimeSource.received,
-            );
-          }
-          assistant?['_gateway_pending_response'] = false;
-          replyRetention.complete(_messages);
-          _restReplyRetention = replyRetention;
-          _sending = false;
-          _streaming = false;
-          _gatewayTurnStatus = null;
-        });
-        // Refresh messages to get the final server-side state. The token is
-        // retained across both HTTP and attachment cleanup, including failure.
-        final read = _beginHistoryRead(widget.session.id);
-        try {
-          final messages = await _getRecentMessages(read);
-          if (!_canApplyHistoryRead(read)) return;
-          if (pendingImage != null) {
-            await _attachmentDraftService.removeCachedFile(pendingImage);
-          }
-          if (!_acceptHistoryRead(read, messages)) return;
-          _acceptRecentMessages(messages);
-          setState(() {
-            _messages = _restHistoryForPresentation();
+            assistant?['_gateway_pending_response'] = false;
+            replyRetention.complete(_messages);
+            _restReplyRetention = replyRetention;
+            _sending = false;
+            _streaming = false;
+            _gatewayTurnStatus = null;
+          });
+          // Refresh messages to get the final server-side state. The token is
+          // retained across both HTTP and attachment cleanup, including failure.
+          final read = _beginHistoryRead(widget.session.id);
+          try {
+            final messages = await _getRecentMessages(read);
+            if (!_canApplyHistoryRead(read)) return;
             if (pendingImage != null) {
-              _attachmentDrafts.removeWhere(
-                (draft) => draft.id == pendingImage.id,
-              );
+              await _attachmentDraftService.removeCachedFile(pendingImage);
             }
-            _streaming = false;
-            _sending = false;
-            _gatewayTurnStatus = null;
-            _activeResponseTransport = _ResponseTransport.none;
-          });
-          _scheduleScrollTarget(_scrollCoordinator.endStreaming());
-          if (_awaitingVoiceReply) {
-            _awaitingVoiceReply = false;
-            final assistant = messages.reversed.firstWhere(
-              (message) => message['role'] == 'assistant',
-              orElse: () => const <String, dynamic>{},
-            );
-            final assistantText = assistant['content']?.toString();
-            if (assistantText != null) {
-              await _speakAssistantText(assistantText);
-            }
-          }
-        } catch (_) {
-          if (!_canApplyHistoryRead(read)) return;
-          _scrollCoordinator.cancelStreaming();
-          setState(() {
-            if (_messages.isNotEmpty && _messages.last['role'] == 'assistant') {
-              _messages.last['_gateway_pending_response'] = false;
-            }
-            _streaming = false;
-            _sending = false;
-            _gatewayTurnStatus = null;
-            _activeResponseTransport = _ResponseTransport.none;
-          });
-          // The SSE response completed, so the server accepted the prompt.
-          // A follow-up history read failing must not resurrect it as a draft.
-          _deferHistoryRefresh();
-        } finally {
-          // Completing this REST operation is independent of the freshness of
-          // its history GET. If a newer success superseded that GET, release
-          // only the still-owned stream latch, without touching its transcript,
-          // error, status or scroll. Never strand Send behind a discarded read.
-          if (_historyReadAttached(read) &&
-              responseGeneration == _responseGeneration &&
-              _activeResponseTransport == _ResponseTransport.rest) {
+            if (!_acceptHistoryRead(read, messages)) return;
+            _acceptRecentMessages(messages);
             setState(() {
+              _messages = _restHistoryForPresentation();
+              if (pendingImage != null) {
+                _attachmentDrafts.removeWhere(
+                  (draft) => draft.id == pendingImage.id,
+                );
+              }
               _streaming = false;
               _sending = false;
+              _gatewayTurnStatus = null;
               _activeResponseTransport = _ResponseTransport.none;
             });
+            _scheduleScrollTarget(_scrollCoordinator.endStreaming());
+            if (_awaitingVoiceReply) {
+              _awaitingVoiceReply = false;
+              final assistant = messages.reversed.firstWhere(
+                (message) => message['role'] == 'assistant',
+                orElse: () => const <String, dynamic>{},
+              );
+              final assistantText = assistant['content']?.toString();
+              if (assistantText != null) {
+                await _speakAssistantText(assistantText);
+              }
+            }
+          } catch (_) {
+            if (!_canApplyHistoryRead(read)) return;
+            _scrollCoordinator.cancelStreaming();
+            setState(() {
+              if (_messages.isNotEmpty &&
+                  _messages.last['role'] == 'assistant') {
+                _messages.last['_gateway_pending_response'] = false;
+              }
+              _streaming = false;
+              _sending = false;
+              _gatewayTurnStatus = null;
+              _activeResponseTransport = _ResponseTransport.none;
+            });
+            // The SSE response completed, so the server accepted the prompt.
+            // A follow-up history read failing must not resurrect it as a draft.
+            _deferHistoryRefresh();
+          } finally {
+            // Completing this REST operation is independent of the freshness of
+            // its history GET. If a newer success superseded that GET, release
+            // only the still-owned stream latch, without touching its transcript,
+            // error, status or scroll. Never strand Send behind a discarded read.
+            if (_historyReadAttached(read) &&
+                responseGeneration == _responseGeneration &&
+                _activeResponseTransport == _ResponseTransport.rest) {
+              setState(() {
+                _streaming = false;
+                _sending = false;
+                _activeResponseTransport = _ResponseTransport.none;
+              });
+            }
           }
-        }
-      },
-      onError: (error) {
-        if (!mounted || responseGeneration != _responseGeneration) return;
-        // No streamed content means the request never reached the server
-        // (connection failure, non-200): restore the draft so nothing typed
-        // is lost. Content already flowing means the prompt was accepted.
-        final hadContent =
-            _messages.isNotEmpty &&
-            _messages.last['role'] == 'assistant' &&
-            (_messages.last['content']?.toString().isNotEmpty ?? false);
-        // Remove the placeholder assistant message
-        setState(() {
-          if (_messages.isNotEmpty && _messages.last['role'] == 'assistant') {
-            _messages.removeLast();
-          }
-        });
-        if (!hadContent) _restoreComposerAfterRejectedSend(text);
-        _handleSendError(error, removePendingUserMessage: true);
-      },
-    );
+        },
+        onError: (error) {
+          if (!mounted || responseGeneration != _responseGeneration) return;
+          // No streamed content means the request never reached the server
+          // (connection failure, non-200): restore the draft so nothing typed
+          // is lost. Content already flowing means the prompt was accepted.
+          final hadContent =
+              _messages.isNotEmpty &&
+              _messages.last['role'] == 'assistant' &&
+              (_messages.last['content']?.toString().isNotEmpty ?? false);
+          // Remove the placeholder assistant message
+          setState(() {
+            if (_messages.isNotEmpty && _messages.last['role'] == 'assistant') {
+              _messages.removeLast();
+            }
+          });
+          if (!hadContent) _restoreComposerAfterRejectedSend(text);
+          _handleSendError(error, removePendingUserMessage: true);
+        },
+      );
+    } finally {
+      _viewController.endLegacyTurn(legacyTurn);
+    }
   }
 
   Future<void> _sendDesktopGatewayMessage({
