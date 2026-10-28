@@ -9,6 +9,10 @@ class AppLocalizationsFr extends AppLocalizations {
   AppLocalizationsFr([String locale = 'fr']) : super(locale);
 
   @override
+  String get paste_attachment_failed_text_kept =>
+      'Impossible de joindre le texte collé. Il a été conservé dans le message.';
+
+  @override
   String get background_task_report => 'Tâche en arrière-plan';
 
   @override

@@ -48,6 +48,7 @@ import '../services/notification_prefs.dart';
 import '../services/voice_composer_adapter.dart';
 import '../services/ws_client.dart';
 import '../utils/media_tags.dart';
+import '../utils/large_paste.dart';
 import '../utils/delivered_files.dart';
 import '../utils/generated_media.dart';
 import '../models/attachment_draft.dart';
@@ -548,6 +549,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   final _textController = TextEditingController();
   int _composerRevision = 0;
   int _clearedComposerRevision = 0;
+  bool _preparingPaste = false;
+  bool _startingVoiceInput = false;
+  late final LargePasteFormatter _largePasteFormatter;
+  final Map<String, String> _pastedDraftTexts = {};
 
   final _imagePicker = ImagePicker();
   final List<AttachmentDraft> _attachmentDrafts = [];
@@ -733,6 +738,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _gateway = GatewayChatClient(_client);
     _attachmentDraftService =
         widget.testAttachmentDraftService ?? AttachmentDraftService();
+    _largePasteFormatter = LargePasteFormatter(onLargePaste: _onLargePaste);
     _attachmentSendCoordinator = AttachmentDraftSendCoordinator(
       _attachmentDraftService,
     );
@@ -1243,7 +1249,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _normalChat?.invalidateDraftRecovery();
     final text = _textController.text;
     if (!_restoringComposer && text != _lastComposerText) {
-      _draftWriter.edit(text);
+      _draftWriter.edit(_composerTextWithPastes(text));
     }
     _lastComposerText = text;
   }
@@ -2197,36 +2203,46 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final intent = ++_manualAudioIntent;
     if (_streaming ||
         _sending ||
+        _preparingPaste ||
+        _startingVoiceInput ||
         _transcriptLoadBlocksComposer ||
         _pendingReattachResync) {
       return;
     }
+    setState(() => _startingVoiceInput = true);
     try {
-      await _handsFree.stop(reason: HandsFreeStopReason.manualDictation);
-      if (widget.testVoiceComposerAdapter == null ||
-          widget.testVoiceReplySpeaker != null) {
-        await _replySpeaker.stop();
+      try {
+        await _handsFree.stop(reason: HandsFreeStopReason.manualDictation);
+        if (widget.testVoiceComposerAdapter == null ||
+            widget.testVoiceReplySpeaker != null) {
+          await _replySpeaker.stop();
+        }
+      } catch (_) {
+        return;
       }
-    } catch (_) {
-      return;
-    }
-    if (!mounted ||
-        intent != _manualAudioIntent ||
-        !_voiceRouteCurrent ||
-        !_voiceForeground) {
-      return;
-    }
-    final started = await _voiceComposer.start(localeId: _sttLocaleId);
-    if (!started && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            _voiceComposer.status ??
-                _voiceStatus ??
-                context.l10n.speech_recognition_is_unavailable,
+      if (!mounted ||
+          intent != _manualAudioIntent ||
+          !_voiceRouteCurrent ||
+          !_voiceForeground ||
+          _preparingPaste ||
+          _sending ||
+          _streaming) {
+        return;
+      }
+      final started = await _voiceComposer.start(localeId: _sttLocaleId);
+      if (!started && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _voiceComposer.status ??
+                  _voiceStatus ??
+                  context.l10n.speech_recognition_is_unavailable,
+            ),
           ),
-        ),
-      );
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _startingVoiceInput = false);
     }
   }
 
@@ -3288,10 +3304,81 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  String _composerTextWithPastes(String text) => [
+    text,
+    for (final draft in _attachmentDrafts) ?_pastedDraftTexts[draft.id],
+  ].where((part) => part.isNotEmpty).join('\n\n');
+
+  void _onLargePaste(LargePasteEdit edit) {
+    final remote =
+        _desktopGateway != null ||
+        widget.testRemotePromptSubmit != null ||
+        (_turnApplicationSession != null && !_legacyTransportFallback);
+    if (!remote ||
+        _preparingPaste ||
+        _sending ||
+        _streaming ||
+        _preparingSend ||
+        _pendingReattachResync ||
+        _archiving ||
+        _startingVoiceInput ||
+        _voiceComposer.listening ||
+        _transcriptLoadBlocksComposer) {
+      return;
+    }
+    _pastedDraftTexts.removeWhere(
+      (id, _) => !_attachmentDrafts.any((draft) => draft.id == id),
+    );
+    // The formatter observes the edit just before the controller listener.
+    final revision = _composerRevision + 1;
+    setState(() => _preparingPaste = true);
+    unawaited(_prepareLargePaste(edit, revision));
+  }
+
+  Future<void> _prepareLargePaste(LargePasteEdit edit, int revision) async {
+    AttachmentDraft? prepared;
+    try {
+      prepared = await _attachmentDraftService.preparePastedText(
+        text: edit.text,
+        existingDrafts: List<AttachmentDraft>.of(_attachmentDrafts),
+      );
+      if (!mounted ||
+          _startingVoiceInput ||
+          _voiceComposer.listening ||
+          !_draftWriter.isCurrent ||
+          _composerRevision != revision ||
+          _textController.value != edit.insertedValue) {
+        return;
+      }
+      // A picker already in flight may have added files during cache I/O.
+      _attachmentDraftService.validateRemoteDrafts([
+        ..._attachmentDrafts,
+        prepared,
+      ]);
+      final draft = prepared;
+      setState(() {
+        _attachmentDrafts.add(draft);
+        _pastedDraftTexts[draft.id] = edit.text;
+        _textController.value = edit.withoutPaste;
+      });
+      prepared = null;
+    } catch (_) {
+      if (mounted) {
+        _showAttachmentError(context.l10n.paste_attachment_failed_text_kept);
+      }
+    } finally {
+      if (prepared != null) {
+        await _attachmentDraftService.removeCachedFile(prepared);
+      }
+      if (mounted) setState(() => _preparingPaste = false);
+    }
+  }
+
   Future<void> _showAttachmentPicker() async {
     await _handsFree.stop(reason: HandsFreeStopReason.attachmentAction);
     if (!mounted) return;
     if (_transcriptLoadBlocksComposer ||
+        _preparingPaste ||
         _streaming ||
         _sending ||
         _pendingReattachResync) {
@@ -3566,11 +3653,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _removeAttachment(AttachmentDraft draft) async {
-    await _attachmentDraftService.removeCachedFile(draft);
     if (!mounted) return;
     setState(
       () => _attachmentDrafts.removeWhere((item) => item.id == draft.id),
     );
+    if (_pastedDraftTexts.remove(draft.id) != null) {
+      _draftWriter.edit(_composerTextWithPastes(_textController.text));
+    }
+    // The user intent and its draft authority precede asynchronous cleanup.
+    // A late deletion must never reclaim a replacement route's newer writer.
+    await _attachmentDraftService.removeCachedFile(draft);
   }
 
   void _moveAttachment(AttachmentDraft draft, int offset) {
@@ -3997,6 +4089,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       return;
     }
     if (_voiceComposer.listening ||
+        _startingVoiceInput ||
+        _preparingPaste ||
         _preparingSend ||
         _archiving ||
         _stopResponseInFlight ||
@@ -4474,6 +4568,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _normalReservation = reservation;
     final desktopGateway = _desktopGateway;
     final responseGeneration = _responseGeneration;
+    final pastedIds = attachments
+        .where((draft) => _pastedDraftTexts.containsKey(draft.id))
+        .map((draft) => draft.id)
+        .toSet();
+    final recoveryText = _composerTextWithPastes(text);
     var handedOff = false;
     _awaitingVoiceReply = speakResponse && _voiceReplyEnabled;
     try {
@@ -4545,8 +4644,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               (widget.session.isLocalDraft && desktopGateway != null
                   ? null
                   : widget.session.id);
-          if (voiceBinding == null) _commitComposerForSend();
-          _attachmentDrafts.clear();
+          if (voiceBinding == null) {
+            _attachmentDrafts.clear();
+            _pastedDraftTexts.removeWhere((id, _) => pastedIds.contains(id));
+            _commitComposerForSend();
+          }
           handedOff = true;
           _normalReservation = null;
           // All post-handoff callbacks and error/recovery handling live on the
@@ -4557,7 +4659,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             localContent: localContent,
             submit: testSubmit,
             knownStoredSessionId: knownStored,
-            rawDraftText: text,
+            rawDraftText: recoveryText,
             canRestoreDraft:
                 voiceBinding == null &&
                 _composerRevision == _clearedComposerRevision,
@@ -4574,13 +4676,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       // Only definitely pre-wire rejection restores this route's captured
       // revision. Post-wire errors are absorbed as unresolved by the owner.
       if (!chat.snapshot.wireEmitted) {
-        if (voiceBinding == null) _restoreComposerAfterRejectedSend(text);
-        voiceBinding?.finish(HandsFreeTurnStatus.failed);
         setState(() {
           _attachmentDrafts
             ..clear()
-            ..addAll(attachments);
+            ..addAll(
+              attachments.where(
+                (draft) => !handedOff || !pastedIds.contains(draft.id),
+              ),
+            );
         });
+        if (voiceBinding == null) {
+          _restoreComposerAfterRejectedSend(handedOff ? recoveryText : text);
+        }
+        voiceBinding?.finish(HandsFreeTurnStatus.failed);
         _handleSendError(error);
         unawaited(_refreshDeferredHistoryIfIdle());
       }
@@ -4696,7 +4804,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       text,
       attachmentLabels,
     ].where((part) => part.trim().isNotEmpty).join('\n\n');
-    if (voiceBinding == null) _commitComposerForSend();
+    if (voiceBinding == null) {
+      _attachmentDrafts.clear();
+      _commitComposerForSend();
+    }
     _scrollCoordinator.beginStreaming(isNearEnd: _isNearEnd());
     final firstState = Completer<void>();
     _recoverableSubmissionState = firstState;
@@ -4706,7 +4817,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         kind: 'starting',
         text: context.l10n.starting_hermes,
       );
-      _attachmentDrafts.clear();
       _messages.add({
         'role': 'user',
         'content': localContent,
@@ -4763,7 +4873,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           if (_messages.isNotEmpty && _messages.last['role'] == 'user') {
             _messages.removeLast();
           }
-          if (voiceBinding == null) _restoreComposerAfterRejectedSend(text);
           for (final draft in attachments) {
             draft
               ..status = AttachmentDraftStatus.ready
@@ -4773,6 +4882,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             ..clear()
             ..addAll(attachments);
         });
+        if (voiceBinding == null) _restoreComposerAfterRejectedSend(text);
         _handleSendError(error);
         unawaited(_refreshDeferredHistoryIfIdle());
         return;
@@ -5989,24 +6099,30 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   void _clearComposerForSend(String text) {
     _setRestoredComposer('');
     _clearedComposerRevision = _composerRevision;
-    _draftWriter.edit(text);
-    unawaited(_draftWriter.save(text));
+    final recovery = _composerTextWithPastes(text);
+    _draftWriter.edit(recovery);
+    unawaited(_draftWriter.save(recovery));
   }
 
   /// Preparation finished: hand off the prompt without touching newer typing.
   void _commitComposerForSend() {
-    unawaited(_draftWriter.save(_textController.text));
+    unawaited(_draftWriter.save(_composerTextWithPastes(_textController.text)));
   }
 
   /// Restore only the send's untouched draft. A newer edit (including typing
   /// and then deleting) belongs to the user, not this failed submission.
   void _restoreComposerAfterRejectedSend(String text) {
-    if (text.trim().isEmpty) return;
+    if (text.isEmpty &&
+        !_attachmentDrafts.any(
+          (draft) => _pastedDraftTexts.containsKey(draft.id),
+        )) {
+      return;
+    }
     if (!_draftWriter.isCurrent) return;
     if (_composerRevision == _clearedComposerRevision) {
       _setRestoredComposer(text);
     }
-    unawaited(_draftWriter.save(_textController.text));
+    unawaited(_draftWriter.save(_composerTextWithPastes(_textController.text)));
   }
 
   void _handleSendError(Object e, {bool removePendingUserMessage = false}) {
@@ -6379,6 +6495,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     final separateVoiceAction = MediaQuery.sizeOf(context).width < 400;
     final sendEnabled =
         !_transcriptLoadBlocksComposer &&
+        !_preparingPaste &&
+        !_startingVoiceInput &&
         !_archiving &&
         !_preparingSend &&
         !_midTurnSendInFlight &&
@@ -6504,7 +6622,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                     draft: _attachmentDrafts[index],
                                     index: index,
                                     total: _attachmentDrafts.length,
-                                    busy: _sending,
+                                    busy: _sending || _preparingPaste,
                                     onMovePrevious: () => _moveAttachment(
                                       _attachmentDrafts[index],
                                       -1,
@@ -6559,6 +6677,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             ),
             if (separateVoiceAction && handsFreeAction != null)
               Align(alignment: Alignment.centerRight, child: handsFreeAction),
+            if (_preparingPaste)
+              LinearProgressIndicator(
+                key: const Key('paste-attachment-preparing'),
+                semanticsLabel: context.l10n.preparing_attachments,
+              ),
             Row(
               children: [
                 Semantics(
@@ -6566,6 +6689,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   button: true,
                   enabled:
                       !_transcriptLoadBlocksComposer &&
+                      !_preparingPaste &&
                       !_streaming &&
                       !_sending &&
                       !_pendingReattachResync,
@@ -6574,6 +6698,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                     icon: const Icon(Icons.attach_file),
                     onPressed:
                         (!_transcriptLoadBlocksComposer &&
+                            !_preparingPaste &&
                             !_streaming &&
                             !_sending &&
                             !_pendingReattachResync)
@@ -6597,6 +6722,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                       child: TextField(
                         key: const Key('chat-message-composer'),
                         controller: _textController,
+                        inputFormatters: [_largePasteFormatter],
                         decoration: InputDecoration(
                           hintText: context.l10n.message_hermes,
                           border: OutlineInputBorder(
@@ -6625,6 +6751,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   VoiceComposerStartButton(
                     enabled:
                         !_transcriptLoadBlocksComposer &&
+                        !_preparingPaste &&
+                        !_startingVoiceInput &&
                         !_streaming &&
                         !_sending &&
                         !_pendingReattachResync,

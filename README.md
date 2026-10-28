@@ -153,6 +153,9 @@ See [setup, privacy and verification limits](docs/HANDS_FREE_VOICE.md). Thanks t
 - Copy/select text, Read aloud, Stop, Edit and resend, Regenerate, and export.
 - Up to 10 Remote Gateway attachments per draft, capped at 64 MiB total;
   generic files retain the 16 MiB per-file limit.
+- Paste more than 3,000 characters into a Remote Gateway chat to attach them as
+  `paste.txt`, keeping your instructions in the composer. Short pastes and REST
+  chats stay inline. See [Long pastes](docs/long-pastes.md).
 - File-backed app cache, metadata-sanitized JPEG/PNG/WebP images, ordered
   sequential upload, accessible reordering, remove, and individual retry.
   Sanitized JPEG inputs remain JPEG; PNG and WebP inputs are emitted as PNG.

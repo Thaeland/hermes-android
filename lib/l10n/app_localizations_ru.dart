@@ -9,6 +9,10 @@ class AppLocalizationsRu extends AppLocalizations {
   AppLocalizationsRu([String locale = 'ru']) : super(locale);
 
   @override
+  String get paste_attachment_failed_text_kept =>
+      'Не удалось прикрепить вставленный текст. Текст сохранён в сообщении.';
+
+  @override
   String get background_task_report => 'Фоновая задача';
 
   @override

@@ -213,7 +213,7 @@ abstract final class ComposerDraftStore {
         // cache that an older unrelated reload may have replaced during save.
         await prefs.reload();
         final value = prefs.getString(_resolve(prefs, connectionId, sessionId));
-        return (value == null || value.trim().isEmpty) ? null : value;
+        return (value == null || value.isEmpty) ? null : value;
       });
     } catch (_) {
       throw const ComposerDraftReadException();
@@ -263,7 +263,9 @@ abstract final class ComposerDraftStore {
     final oldText = prefs.getString(key);
     final oldMarker = prefs.getBool(marker);
     try {
-      final saved = text.trim().isEmpty
+      // Whitespace may be the literal body of a recovered paste. Only an
+      // explicit empty string is a clear; keep all nonempty draft bytes.
+      final saved = text.isEmpty
           ? await prefs.remove(key)
           : await prefs.setString(key, text);
       if (!saved || !await prefs.setBool(marker, true)) {
