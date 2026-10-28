@@ -1,6 +1,6 @@
 [![Hermes Android 3.0.0 announcement](docs/images/hermes-android-3.0.0-hero.jpg)](https://github.com/rusty4444/hermes-android/releases/tag/v3.0.0)
 
-# Hermes Android v3.0.2
+# Hermes Android v3.0.6
 
 Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — chat with your Hermes sessions from a phone or tablet over local Wi-Fi or a private Tailscale network.
 
@@ -43,15 +43,15 @@ Ten fresh Android emulator captures, each using a different colour palette. Thes
 
 ## Current release
 
-**3.0.2** (base build **3006**) fixes a stale recovery view that could keep an older reply at the end of an existing chat despite newer saved messages. You can inspect retained unconfirmed output without losing your saved-history position. The production package, `com.hermesagent.hermes_android`, and signing identity stay the same. Export an encrypted configuration backup before updating; the matching production-signed APK upgrades 3.0.1 and 3.0.2-recovery.1 in place. Do not uninstall or clear app data to apply this fix.
+**3.0.6** (base build **3010**) keeps API-server turns alive when you background the phone mid-turn, and makes approval/input notifications generic so command details never reach the lock screen. The production package, `com.hermesagent.hermes_android`, and signing identity stay the same. Export an encrypted configuration backup before updating; the matching production-signed APK upgrades 3.0.5 in place. Do not uninstall or clear app data.
 
 | Download | Device | Version code |
 | --- | --- | --- |
-| [ARM64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.2/app-arm64-v8a-release.apk) | Most current Android phones/tablets | `30062` |
-| [ARMv7 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.2/app-armeabi-v7a-release.apk) | Older 32-bit ARM devices | `30061` |
-| [x86_64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.2/app-x86_64-release.apk) | x86_64 Android devices/emulators | `30063` |
+| [ARM64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.6/app-arm64-v8a-release.apk) | Most current Android phones/tablets | `30102` |
+| [ARMv7 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.6/app-armeabi-v7a-release.apk) | Older 32-bit ARM devices | `30101` |
+| [x86_64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.6/app-x86_64-release.apk) | x86_64 Android devices/emulators | `30103` |
 
-[Release and checksums](https://github.com/rusty4444/hermes-android/releases/tag/v3.0.2) · [Changes since 3.0.1](docs/releases/3.0.2.md) · [Full changelog](CHANGELOG.md)
+[Release and checksums](https://github.com/rusty4444/hermes-android/releases/tag/v3.0.6) · [Changes since 3.0.5](docs/releases/3.0.6.md) · [Full changelog](CHANGELOG.md)
 
 Debug builds use the separate `com.hermesagent.hermes_android.dev` package and Android debug certificate. Older production APKs have lower version codes; downgrading can require uninstalling and restoring a backup.
 
@@ -60,7 +60,7 @@ Debug builds use the separate `com.hermesagent.hermes_android.dev` package and A
 - Updating the APK does not install or configure Hermes host software or the optional mobile-push server companion.
 - Quiet mode requires completion metadata for each reply. If an older gateway's saved answers are missing in quiet mode, enable **Verbose Mode**. Saved/live duplicate handover also needs the gateway's optional complete `persisted_turn` receipt and fresh history; older gateways can retain both sources.
 - Assets is partial discovery of shared files, not a complete attachment or filesystem catalogue. Downloads are limited to 25 MiB per file.
-- Protect encrypted backups and their passwords. Backups can contain connection secrets and imported client private keys. See the [upgrade notes and compatibility limits](docs/releases/3.0.2.md#compatibility-and-delivery-limits).
+- Protect encrypted backups and their passwords. Backups can contain connection secrets and imported client private keys. See the [upgrade notes and compatibility limits](docs/releases/3.0.3.md#compatibility-and-delivery-limits).
 
 ### Update checks
 
@@ -243,39 +243,27 @@ See [CHANGELOG.md](CHANGELOG.md) for the complete release history and
 [docs/HERMESAPK_DEVELOPMENT_LOG.md](docs/HERMESAPK_DEVELOPMENT_LOG.md) for the
 sanitized implementation and validation record.
 
-## What's new in v3.0.2
+## What's new in v3.0.6
 
-- Open refreshed saved history at its newest visible message, rather than an older retained reply whose turn outcome remains unknown.
-- Tap **Received · match unconfirmed** to inspect retained output in a separate, read-only sheet. Inspecting it does not resend a prompt or change saved messages.
-- Keep tool and reasoning expansion choices while scrolling that sheet. Quiet mode keeps its existing completed-reply filtering; enable Verbose Mode for retained public details.
-- Preserve your reading position during delayed history reads, refresh and inspection. Use the **Saved history** end action to return to the saved end.
+- API-server (REST SSE) sends register as app-wide turn activity, so backgrounding the phone mid-turn no longer freezes the process and destroys the turn.
+- Approval and input notifications use generic body text — command details never reach the lock screen — with clearer connection attribution, nearby controls, accessible switch labelling and honest disable messaging. Thanks to @mordekai-lab for the notification work and regression tests.
 
-Read the [3.0.2 release notes](docs/releases/3.0.2.md) for recovery semantics, retained-output lifetime and upgrade limits.
+Read the [3.0.6 release notes](docs/releases/3.0.6.md) for scope and compatibility limits.
 
-## What's new in v3.0.1
+## What's new in v3.0.5
 
-- In-app video playback with play/pause, replay, seeking and mute. Videos start paused; playback pauses when the app is backgrounded or another route covers the preview, and resumes only after you tap Play.
-- Offline DOCX paragraph/table text, XLSX sheet names and raw cached cell values with coordinates, and PPTX slide text. The viewer extracts text only; it does not render original layout, formatting, images or charts, or evaluate formulas.
-- Chat cards, inline file links and More → Assets share the same viewer. Download and Share keep the cached original bytes; PDF and plain-text previews remain available.
-- Video uses an app-private local copy, without passing gateway URLs or credentials to the player. Codec support depends on Android and the device; unsupported files retain Download/Share. The existing 25 MiB per-file limit applies.
-- No backend patch or new server configuration is required for these previews. Background push still needs its separate server companion and supported phone transport.
+- Show recognised scheduled-job setup and embedded skill instructions as neutral Background task cards, collapsed in Verbose Mode and hidden in conversation-only mode. Ordinary human input and raw stored history are unchanged.
+- Keep approval-dialog dismissal on its originating route, without popping the chat or a newer prompt. Thanks to @mordekai-lab for the fix and regression tests.
 
-Read the [3.0.1 release notes](docs/releases/3.0.1.md) for formats, fallback behaviour and upgrade limits.
+Read the [3.0.5 release notes](docs/releases/3.0.5.md) for scope and compatibility limits.
 
-## What's new in v3.0.0
+## What's new in v3.0.4
 
-These highlights cover the whole **2.1.33 → 3.0.0** change set, not just RC3.
+- Document the historical MIT declaration and contribution terms rather than treating an unanswered confirmation request as an absent grant.
+- Preserve separate Graphify, Nous Research template, Gradle wrapper and Flutter scaffold notices, alongside the existing font and Library terms.
+- Keep the additional notices accessible offline and associated with the corresponding source distribution. Chat and gateway behaviour are unchanged.
 
-- Ten full-app colour themes with independent light/dark/system appearance, live updates and backup/restore. See [Appearance](docs/APPEARANCE_THEMES.md).
-- Default **Chats → Crons → Projects → Activity → More** navigation, separate scheduled conversations, verified Archive/Unarchive and progressive older-history loading.
-- Completed-reply quiet mode, collapsed Verbose details, neutral internal-report cards, message-level local times and a responding bar for tools, reasoning and gateway status.
-- Separate Stop and Send controls during work: Remote Gateway sends text guidance; REST uses an explicit Stop and send action. Newer draft edits survive delayed acknowledgements.
-- More → Assets, broader generated-file discovery, image/PDF/text previews, direct Android save/download and separate Share. Web links open in the external browser on tap.
-- Optional per-connection PEM/P12 client certificates for mTLS, portable encrypted backups and improved mobile certificate picking/password handling.
-- Simpler opt-in background notifications, automatic authorised-chat scope and an optional built-in Google-backed phone transport. The separate server companion is still required.
-- Stronger saved/live receipt handover, draft/identity/recovery ownership, Activity coverage, account-safe notifications and public-only exports. Offline licences and exact-source/relink release materials accompany the APKs.
-
-Read the [detailed release notes](docs/releases/3.0.0.md) for all changes, prerequisites, limits and contributor credits. Existing Memory facts, local pins, Project moves, voice and task inspection remain available.
+Read the [3.0.4 release notes](docs/releases/3.0.4.md) and [historical licence evidence](docs/licensing/README.md).
 
 ## Features
 
@@ -722,7 +710,7 @@ cp build/app/outputs/flutter-apk/app-*-release.apk release-apks/
 block in `android/app/build.gradle.kts` derives per-ABI codes as
 `base * 10 + ABI code` (armeabi-v7a = 1, arm64-v8a = 2, x86_64 = 3), so the
 codes stay ordered armeabi-v7a < arm64-v8a < x86_64 as fdroiddata requires.
-For v3.0.2, base `3006` produces codes `30061`/`30062`/`30063`.
+For v3.0.6, base `3010` produces codes `30101`/`30102`/`30103`.
 Before publication, CI verifies all three actual APKs: package, version, ABI,
 effective code, production signer and required licence/source assets. Releases
 include checksums and exact-commit source/relink materials. Release-floor checks
@@ -840,6 +828,10 @@ details in v2.1.33. Existing contributor credits below remain unchanged.
 Automated checks do not substitute for device validation; release notes list
 the checks performed.
 
+- **mordekai-lab** — fixed approval-dialog route ownership and added navigation
+  regression tests in PR #220 (v3.0.5), then made mobile notifications clearer
+  and more private with regression tests in PR #224 (v3.0.6). The original
+  commit history is preserved.
 - **smhc** — contributed optional imported client certificates in PR #166, then
   improved Android/iOS certificate picking, protected-file password entry and
   loaded-certificate layout in PR #187, including a physical Android mTLS report.
@@ -877,7 +869,9 @@ the checks performed.
   later added secure inline `MEDIA:` delivery cards and the complete gateway
   file-type contract in PR #137 (v2.1.15), then turn-bounded Android foreground
   keep-alive for backgrounded Gateway chats in PR #152 (v2.1.24). A maintainer
-  follow-up closed shutdown edges while preserving their commit history.
+  follow-up closed shutdown edges while preserving their commit history. Their
+  explicitly AI-labelled 3.0.0/3.0.1 audit (#207) prompted the independently
+  reproduced [audit fixes and finding dispositions](docs/audit-207/README.md).
 - **spsDrop** — reported that Android could not connect through a private
   Caddy/Tailscale gateway whose CA was installed in the device trust store
   (#108). Fixed in v2.1.6.
@@ -899,6 +893,11 @@ Application code is distributed under the [MIT License](LICENSE), as previously
 declared in this README. Copyright (c) 2026 Sam Russell and contributors. The
 canonical file records those existing terms, not a relicensing of third-party
 code or assets. Contributor attribution and source history are preserved.
+
+The [historical contribution evidence](docs/licensing/README.md) records the
+pre-existing MIT declaration and applicable contribution terms, including
+PR #88. See [the scoped third-party inventory](third_party/NOTICE.md) for
+additional template and build-material attribution.
 
 Third-party components retain their separate terms:
 

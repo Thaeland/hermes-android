@@ -31,6 +31,14 @@ Turning optional notifications off does not hide Android's required service
 disclosure. Android notification permission is still required for ordinary chat
 notifications.
 
+When a connection uses the stock Hermes gateway's API-server transport
+(REST `POST /v1/chat/completions` + SSE), a send registers as an active turn
+for its whole streaming lifetime, so the same protection engages while the
+turn is in flight. This raises process priority while backgrounded; it does
+not survive force-stop, Doze kill or an OEM battery killer, and on this
+transport there is still no durable run to reattach to after a real process
+death (tracked in #149).
+
 This is not a guarantee of uninterrupted networking. Doze, network changes,
 manufacturer battery policies, low memory and process termination can interrupt a
 connection. The battery-settings button opens Android settings; it does not grant
@@ -59,6 +67,22 @@ history does not discard a still-retained turn.
 Without an enabled push transport, a terminated app cannot learn
 about completion until it runs and reconnects. Android Force stop blocks background delivery and is not a supported way to test
 background push.
+
+## Scheduled-job messages in chat history
+
+Recognised scheduled-job setup appears as a neutral **Background task** card,
+not a message attributed to you. The card starts collapsed in Verbose Mode and
+is hidden in conversation-only mode. Expanding it retains the complete recorded
+prompt, including loaded skills and run context. This changes presentation only:
+stored roles/content and model request history remain unchanged, and generated
+setup is not selected as the prompt for Regenerate response.
+
+Compatibility matching covers the complete current cron hint and older skill
+scaffolds attached to a legacy cron-run message identity. A skill header alone
+in an ordinary chat is not enough. Explicit human/public/hidden annotations and
+available merge witnesses take precedence; normal follow-ups remain user input.
+Text matching is not authenticated provenance, and an API that omits annotations
+cannot distinguish a byte-identical human copy from generated setup.
 
 ## Optional encrypted background notifications
 

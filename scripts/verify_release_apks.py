@@ -34,12 +34,21 @@ NATIVE_SOURCES = (
     f"{SOURCE_DIRECTORY}/embedded-fcm-distributor-3.1.0-upstream.tar.gz",
     f"{SOURCE_DIRECTORY}/embedded-fcm-distributor-3.1.0.pom",
     f"{SOURCE_DIRECTORY}/manifest.json",
+    "third_party/NOTICE.md",
+    "third_party/licenses/Apache-2.0.txt",
+    "third_party/licenses/gradle-NOTICE.txt",
 )
 FLUTTER_SOURCES = (
     "LICENSE",
     "assets/fonts/OFL.txt",
     "assets/fonts/Cinzel-Variable.ttf",
     *NATIVE_SOURCES[:3],
+    "third_party/NOTICE.md",
+    "third_party/licenses/graphify-MIT.txt",
+    "third_party/licenses/hermes-agent-MIT.txt",
+    "third_party/licenses/flutter-BSD-3-Clause.txt",
+    "third_party/licenses/Apache-2.0.txt",
+    "third_party/licenses/gradle-NOTICE.txt",
 )
 ASSET_SOURCES = {
     **{

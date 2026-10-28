@@ -34,6 +34,14 @@ after extracting it); this prevents Android's asset merger from decompressing
 the verified `.tar.gz` automatically. Its bytes and SHA-256 remain unchanged.
 No Library source files have been modified by Hermes Android.
 
+The retained archive also contains separately Apache-2.0-licensed Gradle wrapper
+scripts and a wrapper JAR. Their original copyright headers and archive bytes
+remain unchanged. The scoped [NOTICE.md](NOTICE.md), complete
+[Apache-2.0 text](licenses/Apache-2.0.txt) and retained
+[Gradle NOTICE](licenses/gradle-NOTICE.txt) accompany that archive in the APK,
+extracted build materials and the source/relink ZIP. These build-tool terms do
+not relicense the Library or turn the conflicting POM into a dual-licence grant.
+
 All 13 Kotlin files in the published source JAR were compared byte-for-byte with
 the tagged source archive. The consumed published AAR was hashed and inspected.
 That establishes source/package correspondence, not reproducible published

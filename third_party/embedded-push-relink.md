@@ -12,6 +12,10 @@ the POM/source discrepancy and distribution checklist.
   README and licence: `sources/embedded-fcm-distributor-3.1.0/*-upstream.tar.gz`.
 - Exact published source JAR and POM, with a hash/origin manifest in the same
   directory. All 13 published Kotlin files match the tagged source bytes.
+- Accompanying `NOTICE.md`, `licenses/Apache-2.0.txt` and
+  `licenses/gradle-NOTICE.txt` for the separately licensed wrapper/build tools.
+  These accompany the unmodified archive and extracted source without changing
+  the Library's LGPL licence or the retained upstream bytes.
 - Application source, Flutter lockfile, Android Gradle/build scripts and a local
   AAR substitution path. The exact-commit source/relink ZIP is generated below.
 - `tools/embedded-push-rebuild/`: a separate build adapter using the app's cached
@@ -100,7 +104,8 @@ or current source materials that differ from that commit. The bundle contains:
 
 - `hermes-android-source.tar.gz`: exact tracked application and build source;
 - a separately accessible Library source/build archive, source JAR, POM, LGPL
-  text, notices and rebuild instructions;
+  text, scoped notices, complete wrapper Apache text/Gradle NOTICE and rebuild
+  instructions;
 - `distribution-manifest.json`: full source commit, application archive hash and
   supplied APK hashes. Hashing is not proof that the source produced those APKs;
   the distributor must verify and retain the build's association.

@@ -2789,6 +2789,9 @@ class AppLocalizationsZh extends AppLocalizations {
   String get could_not_save_chat_pin => '无法在此设备上保存聊天置顶';
 
   @override
+  String get could_not_save_chat_spaces => '无法在此设备上保存聊天空间';
+
+  @override
   String get update_available => '有可用更新';
 
   @override
@@ -5862,6 +5865,9 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get could_not_save_chat_pin => '无法在此设备上保存聊天置顶';
+
+  @override
+  String get could_not_save_chat_spaces => '无法在此设备上保存聊天空间';
 
   @override
   String get update_available => '有可用更新';

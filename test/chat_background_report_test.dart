@@ -14,7 +14,9 @@ import 'package:http/testing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'support/fake_voice_composer_adapter.dart';
+import 'support/cron_task_prompt_fixture.dart';
 import 'support/internal_background_message_fixture.dart';
+import 'support/lcm_summary_fixture.dart';
 import 'support/preserved_task_list_fixture.dart';
 
 const _quote =
@@ -36,6 +38,99 @@ void main() {
   });
 
   final internalFixtures = internalBackgroundMessageFixtures();
+  for (final verbose in [false, true]) {
+    testWidgets(
+      'cron setup preserves real follow-up edit and retry verbose=$verbose',
+      (tester) async {
+        SharedPreferences.setMockInitialValues({'verbose_mode': verbose});
+        await tester.binding.setSurfaceSize(const Size(1000, 1400));
+        addTearDown(() => tester.binding.setSurfaceSize(null));
+        final fixture = _History();
+        final task = Map<String, dynamic>.from(
+          cronTaskPromptFixtures()['legacy_skills']!['api'] as Map,
+        );
+        const followup = 'Please explain this scheduled result.';
+        fixture.rows
+          ..clear()
+          ..addAll([
+            {...task, 'id': 1},
+            {...task, 'id': 2, 'content': followup},
+            {
+              'id': 3,
+              'role': 'assistant',
+              'content': 'Answer',
+              'finish_reason': 'stop',
+            },
+          ]);
+        final controller = GatewayTurnApplicationController();
+        try {
+          await tester.pumpWidget(_app(fixture, controller));
+          await tester.pumpAndSettle();
+          expect(
+            find.byType(BackgroundReportCard),
+            verbose ? findsOneWidget : findsNothing,
+          );
+          final human = find.byWidgetPredicate(
+            (widget) =>
+                widget is MessageBubble &&
+                widget.isUser &&
+                widget.content == followup,
+          );
+          expect(human, findsOneWidget);
+          expect(
+            tester
+                .widgetList<MessageBubble>(find.byType(MessageBubble))
+                .where((bubble) => bubble.isUser),
+            hasLength(1),
+          );
+          final target = find.descendant(
+            of: human,
+            matching: find.byKey(const Key('message-bubble')),
+          );
+          await tester.ensureVisible(target);
+          await tester.pumpAndSettle();
+          expect(target.hitTestable(), findsOneWidget);
+          await tester.longPress(target);
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Edit and resend'));
+          await tester.pumpAndSettle();
+          expect(_draft(tester), followup);
+          expect(fixture.submits, 0);
+          await tester.enterText(find.byType(TextField), 'Unsent draft');
+          final answer = find.byWidgetPredicate(
+            (widget) =>
+                widget is MessageBubble &&
+                !widget.isUser &&
+                widget.content == 'Answer',
+          );
+          final answerTarget = find.descendant(
+            of: answer,
+            matching: find.byKey(const Key('message-bubble')),
+          );
+          await tester.ensureVisible(answerTarget);
+          await tester.pumpAndSettle();
+          expect(answerTarget.hitTestable(), findsOneWidget);
+          await tester.longPress(answerTarget);
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Regenerate response'));
+          for (var i = 0; i < 10 && fixture.submits == 0; i++) {
+            await tester.pump(const Duration(milliseconds: 100));
+          }
+          expect(fixture.submits, 1);
+          expect(fixture.submittedTexts.single, startsWith(followup));
+          expect(
+            fixture.submittedTexts.single,
+            isNot(contains('[IMPORTANT: The user has invoked')),
+          );
+          expect(tester.takeException(), isNull);
+        } finally {
+          await tester.pumpWidget(const SizedBox.shrink());
+          await controller.close();
+          await tester.pump();
+        }
+      },
+    );
+  }
   for (final entry in mergedInternalBackgroundMessageFixtures().entries) {
     for (final verbose in [false, true]) {
       testWidgets(
@@ -125,7 +220,11 @@ void main() {
   }
 
   final taskCases = {
+    for (final entry in cronTaskPromptFixtures().entries)
+      'cron_${entry.key}': Map<String, dynamic>.from(entry.value['api'] as Map),
     ...preservedTaskListFixtures(),
+    for (final entry in lcmSummaryFixtures().entries)
+      'lcm_${entry.key}': Map<String, dynamic>.from(entry.value['api'] as Map),
     for (final name in [
       'model_switch',
       'legacy_model_switch',
@@ -226,7 +325,7 @@ void main() {
                   .snapshot
                   .historyRows
                   .singleWhere((row) => row['id'] == 3);
-              expect(canonical['role'], 'user');
+              expect(canonical['role'], snapshot['role']);
               expect(canonical['content'], body);
               expect(canonical['display_kind'], snapshot['display_kind']);
               await tester.pumpWidget(const SizedBox.shrink());

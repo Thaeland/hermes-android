@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:hermes_android/core/services/android_launch_intent_service.dart';
 import 'package:hermes_android/core/services/android_share_intent_service.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
@@ -61,6 +62,9 @@ void main() {
   final messenger =
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
   setUp(() {
+    // Recovery constructs the production wrapper, not the failing migration
+    // store injected into creation. Supply that separate physical boundary.
+    FlutterSecureStorage.setMockInitialValues({});
     messenger.setMockMethodCallHandler(shareChannel, (_) async => null);
     messenger.setMockMethodCallHandler(launchChannel, (_) async => null);
   });
@@ -112,6 +116,83 @@ void main() {
     expect(home.connManager.getConnections().single.apiKey, 'test-credential');
   });
 
+  testWidgets(
+    'share bridge PlatformException leaves startup usable after required hydration',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({});
+      final hydration = Completer<void>();
+      var shareProbes = 0;
+      messenger.setMockMethodCallHandler(shareChannel, (call) async {
+        expect(call.method, 'getInitialShare');
+        shareProbes++;
+        throw PlatformException(code: 'share_unavailable');
+      });
+      messenger.setMockMethodCallHandler(
+        launchChannel,
+        (_) async => 'quickChat',
+      );
+
+      await tester.pumpWidget(
+        StartupApp(
+          createConnectionManager: (prefs) async {
+            await hydration.future;
+            return ConnectionManager.create(prefs);
+          },
+        ),
+      );
+      await tester.pump();
+      expect(find.byType(HermesApp), findsNothing);
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      hydration.complete();
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.byType(HermesApp), findsOneWidget);
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.text('Reset saved connections'), findsNothing);
+      final home = tester.widget<HomeScreen>(find.byType(HomeScreen));
+      expect(home.launchIntents!.takePendingQuickChat(), isTrue);
+      expect(home.shareIntents!.pendingShare.value, isNull);
+      // Initial-share failure must not unregister the warm-share handler.
+      await messenger.handlePlatformMessage(
+        shareChannel.name,
+        shareChannel.codec.encodeMethodCall(
+          const MethodCall('shareText', 'A later shared draft'),
+        ),
+        (_) {},
+      );
+      expect(
+        home.shareIntents!.takePendingShare()!.text,
+        'A later shared draft',
+      );
+      expect(home.shareIntents!.takePendingShare(), isNull);
+      await home.shareIntents!.initialize();
+      expect(shareProbes, 1);
+    },
+  );
+
+  testWidgets(
+    'optional share failure does not hide a corrupt persisted connection',
+    (tester) async {
+      SharedPreferences.setMockInitialValues({
+        'saved_connections': ['not valid JSON'],
+        'unrelated_preference': 'keep',
+      });
+      messenger.setMockMethodCallHandler(shareChannel, (_) async {
+        throw PlatformException(code: 'share_unavailable');
+      });
+      await tester.pumpWidget(const StartupApp());
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(find.byType(HermesApp), findsNothing);
+      expect(find.text('Reset saved connections'), findsOneWidget);
+      final prefs = await SharedPreferences.getInstance();
+      expect(prefs.getStringList('saved_connections'), ['not valid JSON']);
+      expect(prefs.getString('unrelated_preference'), 'keep');
+    },
+  );
+
   for (final failVerification in [false, true]) {
     testWidgets(
       'failed credential migration shows recovery and reset can retry (verification=$failVerification)',
@@ -123,6 +204,18 @@ void main() {
         });
         final credentials = _PendingCredentialStore()
           ..holdVerification = failVerification;
+        const physicalCredentials = FlutterSecureStorage();
+        final encodedId = base64Url
+            .encode(utf8.encode('saved-id'))
+            .replaceAll('=', '');
+        final credentialKey = 'connection_credentials_v1.$encodedId';
+        await physicalCredentials.write(
+          key: credentialKey,
+          value: 'raw-bundle',
+        );
+        messenger.setMockMethodCallHandler(shareChannel, (_) async {
+          throw PlatformException(code: 'share_unavailable');
+        });
         var attempts = 0;
         await tester.pumpWidget(
           StartupApp(
@@ -140,7 +233,7 @@ void main() {
         await tester.pump();
         expect(credentials.reads, failVerification ? 2 : 1);
         credentials.readResult.completeError(
-          StateError('Keystore unavailable'),
+          PlatformException(code: 'keystore_unavailable'),
         );
         await tester.pumpAndSettle();
 
@@ -168,6 +261,7 @@ void main() {
         );
         expect(prefs.getStringList('saved_connections'), isNull);
         expect(prefs.getString('unrelated_preference'), 'keep');
+        expect(await physicalCredentials.read(key: credentialKey), isNull);
         expect(credentials.deletes, 0);
       },
     );

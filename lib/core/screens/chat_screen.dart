@@ -568,6 +568,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   String? _terminalTurnNotice;
   _ResponseTransport _activeResponseTransport = _ResponseTransport.none;
   String? _activeClientTurnId;
+  // Stop can arrive after submit admission but before the coordinator's first
+  // persisted callback supplies its client-turn identity. Keep that intent on
+  // the v2 route rather than falling back to a legacy session interrupt.
+  Completer<void>? _recoverableSubmissionState;
   bool _recoveringTurn = false;
   bool _legacyTransportFallback = false;
   bool _stockGatewayFallback = false;
@@ -1442,6 +1446,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    final pendingSubmission = _recoverableSubmissionState;
+    if (pendingSubmission != null && !pendingSubmission.isCompleted) {
+      pendingSubmission.complete();
+    }
     _manualAudioIntent++;
     _voiceBound = false;
     handsFreeRouteObserver.removeListener(_onVoiceRouteChanged);
@@ -2336,16 +2344,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// Mirrors a blocking approval to a native notification (with approve/deny
   /// buttons) while the app is in the background — the one prompt class that
   /// must not wait for the user to come back on their own.
-  void _notifyApprovalRequest(
-    GatewayApprovalRequest request,
-    String? serverRequestId,
-  ) {
+  void _notifyApprovalRequest(String? serverRequestId) {
     if (_normalSession != null && _normalChat?.snapshot.turnId != null) return;
     if (!_appInBackground || serverRequestId == null) return;
-    final command = request.command.trim();
-    final body = command.isEmpty
-        ? request.description.trim()
-        : (command.length > 140 ? '${command.substring(0, 140)}…' : command);
+    // Match the normal owner: request details stay inside the authenticated UI.
+    const body = 'Open the chat to review the requested action.';
     unawaited(
       _turnNotifications.showKind(
         kind: HermesNotificationKind.approval,
@@ -2370,15 +2373,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   /// Mirrors a clarify/sudo/secret prompt to a native notification while the
   /// app is in the background. The dialog itself stays queued for the return.
-  void _notifyInputRequest({required String eventId, required String body}) {
+  void _notifyInputRequest({required String eventId}) {
     if (_normalSession != null && _normalChat?.snapshot.turnId != null) return;
     if (!_appInBackground) return;
-    final trimmed = body.trim();
+    // Prompt content is only displayed after returning to the authenticated UI.
+    const noticeBody = 'Open the chat to respond.';
     unawaited(
       _turnNotifications.showKind(
         kind: HermesNotificationKind.input,
         title: '${context.l10n.input_needed} — $_sessionTitle',
-        body: trimmed.length > 140 ? '${trimmed.substring(0, 140)}…' : trimmed,
+        body: noticeBody,
         eventId: eventId,
         sessionId: widget.session.id,
         connectionId: widget.connection.id,
@@ -3142,6 +3146,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             : null;
       }
     });
+    final pendingSubmission = _recoverableSubmissionState;
+    if (pendingSubmission != null && !pendingSubmission.isCompleted) {
+      pendingSubmission.complete();
+    }
     if (materialized) _registerMaterializedAssistantMessage();
     if (speakTerminalResponse) unawaited(_speakAssistantText(nextText));
     if (projection.isActive) {
@@ -3998,7 +4006,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     final text = handsFreePrompt?.transcript ?? _textController.text.trim();
     if (_streaming) {
-      if (text.isNotEmpty) await _sendWhileWorking(text);
+      if (text.isNotEmpty) {
+        await _sendWhileWorking(text);
+      } else if (_attachmentDrafts.isNotEmpty) {
+        // Active-turn guidance is text-only. Do not silently drop an explicit
+        // attachments-only Send, interrupt work, or consume the staged files.
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(context.l10n.running_message_not_accepted)),
+        );
+      }
       return;
     }
     final attachments = handsFreePrompt == null
@@ -4257,178 +4273,188 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
     // Keep the exact admitted SSE output, not the latest assistant after a GET.
     final voiceResponse = StringBuffer();
-    // Accumulate tokens into the streaming placeholder
-    await _gateway.sendMessageStreaming(
-      message: text,
-      sessionId: widget.session.id,
-      // The OpenAI-compatible endpoint does not consume the API session's
-      // persisted Browser lock. Carry both ids on API-only turns so duplicate
-      // model names cannot silently fall back to another provider. Desktop
-      // Gateway keeps its existing model-only request behaviour.
-      model: _sessionModelOverride ? _sessionModel : null,
-      provider: _desktopGateway == null && _sessionModelOverride
-          ? _sessionProvider
-          : null,
-      history: history,
-      imageDataUrl: imageDataUrl,
-      onToken: (token) {
-        if (!mounted || responseGeneration != _responseGeneration) return;
-        voiceResponse.write(token);
-        setState(() {
-          _gatewayTurnStatus = null;
-          if (_messages.isNotEmpty && _messages.last['role'] == 'assistant') {
-            final assistant = _messages.last;
-            final current = assistant['content'] as String;
-            if (current.isEmpty && token.isNotEmpty) {
-              _registerMaterializedAssistantMessage();
+    // Accumulate tokens into the streaming placeholder.
+    // Register this API-server send as app-wide turn activity so
+    // Settings → Background work can engage the foreground service on the
+    // stock-gateway REST transport (issue #225). The token is released when
+    // the stream settles — terminal, error, superseded or cancelled.
+    final legacyTurn = _viewController.beginLegacyTurn();
+    try {
+      await _gateway.sendMessageStreaming(
+        message: text,
+        sessionId: widget.session.id,
+        // The OpenAI-compatible endpoint does not consume the API session's
+        // persisted Browser lock. Carry both ids on API-only turns so duplicate
+        // model names cannot silently fall back to another provider. Desktop
+        // Gateway keeps its existing model-only request behaviour.
+        model: _sessionModelOverride ? _sessionModel : null,
+        provider: _desktopGateway == null && _sessionModelOverride
+            ? _sessionProvider
+            : null,
+        history: history,
+        imageDataUrl: imageDataUrl,
+        onToken: (token) {
+          if (!mounted || responseGeneration != _responseGeneration) return;
+          voiceResponse.write(token);
+          setState(() {
+            _gatewayTurnStatus = null;
+            if (_messages.isNotEmpty && _messages.last['role'] == 'assistant') {
+              final assistant = _messages.last;
+              final current = assistant['content'] as String;
+              if (current.isEmpty && token.isNotEmpty) {
+                _registerMaterializedAssistantMessage();
+              }
+              assistant['content'] = current + token;
+              if (token.isNotEmpty) {
+                ChatMessageTime.observe(
+                  assistant,
+                  source: ChatMessageTimeSource.received,
+                );
+              }
+              _timeline = _timeline.appendText(assistant, token);
+              _retainReceiptPresentation();
             }
-            assistant['content'] = current + token;
-            if (token.isNotEmpty) {
+          });
+          _scheduleStreamingFollow();
+        },
+        onToolProgress: (progress) {
+          if (!mounted || responseGeneration != _responseGeneration) return;
+          _upsertToolProgress(
+            progress,
+            eventType: progress['status'] == 'running'
+                ? 'tool.start'
+                : 'tool.update',
+          );
+        },
+        onReasoning: (text) => _handleDesktopGatewayEvent(
+          StreamEvent(type: 'reasoning.delta', data: {'text': text}),
+          responseGeneration,
+        ),
+        onStatus: (status) => _handleDesktopGatewayEvent(
+          StreamEvent(type: 'status.update', data: status),
+          responseGeneration,
+        ),
+        onDone: () async {
+          if (!mounted || responseGeneration != _responseGeneration) return;
+          // The SSE client requires an explicit successful protocol completion.
+          final assistant = _lastAssistantMessage();
+          setState(() {
+            assistant?['_chat_response_complete'] = true;
+            if (assistant != null) {
               ChatMessageTime.observe(
                 assistant,
                 source: ChatMessageTimeSource.received,
               );
             }
-            _timeline = _timeline.appendText(assistant, token);
-            _retainReceiptPresentation();
-          }
-        });
-        _scheduleStreamingFollow();
-      },
-      onToolProgress: (progress) {
-        if (!mounted || responseGeneration != _responseGeneration) return;
-        _upsertToolProgress(
-          progress,
-          eventType: progress['status'] == 'running'
-              ? 'tool.start'
-              : 'tool.update',
-        );
-      },
-      onReasoning: (text) => _handleDesktopGatewayEvent(
-        StreamEvent(type: 'reasoning.delta', data: {'text': text}),
-        responseGeneration,
-      ),
-      onStatus: (status) => _handleDesktopGatewayEvent(
-        StreamEvent(type: 'status.update', data: status),
-        responseGeneration,
-      ),
-      onDone: () async {
-        if (!mounted || responseGeneration != _responseGeneration) return;
-        // The SSE client requires an explicit successful protocol completion.
-        final assistant = _lastAssistantMessage();
-        setState(() {
-          assistant?['_chat_response_complete'] = true;
-          if (assistant != null) {
-            ChatMessageTime.observe(
-              assistant,
-              source: ChatMessageTimeSource.received,
+            assistant?['_gateway_pending_response'] = false;
+            replyRetention.complete(_messages);
+            _restReplyRetention = replyRetention;
+            _sending = false;
+            _streaming = false;
+            _gatewayTurnStatus = null;
+          });
+          if (voiceBinding != null &&
+              voiceBinding.responseGeneration == responseGeneration) {
+            _finishVoiceTurn(
+              voiceBinding,
+              HandsFreeTurnStatus.completed,
+              stripToolResultText(voiceResponse.toString()).trim(),
             );
           }
-          assistant?['_gateway_pending_response'] = false;
-          replyRetention.complete(_messages);
-          _restReplyRetention = replyRetention;
-          _sending = false;
-          _streaming = false;
-          _gatewayTurnStatus = null;
-        });
-        if (voiceBinding != null &&
-            voiceBinding.responseGeneration == responseGeneration) {
-          _finishVoiceTurn(
-            voiceBinding,
-            HandsFreeTurnStatus.completed,
-            stripToolResultText(voiceResponse.toString()).trim(),
-          );
-        }
-        // Refresh messages to get the final server-side state. The token is
-        // retained across both HTTP and attachment cleanup, including failure.
-        final read = _beginHistoryRead(widget.session.id);
-        try {
-          final messages = await _getRecentMessages(read);
-          if (!_canApplyHistoryRead(read)) return;
-          if (pendingImage != null) {
-            await _attachmentDraftService.removeCachedFile(pendingImage);
-          }
-          if (!_acceptHistoryRead(read, messages)) return;
-          _acceptRecentMessages(messages);
-          setState(() {
-            _messages = _restHistoryForPresentation();
+          // Refresh messages to get the final server-side state. The token is
+          // retained across both HTTP and attachment cleanup, including failure.
+          final read = _beginHistoryRead(widget.session.id);
+          try {
+            final messages = await _getRecentMessages(read);
+            if (!_canApplyHistoryRead(read)) return;
             if (pendingImage != null) {
-              _attachmentDrafts.removeWhere(
-                (draft) => draft.id == pendingImage.id,
-              );
+              await _attachmentDraftService.removeCachedFile(pendingImage);
             }
-            _streaming = false;
-            _sending = false;
-            _gatewayTurnStatus = null;
-            _activeResponseTransport = _ResponseTransport.none;
-          });
-          _scheduleScrollTarget(_scrollCoordinator.endStreaming());
-          if (_awaitingVoiceReply) {
-            _awaitingVoiceReply = false;
-            final assistant = messages.reversed.firstWhere(
-              (message) => message['role'] == 'assistant',
-              orElse: () => const <String, dynamic>{},
-            );
-            final assistantText = assistant['content']?.toString();
-            if (assistantText != null) {
-              await _speakAssistantText(assistantText);
-            }
-          }
-        } catch (_) {
-          if (!_canApplyHistoryRead(read)) return;
-          _scrollCoordinator.cancelStreaming();
-          setState(() {
-            if (_messages.isNotEmpty && _messages.last['role'] == 'assistant') {
-              _messages.last['_gateway_pending_response'] = false;
-            }
-            _streaming = false;
-            _sending = false;
-            _gatewayTurnStatus = null;
-            _activeResponseTransport = _ResponseTransport.none;
-          });
-          // The SSE response completed, so the server accepted the prompt.
-          // A follow-up history read failing must not resurrect it as a draft.
-          _deferHistoryRefresh();
-        } finally {
-          // Completing this REST operation is independent of the freshness of
-          // its history GET. If a newer success superseded that GET, release
-          // only the still-owned stream latch, without touching its transcript,
-          // error, status or scroll. Never strand Send behind a discarded read.
-          if (_historyReadAttached(read) &&
-              responseGeneration == _responseGeneration &&
-              _activeResponseTransport == _ResponseTransport.rest) {
+            if (!_acceptHistoryRead(read, messages)) return;
+            _acceptRecentMessages(messages);
             setState(() {
+              _messages = _restHistoryForPresentation();
+              if (pendingImage != null) {
+                _attachmentDrafts.removeWhere(
+                  (draft) => draft.id == pendingImage.id,
+                );
+              }
               _streaming = false;
               _sending = false;
+              _gatewayTurnStatus = null;
               _activeResponseTransport = _ResponseTransport.none;
             });
+            _scheduleScrollTarget(_scrollCoordinator.endStreaming());
+            if (_awaitingVoiceReply) {
+              _awaitingVoiceReply = false;
+              final assistant = messages.reversed.firstWhere(
+                (message) => message['role'] == 'assistant',
+                orElse: () => const <String, dynamic>{},
+              );
+              final assistantText = assistant['content']?.toString();
+              if (assistantText != null) {
+                await _speakAssistantText(assistantText);
+              }
+            }
+          } catch (_) {
+            if (!_canApplyHistoryRead(read)) return;
+            _scrollCoordinator.cancelStreaming();
+            setState(() {
+              if (_messages.isNotEmpty &&
+                  _messages.last['role'] == 'assistant') {
+                _messages.last['_gateway_pending_response'] = false;
+              }
+              _streaming = false;
+              _sending = false;
+              _gatewayTurnStatus = null;
+              _activeResponseTransport = _ResponseTransport.none;
+            });
+            // The SSE response completed, so the server accepted the prompt.
+            // A follow-up history read failing must not resurrect it as a draft.
+            _deferHistoryRefresh();
+          } finally {
+            // Completing this REST operation is independent of the freshness of
+            // its history GET. If a newer success superseded that GET, release
+            // only the still-owned stream latch, without touching its transcript,
+            // error, status or scroll. Never strand Send behind a discarded read.
+            if (_historyReadAttached(read) &&
+                responseGeneration == _responseGeneration &&
+                _activeResponseTransport == _ResponseTransport.rest) {
+              setState(() {
+                _streaming = false;
+                _sending = false;
+                _activeResponseTransport = _ResponseTransport.none;
+              });
+            }
           }
-        }
-      },
-      onError: (error) {
-        if (!mounted || responseGeneration != _responseGeneration) return;
-        // No streamed content means the request never reached the server
-        // (connection failure, non-200): restore the draft so nothing typed
-        // is lost. Content already flowing means the prompt was accepted.
-        final hadContent =
-            _messages.isNotEmpty &&
-            _messages.last['role'] == 'assistant' &&
-            (_messages.last['content']?.toString().isNotEmpty ?? false);
-        // Remove the placeholder assistant message
-        setState(() {
-          if (_messages.isNotEmpty && _messages.last['role'] == 'assistant') {
-            _messages.removeLast();
+        },
+        onError: (error) {
+          if (!mounted || responseGeneration != _responseGeneration) return;
+          // No streamed content means the request never reached the server
+          // (connection failure, non-200): restore the draft so nothing typed
+          // is lost. Content already flowing means the prompt was accepted.
+          final hadContent =
+              _messages.isNotEmpty &&
+              _messages.last['role'] == 'assistant' &&
+              (_messages.last['content']?.toString().isNotEmpty ?? false);
+          // Remove the placeholder assistant message
+          setState(() {
+            if (_messages.isNotEmpty && _messages.last['role'] == 'assistant') {
+              _messages.removeLast();
+            }
+          });
+          if (!hadContent && voiceBinding == null) {
+            _restoreComposerAfterRejectedSend(text);
           }
-        });
-        if (!hadContent && voiceBinding == null) {
-          _restoreComposerAfterRejectedSend(text);
-        }
-        if (voiceBinding != null) {
-          _finishVoiceTurn(voiceBinding, HandsFreeTurnStatus.failed);
-        }
-        _handleSendError(error, removePendingUserMessage: true);
-      },
-    );
+          if (voiceBinding != null) {
+            _finishVoiceTurn(voiceBinding, HandsFreeTurnStatus.failed);
+          }
+          _handleSendError(error, removePendingUserMessage: true);
+        },
+      );
+    } finally {
+      _viewController.endLegacyTurn(legacyTurn);
+    }
   }
 
   Future<void> _sendDesktopGatewayMessage({
@@ -4672,6 +4698,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     ].where((part) => part.trim().isNotEmpty).join('\n\n');
     if (voiceBinding == null) _commitComposerForSend();
     _scrollCoordinator.beginStreaming(isNearEnd: _isNearEnd());
+    final firstState = Completer<void>();
+    _recoverableSubmissionState = firstState;
     setState(() {
       _streaming = true;
       _gatewayTurnStatus = GatewayTurnStatus(
@@ -4756,6 +4784,13 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         );
       });
       await _recoverPendingTurn();
+    } finally {
+      // Definite rejection or failed recovery may produce no callback. Release
+      // a queued Stop without inventing an identity or issuing a legacy RPC.
+      if (!firstState.isCompleted) firstState.complete();
+      if (identical(_recoverableSubmissionState, firstState)) {
+        _recoverableSubmissionState = null;
+      }
     }
   }
 
@@ -5378,7 +5413,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         : rawServerRequestId;
     _approvalDialogOpen = true;
     _activeApprovalServerRequestId = serverRequestId;
-    _notifyApprovalRequest(request, serverRequestId);
+    _notifyApprovalRequest(serverRequestId);
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (_usesNormalInputOwner &&
@@ -5496,12 +5531,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     final pending = _sensitivePromptQueue.removeAt(0);
     _activeSensitivePrompt = pending;
-    _notifyInputRequest(
-      eventId: pending.request.requestId,
-      body: pending.request.description.isNotEmpty
-          ? pending.request.description
-          : pending.request.title,
-    );
+    _notifyInputRequest(eventId: pending.request.requestId);
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (_usesNormalInputOwner &&
@@ -5707,10 +5737,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     final pending = _clarifyPromptQueue.removeAt(0);
     _activeClarifyPrompt = pending;
-    _notifyInputRequest(
-      eventId: pending.request.identityKey,
-      body: pending.request.question,
-    );
+    _notifyInputRequest(eventId: pending.request.identityKey);
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (_usesNormalInputOwner &&
@@ -5794,8 +5821,59 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
   }
 
+  Future<bool> _stopRecoverableGatewayResponse() async {
+    final turnSession = _turnApplicationSession!;
+    final responseGeneration = _responseGeneration;
+    final pendingSubmission = _recoverableSubmissionState;
+    setState(() {
+      _stopResponseInFlight = true;
+      _awaitingVoiceReply = false;
+    });
+    try {
+      if (_activeClientTurnId == null) await pendingSubmission?.future;
+      if (!mounted || responseGeneration != _responseGeneration) return false;
+      final clientTurnId = _activeClientTurnId;
+      // A first terminal callback or definite pre-ACK rejection needs no
+      // interrupt. Unknown admission must never borrow the legacy route.
+      if (clientTurnId == null) return false;
+      final state = await turnSession.interrupt(
+        localSessionId: widget.session.id,
+        clientTurnId: clientTurnId,
+      );
+      if (!mounted || responseGeneration != _responseGeneration) return false;
+      // A real terminal may have arrived while interrupt was pending. Its
+      // cleared identity wins over an older, nonterminal interrupt read-back.
+      if (_activeClientTurnId == clientTurnId) _applyGatewayTurnState(state);
+      final stopped = state.isTerminal && !state.isFailClosed && !_streaming;
+      if (!stopped && _activeClientTurnId == clientTurnId) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Stop requested. Waiting for Hermes to finish.'),
+          ),
+        );
+      }
+      // Stop is an intent, not lifecycle settlement. A nonterminal reconcile
+      // must keep the submit observer, scaffold and admission ownership alive;
+      // in particular Stop and send cannot launch another prompt yet.
+      return stopped;
+    } catch (error) {
+      if (mounted && responseGeneration == _responseGeneration) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not request stop: $error')),
+        );
+      }
+      return false;
+    } finally {
+      if (mounted) setState(() => _stopResponseInFlight = false);
+      unawaited(_refreshDeferredHistoryIfIdle());
+    }
+  }
+
   Future<bool> _stopResponse() async {
     if (!_streaming || _stopResponseInFlight) return false;
+    if (_turnApplicationSession != null && !_legacyTransportFallback) {
+      return _stopRecoverableGatewayResponse();
+    }
     final voice = _voiceTurn;
     if (voice != null) _finishVoiceTurn(voice, HandsFreeTurnStatus.interrupted);
     final normal = _normalChat;
@@ -5832,7 +5910,6 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
 
     final transport = _activeResponseTransport;
-    final activeClientTurnId = _activeClientTurnId;
     // Capture the cancelled admission before its empty scaffold is removed.
     // Looking up the last assistant after cancellation can select an older
     // successful reply and incorrectly revoke its quiet-mode completion.
@@ -5855,42 +5932,21 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
 
     try {
-      GatewayTurnRecoveryState? interruptedTurnState;
       bool interrupted;
       switch (transport) {
         case _ResponseTransport.rest:
           interrupted = await _gateway.cancelActiveMessage();
         case _ResponseTransport.desktop:
-          if (_turnApplicationSession != null && activeClientTurnId != null) {
-            // Keep the authoritative terminal state from the interrupt so
-            // the partial assistant message gets the real final content
-            // + terminal markers instead of whatever streamed before the
-            // stop. Previously only .status was read for the snackbar and
-            // the state was discarded: navigating away before the next
-            // resume left truncated text displayed as if complete.
-            final state = await _turnApplicationSession!.interrupt(
-              localSessionId: widget.session.id,
-              clientTurnId: activeClientTurnId,
-            );
-            interruptedTurnState = state;
-            interrupted = state.status?.isTerminal == true;
-          } else {
-            interrupted =
-                await _desktopGateway?.interruptPrompt(
-                  sessionId: _normalLocalSessionKey,
-                ) ??
-                false;
-          }
+          interrupted =
+              await _desktopGateway?.interruptPrompt(
+                sessionId: _normalLocalSessionKey,
+              ) ??
+              false;
         case _ResponseTransport.none:
           interrupted = false;
       }
       if (!mounted) return false;
-      if (interruptedTurnState != null) {
-        // Route through the shared apply path (idempotent): the terminal
-        // state updates the message content/markers and clears the
-        // pending-response flag exactly as a live terminal event would.
-        _applyGatewayTurnState(interruptedTurnState);
-      } else if (interrupted) {
+      if (interrupted) {
         setState(() {
           stoppedAssistant?['_gateway_pending_response'] = false;
           stoppedAssistant?['_chat_response_complete'] = false;
@@ -5923,7 +5979,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       );
       return false;
     } finally {
-      _stopResponseInFlight = false;
+      if (mounted) setState(() => _stopResponseInFlight = false);
       unawaited(_refreshDeferredHistoryIfIdle());
     }
   }

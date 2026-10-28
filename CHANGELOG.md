@@ -22,6 +22,126 @@ Thanks to @mannok for #142. Hermes Agent assisted with research, implementation,
 documentation and regression tests. Physical-device acoustic, privacy, provider,
 battery and 16 KB launch checks remain explicit acceptance limits, not promises.
 
+## [3.0.6] - 2026-10-29
+
+Release identity is `3.0.6+3010`, with production APK codes `30101`, `30102` and
+`30103`, above every 3.0.5 split. The production package and signing identity
+remain unchanged. Export an encrypted configuration backup, then install over
+the existing app without uninstalling or clearing data. See the
+[release notes](docs/releases/3.0.6.md).
+
+### Fixed
+
+- API-server (REST SSE) sends now register as app-wide turn activity, so
+  backgrounding the phone mid-turn no longer freezes the process and destroys
+  the turn (#225, #226).
+- Approval and input notifications use generic body text — command details no
+  longer reach the lock screen — with clearer connection attribution and state,
+  controls placed next to the settings they affect, accessible switch labelling
+  and honest disable messaging (#224).
+
+### Thanks
+
+- Thanks to @mordekai-lab for the notification clarity and privacy work and
+  regression tests in #224. Their original commit history is preserved.
+
+Hermes Agent assisted with review, integration, documentation and tests.
+Automated checks do not establish physical-phone acceptance. The blocked
+long-paste and stock-idle settlement PRs remain excluded; uncertain delivery is
+not automatically resent.
+
+## [3.0.5] - 2026-10-28
+
+Release identity is `3.0.5+3009`, with production APK codes `30091`, `30092` and
+`30093`, above every 3.0.4 split. The production package and signing identity
+remain unchanged. Export an encrypted configuration backup, then install over
+the existing app without uninstalling or clearing data. See the
+[release notes](docs/releases/3.0.5.md).
+
+### Fixed
+
+- Recognised scheduled-job setup, including embedded skill instructions, uses
+  read-only Background task cards: collapsed in Verbose Mode and hidden in
+  conversation-only mode. Ordinary human skill invocations, raw saved history
+  and prompt ownership retain their existing behaviour (#218).
+- An approval response dismisses only the dialog that submitted it. A removed
+  dialog cannot pop the underlying chat, and a covered dialog cannot dismiss a
+  newer prompt (#220).
+
+### Thanks
+
+- Thanks to @mordekai-lab for the approval-dialog route-ownership fix and
+  regression tests in #220. Their original commit history is preserved.
+
+Hermes Agent assisted with review, integration, documentation and tests.
+Automated checks do not establish physical-phone acceptance. Stock-turn receipt
+and long-paste changes from blocked PRs are not included; uncertain delivery is
+not automatically resent.
+
+## [3.0.4] - 2026-10-28
+
+Release identity is `3.0.4+3008`, with production APK codes `30081`, `30082` and
+`30083`, above every 3.0.3 split. Package and production signing identity remain
+unchanged. Install over the existing production app without uninstalling or
+clearing data; export an encrypted configuration backup first. See the
+[release notes](docs/releases/3.0.4.md).
+
+### Licence evidence and notices
+
+- Document the MIT declaration that predates the community contributions,
+  including all 56 PR #88 commits, and the applicable GitHub contribution terms.
+  The application continues under its existing MIT terms; no contributor's
+  silence is treated as permission or a new copyright assignment.
+- Retain scoped upstream notices for the Graphify viewer, copied Hermes backend
+  fixture templates, Gradle wrapper build materials and Flutter scaffolding.
+  Preserve the unchanged embedded Library archive, its LGPL source/relink rights,
+  Cinzel OFL and all existing third-party exceptions.
+- Make the additional notice material available through the existing offline
+  Licences page and corresponding source distribution, with regression gates.
+
+No chat, authentication, notification-consent or gateway behaviour is changed.
+Thanks to the original contributors and F-Droid reviewers for the evidence and
+notice findings. Hermes Agent assisted with audit, implementation and tests.
+
+## [3.0.3] - 2026-10-28
+
+Release identity is `3.0.3+3007`, with production APK codes `30071`, `30072` and
+`30073`, above every 3.0.2 split. Package and production signing identity remain
+unchanged. Export an encrypted configuration backup, then install the matching
+APK without uninstalling or clearing app data. See the
+[release notes](docs/releases/3.0.3.md).
+
+### Fixed
+
+- Complete LCM context summaries render as read-only Background task reports,
+  collapsed in Verbose Mode and hidden in conversation-only mode. Ordinary
+  messages, genuine human input and saved history remain unchanged (#211).
+- Recovery-v2 Stop preserves the admitted turn's observer through wind-down and
+  handles Stop before its first state callback; attachment-only mid-turn Send
+  now explains its unsupported action without losing staged files (#207).
+- Stalled SSE bodies have an activity-renewed timeout, session paging does not
+  truncate on misleading metadata, and message IDs stay within one URL segment.
+- Connection reset verifies credential removal and rollback; rejected local
+  space writes fail honestly. Closed Desktop clients cannot revive callbacks or
+  send forgotten local clarification handles.
+- Optional Android share-bridge failures no longer strand startup. Unsupported
+  Projects metadata remains unknown instead of claiming every chat is Unassigned.
+- Video staging uses process-held ownership locks for safe later reclamation,
+  preserves original opening errors, and shares file classification with previews.
+  Parser mutation and lifecycle regressions cover the independently validated
+  audit gaps; see the [complete #207 dispositions](docs/audit-207/README.md).
+
+### Thanks
+
+- Thanks to @Thaeland for the explicitly AI-labelled #207 audits and follow-up
+  evidence. Maintainer regression tests distinguish confirmed defects from
+  disproved premises, intentional bounded behaviour and an unreproduced flake.
+
+Hermes Agent assisted with validation, implementation, documentation and tests.
+Automated checks do not certify physical-device codecs, memory use or every
+gateway contract. Unknown outcomes remain unknown; prompts are not resent
+automatically. The historical timing report remains not reproduced.
+
 ## [3.0.2] - 2026-10-27
 
 Release identity is `3.0.2+3006`, with production APK codes `30061`, `30062` and

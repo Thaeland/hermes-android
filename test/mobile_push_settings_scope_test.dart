@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hermes_android/core/services/connection_manager.dart';
+import 'package:hermes_android/core/services/mobile_push_service.dart';
 import 'package:hermes_android/core/services/notification_prefs.dart';
 import 'package:hermes_android/core/widgets/mobile_push_settings.dart';
 import 'package:http/http.dart' as http;
@@ -20,7 +21,11 @@ void main() {
   });
   tearDown(() => f.close());
 
-  Future<void> show(WidgetTester tester, {SavedConnection? connection}) async {
+  Future<void> show(
+    WidgetTester tester, {
+    SavedConnection? connection,
+    bool expectSwitchEnabled = true,
+  }) async {
     await tester.runAsync(() => f.service.initialize(f.manager));
     await tester.pumpWidget(
       MaterialApp(
@@ -39,7 +44,9 @@ void main() {
       await f.service.transportOptions();
     });
     await tester.pumpAndSettle();
-    expect(tester.widget<Switch>(find.byType(Switch)).onChanged, isNotNull);
+    if (expectSwitchEnabled) {
+      expect(tester.widget<Switch>(find.byType(Switch)).onChanged, isNotNull);
+    }
   }
 
   for (final failure in ['old', 'missing', 'disabled']) {
@@ -188,17 +195,141 @@ void main() {
         (c) => c.id != f.connection.id,
       );
       f.seed(active: true);
-      await show(tester, connection: another);
+      await show(tester, connection: another, expectSwitchEnabled: false);
+      expect(find.byKey(const Key('mobile-push-switch')), findsOneWidget);
+      expect(find.byKey(const Key('mobile-push-status')), findsOneWidget);
       expect(
-        find.textContaining('Bound to another saved connection.'),
+        find.byKey(const Key('mobile-push-disable-revoke')),
         findsOneWidget,
       );
-      expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
+      expect(
+        find.byKey(const Key('mobile-push-refresh-retry')),
+        findsOneWidget,
+      );
+      expect(
+        find.text(
+          'Bound to another saved connection (Fixture). Disable and revoke that binding before enabling for this connection.',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.text(
+          'Status: Bound to Fixture (not active for Another; handshake: Active)',
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Disable and revoke Fixture'), findsOneWidget);
+      final switchWidget = tester.widget<Switch>(find.byType(Switch));
+      expect(switchWidget.value, isFalse);
+      expect(switchWidget.onChanged, isNull);
       expect(f.methods, isNot(contains('enable')));
-      await tester.tap(find.byType(Switch));
+      await tester.tap(find.byKey(const Key('mobile-push-disable-revoke')));
       await tester.pumpAndSettle();
       expect(f.native['enabled'], isFalse);
       expect(f.methods, isNot(contains('permission')));
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'another connection binding falls back to generic label when connection is missing',
+    (tester) async {
+      await f.manager.saveConnection(
+        '   ',
+        'https://fixture.invalid',
+        443,
+        'test-key',
+        dashboardPrefix: '/dash',
+        dashboardUsername: 'fixture-user',
+        dashboardPassword: 'fixture-password',
+      );
+      final blankLabelConn = f.manager.getConnections().firstWhere(
+        (c) => c.id != f.connection.id,
+      );
+      f.seed(active: true);
+      f.native['connection'] = blankLabelConn.id;
+      f.native['binding'] = MobilePushService.binding(blankLabelConn);
+      await show(tester, connection: f.connection, expectSwitchEnabled: false);
+      expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
+      expect(
+        find.text(
+          'Bound to another saved connection. Disable and revoke that binding before enabling for this connection.',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.text(
+          'Status: Bound to another saved connection (not active for Fixture; handshake: Active)',
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Disable and revoke other connection'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'pending challenge status explains silent verification push and local mute warning reacts immediately',
+    (tester) async {
+      f.seed(active: false);
+      f.native['generation'] = 7;
+      f.native['session_scope'] = 'authorized';
+      f.native['sessions'] = <String>[];
+      await show(tester);
+      expect(
+        find.text(
+          'Status: Pending encrypted challenge (waiting for silent server verification push)',
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const Key('mobile-push-local-mute-warning')),
+        findsNothing,
+      );
+
+      notificationPrefs.value = NotificationPrefs.defaults.copyWith(
+        enabled: false,
+      );
+      await tester.pump();
+      expect(f.service.active, isFalse);
+      expect(
+        find.byKey(const Key('mobile-push-local-mute-warning')),
+        findsOneWidget,
+      );
+      expect(find.textContaining('Enrollment stays active'), findsNothing);
+      expect(
+        find.textContaining('ordinary background activity hints are muted'),
+        findsOneWidget,
+      );
+      expect(f.service.enabled, isTrue);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'status, progress, errors and recovery actions render above static setup prose',
+    (tester) async {
+      f.onCapabilities = (_) async => http.Response('err', 404);
+      await show(tester);
+      await tester.tap(find.byKey(const Key('mobile-push-switch')));
+      await tester.pumpAndSettle();
+
+      final statusY = tester
+          .getTopLeft(find.byKey(const Key('mobile-push-status')))
+          .dy;
+      final errorY = tester
+          .getTopLeft(find.byKey(const Key('mobile-push-error')))
+          .dy;
+      final retryY = tester
+          .getTopLeft(find.byKey(const Key('mobile-push-refresh-retry')))
+          .dy;
+      final guideY = tester.getTopLeft(find.text('Server setup guide')).dy;
+      final advancedY = tester.getTopLeft(find.text('Advanced transport')).dy;
+
+      expect(statusY, lessThan(errorY));
+      expect(errorY, lessThan(retryY));
+      expect(retryY, lessThan(guideY));
+      expect(guideY, lessThan(advancedY));
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );

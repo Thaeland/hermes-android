@@ -2897,6 +2897,10 @@ class AppLocalizationsEs extends AppLocalizations {
       'No se pudo guardar el chat fijado en este dispositivo';
 
   @override
+  String get could_not_save_chat_spaces =>
+      'No se pudieron guardar los espacios de chat en este dispositivo';
+
+  @override
   String get update_available => 'Actualización disponible';
 
   @override
