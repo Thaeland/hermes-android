@@ -4,7 +4,14 @@ All notable changes since v1.0.7 are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The [README](README.md)
 shows only the three latest releases.
 
-## [Unreleased]
+## [3.1.0-rc.1] - 2026-10-29
+
+The testing candidate is **3.1.0-rc.1** (base build **3011**). It is a GitHub
+prerelease, not the stable release; **3.0.6 remains latest stable**. Back up app
+settings before installing. The candidate keeps the production package and
+signer, upgrades every 3.0.x split in place, and its split codes are **30111**
+(armeabi-v7a), **30112** (arm64-v8a) and **30113** (x86_64). Download it from
+the [RC1 testing release](https://github.com/rusty4444/hermes-android/releases/tag/v3.1.0-rc.1).
 
 ### Added
 
@@ -17,10 +24,23 @@ shows only the three latest releases.
 - A shared, joinable native capture owner for Android manual dictation and
   hands-free input. Manual dictation remains draft-only. Bundled runtime/model
   provenance and licences accompany reproducible, hash-checked build inputs.
+- Long pastes over 3,000 UTF-16 code units now attach as collision-safe
+  `paste.txt` files in Remote Gateway chats, matching the Desktop threshold.
+  Short pastes and legacy REST stay inline (#212).
 
-Thanks to @mannok for #142. Hermes Agent assisted with research, implementation,
-documentation and regression tests. Physical-device acoustic, privacy, provider,
-battery and 16 KB launch checks remain explicit acceptance limits, not promises.
+### Fixed
+
+- Stock idle turns settle only on owned successful completion receipts. A
+  rejected foreign completion can no longer manufacture the next completion's
+  evidence, and an owned receipt without a durable response-row floor releases
+  admission as unknown instead of leaving the chat busy indefinitely (#221).
+
+Thanks to @mannok for #142 and @mordekai-lab for the stock-idle receipt policy
+work in #221. Hermes Agent assisted with research, implementation, review,
+documentation and tests. Physical-device acoustic, privacy, provider, battery,
+16 KB launch and clipboard-paste checks remain explicit acceptance limits, not
+promises. Phone acceptance is required before stable 3.1 promotion or
+GitLab/F-Droid updates.
 
 ## [3.0.6] - 2026-10-29
 
@@ -46,9 +66,9 @@ the existing app without uninstalling or clearing data. See the
   regression tests in #224. Their original commit history is preserved.
 
 Hermes Agent assisted with review, integration, documentation and tests.
-Automated checks do not establish physical-phone acceptance. The blocked
-long-paste and stock-idle settlement PRs remain excluded; uncertain delivery is
-not automatically resent.
+Automated checks do not establish physical-phone acceptance. The long-paste and
+stock-idle settlement PRs shipped in 3.1.0-rc.1; uncertain delivery is not
+automatically resent.
 
 ## [3.0.5] - 2026-10-28
 
