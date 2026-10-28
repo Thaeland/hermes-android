@@ -612,7 +612,7 @@ class MobilePushService extends ChangeNotifier with WidgetsBindingObserver {
       }
       status = state['active'] == true
           ? 'Active'
-          : 'Pending encrypted challenge (open Hermes to confirm)';
+          : 'Pending encrypted challenge (waiting for silent server verification push)';
       error = null;
       if (state['active'] == true) {
         // Discard old routable data before fetching; a bad later page must not

@@ -1907,16 +1907,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// Mirrors a blocking approval to a native notification (with approve/deny
   /// buttons) while the app is in the background — the one prompt class that
   /// must not wait for the user to come back on their own.
-  void _notifyApprovalRequest(
-    GatewayApprovalRequest request,
-    String? serverRequestId,
-  ) {
+  void _notifyApprovalRequest(String? serverRequestId) {
     if (_normalSession != null && _normalChat?.snapshot.turnId != null) return;
     if (!_appInBackground || serverRequestId == null) return;
-    final command = request.command.trim();
-    final body = command.isEmpty
-        ? request.description.trim()
-        : (command.length > 140 ? '${command.substring(0, 140)}…' : command);
+    // Match the normal owner: request details stay inside the authenticated UI.
+    const body = 'Open the chat to review the requested action.';
     unawaited(
       _turnNotifications.showKind(
         kind: HermesNotificationKind.approval,
@@ -1941,15 +1936,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   /// Mirrors a clarify/sudo/secret prompt to a native notification while the
   /// app is in the background. The dialog itself stays queued for the return.
-  void _notifyInputRequest({required String eventId, required String body}) {
+  void _notifyInputRequest({required String eventId}) {
     if (_normalSession != null && _normalChat?.snapshot.turnId != null) return;
     if (!_appInBackground) return;
-    final trimmed = body.trim();
+    // Prompt content is only displayed after returning to the authenticated UI.
+    const noticeBody = 'Open the chat to respond.';
     unawaited(
       _turnNotifications.showKind(
         kind: HermesNotificationKind.input,
         title: '${context.l10n.input_needed} — $_sessionTitle',
-        body: trimmed.length > 140 ? '${trimmed.substring(0, 140)}…' : trimmed,
+        body: noticeBody,
         eventId: eventId,
         sessionId: widget.session.id,
         connectionId: widget.connection.id,
@@ -4873,7 +4869,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         : rawServerRequestId;
     _approvalDialogOpen = true;
     _activeApprovalServerRequestId = serverRequestId;
-    _notifyApprovalRequest(request, serverRequestId);
+    _notifyApprovalRequest(serverRequestId);
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (_usesNormalInputOwner &&
@@ -4991,12 +4987,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     final pending = _sensitivePromptQueue.removeAt(0);
     _activeSensitivePrompt = pending;
-    _notifyInputRequest(
-      eventId: pending.request.requestId,
-      body: pending.request.description.isNotEmpty
-          ? pending.request.description
-          : pending.request.title,
-    );
+    _notifyInputRequest(eventId: pending.request.requestId);
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (_usesNormalInputOwner &&
@@ -5202,10 +5193,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
     final pending = _clarifyPromptQueue.removeAt(0);
     _activeClarifyPrompt = pending;
-    _notifyInputRequest(
-      eventId: pending.request.identityKey,
-      body: pending.request.question,
-    );
+    _notifyInputRequest(eventId: pending.request.identityKey);
 
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (_usesNormalInputOwner &&
