@@ -1972,6 +1972,12 @@ class NormalGatewayChatOwner {
         );
       }
       assistant['content'] = '${assistant['content'] ?? ''}$token';
+      // Raw response scope: only streaming observations may feed the
+      // completion receipt gate. Completion payload writes update 'content'
+      // for presentation but never this key, so a rejected foreign payload
+      // cannot manufacture the next completion's evidence.
+      assistant['_raw_response_scope'] =
+          '${assistant['_raw_response_scope'] ?? ''}$token';
       _timeline = _timeline.appendText(
         assistant['_normal_projection_id']!,
         token,
@@ -1992,6 +1998,7 @@ class NormalGatewayChatOwner {
         alreadyStreamed: event.data['already_streamed'] == true,
       );
       assistant['content'] = transition.sealedText;
+      assistant['_raw_response_scope'] = transition.sealedText;
       _timeline = _timeline.textSnapshot(
         assistant['_normal_projection_id']!,
         transition.sealedText,
@@ -2018,12 +2025,16 @@ class NormalGatewayChatOwner {
         event.data['text']?.toString() ?? text,
       );
       if (target != null) {
-        // Evidence comes from the response scope this completion actually
+        // Evidence comes from the raw response scope this completion actually
         // selected: the helper may seal and reuse an earlier same-turn
         // preview and remove an empty pending boundary, so the LAST row can
-        // be the wrong scope. Snapshot BEFORE the payload overwrites it;
-        // an empty selected scope carries no authority.
-        final observedStream = target['content']?.toString() ?? '';
+        // be the wrong scope. The raw-scope key is written only by streaming
+        // observations (deltas and interim seals), never by completion
+        // payloads, so a rejected foreign payload that overwrote 'content'
+        // cannot manufacture this or a later completion's evidence. Snapshot
+        // BEFORE the payload overwrites presentation; an empty selected
+        // scope carries no authority.
+        final observedStream = target['_raw_response_scope']?.toString() ?? '';
         ChatMessageTime.observe(
           target,
           source: ChatMessageTimeSource.received,
@@ -2058,12 +2069,15 @@ class NormalGatewayChatOwner {
         // The gate compares the payload's streamed representation — 'text';
         // 'rendered' is display formatting of the same content and only
         // stands in when 'text' is absent.
-        final completionText = event.data['text']?.toString() ??
+        final completionText =
+            event.data['text']?.toString() ??
             event.data['rendered']?.toString() ??
             '';
-        final provenCompletion = wireTurn != null ||
+        final provenCompletion =
+            wireTurn != null ||
             (completionText.isNotEmpty && completionText == observedStream);
-        _ownedSuccessfulCompletion = provenCompletion &&
+        _ownedSuccessfulCompletion =
+            provenCompletion &&
             ownsResponse &&
             isSuccessfulResponseReceipt(event.data);
         _capturePersistedTurn(event.data);
@@ -2341,9 +2355,17 @@ class NormalGatewayChatOwner {
           _floor != null &&
           fresh.rows.any((row) => _responseRow(row, _floor!))) {
         await _settle(true, null, generation: generation);
-      } else if (inactive && !running && !settledByReceipt) {
+      } else if (inactive &&
+          !running &&
+          (!settledByReceipt ||
+              (_ownedSuccessfulCompletion && !completed && _floor == null))) {
         // Release admission without resubmitting or inventing success/failure.
         // No row/count heuristic is needed to know the server is now idle.
+        // An owned receipt without the durable response-row floor cannot
+        // establish success either: later history reads never repair an
+        // unknown floor, so release as unknown instead of leaving the turn
+        // busy indefinitely. A completed resume status with an unknown floor
+        // stays retained — its reply may belong to an older turn.
         await _settle(null, null, generation: generation);
       } else {
         _notify(meaningfulActivity: running);

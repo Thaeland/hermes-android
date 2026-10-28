@@ -1289,6 +1289,75 @@ void main() {
         expect(f.calls, hasLength(1));
       },
     );
+
+    test('unknown floor with an owned successful receipt releases admission as '
+        'unknown instead of leaving the turn busy', () async {
+      final f = _Fixture()..historyFails = true;
+      addTearDown(f.close);
+      final chat = await f.open(seedHistory: false);
+      final a = await f.begin(chat, 'A question');
+      expect(chat.snapshot.rowFloor, isNull);
+      a.emit('message.delta', {'text': 'Final answer'});
+      // An owned successful wire receipt is the only success evidence, and
+      // it cannot be proven without the durable response-row floor.
+      a.emit('message.complete', {
+        'text': 'Final answer',
+        'status': 'complete',
+      });
+      f.historyFails = false;
+      f.rows = [
+        _row(1, 'user', 'A question'),
+        _row(2, 'assistant', 'Final answer'),
+      ];
+      f.resumeResult = const ResumedGatewaySession(
+        runtimeSessionId: 'runtime',
+        running: false,
+        status: 'idle',
+      );
+      a.ack();
+      await _until(() => !chat.snapshot.hasActiveTurn);
+      expect(chat.snapshot.phase, NormalGatewayTurnPhase.reconciledUnknown);
+    });
+
+    test('a rejected ID-less completion cannot manufacture the next completion '
+        'evidence', () async {
+      final f = _Fixture();
+      addTearDown(f.close);
+      final chat = await f.open();
+      final a = await f.begin(chat, 'A question');
+      a.emit('message.delta', {'text': 'Second partial'});
+      // Two ID-less completions carry an earlier answer. The first fails the
+      // raw-scope gate but overwrites the presentation row; the second must
+      // not compare against that overwritten content.
+      for (var i = 0; i < 2; i++) {
+        a.onEvent(
+          StreamEvent(
+            type: 'message.complete',
+            data: {'text': 'Previous answer', 'status': 'complete'},
+          ),
+        );
+      }
+      // Authoritative idle plus a persisted partial must not complete the
+      // turn: no owned receipt was ever established.
+      f.rows = [
+        ..._previous,
+        _row(12, 'user', 'A question'),
+        _row(
+          13,
+          'assistant',
+          'Previous answer',
+          extra: {'status': 'interrupted'},
+        ),
+      ];
+      f.resumeResult = const ResumedGatewaySession(
+        runtimeSessionId: 'runtime',
+        running: false,
+        status: 'idle',
+      );
+      a.ack();
+      await _until(() => !chat.snapshot.hasActiveTurn);
+      expect(chat.snapshot.phase, NormalGatewayTurnPhase.reconciledUnknown);
+    });
   });
 }
 
