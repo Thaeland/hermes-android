@@ -4,6 +4,31 @@ All notable changes since v1.0.7 are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The [README](README.md)
 shows only the three latest releases.
 
+## [3.0.4] - 2026-10-28
+
+Release identity is `3.0.4+3008`, with production APK codes `30081`, `30082` and
+`30083`, above every 3.0.3 split. Package and production signing identity remain
+unchanged. Install over the existing production app without uninstalling or
+clearing data; export an encrypted configuration backup first. See the
+[release notes](docs/releases/3.0.4.md).
+
+### Licence evidence and notices
+
+- Document the MIT declaration that predates the community contributions,
+  including all 56 PR #88 commits, and the applicable GitHub contribution terms.
+  The application continues under its existing MIT terms; no contributor's
+  silence is treated as permission or a new copyright assignment.
+- Retain scoped upstream notices for the Graphify viewer, copied Hermes backend
+  fixture templates, Gradle wrapper build materials and Flutter scaffolding.
+  Preserve the unchanged embedded Library archive, its LGPL source/relink rights,
+  Cinzel OFL and all existing third-party exceptions.
+- Make the additional notice material available through the existing offline
+  Licences page and corresponding source distribution, with regression gates.
+
+No chat, authentication, notification-consent or gateway behaviour is changed.
+Thanks to the original contributors and F-Droid reviewers for the evidence and
+notice findings. Hermes Agent assisted with audit, implementation and tests.
+
 ## [3.0.3] - 2026-10-28
 
 Release identity is `3.0.3+3007`, with production APK codes `30071`, `30072` and

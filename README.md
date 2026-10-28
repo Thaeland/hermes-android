@@ -1,6 +1,6 @@
 [![Hermes Android 3.0.0 announcement](docs/images/hermes-android-3.0.0-hero.jpg)](https://github.com/rusty4444/hermes-android/releases/tag/v3.0.0)
 
-# Hermes Android v3.0.3
+# Hermes Android v3.0.4
 
 Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — chat with your Hermes sessions from a phone or tablet over local Wi-Fi or a private Tailscale network.
 
@@ -43,15 +43,15 @@ Ten fresh Android emulator captures, each using a different colour palette. Thes
 
 ## Current release
 
-**3.0.3** (base build **3007**) improves Stop/recovery ownership, stalled-stream handling, session paging, local persistence and attachment-preview cleanup. Complete LCM context summaries now use read-only Background task reports instead of ordinary chat bubbles. The production package, `com.hermesagent.hermes_android`, and signing identity stay the same. Export an encrypted configuration backup before updating; the matching production-signed APK upgrades 3.0.2 in place. Do not uninstall or clear app data.
+**3.0.4** (base build **3008**) documents the existing MIT contribution terms and preserves additional third-party template/build notices. This is a licence-evidence and notice-delivery release, not a change to chat or gateway behaviour. The production package, `com.hermesagent.hermes_android`, and signing identity stay the same. Export an encrypted configuration backup before updating; the matching production-signed APK upgrades 3.0.3 in place. Do not uninstall or clear app data.
 
 | Download | Device | Version code |
 | --- | --- | --- |
-| [ARM64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.3/app-arm64-v8a-release.apk) | Most current Android phones/tablets | `30072` |
-| [ARMv7 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.3/app-armeabi-v7a-release.apk) | Older 32-bit ARM devices | `30071` |
-| [x86_64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.3/app-x86_64-release.apk) | x86_64 Android devices/emulators | `30073` |
+| [ARM64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.4/app-arm64-v8a-release.apk) | Most current Android phones/tablets | `30082` |
+| [ARMv7 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.4/app-armeabi-v7a-release.apk) | Older 32-bit ARM devices | `30081` |
+| [x86_64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.4/app-x86_64-release.apk) | x86_64 Android devices/emulators | `30083` |
 
-[Release and checksums](https://github.com/rusty4444/hermes-android/releases/tag/v3.0.3) · [Changes since 3.0.2](docs/releases/3.0.3.md) · [Full changelog](CHANGELOG.md)
+[Release and checksums](https://github.com/rusty4444/hermes-android/releases/tag/v3.0.4) · [Changes since 3.0.3](docs/releases/3.0.4.md) · [Full changelog](CHANGELOG.md)
 
 Debug builds use the separate `com.hermesagent.hermes_android.dev` package and Android debug certificate. Older production APKs have lower version codes; downgrading can require uninstalling and restoring a backup.
 
@@ -230,6 +230,14 @@ See [CHANGELOG.md](CHANGELOG.md) for the complete release history and
 [docs/HERMESAPK_DEVELOPMENT_LOG.md](docs/HERMESAPK_DEVELOPMENT_LOG.md) for the
 sanitized implementation and validation record.
 
+## What's new in v3.0.4
+
+- Document the historical MIT declaration and contribution terms rather than treating an unanswered confirmation request as an absent grant.
+- Preserve separate Graphify, Nous Research template, Gradle wrapper and Flutter scaffold notices, alongside the existing font and Library terms.
+- Keep the additional notices accessible offline and associated with the corresponding source distribution. Chat and gateway behaviour are unchanged.
+
+Read the [3.0.4 release notes](docs/releases/3.0.4.md) and [historical licence evidence](docs/licensing/README.md).
+
 ## What's new in v3.0.3
 
 - Complete LCM context summaries use read-only **Background task** reports: collapsed in Verbose Mode, hidden in conversation-only mode, without changing raw history or ordinary messages.
@@ -247,16 +255,6 @@ Read the [3.0.3 release notes](docs/releases/3.0.3.md) and [all 30 audit disposi
 - Preserve your reading position during delayed history reads, refresh and inspection. Use the **Saved history** end action to return to the saved end.
 
 Read the [3.0.2 release notes](docs/releases/3.0.2.md) for recovery semantics, retained-output lifetime and upgrade limits.
-
-## What's new in v3.0.1
-
-- In-app video playback with play/pause, replay, seeking and mute. Videos start paused; playback pauses when the app is backgrounded or another route covers the preview, and resumes only after you tap Play.
-- Offline DOCX paragraph/table text, XLSX sheet names and raw cached cell values with coordinates, and PPTX slide text. The viewer extracts text only; it does not render original layout, formatting, images or charts, or evaluate formulas.
-- Chat cards, inline file links and More → Assets share the same viewer. Download and Share keep the cached original bytes; PDF and plain-text previews remain available.
-- Video uses an app-private local copy, without passing gateway URLs or credentials to the player. Codec support depends on Android and the device; unsupported files retain Download/Share. The existing 25 MiB per-file limit applies.
-- No backend patch or new server configuration is required for these previews. Background push still needs its separate server companion and supported phone transport.
-
-Read the [3.0.1 release notes](docs/releases/3.0.1.md) for formats, fallback behaviour and upgrade limits.
 
 ## Features
 
@@ -882,6 +880,11 @@ Application code is distributed under the [MIT License](LICENSE), as previously
 declared in this README. Copyright (c) 2026 Sam Russell and contributors. The
 canonical file records those existing terms, not a relicensing of third-party
 code or assets. Contributor attribution and source history are preserved.
+
+The [historical contribution evidence](docs/licensing/README.md) records the
+pre-existing MIT declaration and applicable contribution terms, including
+PR #88. See [the scoped third-party inventory](third_party/NOTICE.md) for
+additional template and build-material attribution.
 
 Third-party components retain their separate terms:
 
