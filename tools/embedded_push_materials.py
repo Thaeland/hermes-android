@@ -19,6 +19,15 @@ SOURCES = Path("third_party/sources/embedded-fcm-distributor-3.1.0")
 LIBRARY_ROOT = "android-embedded_fcm_distributor"
 LIBRARY_SOURCE = f"{LIBRARY_ROOT}/embedded_fcm_distributor/src/main/java/"
 LICENCE = Path("third_party/licenses/embedded-fcm-distributor-LGPL-2.1.txt")
+BUILD_NOTICES = (
+    Path("third_party/NOTICE.md"),
+    Path("third_party/licenses/Apache-2.0.txt"),
+    Path("third_party/licenses/gradle-NOTICE.txt"),
+)
+BUILD_NOTICE_HASHES = {
+    BUILD_NOTICES[1]: "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+    BUILD_NOTICES[2]: "d3d569a7f18525b229a7daa4926faf3e0566371f66686b157d62cdf7b3a0b3b3",
+}
 
 
 def sha256(data: bytes) -> str:
@@ -41,6 +50,11 @@ def verify(root: Path, aar: Path | None = None) -> dict:
     licence = (root / LICENCE).read_bytes()
     if sha256(licence) != manifest["licence_sha256"]:
         raise ValueError("Library licence hash mismatch")
+    for relative in BUILD_NOTICES:
+        content = (root / relative).read_bytes()
+        expected_hash = BUILD_NOTICE_HASHES.get(relative)
+        if not content or (expected_hash is not None and sha256(content) != expected_hash):
+            raise ValueError(f"Build notice hash mismatch: {relative}")
     archive = source_dir / "embedded-fcm-distributor-3.1.0-upstream.tar.gz"
     source_jar = source_dir / "embedded-fcm-distributor-3.1.0-sources.jar"
     with tarfile.open(archive) as upstream, zipfile.ZipFile(source_jar) as published:
@@ -76,6 +90,9 @@ def extract_source(root: Path, output: Path) -> None:
             target = (output / member.name).resolve()
             if not target.is_relative_to(output.resolve()) or not (member.isfile() or member.isdir()):
                 raise ValueError(f"Unsafe source archive member: {member.name}")
+        for relative in BUILD_NOTICES:
+            if not (output / relative).resolve().is_relative_to(output.resolve()):
+                raise ValueError(f"Unsafe build notice output: {relative}")
         for member in members:
             target = output / member.name
             if member.isdir():
@@ -84,6 +101,11 @@ def extract_source(root: Path, output: Path) -> None:
                 target.parent.mkdir(parents=True, exist_ok=True)
                 target.write_bytes(tar_bytes(source, member.name))
                 target.chmod(member.mode & 0o777)
+    # Accompany the unchanged upstream tree; do not alter its root LGPL licence.
+    for relative in BUILD_NOTICES:
+        target = output / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((root / relative).read_bytes())
 
 
 def source_bundle(root: Path, ref: str, output: Path, apks: list[Path]) -> dict:
@@ -91,9 +113,20 @@ def source_bundle(root: Path, ref: str, output: Path, apks: list[Path]) -> dict:
     # git archive excludes ignored/untracked credentials, build state and caches.
     application = subprocess.check_output(["git", "archive", "--format=tar.gz", commit], cwd=root)
     with tarfile.open(fileobj=io.BytesIO(application), mode="r:gz") as archive:
-        for required in [str(SOURCES / "manifest.json"), str(LICENCE), "third_party/embedded-push-relink.md", "tools/embedded_push_materials.py"]:
+        for required in [
+            str(SOURCES / "manifest.json"),
+            str(LICENCE),
+            *map(str, BUILD_NOTICES),
+            "third_party/embedded-push-relink.md",
+            "tools/embedded_push_materials.py",
+        ]:
             archive.getmember(required)  # fail if this ref predates the materials
-    materials = [LICENCE, Path("third_party/embedded-push-notice.md"), Path("third_party/embedded-push-relink.md")]
+    materials = [
+        LICENCE,
+        *BUILD_NOTICES,
+        Path("third_party/embedded-push-notice.md"),
+        Path("third_party/embedded-push-relink.md"),
+    ]
     materials.extend(path.relative_to(root) for path in sorted((root / SOURCES).iterdir()) if path.is_file())
     committed_materials = {}
     for relative in materials:

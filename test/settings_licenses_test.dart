@@ -183,8 +183,27 @@ void main() {
         'third_party/embedded-push-relink.md',
         'third_party/licenses/embedded-fcm-distributor-LGPL-2.1.txt',
       ],
+      'Flutter iOS scaffold (source material)': [
+        'third_party/licenses/flutter-BSD-3-Clause.txt',
+      ],
+      'Gradle wrapper (Library build material)': [
+        'third_party/licenses/Apache-2.0.txt',
+        'third_party/licenses/gradle-NOTICE.txt',
+      ],
+      'Graphify viewer template (source material)': [
+        'third_party/licenses/graphify-MIT.txt',
+      ],
+      'Hermes Agent message templates (source material)': [
+        'third_party/licenses/hermes-agent-MIT.txt',
+      ],
+      'Third-party source/build materials (scope)': ['third_party/NOTICE.md'],
     };
     for (final package in packages.entries) {
+      tester
+          .state<ScrollableState>(find.byType(Scrollable).last)
+          .position
+          .jumpTo(0);
+      await tester.pumpAndSettle();
       await tester.scrollUntilVisible(
         find.text(package.key),
         300,

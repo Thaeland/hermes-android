@@ -84,3 +84,9 @@ flutter:
     - third_party/embedded-push-notice.md
     - third_party/embedded-push-relink.md
     - third_party/licenses/embedded-fcm-distributor-LGPL-2.1.txt
+    - third_party/NOTICE.md
+    - third_party/licenses/graphify-MIT.txt
+    - third_party/licenses/hermes-agent-MIT.txt
+    - third_party/licenses/flutter-BSD-3-Clause.txt
+    - third_party/licenses/Apache-2.0.txt
+    - third_party/licenses/gradle-NOTICE.txt

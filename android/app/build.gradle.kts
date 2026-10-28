@@ -90,6 +90,7 @@ val pushNotices = tasks.register<Sync>("prepareEmbeddedPushNotices") {
     from(rootProject.projectDir.parentFile.resolve("third_party")) {
         include("embedded-push-notice.md", "embedded-push-relink.md")
         include("licenses/embedded-fcm-distributor-LGPL-2.1.txt")
+        include("NOTICE.md", "licenses/Apache-2.0.txt", "licenses/gradle-NOTICE.txt")
         include("sources/embedded-fcm-distributor-3.1.0/**")
         // Android's asset merger transparently decompresses *.gz and strips its
         // suffix. Preserve the verified archive bytes and hash with an alias.
