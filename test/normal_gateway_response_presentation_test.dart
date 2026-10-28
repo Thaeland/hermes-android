@@ -760,7 +760,7 @@ void main() {
       },
     );
 
-    test('unknown lifecycle remains unknown after receipt handover', () async {
+    test('owned receipt settles success after idle without losing handover', () async {
       final f = _Fixture();
       addTearDown(f.close);
       final chat = await f.open();
@@ -771,6 +771,7 @@ void main() {
         running: false,
         status: 'idle',
       );
+      call.emit('message.delta', {'text': 'Wire answer'});
       call.emit('message.complete', {
         'text': 'Wire answer',
         'persisted_turn': _receipt(),
@@ -778,14 +779,290 @@ void main() {
       call.ack();
       await _until(() => !chat.snapshot.hasActiveTurn);
       await pumpEventQueue();
-      expect(chat.phase, NormalGatewayTurnPhase.reconciledUnknown);
-      expect(chat.snapshot.status?.kind, 'reconciled_unknown');
+      // Policy (stock-idle receipt settlement): an owned successful wire
+      // receipt plus authoritative idle and committed rows settles success;
+      // stock resume never reports a terminal status itself.
+      expect(chat.phase, NormalGatewayTurnPhase.completed);
+      expect(chat.snapshot.status, isNull);
       expect(chat.snapshot.displayRows, isEmpty);
       expect(
         _quiet(chat.snapshot).where((s) => s == 'Wire answer'),
         hasLength(1),
       );
       expect(await f.pendingStore.load(_Fixture.scope), isEmpty);
+      expect(f.calls, hasLength(1));
+    });
+
+    test('body activity after a successful completion revokes receipt settlement', () async {
+      final f = _Fixture();
+      addTearDown(f.close);
+      final chat = await f.open();
+      final call = await f.begin(chat, 'Current question');
+      f.rows = _committedRows(answer: 'Part one more');
+      f.resumeResult = const ResumedGatewaySession(
+        runtimeSessionId: 'runtime',
+        running: false,
+        status: 'idle',
+      );
+      call.emit('message.delta', {'text': 'Part one'});
+      call.emit('message.complete', {'text': 'Part one', 'status': 'complete'});
+      // Same-generation body activity extends the response scope: the earlier
+      // completion no longer proves the current scope, and no final receipt
+      // covers the extension. Authoritative idle plus the partial durable row
+      // must therefore settle unknown, not completed.
+      call.emit('message.delta', {'text': ' more'});
+      call.ack();
+      await _until(() => !chat.snapshot.hasActiveTurn);
+      await pumpEventQueue();
+      expect(chat.phase, NormalGatewayTurnPhase.reconciledUnknown);
+      expect(chat.snapshot.status?.kind, 'reconciled_unknown');
+      expect(f.calls, hasLength(1));
+    });
+
+    test('a renewed matching completion restores receipt settlement', () async {
+      final f = _Fixture();
+      addTearDown(f.close);
+      final chat = await f.open();
+      final call = await f.begin(chat, 'Current question');
+      f.rows = _committedRows(answer: 'Part one more');
+      f.resumeResult = const ResumedGatewaySession(
+        runtimeSessionId: 'runtime',
+        running: false,
+        status: 'idle',
+      );
+      call.emit('message.delta', {'text': 'Part one'});
+      call.emit('message.complete', {'text': 'Part one', 'status': 'complete'});
+      call.emit('message.delta', {'text': ' more'});
+      // A subsequent valid final receipt covering the extended scope
+      // re-establishes success settlement.
+      call.emit('message.complete', {
+        'text': 'Part one more',
+        'status': 'complete',
+      });
+      call.ack();
+      await _until(() => !chat.snapshot.hasActiveTurn);
+      await pumpEventQueue();
+      expect(chat.phase, NormalGatewayTurnPhase.completed);
+      expect(f.calls, hasLength(1));
+    });
+
+    test('a foreign delayed ID-less completion cannot settle the next turn', () async {
+      final f = _Fixture();
+      addTearDown(f.close);
+      final chat = await f.open();
+      final a = await f.begin(chat, 'First question');
+      f.rows = _committedRows(answer: 'First answer');
+      f.resumeResult = const ResumedGatewaySession(
+        runtimeSessionId: 'runtime',
+        running: false,
+        status: 'idle',
+      );
+      a.emit('message.delta', {'text': 'First answer'});
+      a.emit('message.complete', {
+        'text': 'First answer',
+        'status': 'complete',
+      });
+      a.ack();
+      await _until(() => !chat.snapshot.hasActiveTurn);
+      await pumpEventQueue();
+      expect(chat.phase, NormalGatewayTurnPhase.completed);
+      final b = await f.begin(chat, 'Second question');
+      f.rows = [
+        ..._committedRows(answer: 'First answer'),
+        _row(14, 'user', 'Second question'),
+        _row(15, 'assistant', 'Second partial'),
+      ];
+      b.emit('message.delta', {'text': 'Second partial'});
+      // Delayed replay of the previous turn's completion, delivered through
+      // the production global ingress with no turn identity. Prior-response
+      // activity alone must not let it settle B; its payload does not match
+      // anything B streamed.
+      f.session.receiveEvent(
+        'local',
+        StreamEvent(
+          type: 'message.complete',
+          data: {'text': 'First answer', 'status': 'complete'},
+        ),
+      );
+      b.ack();
+      await _until(() => !chat.snapshot.hasActiveTurn);
+      await pumpEventQueue();
+      expect(chat.phase, NormalGatewayTurnPhase.reconciledUnknown);
+      expect(chat.snapshot.status?.kind, 'reconciled_unknown');
+      expect(f.calls, hasLength(2));
+    });
+
+    test('empty or absent completion payload cannot establish the receipt', () async {
+      for (final payload in <Map<String, dynamic>>[
+        {},
+        {'rendered': ''},
+        {'text': ''},
+      ]) {
+        final f = _Fixture();
+        addTearDown(f.close);
+        final chat = await f.open();
+        final call = await f.begin(chat, 'Current question');
+        f.rows = _committedRows(answer: 'Streamed answer');
+        f.resumeResult = const ResumedGatewaySession(
+          runtimeSessionId: 'runtime',
+          running: false,
+          status: 'idle',
+        );
+        call.emit('message.delta', {'text': 'Streamed answer'});
+        // ID-less empty-payload completion through the global ingress: an
+        // absent or empty payload vacuously "matches" any stream and must
+        // not grant success authority.
+        f.session.receiveEvent(
+          'local',
+          StreamEvent(type: 'message.complete', data: payload),
+        );
+        call.ack();
+        await _until(() => !chat.snapshot.hasActiveTurn);
+        await pumpEventQueue();
+        expect(chat.phase, NormalGatewayTurnPhase.reconciledUnknown,
+            reason: 'payload $payload must not settle success');
+        expect(chat.snapshot.status?.kind, 'reconciled_unknown');
+        expect(f.calls, hasLength(1));
+      }
+    });
+
+    test('confirmed steering without new body activity settles unknown', () async {
+      final f = _Fixture();
+      addTearDown(f.close);
+      final chat = await f.open();
+      final call = await f.begin(chat, 'Current question');
+      f.rows = _committedRows(answer: 'Streamed answer');
+      f.resumeResult = const ResumedGatewaySession(
+        runtimeSessionId: 'runtime',
+        running: false,
+        status: 'idle',
+      );
+      call.emit('message.delta', {'text': 'Streamed answer'});
+      call.emit('message.complete', {
+        'text': 'Streamed answer',
+        'status': 'complete',
+      });
+      // Accepted guidance advances the response scope; interrupting before
+      // any post-steer body activity leaves the pre-steer receipt stale, so
+      // authoritative idle plus the prior durable row must settle unknown.
+      expect(await chat.steer('Focus on the payload contract'), isTrue);
+      call.ack();
+      await _until(() => !chat.snapshot.hasActiveTurn);
+      await pumpEventQueue();
+      expect(chat.phase, NormalGatewayTurnPhase.reconciledUnknown);
+      expect(chat.snapshot.status?.kind, 'reconciled_unknown');
+      expect(f.calls, hasLength(1));
+    });
+
+    test('renewed matching completion after steering restores success', () async {
+      final f = _Fixture();
+      addTearDown(f.close);
+      final chat = await f.open();
+      final call = await f.begin(chat, 'Current question');
+      f.rows = _committedRows(answer: 'Streamed answer');
+      f.resumeResult = const ResumedGatewaySession(
+        runtimeSessionId: 'runtime',
+        running: false,
+        status: 'idle',
+      );
+      call.emit('message.delta', {'text': 'Streamed answer'});
+      call.emit('message.complete', {
+        'text': 'Streamed answer',
+        'status': 'complete',
+      });
+      expect(await chat.steer('Focus on the payload contract'), isTrue);
+      // The server finishes the guided turn with the same streamed text: a
+      // renewed exact-match completion re-establishes success settlement.
+      call.emit('message.complete', {
+        'text': 'Streamed answer',
+        'status': 'complete',
+      });
+      call.ack();
+      await _until(() => !chat.snapshot.hasActiveTurn);
+      await pumpEventQueue();
+      expect(chat.phase, NormalGatewayTurnPhase.completed);
+      expect(f.calls, hasLength(1));
+    });
+
+    test('reused preview completion settles success from its selected scope', () async {
+      final f = _Fixture();
+      addTearDown(f.close);
+      final chat = await f.open();
+      final call = await f.begin(chat, 'Current question');
+      f.rows = _committedRows(answer: 'Selected final preview');
+      f.resumeResult = const ResumedGatewaySession(
+        runtimeSessionId: 'runtime',
+        running: false,
+        status: 'idle',
+      );
+      call.emit('message.delta', {'text': 'Unselected commentary'});
+      call.emit('message.interim', {
+        'text': 'Unselected commentary',
+        'already_streamed': true,
+      });
+      call.emit('message.delta', {'text': 'Selected final preview'});
+      call.emit('message.interim', {
+        'text': 'Selected final preview',
+        'already_streamed': true,
+      });
+      // The sealed same-turn preview is the selected scope; the empty
+      // pending boundary must carry no authority. ID-less reused completion
+      // through the global ingress settles success from that scope.
+      f.session.receiveEvent(
+        'local',
+        StreamEvent(
+          type: 'message.complete',
+          data: {
+            'text': 'Selected final preview',
+            'response_reused': true,
+            'persisted_turn': _receipt(),
+          },
+        ),
+      );
+      call.ack();
+      await _until(() => !chat.snapshot.hasActiveTurn);
+      await pumpEventQueue();
+      expect(chat.phase, NormalGatewayTurnPhase.completed);
+      expect(
+        chat.snapshot.displayRows,
+        isEmpty,
+        reason: 'handover retires the received scope; no duplicate row',
+      );
+      expect(
+        _quiet(chat.snapshot).where((s) => s == 'Selected final preview'),
+        hasLength(1),
+        reason: 'exact target retained exactly once',
+      );
+      expect(f.calls, hasLength(1));
+    });
+
+    test('transformed completion settles success via its raw streamed text', () async {
+      final f = _Fixture();
+      addTearDown(f.close);
+      final chat = await f.open();
+      final call = await f.begin(chat, 'Current question');
+      f.rows = _committedRows(answer: 'Selected final preview');
+      f.resumeResult = const ResumedGatewaySession(
+        runtimeSessionId: 'runtime',
+        running: false,
+        status: 'idle',
+      );
+      call.emit('message.delta', {'text': 'Selected final preview'});
+      f.session.receiveEvent(
+        'local',
+        StreamEvent(
+          type: 'message.complete',
+          data: {
+            'text': 'Selected final preview',
+            'rendered': '**Selected final preview**',
+            'response_transformed': true,
+          },
+        ),
+      );
+      call.ack();
+      await _until(() => !chat.snapshot.hasActiveTurn);
+      await pumpEventQueue();
+      expect(chat.phase, NormalGatewayTurnPhase.completed);
       expect(f.calls, hasLength(1));
     });
 
@@ -1127,6 +1404,7 @@ class _Fixture {
   ResumedGatewaySession resumeResult;
   Future<ResumedGatewaySession> Function()? resumeHook;
   Future<List<Map<String, dynamic>>> Function()? historyHook;
+  bool steerAccepted = true;
   final calls = <_Call>[];
   final flights = <Future<void>>[];
   bool _closed = false;
@@ -1155,6 +1433,7 @@ class _Fixture {
         final hook = resumeHook;
         return hook == null ? resumeResult : await hook();
       },
+      steer: ({required sessionId, required text}) async => steerAccepted,
       submit:
           ({
             required sessionId,

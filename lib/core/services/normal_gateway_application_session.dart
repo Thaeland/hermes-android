@@ -718,6 +718,7 @@ class NormalGatewayChatOwner {
   String? _wireTurnId;
   final Set<String> _settledWireTurnIds = {};
   bool _sawResponseActivity = false;
+  bool _ownedSuccessfulCompletion = false;
   int? _floor;
   int _generation = 0;
   Object? _reservation;
@@ -1435,6 +1436,7 @@ class NormalGatewayChatOwner {
     wireEmitted = false;
     _wireTurnId = null;
     _sawResponseActivity = false;
+    _ownedSuccessfulCompletion = false;
     _activityChildren.clear();
     _error = null;
     _status = null;
@@ -1490,6 +1492,10 @@ class NormalGatewayChatOwner {
         // A terminal stays decisive if settlement persistence must retry.
         throw StateError('The run ended before steering could be confirmed.');
       }
+      // Confirmed guidance advances this turn's response scope: the
+      // pre-steer completion receipt no longer proves the current scope.
+      // A later matching completion can re-establish it.
+      _ownedSuccessfulCompletion = false;
       // Place guidance before the live response, but do not make it a new
       // prompt boundary. A reused preview can later remove that response's
       // placeholder; ingress still finds the assistant across this row.
@@ -1901,6 +1907,7 @@ class NormalGatewayChatOwner {
       // exact scope claim; lifecycle/status-only updates do not revoke it.
       _persistedTurns.remove(turnId);
       _sawResponseActivity = true;
+      _ownedSuccessfulCompletion = false;
     }
     if (phase == NormalGatewayTurnPhase.reconciling &&
         (event.type == 'message.delta' || event.type.startsWith('tool.'))) {
@@ -2011,6 +2018,12 @@ class NormalGatewayChatOwner {
         event.data['text']?.toString() ?? text,
       );
       if (target != null) {
+        // Evidence comes from the response scope this completion actually
+        // selected: the helper may seal and reuse an earlier same-turn
+        // preview and remove an empty pending boundary, so the LAST row can
+        // be the wrong scope. Snapshot BEFORE the payload overwrites it;
+        // an empty selected scope carries no authority.
+        final observedStream = target['content']?.toString() ?? '';
         ChatMessageTime.observe(
           target,
           source: ChatMessageTimeSource.received,
@@ -2030,6 +2043,29 @@ class NormalGatewayChatOwner {
         target['_gateway_pending_response'] = false;
         target['_chat_response_complete'] =
             ownsResponse && isSuccessfulResponseReceipt(event.data);
+        // Generation-scoped receipt for recovery: stock resume reports idle,
+        // never a terminal status, so an owned successful completion is the
+        // wire-side evidence that this turn finished. Reset in reserve() and
+        // revoked by later body activity or confirmed steering. An ID-less
+        // completion carries no in-band generation identity, so its receipt
+        // only counts when its payload carries the exact, non-empty text this
+        // turn already streamed — a consistency check, not an identity proof:
+        // absent/empty payloads and foreign text are refused, while an
+        // identical-text replay from another generation remains
+        // indistinguishable in-band (documented residual ambiguity).
+        // Wire-ID-matched completions are exempt: the server vouched for the
+        // turn identity.
+        // The gate compares the payload's streamed representation — 'text';
+        // 'rendered' is display formatting of the same content and only
+        // stands in when 'text' is absent.
+        final completionText = event.data['text']?.toString() ??
+            event.data['rendered']?.toString() ??
+            '';
+        final provenCompletion = wireTurn != null ||
+            (completionText.isNotEmpty && completionText == observedStream);
+        _ownedSuccessfulCompletion = provenCompletion &&
+            ownsResponse &&
+            isSuccessfulResponseReceipt(event.data);
         _capturePersistedTurn(event.data);
       }
     } else if (event.type.startsWith('tool.')) {
@@ -2283,24 +2319,29 @@ class NormalGatewayChatOwner {
       }
       if (!_session._canRecover) return;
       if (!_acceptHistory(fresh)) return;
-      // Idle proves work ended, never success: stock may retain partial prose
-      // after interruption. Only explicit terminal status proves an outcome.
+      // Idle alone proves only that work ended: stock may retain partial prose
+      // after interruption. An outcome needs an explicit terminal status or an
+      // owned successful completion receipt from this turn's wire.
       if (running) phase = NormalGatewayTurnPhase.running;
       final completed = const {
         'completed',
         'complete',
         'done',
       }.contains(status);
+      // Stock resume never reports a terminal status; the owned successful
+      // receipt settles through the same durable fresh-response-row authority
+      // the resumed-completed path already uses.
+      final settledByReceipt = completed || _ownedSuccessfulCompletion;
       if (inactive && !running && _additionalRestoredMarkers.isNotEmpty) {
         // Authoritative idle releases all restored uncertainties, but cannot
         // assign one recovered turn's successful outcome to every receipt.
         await _settle(null, null, generation: generation);
-      } else if (completed &&
+      } else if (settledByReceipt &&
           !running &&
           _floor != null &&
           fresh.rows.any((row) => _responseRow(row, _floor!))) {
         await _settle(true, null, generation: generation);
-      } else if (inactive && !running && !completed) {
+      } else if (inactive && !running && !settledByReceipt) {
         // Release admission without resubmitting or inventing success/failure.
         // No row/count heuristic is needed to know the server is now idle.
         await _settle(null, null, generation: generation);
