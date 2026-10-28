@@ -30,6 +30,12 @@ typedef GatewayTurnSessionBoundCallback =
 typedef GatewayTurnRuntimeBoundCallback =
     void Function(String localSessionId, String runtimeSessionId);
 
+class GatewayTurnAdmissionRevoked implements Exception {
+  const GatewayTurnAdmissionRevoked();
+  @override
+  String toString() => 'Local turn admission was revoked before submission.';
+}
+
 enum GatewayTurnCoordinatorFailure {
   closed,
   transportUnavailable,
@@ -343,12 +349,16 @@ class GatewayTurnCoordinatorRegistry {
     required String text,
     List<GatewayTurnAttachmentReceipt> attachments = const [],
     GatewayTurnStateCallback? onState,
+    bool Function()? maySubmit,
   }) async {
+    if (maySubmit?.call() == false) throw const GatewayTurnAdmissionRevoked();
     final coordinator = await open(localSessionId);
+    if (maySubmit?.call() == false) throw const GatewayTurnAdmissionRevoked();
     return coordinator.submit(
       text: text,
       attachments: attachments,
       onState: onState,
+      maySubmit: maySubmit,
     );
   }
 
@@ -601,8 +611,10 @@ class GatewayTurnCoordinator {
     required String text,
     List<GatewayTurnAttachmentReceipt> attachments = const [],
     GatewayTurnStateCallback? onState,
+    bool Function()? maySubmit,
   }) => _serialized(() async {
     _requireOperational();
+    if (maySubmit?.call() == false) throw const GatewayTurnAdmissionRevoked();
     if (attachments.isNotEmpty &&
         (_client?.isConnected != true || _runtimeBinding == null)) {
       throw const GatewayTurnCoordinatorException(
@@ -612,6 +624,7 @@ class GatewayTurnCoordinator {
     if (_client?.isConnected != true || _runtimeBinding == null) {
       await _openFreshTransport();
     }
+    if (maySubmit?.call() == false) throw const GatewayTurnAdmissionRevoked();
     final client = _client!;
     final runtime = _runtimeBinding!;
     final durable = _durableBinding!;
@@ -649,6 +662,19 @@ class GatewayTurnCoordinator {
       rethrow;
     }
     _requireNotPoisoned();
+    if (maySubmit?.call() == false) {
+      // This exact write-ahead was never dispatched. Remove it before releasing
+      // the local reservation; a failed durable removal stays fail-closed.
+      await journal.remove(
+        _entryFromState(
+          durable,
+          state,
+          updatedAtEpochMs: _nowEpochMs(),
+        ).entryIdentity,
+      );
+      _discardUnsubmittedState(state);
+      throw const GatewayTurnAdmissionRevoked();
+    }
     Map<String, dynamic> result;
     try {
       final response = await client.send('prompt.submit', <String, dynamic>{

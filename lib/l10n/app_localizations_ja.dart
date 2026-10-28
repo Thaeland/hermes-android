@@ -28,6 +28,76 @@ class AppLocalizationsJa extends AppLocalizations {
   String get background_report_collapse => 'レポートを折りたたむ';
 
   @override
+  String get hands_free_title => 'ハンズフリー';
+
+  @override
+  String get hands_free_start => 'ハンズフリー開始';
+
+  @override
+  String get hands_free_stop => 'ハンズフリー停止';
+
+  @override
+  String get hands_free_preparing => '音声を準備中 — お待ちください';
+
+  @override
+  String get hands_free_listening => 'Hey Hermes と言ってください';
+
+  @override
+  String get hands_free_recording => '準備完了 — 話してください';
+
+  @override
+  String get hands_free_waiting => 'Hermes の応答待ち';
+
+  @override
+  String get hands_free_speaking => '読み上げ中 — マイクはオフ';
+
+  @override
+  String hands_free_followup(int seconds) {
+    return '最大 $seconds 秒間聞き取る';
+  }
+
+  @override
+  String get hands_free_error => 'ハンズフリー停止中';
+
+  @override
+  String get hands_free_setup => 'ハンズフリー設定';
+
+  @override
+  String hands_free_preview(String transcript) {
+    return '音声プレビュー: $transcript';
+  }
+
+  @override
+  String get hands_free_short_disclosure =>
+      'このチャットが前面で開いている間のみ。起動検出はオフライン、音声は通信を使う場合があります。電池を消費します。';
+
+  @override
+  String get hands_free_error_action =>
+      'マイク権限、音声サービス、読み上げ音声、接続を確認して停止後に再開してください。自動再送はしません。';
+
+  @override
+  String get hands_free_disclosure =>
+      '起動検出は CPU でオフライン動作します。Android の音声認識、選択した音声、ゲートウェイは通信を使う場合があります。電池を消費し、誤起動もあります。チャットが隠れる、閉じる、前面を離れると停止し、自動再開しません。手動入力の音声は編集可能な下書きのままです。';
+
+  @override
+  String get hands_free_ready_cue =>
+      '「Hey Hermes」と言い、準備完了を待ってから話してください。一息での入力や先行録音はありません。権限設定でアプリを離れた場合、許可後に再度開始してください。';
+
+  @override
+  String get hands_free_timing_limit =>
+      '継続入力の時間は最大値であり、最小値ではありません。Android が早く終了する場合があります。無音時は認識を繰り返さず、ローカル起動待ちに戻ります。';
+
+  @override
+  String get hands_free_followup_off => '継続入力オフ — 毎回 Hey Hermes と言ってください';
+
+  @override
+  String get hands_free_start_blocked =>
+      '空の下書き、添付なし、処理中でない接続済みチャット、読み上げ有効が必要です。手動音声操作を先に終えてください。';
+
+  @override
+  String get hands_free_setup_complete => 'マイク設定が完了しました。再度開始してください。';
+
+  @override
   String message_time_recorded(String time) {
     return 'Recorded by server: $time (local time)';
   }

@@ -27,6 +27,76 @@ class AppLocalizationsZh extends AppLocalizations {
   String get background_report_collapse => '收起报告';
 
   @override
+  String get hands_free_title => '免提对话';
+
+  @override
+  String get hands_free_start => '开始免提';
+
+  @override
+  String get hands_free_stop => '停止免提';
+
+  @override
+  String get hands_free_preparing => '正在准备语音 — 请稍候';
+
+  @override
+  String get hands_free_listening => '请说 Hey Hermes';
+
+  @override
+  String get hands_free_recording => '已就绪 — 请说话';
+
+  @override
+  String get hands_free_waiting => '等待 Hermes 回复';
+
+  @override
+  String get hands_free_speaking => '正在朗读 — 麦克风已关闭';
+
+  @override
+  String hands_free_followup(int seconds) {
+    return '最多聆听 $seconds 秒';
+  }
+
+  @override
+  String get hands_free_error => '免提已停止';
+
+  @override
+  String get hands_free_setup => '免提设置';
+
+  @override
+  String hands_free_preview(String transcript) {
+    return '语音预览：$transcript';
+  }
+
+  @override
+  String get hands_free_short_disclosure =>
+      '仅在此聊天于前台打开时运行。唤醒检测离线；语音可能使用网络。会消耗电量。';
+
+  @override
+  String get hands_free_error_action =>
+      '请检查麦克风权限、语音服务、回复声音和连接，再点击停止并重新开始。不会自动重发。';
+
+  @override
+  String get hands_free_disclosure =>
+      '唤醒检测在 CPU 上离线运行。Android 语音识别、所选声音和网关可能使用网络。聆听会消耗电量，也可能误触发。聊天被遮挡、关闭或离开前台时停止，返回后不会自动重启。手动听写仍是可编辑的草稿。';
+
+  @override
+  String get hands_free_ready_cue =>
+      '说“Hey Hermes”，等待就绪提示后再说话。不支持一口气连续输入或预录音。如果授权对话框使应用离开前台，授权后请再次点击开始。';
+
+  @override
+  String get hands_free_timing_limit =>
+      '后续聆听时间是上限，不是下限。Android 可能提前结束。无语音时返回本地唤醒检测，不会反复重启识别。';
+
+  @override
+  String get hands_free_followup_off => '后续聆听已关闭 — 每次提问请说 Hey Hermes';
+
+  @override
+  String get hands_free_start_blocked =>
+      '需要空草稿、无附件、空闲且已连接的聊天，并启用语音回复。请先结束手动语音操作。';
+
+  @override
+  String get hands_free_setup_complete => '麦克风设置完成。请再次点击开始。';
+
+  @override
   String message_time_recorded(String time) {
     return 'Recorded by server: $time (local time)';
   }
@@ -3094,6 +3164,76 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
 
   @override
   String get background_report_collapse => '收起报告';
+
+  @override
+  String get hands_free_title => '免提对话';
+
+  @override
+  String get hands_free_start => '开始免提';
+
+  @override
+  String get hands_free_stop => '停止免提';
+
+  @override
+  String get hands_free_preparing => '正在准备语音 — 请稍候';
+
+  @override
+  String get hands_free_listening => '请说 Hey Hermes';
+
+  @override
+  String get hands_free_recording => '已就绪 — 请说话';
+
+  @override
+  String get hands_free_waiting => '等待 Hermes 回复';
+
+  @override
+  String get hands_free_speaking => '正在朗读 — 麦克风已关闭';
+
+  @override
+  String hands_free_followup(int seconds) {
+    return '最多聆听 $seconds 秒';
+  }
+
+  @override
+  String get hands_free_error => '免提已停止';
+
+  @override
+  String get hands_free_setup => '免提设置';
+
+  @override
+  String hands_free_preview(String transcript) {
+    return '语音预览：$transcript';
+  }
+
+  @override
+  String get hands_free_short_disclosure =>
+      '仅在此聊天于前台打开时运行。唤醒检测离线；语音可能使用网络。会消耗电量。';
+
+  @override
+  String get hands_free_error_action =>
+      '请检查麦克风权限、语音服务、回复声音和连接，再点击停止并重新开始。不会自动重发。';
+
+  @override
+  String get hands_free_disclosure =>
+      '唤醒检测在 CPU 上离线运行。Android 语音识别、所选声音和网关可能使用网络。聆听会消耗电量，也可能误触发。聊天被遮挡、关闭或离开前台时停止，返回后不会自动重启。手动听写仍是可编辑的草稿。';
+
+  @override
+  String get hands_free_ready_cue =>
+      '说“Hey Hermes”，等待就绪提示后再说话。不支持一口气连续输入或预录音。如果授权对话框使应用离开前台，授权后请再次点击开始。';
+
+  @override
+  String get hands_free_timing_limit =>
+      '后续聆听时间是上限，不是下限。Android 可能提前结束。无语音时返回本地唤醒检测，不会反复重启识别。';
+
+  @override
+  String get hands_free_followup_off => '后续聆听已关闭 — 每次提问请说 Hey Hermes';
+
+  @override
+  String get hands_free_start_blocked =>
+      '需要空草稿、无附件、空闲且已连接的聊天，并启用语音回复。请先结束手动语音操作。';
+
+  @override
+  String get hands_free_setup_complete => '麦克风设置完成。请再次点击开始。';
 
   @override
   String get stop_and_send => '停止并发送';

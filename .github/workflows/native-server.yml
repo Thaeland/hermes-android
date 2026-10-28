@@ -50,15 +50,26 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.1.0'
-      - name: Run native lifecycle and push tests
+      - name: Verify voice preparation and native CI configuration
+        run: python3 -m unittest scripts.test_prepare_voice_inputs scripts.test_native_ci_config
+      - name: Cache hash-verified build-time voice artifacts
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/hermes-voice
+          key: voice-inputs-${{ hashFiles('third_party/voice/manifest.json') }}
+      - name: Run native lifecycle, voice ownership and push tests
         working-directory: android
-        run: gradle :app:testDebugUnitTest --no-daemon --stacktrace
+        run: gradle :app:testDebugUnitTest :flutter_tts:testDebugUnitTest --no-daemon --stacktrace
       - name: Preserve native test reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: native-test-reports
-          path: build/app/reports/tests/testDebugUnitTest
+          path: |
+            build/app/reports/tests/testDebugUnitTest
+            build/app/test-results/testDebugUnitTest
+            build/flutter_tts/reports/tests/testDebugUnitTest
+            build/flutter_tts/test-results/testDebugUnitTest
           if-no-files-found: warn
 
   server:

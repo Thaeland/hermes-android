@@ -23,6 +23,7 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   HttpOverrides? previous;
   final spoken = <String>[];
+  final speechCompletions = <Completer<int>>[];
   final shared = <String>[];
   final messenger =
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
@@ -31,6 +32,7 @@ void main() {
     previous = HttpOverrides.current;
     HttpOverrides.global = null;
     spoken.clear();
+    speechCompletions.clear();
     shared.clear();
     messenger.setMockMethodCallHandler(
       const MethodChannel('plugins.flutter.io/image_picker'),
@@ -39,9 +41,15 @@ void main() {
     messenger.setMockMethodCallHandler(const MethodChannel('flutter_tts'), (
       call,
     ) async {
+      if (call.method == 'getMaxSpeechInputLength') return 4000;
       if (call.method == 'speak') {
         final args = call.arguments;
         spoken.add(args is String ? args : (args as Map)['text'] as String);
+        // With awaitSpeakCompletion enabled Android replies only when this
+        // utterance finishes, not merely when it has been enqueued.
+        final completion = Completer<int>();
+        speechCompletions.add(completion);
+        return completion.future;
       }
       return 1;
     });
@@ -56,6 +64,9 @@ void main() {
     );
   });
   tearDown(() {
+    for (final completion in speechCompletions) {
+      if (!completion.isCompleted) completion.complete(0);
+    }
     HttpOverrides.global = previous;
     for (final name in [
       'plugins.flutter.io/image_picker',
@@ -662,6 +673,12 @@ void main() {
         await widgetUntil(tester, () => !owner.snapshot.hasActiveTurn);
         await tester.pump();
         owner.observeHistory(wire.rows);
+        owner.observeHistory(wire.rows);
+        await tester.pump();
+        expect(spoken, ['Current spoken answer']);
+        expect(speechCompletions, hasLength(1));
+        speechCompletions.single.complete(1);
+        await tester.pump();
         owner.observeHistory(wire.rows);
         await tester.pump();
         expect(spoken, ['Current spoken answer']);

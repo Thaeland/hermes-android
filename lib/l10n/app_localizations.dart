@@ -150,6 +150,126 @@ abstract class AppLocalizations {
   /// **'Collapse report'**
   String get background_report_collapse;
 
+  /// No description provided for @hands_free_title.
+  ///
+  /// In en, this message translates to:
+  /// **'Hands-free'**
+  String get hands_free_title;
+
+  /// No description provided for @hands_free_start.
+  ///
+  /// In en, this message translates to:
+  /// **'Start hands-free'**
+  String get hands_free_start;
+
+  /// No description provided for @hands_free_stop.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop hands-free'**
+  String get hands_free_stop;
+
+  /// No description provided for @hands_free_preparing.
+  ///
+  /// In en, this message translates to:
+  /// **'Preparing voice — wait for ready'**
+  String get hands_free_preparing;
+
+  /// No description provided for @hands_free_listening.
+  ///
+  /// In en, this message translates to:
+  /// **'Say Hey Hermes'**
+  String get hands_free_listening;
+
+  /// No description provided for @hands_free_recording.
+  ///
+  /// In en, this message translates to:
+  /// **'Ready — speak now'**
+  String get hands_free_recording;
+
+  /// No description provided for @hands_free_waiting.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for Hermes'**
+  String get hands_free_waiting;
+
+  /// No description provided for @hands_free_speaking.
+  ///
+  /// In en, this message translates to:
+  /// **'Speaking — microphone off'**
+  String get hands_free_speaking;
+
+  /// No description provided for @hands_free_followup.
+  ///
+  /// In en, this message translates to:
+  /// **'Listen up to {seconds} seconds'**
+  String hands_free_followup(int seconds);
+
+  /// No description provided for @hands_free_error.
+  ///
+  /// In en, this message translates to:
+  /// **'Hands-free stopped'**
+  String get hands_free_error;
+
+  /// No description provided for @hands_free_setup.
+  ///
+  /// In en, this message translates to:
+  /// **'Hands-free setup'**
+  String get hands_free_setup;
+
+  /// No description provided for @hands_free_preview.
+  ///
+  /// In en, this message translates to:
+  /// **'Voice preview: {transcript}'**
+  String hands_free_preview(String transcript);
+
+  /// No description provided for @hands_free_short_disclosure.
+  ///
+  /// In en, this message translates to:
+  /// **'Only while this chat is open in the foreground. Wake is offline; speech may use networks. Uses battery.'**
+  String get hands_free_short_disclosure;
+
+  /// No description provided for @hands_free_error_action.
+  ///
+  /// In en, this message translates to:
+  /// **'Check microphone permission, speech service, reply voice and connection, then press Stop and Start to retry. Nothing is resent.'**
+  String get hands_free_error_action;
+
+  /// No description provided for @hands_free_disclosure.
+  ///
+  /// In en, this message translates to:
+  /// **'Wake detection runs offline on the CPU. Android speech recognition, the selected reply voice and gateway may use networks. Listening uses battery and false activations are possible. Stops when this chat is covered, closed or no longer foreground; reopening never restarts it. Manual dictation stays an editable draft.'**
+  String get hands_free_disclosure;
+
+  /// No description provided for @hands_free_ready_cue.
+  ///
+  /// In en, this message translates to:
+  /// **'Say “Hey Hermes”, wait for “Ready — speak now”, then speak. No same-breath capture or pre-roll. If permission setup leaves the app, press Start again after granting it.'**
+  String get hands_free_ready_cue;
+
+  /// No description provided for @hands_free_timing_limit.
+  ///
+  /// In en, this message translates to:
+  /// **'The follow-up window is a maximum, not a minimum. Android may stop earlier. Silence returns to local wake listening without repeated recognition restarts.'**
+  String get hands_free_timing_limit;
+
+  /// No description provided for @hands_free_followup_off.
+  ///
+  /// In en, this message translates to:
+  /// **'Follow-up off — say Hey Hermes for each prompt'**
+  String get hands_free_followup_off;
+
+  /// No description provided for @hands_free_start_blocked.
+  ///
+  /// In en, this message translates to:
+  /// **'Start requires an empty draft, no attachments, an idle connected chat and spoken replies enabled. Finish any manual voice action first.'**
+  String get hands_free_start_blocked;
+
+  /// No description provided for @hands_free_setup_complete.
+  ///
+  /// In en, this message translates to:
+  /// **'Microphone setup finished. Press Start again.'**
+  String get hands_free_setup_complete;
+
   /// No description provided for @message_time_recorded.
   ///
   /// In en, this message translates to:

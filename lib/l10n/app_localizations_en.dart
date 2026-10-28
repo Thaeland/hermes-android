@@ -29,6 +29,78 @@ class AppLocalizationsEn extends AppLocalizations {
   String get background_report_collapse => 'Collapse report';
 
   @override
+  String get hands_free_title => 'Hands-free';
+
+  @override
+  String get hands_free_start => 'Start hands-free';
+
+  @override
+  String get hands_free_stop => 'Stop hands-free';
+
+  @override
+  String get hands_free_preparing => 'Preparing voice — wait for ready';
+
+  @override
+  String get hands_free_listening => 'Say Hey Hermes';
+
+  @override
+  String get hands_free_recording => 'Ready — speak now';
+
+  @override
+  String get hands_free_waiting => 'Waiting for Hermes';
+
+  @override
+  String get hands_free_speaking => 'Speaking — microphone off';
+
+  @override
+  String hands_free_followup(int seconds) {
+    return 'Listen up to $seconds seconds';
+  }
+
+  @override
+  String get hands_free_error => 'Hands-free stopped';
+
+  @override
+  String get hands_free_setup => 'Hands-free setup';
+
+  @override
+  String hands_free_preview(String transcript) {
+    return 'Voice preview: $transcript';
+  }
+
+  @override
+  String get hands_free_short_disclosure =>
+      'Only while this chat is open in the foreground. Wake is offline; speech may use networks. Uses battery.';
+
+  @override
+  String get hands_free_error_action =>
+      'Check microphone permission, speech service, reply voice and connection, then press Stop and Start to retry. Nothing is resent.';
+
+  @override
+  String get hands_free_disclosure =>
+      'Wake detection runs offline on the CPU. Android speech recognition, the selected reply voice and gateway may use networks. Listening uses battery and false activations are possible. Stops when this chat is covered, closed or no longer foreground; reopening never restarts it. Manual dictation stays an editable draft.';
+
+  @override
+  String get hands_free_ready_cue =>
+      'Say “Hey Hermes”, wait for “Ready — speak now”, then speak. No same-breath capture or pre-roll. If permission setup leaves the app, press Start again after granting it.';
+
+  @override
+  String get hands_free_timing_limit =>
+      'The follow-up window is a maximum, not a minimum. Android may stop earlier. Silence returns to local wake listening without repeated recognition restarts.';
+
+  @override
+  String get hands_free_followup_off =>
+      'Follow-up off — say Hey Hermes for each prompt';
+
+  @override
+  String get hands_free_start_blocked =>
+      'Start requires an empty draft, no attachments, an idle connected chat and spoken replies enabled. Finish any manual voice action first.';
+
+  @override
+  String get hands_free_setup_complete =>
+      'Microphone setup finished. Press Start again.';
+
+  @override
   String message_time_recorded(String time) {
     return 'Recorded by server: $time (local time)';
   }

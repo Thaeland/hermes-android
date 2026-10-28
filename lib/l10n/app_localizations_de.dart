@@ -29,6 +29,78 @@ class AppLocalizationsDe extends AppLocalizations {
   String get background_report_collapse => 'Bericht zuklappen';
 
   @override
+  String get hands_free_title => 'Freisprechen';
+
+  @override
+  String get hands_free_start => 'Freisprechen starten';
+
+  @override
+  String get hands_free_stop => 'Freisprechen stoppen';
+
+  @override
+  String get hands_free_preparing => 'Sprachfunktion wird vorbereitet';
+
+  @override
+  String get hands_free_listening => 'Sage Hey Hermes';
+
+  @override
+  String get hands_free_recording => 'Bereit — jetzt sprechen';
+
+  @override
+  String get hands_free_waiting => 'Warten auf Hermes';
+
+  @override
+  String get hands_free_speaking => 'Wiedergabe — Mikrofon aus';
+
+  @override
+  String hands_free_followup(int seconds) {
+    return 'Bis zu $seconds Sekunden zuhören';
+  }
+
+  @override
+  String get hands_free_error => 'Freisprechen gestoppt';
+
+  @override
+  String get hands_free_setup => 'Freisprechen einrichten';
+
+  @override
+  String hands_free_preview(String transcript) {
+    return 'Sprachvorschau: $transcript';
+  }
+
+  @override
+  String get hands_free_short_disclosure =>
+      'Nur solange dieser Chat im Vordergrund geöffnet ist. Aktivierung offline; Sprache ggf. online. Verbraucht Akku.';
+
+  @override
+  String get hands_free_error_action =>
+      'Mikrofonberechtigung, Sprachdienst, Stimme und Verbindung prüfen. Dann Stoppen und Starten wählen. Nichts wird erneut gesendet.';
+
+  @override
+  String get hands_free_disclosure =>
+      'Die Aktivierung läuft offline auf der CPU. Android-Spracherkennung, Antwortstimme und Gateway können Netzwerke nutzen. Zuhören verbraucht Akku; Fehlaktivierungen sind möglich. Bei verdecktem, geschlossenem oder nicht mehr sichtbarem Chat wird gestoppt. Kein automatischer Neustart. Manuelles Diktieren bleibt ein bearbeitbarer Entwurf.';
+
+  @override
+  String get hands_free_ready_cue =>
+      '„Hey Hermes“ sagen, auf „Bereit“ warten, dann sprechen. Keine Erfassung im selben Atemzug oder Audiopuffer. Nach einem Berechtigungsdialog gegebenenfalls erneut Starten wählen.';
+
+  @override
+  String get hands_free_timing_limit =>
+      'Das Folgefenster ist eine Höchstdauer, keine Mindestdauer. Android kann früher stoppen. Bei Stille zurück zur lokalen Aktivierung, ohne wiederholte Spracherkennungsstarts.';
+
+  @override
+  String get hands_free_followup_off =>
+      'Folgefenster aus — für jede Eingabe Hey Hermes sagen';
+
+  @override
+  String get hands_free_start_blocked =>
+      'Leerer Entwurf, keine Anhänge, inaktiver verbundener Chat und Sprachantworten erforderlich. Manuelle Sprachaktionen zuerst beenden.';
+
+  @override
+  String get hands_free_setup_complete =>
+      'Mikrofoneinrichtung beendet. Erneut Starten wählen.';
+
+  @override
   String message_time_recorded(String time) {
     return 'Recorded by server: $time (local time)';
   }

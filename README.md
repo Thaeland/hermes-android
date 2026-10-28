@@ -134,6 +134,19 @@ rows and offers Retry rather than claiming the archive is empty.
   with a 25 MiB per-file limit. This is not a complete attachment or
   filesystem catalogue. See [Browsing chat assets](docs/chat-assets.md).
 
+## Foreground hands-free voice (unreleased)
+
+This branch adds explicit-start Android **“Hey Hermes”** wake detection, spoken
+replies and a configurable 0–30 second follow-up window. It is off by default and
+only listens while the current chat is visible; navigation, account changes and
+backgrounding stop it without automatic restart. Manual dictation remains
+draft-only. Wake detection is offline, but Android speech recognition, the selected
+voice and the gateway may use networks. This is not locked-phone or Android Auto
+support, and physical-device acoustic/battery checks remain outstanding.
+
+See [setup, privacy and verification limits](docs/HANDS_FREE_VOICE.md). Thanks to
+@mannok for the proposal; Hermes Agent assisted with research and implementation.
+
 ## Remote Gateway edition highlights
 
 - One Desktop Gateway JSON-RPC session for text, images, and files.

@@ -127,6 +127,35 @@ abstract interface class GatewayTurnApplicationSession {
   void removeTurnActivityListener(Object token);
 }
 
+/// Optional local admission guard for callers whose consent can be revoked
+/// while connection setup or durable write-ahead is suspended. No wire changes.
+abstract interface class GuardedGatewayTurnSubmission {
+  Future<GatewayTurnRecoveryState> submitGuarded({
+    required String localSessionId,
+    required String text,
+    required bool Function() maySubmit,
+    GatewayTurnStateCallback? onState,
+  });
+}
+
+Future<GatewayTurnRecoveryState> submitGuardedGatewayTurn(
+  GatewayTurnApplicationSession session, {
+  required String localSessionId,
+  required String text,
+  required bool Function() maySubmit,
+  GatewayTurnStateCallback? onState,
+}) {
+  if (session is! GuardedGatewayTurnSubmission || !maySubmit()) {
+    return Future.error(const GatewayTurnAdmissionRevoked());
+  }
+  return (session as GuardedGatewayTurnSubmission).submitGuarded(
+    localSessionId: localSessionId,
+    text: text,
+    maySubmit: maySubmit,
+    onState: onState,
+  );
+}
+
 /// Owns recovery registries above screen and Navigator lifetimes.
 ///
 /// A screen may detach its callbacks when disposed, but this owner keeps the
@@ -404,7 +433,7 @@ class GatewayTurnApplicationController {
 }
 
 class _CoordinatorGatewayTurnApplicationSession
-    implements GatewayTurnApplicationSession {
+    implements GatewayTurnApplicationSession, GuardedGatewayTurnSubmission {
   final DesktopGatewayClient _client;
   final Map<String, _ApplicationAsyncEventRegistration> _asyncEventListeners =
       {};
@@ -607,6 +636,22 @@ class _CoordinatorGatewayTurnApplicationSession
       localSessionId: localSessionId,
       text: text,
       attachments: attachments,
+      onState: onState,
+    );
+  }
+
+  @override
+  Future<GatewayTurnRecoveryState> submitGuarded({
+    required String localSessionId,
+    required String text,
+    required bool Function() maySubmit,
+    GatewayTurnStateCallback? onState,
+  }) {
+    _requireOpen();
+    return _registry.submit(
+      localSessionId: localSessionId,
+      text: text,
+      maySubmit: maySubmit,
       onState: onState,
     );
   }
