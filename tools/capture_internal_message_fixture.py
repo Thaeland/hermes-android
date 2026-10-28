@@ -5,6 +5,11 @@ Run with the backend's dependency environment:
 
 No gateway/model requests or existing conversations are used. Legacy constants
 are read from the supplied source; dynamic rows use the real backend formatters.
+
+Copied upstream message templates retain Copyright (c) 2025 Nous Research (MIT).
+Complete permission/warranty notice: third_party/licenses/hermes-agent-MIT.txt.
+Pinned fixture/source scope: third_party/NOTICE.md. Keep the applicable upstream
+notices when recapturing; do not insert licence text into expected message rows.
 """
 import ast
 import json
