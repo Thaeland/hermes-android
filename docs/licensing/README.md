@@ -6,7 +6,7 @@ Hermes Android's application licence was already MIT before the community
 contributions. The historical absence of a standalone `LICENSE` file did not
 mean the README contained no licence notice. The complete terms were subsequently
 added to the canonical [LICENSE](../../LICENSE), with contributor attribution,
-and the confusing [NOTICE](../../NOTICE.md) was corrected.
+and the confusing [NOTICE](../../NOTICE.md) was corrected.[9]
 
 The evidence below supports continuing the existing MIT distribution without
 making fresh confirmation from every historical contributor a prerequisite.
@@ -20,7 +20,7 @@ claim of exclusive ownership is inferred.
 The README first declared exactly `## License` / `MIT` in maintainer commit
 [`4ad169557182c08446eee129253495efa05ab589`](https://github.com/rusty4444/hermes-android/blob/4ad169557182c08446eee129253495efa05ab589/README.md),
 27 May 2026. That commit precedes the audited contributions; it is not a notice
-added retrospectively after their submission.
+added retrospectively after their submission.[1]
 
 For [PR #88](https://github.com/rusty4444/hermes-android/pull/88):
 
@@ -32,7 +32,7 @@ For [PR #88](https://github.com/rusty4444/hermes-android/pull/88):
 All **56 source commits** retain the identical licence-bearing README blob,
 `800877c0e5d590167cc78f9931eeb39f1805a979`. The merge also retains MIT. The
 independent `License: MIT` declaration in the historical `fdroiddata.yml` remains
-unchanged through that series. No contrary contributor-specific licence or
+unchanged through that series.[2][3][4] No contrary contributor-specific licence or
 separate agreement was identified in the public submission and discussions.
 The later unanswered confirmation request is not evidence that these earlier
 terms were absent.
@@ -45,25 +45,25 @@ output files omitted from some API patch/statistic fields.
 ## 2. Applicable contribution terms
 
 GitHub Terms of Service effective **27 April 2026**, section D.6,
-**Contributions Under Repository License**, state:
+**Contributions Under Repository License**, state:[5][6]
 
 > Whenever you add Content to a repository containing notice of a license, you
 > license that Content under the same terms, and you agree that you have the
 > right to license that Content under those terms. If you have a separate
 > agreement to license that Content under different terms, such as a contributor
-> license agreement, that agreement will supersede.
+> license agreement, that agreement will supersede.[5][6]
 
 Primary sources:
 
 - [27 April publishing-source version](https://github.com/github/docs/blob/301baf10d6e9c8f89460eea6b9ad577b2de6fdb9/content/site-policy/github-terms/github-terms-of-service.md#6-contributions-under-repository-license).
 - [24 July publishing-source version](https://github.com/github/docs/blob/de34d5d495d1cd6e7e843075faae2d8f34e8fbb7/content/site-policy/github-terms/github-terms-of-service.md#6-contributions-under-repository-license), with the same effective date and unchanged D.6.
-- [GitHub's licence documentation](https://github.com/github/docs/blob/2bbf57a64839909eac94b7c759e27576b81dd1f3/content/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository.md), which recognises README licence declarations and recommends a complete licence file.
+- [GitHub's licence documentation](https://github.com/github/docs/blob/2bbf57a64839909eac94b7c759e27576b81dd1f3/content/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository.md), which recognises README licence declarations and recommends a complete licence file.[7]
 
 The contribution provision concerns a repository **containing notice of a
 licence**, not a specifically named file. This is the inbound-under-existing-MIT
 basis, distinct from D.5's public viewing/forking permission. It cannot convert
 someone else's copied component to MIT or override an actually identified
-separate agreement.
+separate agreement.[5][6]
 
 The policy history was checked against both GitHub's publishing source and its
 separately maintained policy mirror. Source commit dates, effective dates and
@@ -75,14 +75,14 @@ an archived HTTP response for every contributor's submission day.
 The [original Remote Gateway NOTICE](https://github.com/rusty4444/hermes-android/blob/6d9a8bf730c4ba4d74e0322847e757944470ff4a/NOTICE.md)
 says the upstream snapshot lacked a licence **file** and that the fork did not
 **add** an upstream grant. Its [README in that same commit](https://github.com/rusty4444/hermes-android/blob/6d9a8bf730c4ba4d74e0322847e757944470ff4a/README.md)
-still declares MIT, as does the parent snapshot.
+still declares MIT, as does the parent snapshot.[8]
 
 Read together, those statements do not expressly revoke MIT or establish a
 superseding agreement for new application contributions. The old wording was
 confusing and deserved correction. Commit
 [`c3eecfa4d3978cfb00a78d3aa5a77e7fde02fac0`](https://github.com/rusty4444/hermes-android/commit/c3eecfa4d3978cfb00a78d3aa5a77e7fde02fac0)
 added the complete MIT file and clarified that existing application terms do not
-relicense dependencies or assets. This correction was already present in stable
+relicense dependencies or assets.[9] This correction was already present in stable
 3.0.3; the historical grant conclusion does not pretend that the full file
 existed earlier.
 
@@ -112,7 +112,7 @@ The Remote Gateway import retains its **23 original commits**, including the
 [public fork submission](https://github.com/rusty4444/hermes-android/issues/81) and
 [additional original-material confirmation](https://github.com/rusty4444/hermes-android/issues/81#issuecomment-6108110695)
 are preserved. That confirmation excludes third-party contributions and is not
-expanded into ownership of them. The same pre-existing-notice evidence covers
+expanded into ownership of them.[10] The same pre-existing-notice evidence covers
 maebahesioru's localisation/notification contributions; the separate Thaeland and
 igitur confirmations are corroboration, not a requirement to obtain a new grant
 for every contributor.
@@ -154,3 +154,16 @@ notice corrections.
 Hermes Agent assisted with evidence collection, independent audit, notice
 corrections and regression tests. Original contributor credits and history are
 preserved.
+
+## Sources
+
+[1] https://github.com/rusty4444/hermes-android/blob/4ad169557182c08446eee129253495efa05ab589/README.md
+[2] https://github.com/rusty4444/hermes-android/blob/aa6b71060a2e4f53616778a2a7117162611dcd97/README.md
+[3] https://github.com/rusty4444/hermes-android/blob/72f13ad90c1c234b5c2f373f70883164d40917e7/README.md
+[4] https://github.com/rusty4444/hermes-android/blob/6079f83ebf2d7eaa76b2af915e7def086a830c37/README.md
+[5] https://github.com/github/docs/blob/301baf10d6e9c8f89460eea6b9ad577b2de6fdb9/content/site-policy/github-terms/github-terms-of-service.md
+[6] https://github.com/github/docs/blob/de34d5d495d1cd6e7e843075faae2d8f34e8fbb7/content/site-policy/github-terms/github-terms-of-service.md
+[7] https://github.com/github/docs/blob/2bbf57a64839909eac94b7c759e27576b81dd1f3/content/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository.md
+[8] https://github.com/rusty4444/hermes-android/blob/6d9a8bf730c4ba4d74e0322847e757944470ff4a/NOTICE.md
+[9] https://github.com/rusty4444/hermes-android/commit/c3eecfa4d3978cfb00a78d3aa5a77e7fde02fac0
+[10] https://github.com/rusty4444/hermes-android/issues/81
