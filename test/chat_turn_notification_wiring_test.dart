@@ -188,15 +188,15 @@ void main() {
   );
 
   testWidgets(
-    'an approval arriving while backgrounded posts a notification with actions',
+    'a background approval redacts command text without changing actions',
     (WidgetTester tester) async {
       await pumpChat(tester);
       background(tester);
 
       turnSession.emitAsync('approval.request', {
         'server_request_id': 'req-1',
-        'command': 'rm -rf build',
-        'description': 'Remove the build folder',
+        'command': 'fixture-tool PRIVATE-COMMAND-SENTINEL',
+        'description': 'PRIVATE-DESCRIPTION-SENTINEL',
       });
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 100));
@@ -206,8 +206,52 @@ void main() {
       expect(posted.channel.id, 'hermes_attention');
       expect(posted.actions.map((a) => a.id), ['approve', 'reject']);
       expect(posted.payload, contains('req-1'));
+      expect(posted.body, 'Open the chat to review the requested action.');
+      expect(
+        '${posted.title} ${posted.body} ${posted.payload}',
+        isNot(contains('PRIVATE-COMMAND-SENTINEL')),
+      );
+      expect(
+        '${posted.title} ${posted.body} ${posted.payload}',
+        isNot(contains('PRIVATE-DESCRIPTION-SENTINEL')),
+      );
     },
   );
+
+  for (final eventType in [
+    'clarify.request',
+    'sudo.request',
+    'secret.request',
+  ]) {
+    testWidgets(
+      '$eventType redacts input details in background notifications',
+      (WidgetTester tester) async {
+        await pumpChat(tester);
+        background(tester);
+
+        turnSession.emitAsync(eventType, {
+          'request_id': 'private-input-request',
+          'question': 'PRIVATE-QUESTION-SENTINEL',
+          'prompt': 'PRIVATE-PROMPT-SENTINEL',
+          'env_var': 'PRIVATE-FIELD-SENTINEL',
+        });
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+
+        expect(sink.shown, hasLength(1));
+        final posted = sink.shown.single;
+        expect(posted.channel.id, 'hermes_attention');
+        expect(posted.body, 'Open the chat to respond.');
+        expect(posted.actions, isEmpty);
+        expect(posted.payload, contains('notif-session'));
+        expect(
+          '${posted.title} ${posted.body} ${posted.payload}',
+          isNot(contains('PRIVATE-')),
+        );
+        expect(turnSession.approvalResponses, isEmpty);
+      },
+    );
+  }
 
   testWidgets('an answered approval never opens its queued post-frame dialog', (
     WidgetTester tester,
