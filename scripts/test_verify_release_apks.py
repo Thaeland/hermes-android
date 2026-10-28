@@ -33,12 +33,21 @@ NATIVE_SOURCES = (
     f"{SOURCE_DIRECTORY}/embedded-fcm-distributor-3.1.0-upstream.tar.gz",
     f"{SOURCE_DIRECTORY}/embedded-fcm-distributor-3.1.0.pom",
     f"{SOURCE_DIRECTORY}/manifest.json",
+    "third_party/NOTICE.md",
+    "third_party/licenses/Apache-2.0.txt",
+    "third_party/licenses/gradle-NOTICE.txt",
 )
 FLUTTER_SOURCES = (
     "LICENSE",
     "assets/fonts/OFL.txt",
     "assets/fonts/Cinzel-Variable.ttf",
     *NATIVE_SOURCES[:3],
+    "third_party/NOTICE.md",
+    "third_party/licenses/graphify-MIT.txt",
+    "third_party/licenses/hermes-agent-MIT.txt",
+    "third_party/licenses/flutter-BSD-3-Clause.txt",
+    "third_party/licenses/Apache-2.0.txt",
+    "third_party/licenses/gradle-NOTICE.txt",
 )
 ASSET_SOURCES = {
     **{
@@ -260,7 +269,8 @@ class ApkPublicationGateTest(unittest.TestCase):
                     {apk["name"] for apk in report["apks"]}, set(publisher.APK_NAMES)
                 )
                 self.assertEqual(
-                    [apk["verified_assets"] for apk in report["apks"]], [13] * 3
+                    [apk["verified_assets"] for apk in report["apks"]],
+                    [len(ASSET_SOURCES)] * 3,
                 )
 
         self.diagnostics = diagnostics.getvalue()
@@ -344,7 +354,7 @@ class ApkPublicationGateTest(unittest.TestCase):
     def test_valid_labelled_fixtures_verify_all_three_before_source_and_publication(
         self,
     ):
-        self.assertEqual(len(ASSET_SOURCES), 13)
+        self.assertEqual(len(ASSET_SOURCES), 22)
         self.invoke()
         for tool in ("aapt", "apksigner"):
             self.assertEqual(
