@@ -1,6 +1,6 @@
 [![Hermes Android 3.0.0 announcement](docs/images/hermes-android-3.0.0-hero.jpg)](https://github.com/rusty4444/hermes-android/releases/tag/v3.0.0)
 
-# Hermes Android v3.0.5
+# Hermes Android v3.0.6
 
 Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — chat with your Hermes sessions from a phone or tablet over local Wi-Fi or a private Tailscale network.
 
@@ -43,15 +43,15 @@ Ten fresh Android emulator captures, each using a different colour palette. Thes
 
 ## Current release
 
-**3.0.5** (base build **3009**) shows recognised scheduled-job setup as read-only Background task cards and fixes approval dialogs dismissing the wrong route. The production package, `com.hermesagent.hermes_android`, and signing identity stay the same. Export an encrypted configuration backup before updating; the matching production-signed APK upgrades 3.0.4 in place. Do not uninstall or clear app data.
+**3.0.6** (base build **3010**) keeps API-server turns alive when you background the phone mid-turn, and makes approval/input notifications generic so command details never reach the lock screen. The production package, `com.hermesagent.hermes_android`, and signing identity stay the same. Export an encrypted configuration backup before updating; the matching production-signed APK upgrades 3.0.5 in place. Do not uninstall or clear app data.
 
 | Download | Device | Version code |
 | --- | --- | --- |
-| [ARM64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.5/app-arm64-v8a-release.apk) | Most current Android phones/tablets | `30092` |
-| [ARMv7 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.5/app-armeabi-v7a-release.apk) | Older 32-bit ARM devices | `30091` |
-| [x86_64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.5/app-x86_64-release.apk) | x86_64 Android devices/emulators | `30093` |
+| [ARM64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.6/app-arm64-v8a-release.apk) | Most current Android phones/tablets | `30102` |
+| [ARMv7 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.6/app-armeabi-v7a-release.apk) | Older 32-bit ARM devices | `30101` |
+| [x86_64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.6/app-x86_64-release.apk) | x86_64 Android devices/emulators | `30103` |
 
-[Release and checksums](https://github.com/rusty4444/hermes-android/releases/tag/v3.0.5) · [Changes since 3.0.4](docs/releases/3.0.5.md) · [Full changelog](CHANGELOG.md)
+[Release and checksums](https://github.com/rusty4444/hermes-android/releases/tag/v3.0.6) · [Changes since 3.0.5](docs/releases/3.0.6.md) · [Full changelog](CHANGELOG.md)
 
 Debug builds use the separate `com.hermesagent.hermes_android.dev` package and Android debug certificate. Older production APKs have lower version codes; downgrading can require uninstalling and restoring a backup.
 
@@ -230,6 +230,13 @@ See [CHANGELOG.md](CHANGELOG.md) for the complete release history and
 [docs/HERMESAPK_DEVELOPMENT_LOG.md](docs/HERMESAPK_DEVELOPMENT_LOG.md) for the
 sanitized implementation and validation record.
 
+## What's new in v3.0.6
+
+- API-server (REST SSE) sends register as app-wide turn activity, so backgrounding the phone mid-turn no longer freezes the process and destroys the turn.
+- Approval and input notifications use generic body text — command details never reach the lock screen — with clearer connection attribution, nearby controls, accessible switch labelling and honest disable messaging. Thanks to @mordekai-lab for the notification work and regression tests.
+
+Read the [3.0.6 release notes](docs/releases/3.0.6.md) for scope and compatibility limits.
+
 ## What's new in v3.0.5
 
 - Show recognised scheduled-job setup and embedded skill instructions as neutral Background task cards, collapsed in Verbose Mode and hidden in conversation-only mode. Ordinary human input and raw stored history are unchanged.
@@ -244,15 +251,6 @@ Read the [3.0.5 release notes](docs/releases/3.0.5.md) for scope and compatibili
 - Keep the additional notices accessible offline and associated with the corresponding source distribution. Chat and gateway behaviour are unchanged.
 
 Read the [3.0.4 release notes](docs/releases/3.0.4.md) and [historical licence evidence](docs/licensing/README.md).
-
-## What's new in v3.0.3
-
-- Complete LCM context summaries use read-only **Background task** reports: collapsed in Verbose Mode, hidden in conversation-only mode, without changing raw history or ordinary messages.
-- Recovery-v2 Stop keeps observing its turn through wind-down. Stalled SSE bodies time out after 60 seconds without raw-body activity; keepalives renew the timer and uncertain prompts are never resent automatically.
-- Correct misleading session-paging metadata, rejected credential/Space persistence, optional share-intent startup failures and unsupported Project metadata.
-- Safely reclaim marked, unlocked old-process video staging on later video preparation; retain bytes when native disposal is unproven. Shared file classification and parser guard regressions preserve existing preview limits.
-
-Read the [3.0.3 release notes](docs/releases/3.0.3.md) and [all 30 audit dispositions](docs/audit-207/README.md) for scope, retained safety policies and unverified device behaviour.
 
 ## Features
 
@@ -699,7 +697,7 @@ cp build/app/outputs/flutter-apk/app-*-release.apk release-apks/
 block in `android/app/build.gradle.kts` derives per-ABI codes as
 `base * 10 + ABI code` (armeabi-v7a = 1, arm64-v8a = 2, x86_64 = 3), so the
 codes stay ordered armeabi-v7a < arm64-v8a < x86_64 as fdroiddata requires.
-For v3.0.5, base `3009` produces codes `30091`/`30092`/`30093`.
+For v3.0.6, base `3010` produces codes `30101`/`30102`/`30103`.
 Before publication, CI verifies all three actual APKs: package, version, ABI,
 effective code, production signer and required licence/source assets. Releases
 include checksums and exact-commit source/relink materials. Release-floor checks
@@ -818,7 +816,9 @@ Automated checks do not substitute for device validation; release notes list
 the checks performed.
 
 - **mordekai-lab** — fixed approval-dialog route ownership and added navigation
-  regression tests in PR #220 (v3.0.5). The original commit history is preserved.
+  regression tests in PR #220 (v3.0.5), then made mobile notifications clearer
+  and more private with regression tests in PR #224 (v3.0.6). The original
+  commit history is preserved.
 - **smhc** — contributed optional imported client certificates in PR #166, then
   improved Android/iOS certificate picking, protected-file password entry and
   loaded-certificate layout in PR #187, including a physical Android mTLS report.

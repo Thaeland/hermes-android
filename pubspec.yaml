@@ -1,7 +1,7 @@
 name: hermes_android
 description: "Hermes Agent — chat with your Hermes Gateway API Server over LAN. SSE streaming, Bearer auth, session management."
 publish_to: 'none'
-version: 3.0.5+3009
+version: 3.0.6+3010
 
 environment:
   sdk: ^3.12.0

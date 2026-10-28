@@ -4,6 +4,34 @@ All notable changes since v1.0.7 are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The [README](README.md)
 shows only the three latest releases.
 
+## [3.0.6] - 2026-10-29
+
+Release identity is `3.0.6+3010`, with production APK codes `30101`, `30102` and
+`30103`, above every 3.0.5 split. The production package and signing identity
+remain unchanged. Export an encrypted configuration backup, then install over
+the existing app without uninstalling or clearing data. See the
+[release notes](docs/releases/3.0.6.md).
+
+### Fixed
+
+- API-server (REST SSE) sends now register as app-wide turn activity, so
+  backgrounding the phone mid-turn no longer freezes the process and destroys
+  the turn (#225, #226).
+- Approval and input notifications use generic body text — command details no
+  longer reach the lock screen — with clearer connection attribution and state,
+  controls placed next to the settings they affect, accessible switch labelling
+  and honest disable messaging (#224).
+
+### Thanks
+
+- Thanks to @mordekai-lab for the notification clarity and privacy work and
+  regression tests in #224. Their original commit history is preserved.
+
+Hermes Agent assisted with review, integration, documentation and tests.
+Automated checks do not establish physical-phone acceptance. The blocked
+long-paste and stock-idle settlement PRs remain excluded; uncertain delivery is
+not automatically resent.
+
 ## [3.0.5] - 2026-10-28
 
 Release identity is `3.0.5+3009`, with production APK codes `30091`, `30092` and
