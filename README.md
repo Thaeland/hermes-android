@@ -238,7 +238,15 @@ sanitized implementation and validation record.
 - README release window now shows the three latest changelog releases, matching
   the release validation script.
 
-See [the 3.1.2 release notes](docs/releases/3.1.3.md) for scope and
+See [the 3.1.3 release notes](docs/releases/3.1.3.md) for scope and
+compatibility limits.
+
+## What's new in v3.1.2
+
+- README release window now shows the three latest changelog releases, matching
+  the release validation script.
+
+See [the 3.1.2 release notes](docs/releases/3.1.2.md) for scope and
 compatibility limits.
 
 ## What's new in v3.1.1
@@ -251,18 +259,6 @@ compatibility limits.
 
 See [the 3.1.1 release notes](docs/releases/3.1.1.md) for scope and
 compatibility limits.
-
-## What's new in v3.1.0
-
-- **Foreground hands-free voice:** opt-in, explicit-start Android **“Hey Hermes”** wake detection, one recognised prompt through normal chat admission, that turn's spoken reply, and a configurable 0–30 second follow-up window. Off by default; only listens while the current chat is visible. Navigation, account changes and backgrounding stop it without automatic restart; manual dictation remains draft-only. Wake detection is offline, but Android speech recognition, the selected voice and the gateway may use networks.
-- **Settings → Voice → Hands-free voice switch:** turns the feature off entirely — the start/stop control and in-chat voice controls disappear and a running session stops immediately. Re-enabling restores the controls but never restarts capture.
-- **Long pastes become `paste.txt` attachments** in Remote Gateway chats (over 3,000 UTF-16 code units, matching the Desktop threshold); short pastes and legacy REST stay inline.
-- **Stricter stock-idle settlement:** an idle stock turn settles as successful only on an owned completion receipt with exact text evidence; foreign completions can't manufacture success, and unproven receipt cases release as unknown instead of leaving the chat busy.
-
-See [setup, privacy and verification limits](docs/HANDS_FREE_VOICE.md) and the
-[detailed release notes](docs/releases/3.1.0.md). Thanks to @mannok for the
-hands-free proposal and @mordekai-lab for the stock-idle receipt work; Hermes
-Agent assisted with research, implementation and review.
 
 ## Features
 
