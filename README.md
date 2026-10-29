@@ -238,7 +238,15 @@ sanitized implementation and validation record.
 - README release window now shows the three latest changelog releases, matching
   the release validation script.
 
-See [the 3.1.5 release notes](docs/releases/3.1.6.md) for scope and
+See [the 3.1.6 release notes](docs/releases/3.1.6.md) for scope and
+compatibility limits.
+
+## What's new in v3.1.5
+
+- README release window now shows exactly the three latest changelog releases,
+  matching the release validation script.
+
+See [the 3.1.5 release notes](docs/releases/3.1.5.md) for scope and
 compatibility limits.
 
 ## What's new in v3.1.4
@@ -247,14 +255,6 @@ compatibility limits.
   matching the release validation script.
 
 See [the 3.1.4 release notes](docs/releases/3.1.4.md) for scope and
-compatibility limits.
-
-## What's new in v3.1.3
-
-- README release window now shows exactly the three latest changelog releases,
-  matching the release validation script.
-
-See [the 3.1.2 release notes](docs/releases/3.1.2.md) for scope and
 compatibility limits.
 
 ## Features
