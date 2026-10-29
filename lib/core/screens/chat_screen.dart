@@ -4450,6 +4450,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           StreamEvent(type: 'status.update', data: status),
           responseGeneration,
         ),
+        onApproval: (approval) {
+          if (!mounted || responseGeneration != _responseGeneration) return;
+          _showGatewayApproval(approval, responseGeneration);
+        },
         onDone: () async {
           if (!mounted || responseGeneration != _responseGeneration) return;
           // The SSE client requires an explicit successful protocol completion.
@@ -5290,6 +5294,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   Future<void> _respondToGatewayApproval(
     String choice, {
     String? requestId,
+    String? runId,
     bool Function()? isCurrent,
   }) async {
     final normal = _normalSession;
@@ -5323,14 +5328,30 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         false;
     if (handled) return;
     check();
-    if (gateway == null) {
-      throw StateError('The Desktop gateway session is no longer connected');
+    if (gateway != null) {
+      await gateway.respondToApproval(
+        sessionId: localSessionId,
+        choice: choice,
+        serverRequestId: requestId,
+      );
+      return;
     }
-    await gateway.respondToApproval(
-      sessionId: localSessionId,
-      choice: choice,
-      serverRequestId: requestId,
-    );
+    if (runId != null) {
+      final result = await _client.apiPost(
+        'v1/runs/$runId/approval',
+        body: {
+          'choice': choice,
+          ...? (requestId == null ? null : {'request_id': requestId}),
+        },
+      );
+      if (result['object'] != 'hermes.run.approval_response') {
+        throw Exception(
+          'Unexpected approval response: ${result['object']}',
+        );
+      }
+      return;
+    }
+    throw StateError('The Desktop gateway session is no longer connected');
   }
 
   /// Answers approvals that notification actions left pending for this
@@ -5571,7 +5592,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         _activeApprovalServerRequestId = null;
         return;
       }
-      if (_desktopGateway == null && _turnApplicationSession == null) {
+      final approvalRunId = request.runId;
+      if (_desktopGateway == null &&
+          _turnApplicationSession == null &&
+          approvalRunId == null) {
         _approvalDialogOpen = false;
         _activeApprovalServerRequestId = null;
         return;
@@ -5586,6 +5610,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
           onRespond: (choice) => _respondToGatewayApproval(
             choice.wireValue,
             requestId: serverRequestId,
+            runId: approvalRunId,
           ),
         ),
       );
