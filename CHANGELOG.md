@@ -4,45 +4,15 @@ All notable changes since v1.0.7 are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The [README](README.md)
 shows only the three latest releases.
 
-## [3.1.0-rc.2] - 2026-10-29
+## [3.1.0] - 2026-10-29
 
-The testing candidate is **3.1.0-rc.2** (base build **3012**). It is a GitHub
-prerelease, not the stable release; **3.0.6 remains latest stable**. Back up app
-settings before installing. The candidate keeps the production package and
-signer, upgrades every 3.0.x and 3.1.0-rc.1 split in place, and its split codes
-are **30121** (armeabi-v7a), **30122** (arm64-v8a) and **30123** (x86_64).
-Download it from the
-[RC2 testing release](https://github.com/rusty4444/hermes-android/releases/tag/v3.1.0-rc.2).
-
-### Added
-
-- A Settings → Voice switch turns the hands-free feature off entirely: the
-  “Hey Hermes” start/stop control and in-chat voice controls disappear, and a
-  running session stops immediately. Re-enabling restores the control surface
-  without restarting capture (#227, #228).
-
-### From 3.1.0-rc.1
-
-- Opt-in foreground Android hands-free voice (#142, #216).
-- Long pastes over 3,000 UTF-16 code units attach as `paste.txt` files in
-  Remote Gateway chats (#212).
-- Stock idle turns settle only on owned successful completion receipts (#221).
-
-Thanks to @mannok for #142 and @mordekai-lab for the stock-idle receipt policy
-work in #221. Hermes Agent assisted with research, implementation, review,
-documentation and tests. Physical-device acoustic, privacy, provider, battery,
-16 KB launch and clipboard-paste checks remain explicit acceptance limits, not
-promises. Phone acceptance is required before stable 3.1 promotion or
-GitLab/F-Droid updates.
-
-## [3.1.0-rc.1] - 2026-10-29
-
-The testing candidate is **3.1.0-rc.1** (base build **3011**). It is a GitHub
-prerelease, not the stable release; **3.0.6 remains latest stable**. Back up app
-settings before installing. The candidate keeps the production package and
-signer, upgrades every 3.0.x split in place, and its split codes are **30111**
-(armeabi-v7a), **30112** (arm64-v8a) and **30113** (x86_64). Download it from
-the [RC1 testing release](https://github.com/rusty4444/hermes-android/releases/tag/v3.1.0-rc.1).
+Stable promotion of RC2's application code. This entry covers **all changes
+since 3.0.6**, including RC1 and RC2. Release identity is `3.1.0+3013`;
+production APK codes are `30131`, `30132` and `30133`, above every 3.1 RC and
+every 3.0.x split. The production package, `com.hermesagent.hermes_android`,
+and signing identity remain unchanged. Export an encrypted configuration
+backup, then install over the existing app without uninstalling or clearing
+data. See the [detailed release notes](docs/releases/3.1.0.md).
 
 ### Added
 
@@ -52,6 +22,10 @@ the [RC1 testing release](https://github.com/rusty4444/hermes-android/releases/t
   by default and stops on navigation, backgrounding, account changes or errors;
   returning never restarts the microphone. Wake detection is offline, but the
   Android speech provider, selected voice and gateway may use networks.
+- A Settings → Voice switch turns the hands-free feature off entirely: the
+  “Hey Hermes” start/stop control and in-chat voice controls disappear, and a
+  running session stops immediately. Re-enabling restores the control surface
+  without restarting capture (#227, #228).
 - A shared, joinable native capture owner for Android manual dictation and
   hands-free input. Manual dictation remains draft-only. Bundled runtime/model
   provenance and licences accompany reproducible, hash-checked build inputs.
@@ -66,12 +40,18 @@ the [RC1 testing release](https://github.com/rusty4444/hermes-android/releases/t
   evidence, and an owned receipt without a durable response-row floor releases
   admission as unknown instead of leaving the chat busy indefinitely (#221).
 
-Thanks to @mannok for #142 and @mordekai-lab for the stock-idle receipt policy
-work in #221. Hermes Agent assisted with research, implementation, review,
-documentation and tests. Physical-device acoustic, privacy, provider, battery,
-16 KB launch and clipboard-paste checks remain explicit acceptance limits, not
-promises. Phone acceptance is required before stable 3.1 promotion or
-GitLab/F-Droid updates.
+### Thanks
+
+- Thanks to @mannok for the hands-free voice proposal (#142) and to
+  @mordekai-lab for the stock-idle receipt policy work and regression tests
+  in #221. Original commit histories are preserved.
+
+Hermes Agent assisted with research, implementation, independent review,
+documentation and tests. Automated checks do not establish physical-phone
+acceptance: microphone → STT → gateway → TTS behaviour, Android 14–16
+permission/privacy/lock scenarios, accents, noise, Bluetooth/car mode,
+battery/thermal measurements, clipboard-paste behaviour and physical 16 KB-page
+launch remain unverified limits, not promises.
 
 ## [3.0.6] - 2026-10-29
 

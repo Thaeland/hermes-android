@@ -1,6 +1,6 @@
 [![Hermes Android 3.0.0 announcement](docs/images/hermes-android-3.0.0-hero.jpg)](https://github.com/rusty4444/hermes-android/releases/tag/v3.0.0)
 
-# Hermes Android v3.0.6
+# Hermes Android v3.1.0
 
 Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — chat with your Hermes sessions from a phone or tablet over local Wi-Fi or a private Tailscale network.
 
@@ -43,15 +43,15 @@ Ten fresh Android emulator captures, each using a different colour palette. Thes
 
 ## Current release
 
-**3.0.6** (base build **3010**) keeps API-server turns alive when you background the phone mid-turn, and makes approval/input notifications generic so command details never reach the lock screen. The production package, `com.hermesagent.hermes_android`, and signing identity stay the same. Export an encrypted configuration backup before updating; the matching production-signed APK upgrades 3.0.5 in place. Do not uninstall or clear app data.
+**3.1.0** (base build **3013**) adds opt-in foreground **“Hey Hermes”** hands-free voice with spoken replies, a Settings switch to hide the voice controls, `paste.txt` attachments for long pastes, and stricter stock-idle settlement that only accepts owned completion receipts. The production package, `com.hermesagent.hermes_android`, and signing identity stay the same. Export an encrypted configuration backup before updating; the matching production-signed APK upgrades 3.0.6 and every 3.1 RC in place. Do not uninstall or clear app data.
 
 | Download | Device | Version code |
 | --- | --- | --- |
-| [ARM64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.6/app-arm64-v8a-release.apk) | Most current Android phones/tablets | `30102` |
-| [ARMv7 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.6/app-armeabi-v7a-release.apk) | Older 32-bit ARM devices | `30101` |
-| [x86_64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.0.6/app-x86_64-release.apk) | x86_64 Android devices/emulators | `30103` |
+| [ARM64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.1.0/app-arm64-v8a-release.apk) | Most current Android phones/tablets | `30132` |
+| [ARMv7 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.1.0/app-armeabi-v7a-release.apk) | Older 32-bit ARM devices | `30131` |
+| [x86_64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.1.0/app-x86_64-release.apk) | x86_64 Android devices/emulators | `30133` |
 
-[Release and checksums](https://github.com/rusty4444/hermes-android/releases/tag/v3.0.6) · [Changes since 3.0.5](docs/releases/3.0.6.md) · [Full changelog](CHANGELOG.md)
+[Release and checksums](https://github.com/rusty4444/hermes-android/releases/tag/v3.1.0) · [Changes since 3.0.6](docs/releases/3.1.0.md) · [Full changelog](CHANGELOG.md)
 
 Debug builds use the separate `com.hermesagent.hermes_android.dev` package and Android debug certificate. Older production APKs have lower version codes; downgrading can require uninstalling and restoring a backup.
 
@@ -133,34 +133,6 @@ rows and offers Retry rather than claiming the archive is empty.
   remain downloadable. History scans are incremental and downloads are lazy,
   with a 25 MiB per-file limit. This is not a complete attachment or
   filesystem catalogue. See [Browsing chat assets](docs/chat-assets.md).
-
-## 3.1 testing release — RC2
-
-The testing candidate is **3.1.0-rc.2** (base build **3012**). It is a GitHub
-prerelease, not the stable release; **3.0.6 remains latest stable**. Back up app
-settings before installing. RC2 uses the existing production package and signer
-and can upgrade every 3.0.x and 3.1.0-rc.1 install in place. Its split codes are
-**30121** (armeabi-v7a), **30122** (arm64-v8a) and **30123** (x86_64).
-
-RC2 adds a Settings → Voice switch that turns hands-free off entirely — the
-“Hey Hermes” start/stop control and in-chat voice controls disappear and a
-running session stops immediately; re-enabling never restarts capture. It also
-keeps RC1's explicit-start Android **“Hey Hermes”** wake detection with spoken
-replies and a configurable 0–30 second follow-up window — off by default, only
-listening while the current chat is visible; navigation, account changes and
-backgrounding stop it without automatic restart — long pastes over 3,000 UTF-16
-code units attaching as `paste.txt` files in Remote Gateway chats, and stricter
-stock-idle settlement that only accepts owned completion receipts. Manual
-dictation remains draft-only. Download it from the
-[RC2 testing release](https://github.com/rusty4444/hermes-android/releases/tag/v3.1.0-rc.2).
-Phone acceptance is required before stable 3.1 promotion or GitLab/F-Droid updates.
-
-Wake detection is offline, but Android speech recognition, the selected voice
-and the gateway may use networks. This is not locked-phone or Android Auto
-support, and physical-device acoustic/battery checks remain outstanding.
-
-See [setup, privacy and verification limits](docs/HANDS_FREE_VOICE.md). Thanks to
-@mannok for the proposal; Hermes Agent assisted with research and implementation.
 
 ## Remote Gateway edition highlights
 
@@ -261,6 +233,18 @@ See [CHANGELOG.md](CHANGELOG.md) for the complete release history and
 [docs/HERMESAPK_DEVELOPMENT_LOG.md](docs/HERMESAPK_DEVELOPMENT_LOG.md) for the
 sanitized implementation and validation record.
 
+## What's new in v3.1.0
+
+- **Foreground hands-free voice:** opt-in, explicit-start Android **“Hey Hermes”** wake detection, one recognised prompt through normal chat admission, that turn's spoken reply, and a configurable 0–30 second follow-up window. Off by default; only listens while the current chat is visible. Navigation, account changes and backgrounding stop it without automatic restart; manual dictation remains draft-only. Wake detection is offline, but Android speech recognition, the selected voice and the gateway may use networks.
+- **Settings → Voice → Hands-free voice switch:** turns the feature off entirely — the start/stop control and in-chat voice controls disappear and a running session stops immediately. Re-enabling restores the controls but never restarts capture.
+- **Long pastes become `paste.txt` attachments** in Remote Gateway chats (over 3,000 UTF-16 code units, matching the Desktop threshold); short pastes and legacy REST stay inline.
+- **Stricter stock-idle settlement:** an idle stock turn settles as successful only on an owned completion receipt with exact text evidence; foreign completions can't manufacture success, and unproven receipt cases release as unknown instead of leaving the chat busy.
+
+See [setup, privacy and verification limits](docs/HANDS_FREE_VOICE.md) and the
+[detailed release notes](docs/releases/3.1.0.md). Thanks to @mannok for the
+hands-free proposal and @mordekai-lab for the stock-idle receipt work; Hermes
+Agent assisted with research, implementation and review.
+
 ## What's new in v3.0.6
 
 - API-server (REST SSE) sends register as app-wide turn activity, so backgrounding the phone mid-turn no longer freezes the process and destroys the turn.
@@ -274,14 +258,6 @@ Read the [3.0.6 release notes](docs/releases/3.0.6.md) for scope and compatibili
 - Keep approval-dialog dismissal on its originating route, without popping the chat or a newer prompt. Thanks to @mordekai-lab for the fix and regression tests.
 
 Read the [3.0.5 release notes](docs/releases/3.0.5.md) for scope and compatibility limits.
-
-## What's new in v3.0.4
-
-- Document the historical MIT declaration and contribution terms rather than treating an unanswered confirmation request as an absent grant.
-- Preserve separate Graphify, Nous Research template, Gradle wrapper and Flutter scaffold notices, alongside the existing font and Library terms.
-- Keep the additional notices accessible offline and associated with the corresponding source distribution. Chat and gateway behaviour are unchanged.
-
-Read the [3.0.4 release notes](docs/releases/3.0.4.md) and [historical licence evidence](docs/licensing/README.md).
 
 ## Features
 
