@@ -4,7 +4,31 @@ All notable changes since v1.0.7 are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The [README](README.md)
 shows only the three latest releases.
 
+## [3.1.5] - 2026-10-29
+
+Stable patch for the v3.1.4 release window README. Release identity is
+`3.1.5+3018`; production APK codes are `30181`, `30182` and `30183`, above
+every 3.1.4 and 3.1.3 split. The production package and signing identity
+remain unchanged. Install over the existing app without uninstalling.
+
+### Fixed
+
+- README release window now shows exactly the three latest changelog releases,
+  matching the release validation script.
+
 ## [3.1.4] - 2026-10-29
+
+Stable patch for the v3.1.3 release window README. Release identity is
+`3.1.4+3017`; production APK codes are `30171`, `30172` and `30173`, above
+every 3.1.3 and 3.1.2 split. The production package and signing identity
+remain unchanged. Install over the existing app without uninstalling.
+
+### Fixed
+
+- README release window now shows exactly the three latest changelog releases,
+  matching the release validation script.
+
+## [3.1.3] - 2026-10-29
 
 Stable patch for the v3.1.3 release window README. Release identity is
 `3.1.4+3017`; production APK codes are `30171`, `30172` and `30173`, above
