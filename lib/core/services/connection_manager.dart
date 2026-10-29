@@ -1718,6 +1718,9 @@ class GatewayChatClient {
     if (eventType == 'hermes.status') {
       return _SseFrame(status: parsed);
     }
+    if (eventType == 'approval.request') {
+      return _SseFrame(approval: parsed);
+    }
     final choices = parsed['choices'];
     // Usage-only chunks and extension events do not carry completion evidence.
     if (choices == null || (choices is List && choices.isEmpty)) {
@@ -1793,6 +1796,7 @@ class GatewayChatClient {
     ToolProgressCallback? onToolProgress,
     void Function(String reasoning)? onReasoning,
     void Function(Map<String, dynamic> status)? onStatus,
+    void Function(Map<String, dynamic> approval)? onApproval,
     required void Function() onDone,
     required void Function(String error) onError,
   }) async {
@@ -1897,6 +1901,10 @@ class GatewayChatClient {
         if (!ownsStream()) return;
         if (frame.status case final status?) {
           onStatus?.call(status);
+        }
+        if (!ownsStream()) return;
+        if (frame.approval case final approval?) {
+          onApproval?.call(approval);
         }
         if (!ownsStream()) return;
         if (frame.reasoning case final reasoning? when reasoning.isNotEmpty) {
@@ -2034,6 +2042,7 @@ class _SseFrame {
   final String? reasoning;
   final Map<String, dynamic>? toolProgress;
   final Map<String, dynamic>? status;
+  final Map<String, dynamic>? approval;
   final String? error;
   final bool successfulFinish;
   final bool hasToolCalls;
@@ -2044,6 +2053,7 @@ class _SseFrame {
     this.reasoning,
     this.toolProgress,
     this.status,
+    this.approval,
     this.error,
     this.successfulFinish = false,
     this.hasToolCalls = false,
