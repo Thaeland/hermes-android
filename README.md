@@ -1,6 +1,6 @@
 [![Hermes Android 3.0.0 announcement](docs/images/hermes-android-3.0.0-hero.jpg)](https://github.com/rusty4444/hermes-android/releases/tag/v3.0.0)
 
-# Hermes Android v3.1.5
+# Hermes Android v3.1.6
 
 Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — chat with your Hermes sessions from a phone or tablet over local Wi-Fi or a private Tailscale network.
 
@@ -43,15 +43,15 @@ Ten fresh Android emulator captures, each using a different colour palette. Thes
 
 ## Current release
 
-**3.1.5** (base build **3018**) updates the README release window so the three latest changelog releases are displayed correctly. The production package, `com.hermesagent.hermes_android`, and signing identity stay the same. Export an encrypted configuration backup before updating; the matching production-signed APK upgrades 3.1.4 and every 3.1 RC in place. Do not uninstall or clear app data.
+**3.1.6** (base build **3019**) updates the README release window so the three latest changelog releases are displayed correctly. The production package, `com.hermesagent.hermes_android`, and signing identity stay the same. Export an encrypted configuration backup before updating; the matching production-signed APK upgrades 3.1.5 and every 3.1 RC in place. Do not uninstall or clear app data.
 
 | Download | Device | Version code |
 | --- | --- | --- |
-| [ARM64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.1.5/app-arm64-v8a-release.apk) | Most current Android phones/tablets | `30182` |
-| [ARMv7 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.1.5/app-armeabi-v7a-release.apk) | Older 32-bit ARM devices | `30181` |
-| [x86_64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.1.5/app-x86_64-release.apk) | x86_64 Android devices/emulators | `30183` |
+| [ARM64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.1.6/app-arm64-v8a-release.apk) | Most current Android phones/tablets | `30192` |
+| [ARMv7 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.1.6/app-armeabi-v7a-release.apk) | Older 32-bit ARM devices | `30191` |
+| [x86_64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.1.6/app-x86_64-release.apk) | x86_64 Android devices/emulators | `30193` |
 
-[Release and checksums](https://github.com/rusty4444/hermes-android/releases/tag/v3.1.2) · [Changes since 3.1.1](docs/releases/3.1.5.md) · [Full changelog](CHANGELOG.md)
+[Release and checksums](https://github.com/rusty4444/hermes-android/releases/tag/v3.1.2) · [Changes since 3.1.1](docs/releases/3.1.6.md) · [Full changelog](CHANGELOG.md)
 
 Debug builds use the separate `com.hermesagent.hermes_android.dev` package and Android debug certificate. Older production APKs have lower version codes; downgrading can require uninstalling and restoring a backup.
 
@@ -233,12 +233,12 @@ See [CHANGELOG.md](CHANGELOG.md) for the complete release history and
 [docs/HERMESAPK_DEVELOPMENT_LOG.md](docs/HERMESAPK_DEVELOPMENT_LOG.md) for the
 sanitized implementation and validation record.
 
-## What's new in v3.1.5
+## What's new in v3.1.6
 
 - README release window now shows the three latest changelog releases, matching
   the release validation script.
 
-See [the 3.1.5 release notes](docs/releases/3.1.5.md) for scope and
+See [the 3.1.5 release notes](docs/releases/3.1.6.md) for scope and
 compatibility limits.
 
 ## What's new in v3.1.4
