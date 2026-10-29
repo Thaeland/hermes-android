@@ -233,6 +233,17 @@ See [CHANGELOG.md](CHANGELOG.md) for the complete release history and
 [docs/HERMESAPK_DEVELOPMENT_LOG.md](docs/HERMESAPK_DEVELOPMENT_LOG.md) for the
 sanitized implementation and validation record.
 
+## What's new in v3.1.1
+
+- REST/API-server approval path restored: approval requests now reach the
+  approval dialog over API-server SSE, and the responder falls back to
+  `POST /v1/runs/{run_id}/approval` when no Desktop Gateway session is
+  available. Thanks to @igitur for the bug report and server-side frame
+  evidence.
+
+See [the 3.1.1 release notes](docs/releases/3.1.1.md) for scope and
+compatibility limits.
+
 ## What's new in v3.1.0
 
 - **Foreground hands-free voice:** opt-in, explicit-start Android **“Hey Hermes”** wake detection, one recognised prompt through normal chat admission, that turn's spoken reply, and a configurable 0–30 second follow-up window. Off by default; only listens while the current chat is visible. Navigation, account changes and backgrounding stop it without automatic restart; manual dictation remains draft-only. Wake detection is offline, but Android speech recognition, the selected voice and the gateway may use networks.
@@ -251,13 +262,6 @@ Agent assisted with research, implementation and review.
 - Approval and input notifications use generic body text — command details never reach the lock screen — with clearer connection attribution, nearby controls, accessible switch labelling and honest disable messaging. Thanks to @mordekai-lab for the notification work and regression tests.
 
 Read the [3.0.6 release notes](docs/releases/3.0.6.md) for scope and compatibility limits.
-
-## What's new in v3.0.5
-
-- Show recognised scheduled-job setup and embedded skill instructions as neutral Background task cards, collapsed in Verbose Mode and hidden in conversation-only mode. Ordinary human input and raw stored history are unchanged.
-- Keep approval-dialog dismissal on its originating route, without popping the chat or a newer prompt. Thanks to @mordekai-lab for the fix and regression tests.
-
-Read the [3.0.5 release notes](docs/releases/3.0.5.md) for scope and compatibility limits.
 
 ## Features
 
