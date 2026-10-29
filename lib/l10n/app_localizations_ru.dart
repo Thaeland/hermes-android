@@ -85,6 +85,13 @@ class AppLocalizationsRu extends AppLocalizations {
       'Скажите «Hey Hermes», дождитесь «Готово», затем говорите. Нет захвата одной фразой или предзаписи. После выдачи разрешения вне приложения нажмите Начать снова.';
 
   @override
+  String get hands_free_settings_title => 'Голосовой режим без рук';
+
+  @override
+  String get hands_free_settings_subtitle =>
+      'Показывает кнопку запуска «Hey Hermes» в чатах. Отключение останавливает текущий сеанс.';
+
+  @override
   String get hands_free_timing_limit =>
       'Окно продолжения — максимум, не минимум. Android может остановиться раньше. Тишина возвращает локальную активацию без повторных запусков распознавания.';
 

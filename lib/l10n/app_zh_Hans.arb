@@ -22,6 +22,8 @@
   "hands_free_error_action": "请检查麦克风权限、语音服务、回复声音和连接，再点击停止并重新开始。不会自动重发。",
   "hands_free_disclosure": "唤醒检测在 CPU 上离线运行。Android 语音识别、所选声音和网关可能使用网络。聆听会消耗电量，也可能误触发。聊天被遮挡、关闭或离开前台时停止，返回后不会自动重启。手动听写仍是可编辑的草稿。",
   "hands_free_ready_cue": "说“Hey Hermes”，等待就绪提示后再说话。不支持一口气连续输入或预录音。如果授权对话框使应用离开前台，授权后请再次点击开始。",
+  "hands_free_settings_title": "免提语音",
+  "hands_free_settings_subtitle": "在聊天中显示“Hey Hermes”启动控件。关闭会停止正在进行的免提会话。",
   "hands_free_timing_limit": "后续聆听时间是上限，不是下限。Android 可能提前结束。无语音时返回本地唤醒检测，不会反复重启识别。",
   "hands_free_followup_off": "后续聆听已关闭 — 每次提问请说 Hey Hermes",
   "hands_free_start_blocked": "需要空草稿、无附件、空闲且已连接的聊天，并启用语音回复。请先结束手动语音操作。",

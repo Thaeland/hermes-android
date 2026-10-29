@@ -8,6 +8,7 @@ import '../services/app_licenses.dart';
 import '../services/config_backup_io.dart';
 import '../services/config_backup_service.dart';
 import '../services/connection_manager.dart';
+import '../services/hands_free_preference.dart';
 import '../services/notification_prefs.dart';
 import '../widgets/background_work_settings.dart';
 import '../services/turn_notification_service.dart';
@@ -388,6 +389,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         // ---- Section: Voice ----
         _buildSectionHeader(context.l10n.voice),
         _VoicePicker(),
+        const SizedBox(height: 8),
+        const _HandsFreeToggle(),
         const SizedBox(height: 16),
 
         // ---- Section: Session Sources ----
@@ -736,6 +739,26 @@ class _VerboseToggleState extends State<_VerboseToggle> {
         secondary: const Icon(Icons.terminal),
         value: _verbose,
         onChanged: _set,
+      ),
+    );
+  }
+}
+
+class _HandsFreeToggle extends StatelessWidget {
+  const _HandsFreeToggle();
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<bool>(
+      valueListenable: handsFreeEnabled,
+      builder: (context, enabled, _) => Card(
+        child: SwitchListTile(
+          secondary: const Icon(Icons.record_voice_over_outlined),
+          title: Text(context.l10n.hands_free_settings_title),
+          subtitle: Text(context.l10n.hands_free_settings_subtitle),
+          value: enabled,
+          onChanged: (on) => unawaited(HandsFreePreferenceStore.setEnabled(on)),
+        ),
       ),
     );
   }

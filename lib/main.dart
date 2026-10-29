@@ -25,6 +25,7 @@ import 'core/services/mobile_push_service.dart';
 import 'core/services/notification_approval_authority.dart';
 import 'core/services/connection_mutation_barrier.dart';
 import 'core/services/notification_prefs.dart';
+import 'core/services/hands_free_preference.dart';
 import 'core/services/text_size_preference.dart';
 import 'core/services/theme_preference.dart';
 import 'core/services/turn_notification_service.dart';
@@ -424,6 +425,7 @@ class HermesAppState extends State<HermesApp> with WidgetsBindingObserver {
       _rootFrameReady = true;
       unawaited(_loadBackgroundPolicy());
       unawaited(NotificationPrefsStore.load());
+      unawaited(HandsFreePreferenceStore.load());
       _restoreNormalSessions();
       // The singleton is process-owned, not disposed with a replaceable root.
       unawaited(

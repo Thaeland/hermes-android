@@ -13,6 +13,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:uuid/uuid.dart';
 import '../controllers/hands_free_conversation_controller.dart';
+import '../services/hands_free_preference.dart';
 import '../services/hands_free_voice_platform.dart';
 import '../services/android_voice_composer_adapter.dart';
 import '../services/hands_free_speech.dart';
@@ -765,6 +766,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     )..addListener(_onVoiceComposerChanged);
     _voiceBound = true;
     handsFreeRouteObserver.addListener(_onVoiceRouteChanged);
+    handsFreeEnabled.addListener(_onHandsFreeEnabledChanged);
     ConnectionMutationBarrier.addListener(_onVoiceAccountChanged);
     _attachmentDrafts
       ..addAll(widget.initialAttachmentDrafts)
@@ -1459,6 +1461,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     _manualAudioIntent++;
     _voiceBound = false;
     handsFreeRouteObserver.removeListener(_onVoiceRouteChanged);
+    handsFreeEnabled.removeListener(_onHandsFreeEnabledChanged);
     ConnectionMutationBarrier.removeListener(_onVoiceAccountChanged);
     _handsFree
       ..removeListener(_onVoiceComposerChanged)
@@ -2015,7 +2018,26 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
+  void _onHandsFreeEnabledChanged() {
+    if (!handsFreeEnabled.value) {
+      // The user turned the feature off in Settings: revoke consent immediately
+      // and let the composer/control surface disappear. Disabling never starts
+      // capture, and re-enabling never restarts it.
+      if (_handsFree.active || _handsFree.state == HandsFreeState.error) {
+        unawaited(
+          _handsFree
+              .stop(reason: HandsFreeStopReason.user)
+              .catchError((Object _) {}),
+        );
+      }
+    }
+    // Rebuild on both directions: the control surface must reappear when the
+    // feature is switched back on.
+    if (mounted) setState(() {});
+  }
+
   Future<void> _startHandsFree() async {
+    if (!handsFreeEnabled.value) return;
     final authority = _captureVoiceAuthority();
     if (!_canStartHandsFree(authority)) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -6642,7 +6664,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                           ),
                         ),
                       ),
-                    if (_handsFreeSupported &&
+                    if (handsFreeEnabled.value &&
+                        _handsFreeSupported &&
                         !_voiceComposer.listening &&
                         (_handsFree.active ||
                             _handsFree.state == HandsFreeState.error))
@@ -6819,6 +6842,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   }
 
   Widget? _buildHandsFreeComposerAction() {
+    // The feature is switched off in Settings: hide the control entirely. A
+    // session that is still winding down after the switch keeps its Stop
+    // reachable until the stop lands.
+    if (!handsFreeEnabled.value && !_handsFree.active) return null;
     if (_handsFree.active || _handsFree.state == HandsFreeState.error) {
       return IconButton(
         key: const Key('hands-free-quick-stop'),

@@ -85,6 +85,13 @@ class AppLocalizationsFr extends AppLocalizations {
       'Dites « Hey Hermes », attendez « Prêt », puis parlez. Pas de capture d’un seul souffle ni d’audio préalable. Après une autorisation qui quitte l’app, appuyez à nouveau sur Démarrer.';
 
   @override
+  String get hands_free_settings_title => 'Voix mains libres';
+
+  @override
+  String get hands_free_settings_subtitle =>
+      'Affiche la commande de démarrage « Hey Hermes » dans les discussions. La désactiver arrête toute session mains libres en cours.';
+
+  @override
   String get hands_free_timing_limit =>
       'La fenêtre de suivi est une durée maximale, non minimale. Android peut s’arrêter plus tôt. Le silence ramène à l’activation locale sans redémarrages répétés de reconnaissance.';
 

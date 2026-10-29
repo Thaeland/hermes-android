@@ -22,6 +22,8 @@
   "hands_free_error_action": "Confira microfone, serviço de voz, voz da resposta e conexão. Toque em Parar e Iniciar. Nada é reenviado.",
   "hands_free_disclosure": "A ativação funciona offline na CPU. O reconhecimento Android, a voz escolhida e o gateway podem usar redes. A escuta consome bateria e pode ativar por engano. Para ao cobrir ou fechar o chat ou sair do primeiro plano, sem reinício automático. O ditado manual continua como rascunho editável.",
   "hands_free_ready_cue": "Diga “Hey Hermes”, espere por “Pronto” e fale. Sem captura na mesma frase nem áudio anterior. Se a permissão sair do app, toque em Iniciar novamente após concedê-la.",
+  "hands_free_settings_title": "Voz mãos-livres",
+  "hands_free_settings_subtitle": "Mostra o controle de início \"Hey Hermes\" nos chats. Desligar interrompe qualquer sessão mãos-livres em andamento.",
   "hands_free_timing_limit": "A janela de continuação é um máximo, não um mínimo. O Android pode parar antes. O silêncio volta à ativação local sem reinícios repetidos do reconhecimento.",
   "hands_free_followup_off": "Continuação desativada — diga Hey Hermes para cada mensagem",
   "hands_free_start_blocked": "Requer rascunho vazio, sem anexos, chat conectado e sem atividade e respostas faladas ativas. Termine primeiro as ações de voz manuais.",

@@ -22,6 +22,8 @@
   "hands_free_error_action": "Check microphone permission, speech service, reply voice and connection, then press Stop and Start to retry. Nothing is resent.",
   "hands_free_disclosure": "Wake detection runs offline on the CPU. Android speech recognition, the selected reply voice and gateway may use networks. Listening uses battery and false activations are possible. Stops when this chat is covered, closed or no longer foreground; reopening never restarts it. Manual dictation stays an editable draft.",
   "hands_free_ready_cue": "Say “Hey Hermes”, wait for “Ready — speak now”, then speak. No same-breath capture or pre-roll. If permission setup leaves the app, press Start again after granting it.",
+  "hands_free_settings_title": "Hands-free voice",
+  "hands_free_settings_subtitle": "Show the “Hey Hermes” start control in chats. Turning it off stops any running hands-free session.",
   "hands_free_timing_limit": "The follow-up window is a maximum, not a minimum. Android may stop earlier. Silence returns to local wake listening without repeated recognition restarts.",
   "hands_free_followup_off": "Follow-up off — say Hey Hermes for each prompt",
   "hands_free_start_blocked": "Start requires an empty draft, no attachments, an idle connected chat and spoken replies enabled. Finish any manual voice action first.",
