@@ -134,22 +134,25 @@ rows and offers Retry rather than claiming the archive is empty.
   with a 25 MiB per-file limit. This is not a complete attachment or
   filesystem catalogue. See [Browsing chat assets](docs/chat-assets.md).
 
-## 3.1 testing release — RC1
+## 3.1 testing release — RC2
 
-The testing candidate is **3.1.0-rc.1** (base build **3011**). It is a GitHub
+The testing candidate is **3.1.0-rc.2** (base build **3012**). It is a GitHub
 prerelease, not the stable release; **3.0.6 remains latest stable**. Back up app
-settings before installing. RC1 uses the existing production package and signer
-and can upgrade every 3.0.x install in place. Its split codes are **30111**
-(armeabi-v7a), **30112** (arm64-v8a) and **30113** (x86_64).
+settings before installing. RC2 uses the existing production package and signer
+and can upgrade every 3.0.x and 3.1.0-rc.1 install in place. Its split codes are
+**30121** (armeabi-v7a), **30122** (arm64-v8a) and **30123** (x86_64).
 
-RC1 brings explicit-start Android **“Hey Hermes”** wake detection with spoken
+RC2 adds a Settings → Voice switch that turns hands-free off entirely — the
+“Hey Hermes” start/stop control and in-chat voice controls disappear and a
+running session stops immediately; re-enabling never restarts capture. It also
+keeps RC1's explicit-start Android **“Hey Hermes”** wake detection with spoken
 replies and a configurable 0–30 second follow-up window — off by default, only
 listening while the current chat is visible; navigation, account changes and
 backgrounding stop it without automatic restart — long pastes over 3,000 UTF-16
 code units attaching as `paste.txt` files in Remote Gateway chats, and stricter
 stock-idle settlement that only accepts owned completion receipts. Manual
 dictation remains draft-only. Download it from the
-[RC1 testing release](https://github.com/rusty4444/hermes-android/releases/tag/v3.1.0-rc.1).
+[RC2 testing release](https://github.com/rusty4444/hermes-android/releases/tag/v3.1.0-rc.2).
 Phone acceptance is required before stable 3.1 promotion or GitLab/F-Droid updates.
 
 Wake detection is offline, but Android speech recognition, the selected voice
