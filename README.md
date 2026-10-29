@@ -264,13 +264,6 @@ See [setup, privacy and verification limits](docs/HANDS_FREE_VOICE.md) and the
 hands-free proposal and @mordekai-lab for the stock-idle receipt work; Hermes
 Agent assisted with research, implementation and review.
 
-## What's new in v3.0.6
-
-- API-server (REST SSE) sends register as app-wide turn activity, so backgrounding the phone mid-turn no longer freezes the process and destroys the turn.
-- Approval and input notifications use generic body text — command details never reach the lock screen — with clearer connection attribution, nearby controls, accessible switch labelling and honest disable messaging. Thanks to @mordekai-lab for the notification work and regression tests.
-
-Read the [3.0.6 release notes](docs/releases/3.0.6.md) for scope and compatibility limits.
-
 ## Features
 
 - **Hermes chat on Android** — browse sessions, create new chats, and send prompts to your Hermes Agent.
