@@ -4,6 +4,26 @@ All notable changes since v1.0.7 are documented here. This project adheres to
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The [README](README.md)
 shows only the three latest releases.
 
+## [3.1.1] - 2026-10-29
+
+Stable patch for the REST/API-server approval path. Release identity is
+`3.1.1+3014`; production APK codes are `30141`, `30142` and `30143`, above
+every 3.1.0 and 3.1 RC split. The production package and signing identity
+remain unchanged. Install over the existing app without uninstalling.
+
+### Fixed
+
+- REST/API-server transport now handles `event: approval.request` frames
+  instead of crashing on the non-object `choices` list. Approval frames are
+  forwarded into the existing approval dialog, and the responder falls back to
+  `POST /v1/runs/{run_id}/approval` when no Desktop Gateway session is
+  available (#229).
+
+### Thanks
+
+- Thanks to @igitur for the detailed bug report and server-side frame evidence
+  for #229.
+
 ## [3.1.0] - 2026-10-29
 
 Stable promotion of RC2's application code. This entry covers **all changes

@@ -1,6 +1,6 @@
 [![Hermes Android 3.0.0 announcement](docs/images/hermes-android-3.0.0-hero.jpg)](https://github.com/rusty4444/hermes-android/releases/tag/v3.0.0)
 
-# Hermes Android v3.1.0
+# Hermes Android v3.1.1
 
 Android client for [Hermes Agent](https://hermes-agent.nousresearch.com/) — chat with your Hermes sessions from a phone or tablet over local Wi-Fi or a private Tailscale network.
 
@@ -43,15 +43,15 @@ Ten fresh Android emulator captures, each using a different colour palette. Thes
 
 ## Current release
 
-**3.1.0** (base build **3013**) adds opt-in foreground **“Hey Hermes”** hands-free voice with spoken replies, a Settings switch to hide the voice controls, `paste.txt` attachments for long pastes, and stricter stock-idle settlement that only accepts owned completion receipts. The production package, `com.hermesagent.hermes_android`, and signing identity stay the same. Export an encrypted configuration backup before updating; the matching production-signed APK upgrades 3.0.6 and every 3.1 RC in place. Do not uninstall or clear app data.
+**3.1.1** (base build **3014**) restores the REST/API-server approval path. Approval requests now reach the approval dialog over API-server SSE, and the responder falls back to `POST /v1/runs/{run_id}/approval` when no Desktop Gateway session is available. The production package, `com.hermesagent.hermes_android`, and signing identity stay the same. Export an encrypted configuration backup before updating; the matching production-signed APK upgrades 3.1.0 and every 3.1 RC in place. Do not uninstall or clear app data.
 
 | Download | Device | Version code |
 | --- | --- | --- |
-| [ARM64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.1.0/app-arm64-v8a-release.apk) | Most current Android phones/tablets | `30132` |
-| [ARMv7 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.1.0/app-armeabi-v7a-release.apk) | Older 32-bit ARM devices | `30131` |
-| [x86_64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.1.0/app-x86_64-release.apk) | x86_64 Android devices/emulators | `30133` |
+| [ARM64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.1.1/app-arm64-v8a-release.apk) | Most current Android phones/tablets | `30142` |
+| [ARMv7 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.1.1/app-armeabi-v7a-release.apk) | Older 32-bit ARM devices | `30141` |
+| [x86_64 APK](https://github.com/rusty4444/hermes-android/releases/download/v3.1.1/app-x86_64-release.apk) | x86_64 Android devices/emulators | `30143` |
 
-[Release and checksums](https://github.com/rusty4444/hermes-android/releases/tag/v3.1.0) · [Changes since 3.0.6](docs/releases/3.1.0.md) · [Full changelog](CHANGELOG.md)
+[Release and checksums](https://github.com/rusty4444/hermes-android/releases/tag/v3.1.1) · [Changes since 3.1.0](docs/releases/3.1.1.md) · [Full changelog](CHANGELOG.md)
 
 Debug builds use the separate `com.hermesagent.hermes_android.dev` package and Android debug certificate. Older production APKs have lower version codes; downgrading can require uninstalling and restoring a backup.
 
@@ -822,6 +822,9 @@ details in v2.1.33. Existing contributor credits below remain unchanged.
 Automated checks do not substitute for device validation; release notes list
 the checks performed.
 
+- **igitur** — reported the REST/API-server approval path regression (#229) with
+  server-side frame evidence and a precise reproduction of the malformed SSE
+  choices crash.
 - **mordekai-lab** — fixed approval-dialog route ownership and added navigation
   regression tests in PR #220 (v3.0.5), then made mobile notifications clearer
   and more private with regression tests in PR #224 (v3.0.6). The original
