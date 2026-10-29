@@ -246,6 +246,18 @@ abstract class AppLocalizations {
   /// **'Say “Hey Hermes”, wait for “Ready — speak now”, then speak. No same-breath capture or pre-roll. If permission setup leaves the app, press Start again after granting it.'**
   String get hands_free_ready_cue;
 
+  /// No description provided for @hands_free_settings_title.
+  ///
+  /// In en, this message translates to:
+  /// **'Hands-free voice'**
+  String get hands_free_settings_title;
+
+  /// No description provided for @hands_free_settings_subtitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Show the “Hey Hermes” start control in chats. Turning it off stops any running hands-free session.'**
+  String get hands_free_settings_subtitle;
+
   /// No description provided for @hands_free_timing_limit.
   ///
   /// In en, this message translates to:

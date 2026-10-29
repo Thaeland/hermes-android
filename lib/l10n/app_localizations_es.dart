@@ -85,6 +85,13 @@ class AppLocalizationsEs extends AppLocalizations {
       'Di «Hey Hermes», espera a «Listo» y habla. Sin captura en la misma frase ni audio previo. Si el permiso te saca de la app, pulsa Iniciar otra vez tras concederlo.';
 
   @override
+  String get hands_free_settings_title => 'Voz manos libres';
+
+  @override
+  String get hands_free_settings_subtitle =>
+      'Muestra el control de inicio «Hey Hermes» en los chats. Desactivarlo detiene cualquier sesión de manos libres en curso.';
+
+  @override
   String get hands_free_timing_limit =>
       'La ventana de seguimiento es un máximo, no un mínimo. Android puede detenerse antes. El silencio vuelve a la activación local sin reiniciar repetidamente el reconocimiento.';
 

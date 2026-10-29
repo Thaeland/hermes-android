@@ -83,6 +83,13 @@ class AppLocalizationsZh extends AppLocalizations {
       '说“Hey Hermes”，等待就绪提示后再说话。不支持一口气连续输入或预录音。如果授权对话框使应用离开前台，授权后请再次点击开始。';
 
   @override
+  String get hands_free_settings_title => '免提语音';
+
+  @override
+  String get hands_free_settings_subtitle =>
+      '在聊天中显示“Hey Hermes”启动控件。关闭会停止正在进行的免提会话。';
+
+  @override
   String get hands_free_timing_limit =>
       '后续聆听时间是上限，不是下限。Android 可能提前结束。无语音时返回本地唤醒检测，不会反复重启识别。';
 
@@ -3220,6 +3227,13 @@ class AppLocalizationsZhHans extends AppLocalizationsZh {
   @override
   String get hands_free_ready_cue =>
       '说“Hey Hermes”，等待就绪提示后再说话。不支持一口气连续输入或预录音。如果授权对话框使应用离开前台，授权后请再次点击开始。';
+
+  @override
+  String get hands_free_settings_title => '免提语音';
+
+  @override
+  String get hands_free_settings_subtitle =>
+      '在聊天中显示“Hey Hermes”启动控件。关闭会停止正在进行的免提会话。';
 
   @override
   String get hands_free_timing_limit =>

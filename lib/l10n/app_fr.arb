@@ -22,6 +22,8 @@
   "hands_free_error_action": "Vérifiez le microphone, le service vocal, la voix et la connexion, puis Arrêter et Démarrer. Aucun renvoi automatique.",
   "hands_free_disclosure": "La détection fonctionne hors ligne sur le processeur. La reconnaissance Android, la voix choisie et la passerelle peuvent utiliser des réseaux. L’écoute consomme la batterie et peut se déclencher à tort. Elle s’arrête si le chat est couvert, fermé ou quitte le premier plan, sans reprise automatique. La dictée manuelle reste un brouillon modifiable.",
   "hands_free_ready_cue": "Dites « Hey Hermes », attendez « Prêt », puis parlez. Pas de capture d’un seul souffle ni d’audio préalable. Après une autorisation qui quitte l’app, appuyez à nouveau sur Démarrer.",
+  "hands_free_settings_title": "Voix mains libres",
+  "hands_free_settings_subtitle": "Affiche la commande de démarrage « Hey Hermes » dans les discussions. La désactiver arrête toute session mains libres en cours.",
   "hands_free_timing_limit": "La fenêtre de suivi est une durée maximale, non minimale. Android peut s’arrêter plus tôt. Le silence ramène à l’activation locale sans redémarrages répétés de reconnaissance.",
   "hands_free_followup_off": "Suivi désactivé — dites Hey Hermes pour chaque message",
   "hands_free_start_blocked": "Brouillon vide, aucun fichier joint, chat connecté au repos et réponses vocales activées requis. Terminez d’abord les actions vocales manuelles.",

@@ -85,6 +85,13 @@ class AppLocalizationsEn extends AppLocalizations {
       'Say “Hey Hermes”, wait for “Ready — speak now”, then speak. No same-breath capture or pre-roll. If permission setup leaves the app, press Start again after granting it.';
 
   @override
+  String get hands_free_settings_title => 'Hands-free voice';
+
+  @override
+  String get hands_free_settings_subtitle =>
+      'Show the “Hey Hermes” start control in chats. Turning it off stops any running hands-free session.';
+
+  @override
   String get hands_free_timing_limit =>
       'The follow-up window is a maximum, not a minimum. Android may stop earlier. Silence returns to local wake listening without repeated recognition restarts.';
 

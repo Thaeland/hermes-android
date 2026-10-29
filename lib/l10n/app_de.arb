@@ -22,6 +22,8 @@
   "hands_free_error_action": "Mikrofonberechtigung, Sprachdienst, Stimme und Verbindung prüfen. Dann Stoppen und Starten wählen. Nichts wird erneut gesendet.",
   "hands_free_disclosure": "Die Aktivierung läuft offline auf der CPU. Android-Spracherkennung, Antwortstimme und Gateway können Netzwerke nutzen. Zuhören verbraucht Akku; Fehlaktivierungen sind möglich. Bei verdecktem, geschlossenem oder nicht mehr sichtbarem Chat wird gestoppt. Kein automatischer Neustart. Manuelles Diktieren bleibt ein bearbeitbarer Entwurf.",
   "hands_free_ready_cue": "„Hey Hermes“ sagen, auf „Bereit“ warten, dann sprechen. Keine Erfassung im selben Atemzug oder Audiopuffer. Nach einem Berechtigungsdialog gegebenenfalls erneut Starten wählen.",
+  "hands_free_settings_title": "Freisprechen-Sprachsteuerung",
+  "hands_free_settings_subtitle": "Zeigt die Startschaltfläche „Hey Hermes“ in Chats. Ausschalten beendet eine laufende Freisprechen-Sitzung.",
   "hands_free_timing_limit": "Das Folgefenster ist eine Höchstdauer, keine Mindestdauer. Android kann früher stoppen. Bei Stille zurück zur lokalen Aktivierung, ohne wiederholte Spracherkennungsstarts.",
   "hands_free_followup_off": "Folgefenster aus — für jede Eingabe Hey Hermes sagen",
   "hands_free_start_blocked": "Leerer Entwurf, keine Anhänge, inaktiver verbundener Chat und Sprachantworten erforderlich. Manuelle Sprachaktionen zuerst beenden.",

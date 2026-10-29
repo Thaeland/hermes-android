@@ -84,6 +84,13 @@ class AppLocalizationsJa extends AppLocalizations {
       '「Hey Hermes」と言い、準備完了を待ってから話してください。一息での入力や先行録音はありません。権限設定でアプリを離れた場合、許可後に再度開始してください。';
 
   @override
+  String get hands_free_settings_title => 'ハンズフリー音声';
+
+  @override
+  String get hands_free_settings_subtitle =>
+      'チャットに「Hey Hermes」の開始ボタンを表示します。オフにすると、実行中のハンズフリーセッションが停止します。';
+
+  @override
   String get hands_free_timing_limit =>
       '継続入力の時間は最大値であり、最小値ではありません。Android が早く終了する場合があります。無音時は認識を繰り返さず、ローカル起動待ちに戻ります。';
 

@@ -85,6 +85,13 @@ class AppLocalizationsPt extends AppLocalizations {
       'Diga «Hey Hermes», espere por «Pronto» e fale. Sem captura na mesma frase nem áudio anterior. Se a autorização sair da aplicação, prima Iniciar novamente após a conceder.';
 
   @override
+  String get hands_free_settings_title => 'Voz mãos-livres';
+
+  @override
+  String get hands_free_settings_subtitle =>
+      'Mostra o controlo de início «Hey Hermes» nos chats. Desligar interrompe qualquer sessão mãos-livres em curso.';
+
+  @override
   String get hands_free_timing_limit =>
       'A janela de seguimento é um máximo, não um mínimo. O Android pode parar mais cedo. O silêncio volta à ativação local sem reinícios repetidos do reconhecimento.';
 
@@ -3346,6 +3353,13 @@ class AppLocalizationsPtBr extends AppLocalizationsPt {
   @override
   String get hands_free_ready_cue =>
       'Diga “Hey Hermes”, espere por “Pronto” e fale. Sem captura na mesma frase nem áudio anterior. Se a permissão sair do app, toque em Iniciar novamente após concedê-la.';
+
+  @override
+  String get hands_free_settings_title => 'Voz mãos-livres';
+
+  @override
+  String get hands_free_settings_subtitle =>
+      'Mostra o controle de início \"Hey Hermes\" nos chats. Desligar interrompe qualquer sessão mãos-livres em andamento.';
 
   @override
   String get hands_free_timing_limit =>
