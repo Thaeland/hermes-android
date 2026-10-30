@@ -1,9 +1,4 @@
-import 'dart:convert';
-import 'dart:io';
-
 import 'package:flutter_test/flutter_test.dart';
-import 'package:http/http.dart' as http;
-import 'package:http/testing.dart';
 import 'package:hermes_android/core/services/lan_discovery_service.dart';
 
 void main() {
@@ -61,52 +56,11 @@ void main() {
       expect(server.displayName, '192.168.1.10:8642');
     });
 
-    test('discover finds HTTP Hermes servers on a subnet', () async {
+    // Network probing depends on NetworkInterface.list and live sockets, which
+    // cannot be exercised deterministically in a unit test. The probe path is
+    // covered by the integration workflow; here we assert the service builds.
+    test('LanDiscoveryService constructs', () {
       final service = LanDiscoveryService();
-      final httpClient = MockClient((request) async {
-        if (request.url.path == '/health') {
-          return http.Response('{"status":"ok","name":"Test"}', 200);
-        }
-        return http.Response('Not Found', 404);
-      });
-
-      // We can't easily mock NetworkInterface.list, so we test _probeSubnet
-      // indirectly by verifying the service handles HTTP responses.
-      // For full integration testing, a mock network interface layer would be needed.
-      expect(service, isNotNull);
-    });
-
-    test('discover finds HTTPS Hermes servers on a subnet', () async {
-      final service = LanDiscoveryService();
-      final httpClient = MockClient((request) async {
-        if (request.url.scheme == 'https' && request.url.path == '/health') {
-          return http.Response('{"status":"ok","name":"Secure"}', 200);
-        }
-        return http.Response('Not Found', 404);
-      });
-
-      expect(service, isNotNull);
-    });
-
-    test('discover respects bounded concurrency', () async {
-      final service = LanDiscoveryService();
-      final maxConcurrent = <int>[0];
-      int currentConcurrent = 0;
-      int peakConcurrent = 0;
-
-      final httpClient = MockClient((request) async {
-        currentConcurrent++;
-        if (currentConcurrent > peakConcurrent) {
-          peakConcurrent = currentConcurrent;
-        }
-        await Future.delayed(const Duration(milliseconds: 10));
-        currentConcurrent--;
-        if (request.url.path == '/health') {
-          return http.Response('{"status":"ok","name":"Concurrent"}', 200);
-        }
-        return http.Response('Not Found', 404);
-      });
-
       expect(service, isNotNull);
     });
 
